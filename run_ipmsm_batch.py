@@ -68,6 +68,112 @@ REPORT_NAMES = (
     "PPT_Losses",
 )
 
+OUTPUT_SUMMARY_COLUMNS = (
+    "output_electric_frequency_hz",
+    "output_period_s",
+    "output_stop_time_s",
+    *(
+        f"output_{metric}_{window}_{stat}_{unit}"
+        for metric, unit in (
+            ("torque", "nm"),
+            ("coreloss", "w"),
+            ("solidloss", "w"),
+        )
+        for window in ("first", "last", "all")
+        for stat in ("avg", "peak_abs", "peak_signed")
+    ),
+)
+
+ARTIFACT_COLUMNS = tuple(f"artifact_report_{name}" for name in REPORT_NAMES)
+
+INPUT_SPEC_COLUMNS = (
+    "input_pole_number",
+    "input_slot_number",
+    "input_symmetry_factor",
+    "input_base_rpm",
+    "input_i_peak_a",
+    "input_beta_deg",
+    "input_series_turns_per_phase",
+    "input_turns_per_coil_side",
+    "input_stack_length_mm",
+    "input_phase_resistance_ohm",
+    "input_vdc_v",
+    "input_initial_position_deg",
+    "input_transient_periods",
+    "input_steps_per_period",
+    "input_core_material",
+    "input_core_material_fallbacks",
+    "input_magnet_material",
+    "input_winding_material",
+    "input_shaft_material",
+    "input_air_material",
+    "input_setup_name",
+    "input_mesh_elements",
+)
+
+INPUT_GEOMETRY_COLUMNS = (
+    "input_slot_num",
+    "input_pole_num",
+    "input_stator_outer_radius",
+    "input_stator_back_yoke_thick_ratio",
+    "input_stator_back_yoke_thick",
+    "input_stator_inner_ratio",
+    "input_stator_inner_radius",
+    "input_stator_shoe_thick",
+    "input_stator_teeth_length_ratio",
+    "input_stator_teeth_length",
+    "input_stator_teeth_width",
+    "input_stator_gap",
+    "input_rotator_gap",
+    "input_shaft_ratio",
+    "input_rotor_radius",
+    "input_shaft_radius",
+    "input_magnet_shield_thick",
+    "input_magnet_setback_ratio",
+    "input_magnet_thick_ratio",
+    "input_magnet_height_ratio",
+)
+
+INPUT_CORE_COLUMNS = (
+    "input_coreloss_Kh",
+    "input_coreloss_Kc",
+    "input_coreloss_Ke",
+    "input_coreloss_Y",
+    "input_coreloss_Kdc",
+    "input_core_resistivity_ohm_m",
+    "input_core_conductivity_s_per_m",
+    "input_core_mass_density_kg_per_m3",
+)
+
+INPUT_RUN_COLUMNS = (
+    "input_use_periodic_boundary",
+    "input_operation",
+)
+
+RUN_METADATA_COLUMNS = (
+    "error",
+    "simulation_name",
+    "project_path",
+    "analyze",
+    "analysis_returned_false",
+    "validation",
+    "elapsed_s",
+    "finished_at",
+)
+
+RESULT_COLUMN_ORDER = (
+    "case_id",
+    "status",
+    "started_at",
+    *INPUT_SPEC_COLUMNS,
+    *INPUT_GEOMETRY_COLUMNS,
+    *INPUT_CORE_COLUMNS,
+    *INPUT_RUN_COLUMNS,
+    *OUTPUT_SUMMARY_COLUMNS,
+    *ARTIFACT_COLUMNS,
+    *RUN_METADATA_COLUMNS,
+)
+
 
 @dataclass(frozen=True)
 class RunnerOptions:
@@ -241,8 +347,28 @@ def prefixed_row(data: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {f"{prefix}{key}": normalize_csv_value(value) for key, value in data.items()}
 
 
+def initialize_result_row_schema(row: dict[str, Any]) -> None:
+    """Keep the shared CSV header stable even if the first case fails early."""
+    for column in RESULT_COLUMN_ORDER:
+        row.setdefault(column, "")
+
+
+def ordered_result_fieldnames(existing_header: list[str], row: dict[str, Any]) -> list[str]:
+    """Return a deterministic CSV header while preserving unknown sweep columns."""
+    fieldnames: list[str] = []
+    for column in RESULT_COLUMN_ORDER:
+        if column in existing_header or column in row:
+            fieldnames.append(column)
+    for source in (existing_header, list(row)):
+        for column in source:
+            if column not in fieldnames:
+                fieldnames.append(column)
+    return fieldnames
+
+
 def append_result_row(result_csv: Path, row: dict[str, Any]) -> None:
     """Append one row to the shared result CSV with a process-safe lock."""
+    initialize_result_row_schema(row)
     lock_path = result_csv.with_suffix(result_csv.suffix + ".lock")
     result_csv.parent.mkdir(parents=True, exist_ok=True)
     with locked_text_file(lock_path, "a+") as _lock:
@@ -255,12 +381,9 @@ def append_result_row(result_csv: Path, row: dict[str, Any]) -> None:
                 existing_header = reader.fieldnames or []
                 existing_rows = list(reader)
 
-        fieldnames = list(existing_header)
-        for key in row:
-            if key not in fieldnames:
-                fieldnames.append(key)
+        fieldnames = ordered_result_fieldnames(existing_header, row)
 
-        if existing_rows and fieldnames != existing_header:
+        if file_exists and fieldnames != existing_header:
             with result_csv.open("w", encoding="utf-8-sig", newline="") as file:
                 writer = csv.DictWriter(file, fieldnames=fieldnames, extrasaction="ignore")
                 writer.writeheader()
@@ -566,6 +689,23 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     }
 
     try:
+        spec = build_spec(case, default_symmetry_factor=options.symmetry_factor)
+        use_periodic_boundary = case_bool(
+            case,
+            "use_periodic_boundary",
+            default=options.use_periodic_boundary,
+        )
+        operation = str(case_value(case, "operation", default="sin_current"))
+
+        input_data = {}
+        input_data.update(asdict(spec))
+        input_data.update({f"coreloss_{key}": value for key, value in get_core_loss_coefficients().items()})
+        input_data.update({f"core_{key}": value for key, value in get_core_material_properties().items()})
+        input_data["use_periodic_boundary"] = use_periodic_boundary
+        input_data["operation"] = operation
+        row.update(prefixed_row(input_data, "input_"))
+        row.update(summarize_transient_outputs({}, spec))
+
         desktop = pyDesktop(
             version=None,
             non_graphical=options.non_graphical,
@@ -578,17 +718,13 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         project_path = Path(project.path)
 
         design, input_df, object_groups = create_ipmsm_design(project, sim)
-        spec = build_spec(case, default_symmetry_factor=options.symmetry_factor)
-        use_periodic_boundary = case_bool(
-            case,
-            "use_periodic_boundary",
-            default=options.use_periodic_boundary,
-        )
+        row.update(prefixed_row(dataframe_first_row(input_df), "input_"))
+
         setup_result = configure_ipmsm_from_ppt(
             design,
             object_groups=object_groups,
             spec=spec,
-            operation=str(case_value(case, "operation", default="sin_current")),
+            operation=operation,
             use_periodic_boundary=use_periodic_boundary,
             create_missing_region=True,
             create_missing_band=True,
@@ -614,15 +750,6 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         elapsed = time.time() - start
         success = True
 
-        input_data = {}
-        input_data.update(asdict(spec))
-        input_data.update(dataframe_first_row(input_df))
-        input_data.update({f"coreloss_{key}": value for key, value in get_core_loss_coefficients().items()})
-        input_data.update({f"core_{key}": value for key, value in get_core_material_properties().items()})
-        input_data["use_periodic_boundary"] = use_periodic_boundary
-        input_data["operation"] = str(case_value(case, "operation", default="sin_current"))
-
-        row.update(prefixed_row(input_data, "input_"))
         row.update(
             {
                 "status": "ok",
