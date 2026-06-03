@@ -29,6 +29,18 @@ DEFAULT_CORE_LOSS_COEFFICIENTS = {
     "Kdc": 0.0,
 }
 
+PPT_REPORT_DEFS = {
+    "PPT_Phase_Currents": ["InputCurrent(PhaseA)", "InputCurrent(PhaseB)", "InputCurrent(PhaseC)"],
+    "PPT_Torque": ["Moving1.Torque"],
+    "PPT_PhaseA_Voltage_Limit": ["mag(InducedVoltage(PhaseA)+R_phase*InputCurrent(PhaseA))"],
+    "PPT_Phase_Voltages": [
+        "mag(InducedVoltage(PhaseA)+R_phase*InputCurrent(PhaseA))",
+        "mag(InducedVoltage(PhaseB)+R_phase*InputCurrent(PhaseB))",
+        "mag(InducedVoltage(PhaseC)+R_phase*InputCurrent(PhaseC))",
+    ],
+    "PPT_Losses": ["CoreLoss", "SolidLoss"],
+}
+
 
 @dataclass
 class IPMSMPPTSpec:
@@ -584,7 +596,7 @@ def clear_previous_ppt_setup(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
         except Exception:
             existing = set()
         deleted = []
-        for name in ["PPT_Phase_Currents", "PPT_Torque", "PPT_PhaseA_Voltage_Limit", "PPT_Losses"]:
+        for name in PPT_REPORT_DEFS:
             if name not in existing:
                 continue
             try:
@@ -1023,10 +1035,10 @@ def create_ppt_transient_setup(design: Any, spec: IPMSMPPTSpec) -> Any:
     setup = m2d.create_setup(name=spec.setup_name)
     setup.props["StopTime"] = "StopTime"
     setup.props["TimeStep"] = "TimeStep"
-    setup.props["SaveFieldsType"] = "Every N Steps"
-    setup.props["N Steps"] = "1"
-    setup.props["Steps From"] = "0s"
-    setup.props["Steps To"] = "StopTime"
+    setup.props["SaveFieldsType"] = "None"
+    setup.props.pop("N Steps", None)
+    setup.props.pop("Steps From", None)
+    setup.props.pop("Steps To", None)
     setup.props["OutputPerObjectCoreLoss"] = True
     setup.props["OutputPerObjectSolidLoss"] = True
     setup.props["OutputError"] = True
@@ -1038,14 +1050,8 @@ def create_ppt_reports(design: Any, setup_name: str = "PPT_Transient") -> dict[s
     """Create common reports from the deck: currents, torque, voltage, and losses."""
     m2d = _m2d(design)
     setup_sweep = f"{setup_name} : Transient"
-    report_defs = {
-        "PPT_Phase_Currents": ["InputCurrent(PhaseA)", "InputCurrent(PhaseB)", "InputCurrent(PhaseC)"],
-        "PPT_Torque": ["Moving1.Torque"],
-        "PPT_PhaseA_Voltage_Limit": ["mag(InducedVoltage(PhaseA)+R_phase*InputCurrent(PhaseA))"],
-        "PPT_Losses": ["CoreLoss", "SolidLoss"],
-    }
     reports: dict[str, Any] = {}
-    for plot_name, expressions in report_defs.items():
+    for plot_name, expressions in PPT_REPORT_DEFS.items():
         try:
             reports[plot_name] = m2d.post.create_report(
                 expressions=expressions,
@@ -1108,14 +1114,14 @@ def configure_ipmsm_from_ppt(
         "setup": create_ppt_transient_setup(design, spec),
     }
 
-    if create_reports:
-        result["reports"] = create_ppt_reports(design, spec.setup_name)
-
     m2d = _m2d(design)
     try:
         result["validation"] = m2d.validate_simple()
     except Exception as exc:
         result["validation"] = f"skipped: {exc}"
+
+    if create_reports:
+        result["reports"] = create_ppt_reports(design, spec.setup_name)
 
     if analyze:
         result["analysis"] = m2d.analyze(setup=spec.setup_name, cores=cores, use_auto_settings=False)

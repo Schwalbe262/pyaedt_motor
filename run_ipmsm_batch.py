@@ -65,23 +65,44 @@ REPORT_NAMES = (
     "PPT_Phase_Currents",
     "PPT_Torque",
     "PPT_PhaseA_Voltage_Limit",
+    "PPT_Phase_Voltages",
     "PPT_Losses",
 )
 
+TIME_DOMAIN_WINDOWS = ("first", "last", "all")
+TIME_DOMAIN_STATS = ("avg", "rms", "min", "max", "peak_abs", "peak_signed")
+TIME_DOMAIN_OUTPUT_METRICS = (
+    ("torque", "nm"),
+    ("coreloss", "w"),
+    ("solidloss", "w"),
+    ("phasea_current", "a"),
+    ("phaseb_current", "a"),
+    ("phasec_current", "a"),
+    ("phase_current", "a"),
+    ("phasea_voltage", "v"),
+    ("phaseb_voltage", "v"),
+    ("phasec_voltage", "v"),
+    ("phase_voltage", "v"),
+)
+DERIVED_OUTPUT_COLUMNS = (
+    *(f"output_torque_{window}_ripple_pct" for window in TIME_DOMAIN_WINDOWS),
+    *(f"output_copperloss_{window}_avg_w" for window in TIME_DOMAIN_WINDOWS),
+    *(f"output_total_loss_{window}_avg_w" for window in TIME_DOMAIN_WINDOWS),
+    *(f"output_mech_power_{window}_w" for window in TIME_DOMAIN_WINDOWS),
+    *(f"output_efficiency_{window}_pct" for window in TIME_DOMAIN_WINDOWS),
+    *(f"output_voltage_margin_{window}_v" for window in TIME_DOMAIN_WINDOWS),
+)
 OUTPUT_SUMMARY_COLUMNS = (
     "output_electric_frequency_hz",
     "output_period_s",
     "output_stop_time_s",
     *(
         f"output_{metric}_{window}_{stat}_{unit}"
-        for metric, unit in (
-            ("torque", "nm"),
-            ("coreloss", "w"),
-            ("solidloss", "w"),
-        )
-        for window in ("first", "last", "all")
-        for stat in ("avg", "peak_abs", "peak_signed")
+        for metric, unit in TIME_DOMAIN_OUTPUT_METRICS
+        for window in TIME_DOMAIN_WINDOWS
+        for stat in TIME_DOMAIN_STATS
     ),
+    *DERIVED_OUTPUT_COLUMNS,
 )
 
 ARTIFACT_COLUMNS = tuple(f"artifact_report_{name}" for name in REPORT_NAMES)
@@ -419,6 +440,23 @@ POWER_UNITS_TO_WATTS = {
     "": 1.0,
 }
 
+CURRENT_UNITS_TO_AMPERES = {
+    "A": 1.0,
+    "amp": 1.0,
+    "Amp": 1.0,
+    "mA": 1e-3,
+    "kA": 1e3,
+    "": 1.0,
+}
+
+VOLTAGE_UNITS_TO_VOLTS = {
+    "V": 1.0,
+    "v": 1.0,
+    "mV": 1e-3,
+    "kV": 1e3,
+    "": 1.0,
+}
+
 TORQUE_UNITS_TO_NM = {
     "NewtonMeter": 1.0,
     "Newton Meter": 1.0,
@@ -460,6 +498,10 @@ def unit_scale_to_base(unit: str, unit_suffix: str) -> float:
         return POWER_UNITS_TO_WATTS.get(unit, 1.0)
     if unit_suffix == "nm":
         return TORQUE_UNITS_TO_NM.get(unit, 1.0)
+    if unit_suffix == "a":
+        return CURRENT_UNITS_TO_AMPERES.get(unit, 1.0)
+    if unit_suffix == "v":
+        return VOLTAGE_UNITS_TO_VOLTS.get(unit, 1.0)
     return 1.0
 
 
@@ -478,6 +520,10 @@ def find_column(columns: list[str], tokens: tuple[str, ...]) -> str | None:
     return None
 
 
+def non_time_columns(columns: list[str]) -> list[str]:
+    return [column for column in columns if "time" not in column.lower()]
+
+
 def read_report_csv(path: str) -> Any:
     import pandas as pd
 
@@ -487,10 +533,20 @@ def read_report_csv(path: str) -> Any:
 def series_stats(values: Any) -> dict[str, float]:
     finite = [float(value) for value in values if value is not None and not math.isnan(float(value))]
     if not finite:
-        return {"avg": math.nan, "peak_abs": math.nan, "peak_signed": math.nan}
+        return {
+            "avg": math.nan,
+            "rms": math.nan,
+            "min": math.nan,
+            "max": math.nan,
+            "peak_abs": math.nan,
+            "peak_signed": math.nan,
+        }
     peak_signed = max(finite, key=lambda value: abs(value))
     return {
         "avg": sum(finite) / len(finite),
+        "rms": math.sqrt(sum(value * value for value in finite) / len(finite)),
+        "min": min(finite),
+        "max": max(finite),
         "peak_abs": abs(peak_signed),
         "peak_signed": peak_signed,
     }
@@ -523,10 +579,100 @@ def summarize_metric(
         if len(selected) == 0:
             selected = values
         stats = series_stats(selected)
-        result[f"{output_prefix}_{window_name}_avg_{unit_suffix}"] = stats["avg"]
-        result[f"{output_prefix}_{window_name}_peak_abs_{unit_suffix}"] = stats["peak_abs"]
-        result[f"{output_prefix}_{window_name}_peak_signed_{unit_suffix}"] = stats["peak_signed"]
+        for stat in TIME_DOMAIN_STATS:
+            result[f"{output_prefix}_{window_name}_{stat}_{unit_suffix}"] = stats[stat]
     return result
+
+
+def finite_float(value: Any) -> float:
+    try:
+        number = float(value)
+    except Exception:
+        return math.nan
+    return number if math.isfinite(number) else math.nan
+
+
+def safe_divide(numerator: float, denominator: float) -> float:
+    if not math.isfinite(numerator) or not math.isfinite(denominator) or abs(denominator) < 1e-30:
+        return math.nan
+    return numerator / denominator
+
+
+def summarize_phase_envelope(
+    output_summary: dict[str, Any],
+    phase_prefixes: tuple[str, ...],
+    aggregate_prefix: str,
+    unit_suffix: str,
+) -> None:
+    """Summarize the three-phase envelope for RMS and peak-style constraints."""
+    for window in TIME_DOMAIN_WINDOWS:
+        for stat in TIME_DOMAIN_STATS:
+            values = [
+                finite_float(output_summary.get(f"{prefix}_{window}_{stat}_{unit_suffix}"))
+                for prefix in phase_prefixes
+            ]
+            values = [value for value in values if math.isfinite(value)]
+            if not values:
+                continue
+            if stat in {"min"}:
+                aggregate = min(values)
+            elif stat in {"avg", "rms"}:
+                aggregate = sum(values) / len(values)
+            else:
+                aggregate = max(values, key=abs if stat == "peak_signed" else None)
+                if stat in {"max", "peak_abs"}:
+                    aggregate = max(values)
+            output_summary[f"{aggregate_prefix}_{window}_{stat}_{unit_suffix}"] = aggregate
+
+
+def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None:
+    """Add optimization-friendly metrics derived from transient report summaries."""
+    omega_mech_rad_s = 2.0 * math.pi * float(spec.base_rpm) / 60.0
+    phase_resistance = float(spec.phase_resistance_ohm)
+    vdc = float(spec.vdc_v)
+    phase_voltage_limit = vdc / math.sqrt(3.0)
+
+    for window in TIME_DOMAIN_WINDOWS:
+        torque_avg = finite_float(output_summary.get(f"output_torque_{window}_avg_nm"))
+        torque_min = finite_float(output_summary.get(f"output_torque_{window}_min_nm"))
+        torque_max = finite_float(output_summary.get(f"output_torque_{window}_max_nm"))
+        output_summary[f"output_torque_{window}_ripple_pct"] = (
+            safe_divide(torque_max - torque_min, abs(torque_avg)) * 100.0
+        )
+
+        phase_rms_values = [
+            finite_float(output_summary.get(f"output_phase{phase}_current_{window}_rms_a"))
+            for phase in ("a", "b", "c")
+        ]
+        finite_phase_rms = [value for value in phase_rms_values if math.isfinite(value)]
+        phase_current_rms = (
+            math.sqrt(sum(value * value for value in finite_phase_rms) / len(finite_phase_rms))
+            if finite_phase_rms
+            else math.nan
+        )
+        if math.isfinite(phase_current_rms):
+            output_summary[f"output_phase_current_{window}_rms_a"] = phase_current_rms
+
+        copper_loss = 3.0 * phase_resistance * phase_current_rms * phase_current_rms
+        output_summary[f"output_copperloss_{window}_avg_w"] = copper_loss if math.isfinite(copper_loss) else math.nan
+
+        core_loss = finite_float(output_summary.get(f"output_coreloss_{window}_avg_w"))
+        solid_loss = finite_float(output_summary.get(f"output_solidloss_{window}_avg_w"))
+        total_loss = sum(value for value in (core_loss, solid_loss, copper_loss) if math.isfinite(value))
+        if not any(math.isfinite(value) for value in (core_loss, solid_loss, copper_loss)):
+            total_loss = math.nan
+        output_summary[f"output_total_loss_{window}_avg_w"] = total_loss
+
+        mech_power = torque_avg * omega_mech_rad_s
+        output_summary[f"output_mech_power_{window}_w"] = mech_power if math.isfinite(mech_power) else math.nan
+        output_summary[f"output_efficiency_{window}_pct"] = (
+            safe_divide(mech_power, mech_power + total_loss) * 100.0
+        )
+
+        voltage_peak = finite_float(output_summary.get(f"output_phase_voltage_{window}_peak_abs_v"))
+        output_summary[f"output_voltage_margin_{window}_v"] = (
+            phase_voltage_limit - voltage_peak if math.isfinite(voltage_peak) else math.nan
+        )
 
 
 def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any) -> dict[str, Any]:
@@ -547,6 +693,58 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any) -> 
         if column:
             result.update(summarize_metric(df, column, "output_torque", period_s, stop_s, "nm"))
 
+    current_path = exported_reports.get("artifact_report_PPT_Phase_Currents")
+    if current_path and Path(current_path).exists():
+        df = read_report_csv(current_path)
+        data_columns = non_time_columns(list(df.columns))
+        for index, phase in enumerate(("a", "b", "c")):
+            column = find_column(list(df.columns), (f"phase{phase}",))
+            if not column and index < len(data_columns):
+                column = data_columns[index]
+            if column:
+                result.update(
+                    summarize_metric(df, column, f"output_phase{phase}_current", period_s, stop_s, "a")
+                )
+        summarize_phase_envelope(
+            result,
+            ("output_phasea_current", "output_phaseb_current", "output_phasec_current"),
+            "output_phase_current",
+            "a",
+        )
+
+    voltage_path = exported_reports.get("artifact_report_PPT_Phase_Voltages")
+    if voltage_path and Path(voltage_path).exists():
+        df = read_report_csv(voltage_path)
+        data_columns = non_time_columns(list(df.columns))
+        for index, phase in enumerate(("a", "b", "c")):
+            column = find_column(list(df.columns), (f"phase{phase}",))
+            if not column and index < len(data_columns):
+                column = data_columns[index]
+            if column:
+                result.update(
+                    summarize_metric(df, column, f"output_phase{phase}_voltage", period_s, stop_s, "v")
+                )
+        summarize_phase_envelope(
+            result,
+            ("output_phasea_voltage", "output_phaseb_voltage", "output_phasec_voltage"),
+            "output_phase_voltage",
+            "v",
+        )
+    else:
+        voltage_a_path = exported_reports.get("artifact_report_PPT_PhaseA_Voltage_Limit")
+        if voltage_a_path and Path(voltage_a_path).exists():
+            df = read_report_csv(voltage_a_path)
+            columns = non_time_columns(list(df.columns))
+            if columns:
+                result.update(summarize_metric(df, columns[0], "output_phasea_voltage", period_s, stop_s, "v"))
+                result.update(
+                    {
+                        key.replace("output_phasea_voltage", "output_phase_voltage"): value
+                        for key, value in result.items()
+                        if key.startswith("output_phasea_voltage")
+                    }
+                )
+
     losses_path = exported_reports.get("artifact_report_PPT_Losses")
     if losses_path and Path(losses_path).exists():
         df = read_report_csv(losses_path)
@@ -557,6 +755,7 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any) -> 
         if solid_column:
             result.update(summarize_metric(df, solid_column, "output_solidloss", period_s, stop_s, "w"))
 
+    add_derived_motor_metrics(result, spec)
     return result
 
 
