@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# 현재 폴더의 *.csv 파일 무시
+/*.csv
+/*.csv.lock
+
 # C extensions
 *.so
 

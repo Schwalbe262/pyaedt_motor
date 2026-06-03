@@ -164,6 +164,9 @@ INPUT_CORE_COLUMNS = (
     "input_core_resistivity_ohm_m",
     "input_core_conductivity_s_per_m",
     "input_core_mass_density_kg_per_m3",
+    "input_core_bh_curve_points",
+    "input_core_bh_curve_bmax_t",
+    "input_core_bh_curve_hmax_a_per_m",
 )
 
 INPUT_RUN_COLUMNS = (
@@ -521,6 +524,15 @@ def find_column(columns: list[str], tokens: tuple[str, ...]) -> str | None:
 
 
 def non_time_columns(columns: list[str]) -> list[str]:
+    """Return report data columns after the sweep/time column.
+
+    AEDT exported CSVs prepend design-variation columns before ``Time``.  Using
+    every non-time column as a fallback can accidentally summarize inputs such
+    as ``BaseRPM`` as if they were transient results.
+    """
+    for index, column in enumerate(columns):
+        if "time" in column.lower():
+            return list(columns[index + 1 :])
     return [column for column in columns if "time" not in column.lower()]
 
 
@@ -625,6 +637,29 @@ def summarize_phase_envelope(
             output_summary[f"{aggregate_prefix}_{window}_{stat}_{unit_suffix}"] = aggregate
 
 
+def is_current_driven_operation(operation: str) -> bool:
+    normalized = operation.lower().replace("_", "").replace("-", "")
+    return normalized not in {"noload", "backemf", "cogging"}
+
+
+def populate_commanded_current_metrics(output_summary: dict[str, Any], spec: Any, operation: str) -> None:
+    """Store physical commanded phase-current metrics for optimization CSVs."""
+    peak = abs(float(spec.i_peak_a)) if is_current_driven_operation(operation) else 0.0
+    rms = peak / math.sqrt(2.0)
+    stats = {
+        "avg": 0.0,
+        "rms": rms,
+        "min": -peak,
+        "max": peak,
+        "peak_abs": peak,
+        "peak_signed": peak,
+    }
+    for window in TIME_DOMAIN_WINDOWS:
+        for prefix in ("output_phasea_current", "output_phaseb_current", "output_phasec_current", "output_phase_current"):
+            for stat, value in stats.items():
+                output_summary[f"{prefix}_{window}_{stat}_a"] = value
+
+
 def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None:
     """Add optimization-friendly metrics derived from transient report summaries."""
     omega_mech_rad_s = 2.0 * math.pi * float(spec.base_rpm) / 60.0
@@ -640,18 +675,7 @@ def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None
             safe_divide(torque_max - torque_min, abs(torque_avg)) * 100.0
         )
 
-        phase_rms_values = [
-            finite_float(output_summary.get(f"output_phase{phase}_current_{window}_rms_a"))
-            for phase in ("a", "b", "c")
-        ]
-        finite_phase_rms = [value for value in phase_rms_values if math.isfinite(value)]
-        phase_current_rms = (
-            math.sqrt(sum(value * value for value in finite_phase_rms) / len(finite_phase_rms))
-            if finite_phase_rms
-            else math.nan
-        )
-        if math.isfinite(phase_current_rms):
-            output_summary[f"output_phase_current_{window}_rms_a"] = phase_current_rms
+        phase_current_rms = finite_float(output_summary.get(f"output_phase_current_{window}_rms_a"))
 
         copper_loss = 3.0 * phase_resistance * phase_current_rms * phase_current_rms
         output_summary[f"output_copperloss_{window}_avg_w"] = copper_loss if math.isfinite(copper_loss) else math.nan
@@ -675,7 +699,7 @@ def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None
         )
 
 
-def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any) -> dict[str, Any]:
+def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, operation: str = "sin_current") -> dict[str, Any]:
     """Summarize first-cycle, last-cycle, and all-cycle transient outputs."""
     frq_hz = float(spec.base_rpm) * float(spec.pole_number) / 120.0
     period_s = 1.0 / frq_hz
@@ -693,24 +717,7 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any) -> 
         if column:
             result.update(summarize_metric(df, column, "output_torque", period_s, stop_s, "nm"))
 
-    current_path = exported_reports.get("artifact_report_PPT_Phase_Currents")
-    if current_path and Path(current_path).exists():
-        df = read_report_csv(current_path)
-        data_columns = non_time_columns(list(df.columns))
-        for index, phase in enumerate(("a", "b", "c")):
-            column = find_column(list(df.columns), (f"phase{phase}",))
-            if not column and index < len(data_columns):
-                column = data_columns[index]
-            if column:
-                result.update(
-                    summarize_metric(df, column, f"output_phase{phase}_current", period_s, stop_s, "a")
-                )
-        summarize_phase_envelope(
-            result,
-            ("output_phasea_current", "output_phaseb_current", "output_phasec_current"),
-            "output_phase_current",
-            "a",
-        )
+    populate_commanded_current_metrics(result, spec, operation)
 
     voltage_path = exported_reports.get("artifact_report_PPT_Phase_Voltages")
     if voltage_path and Path(voltage_path).exists():
@@ -903,7 +910,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         input_data["use_periodic_boundary"] = use_periodic_boundary
         input_data["operation"] = operation
         row.update(prefixed_row(input_data, "input_"))
-        row.update(summarize_transient_outputs({}, spec))
+        row.update(summarize_transient_outputs({}, spec, operation=operation))
 
         desktop = pyDesktop(
             version=None,
@@ -940,7 +947,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             logging.exception("Project save failed for %s", sim.PROJECT_NAME)
 
         exported = export_ppt_reports(design, project_path, case_id) if options.analyze else {}
-        output_summary = summarize_transient_outputs(exported, spec) if options.analyze else {}
+        output_summary = summarize_transient_outputs(exported, spec, operation=operation) if options.analyze else {}
         row.update(prefixed_row(output_summary, ""))
         row.update(exported)
         missing_outputs = missing_required_output_metrics(output_summary) if options.analyze else []

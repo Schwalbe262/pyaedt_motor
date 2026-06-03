@@ -28,6 +28,7 @@ DEFAULT_CORE_LOSS_COEFFICIENTS = {
     "Y": 1.66,
     "Kdc": 0.0,
 }
+DEFAULT_CORE_BH_CURVE_CSV = "30PNF1600_BH.csv"
 
 PPT_REPORT_DEFS = {
     "PPT_Phase_Currents": ["InputCurrent(PhaseA)", "InputCurrent(PhaseB)", "InputCurrent(PhaseC)"],
@@ -399,18 +400,79 @@ def _load_core_loss_coefficients() -> dict[str, float]:
     return defaults
 
 
+def _material_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "material"
+
+
 def get_core_loss_coefficients() -> dict[str, float]:
     """Return the Electrical Steel core-loss coefficients applied to the core material."""
     return _load_core_loss_coefficients()
 
 
+def _load_core_bh_curve() -> list[list[float]]:
+    """Load the nonlinear B-H curve as PyAEDT ``[[B_tesla, H_A_per_m], ...]`` pairs."""
+    path = _material_dir() / DEFAULT_CORE_BH_CURVE_CSV
+    if not path.exists():
+        return []
+
+    with path.open(newline="", encoding="utf-8-sig") as fp:
+        reader = csv.DictReader(fp)
+        headers = reader.fieldnames or []
+        b_column = next((header for header in headers if header.lower().startswith("b")), None)
+        h_column = next((header for header in headers if header.lower().startswith("h")), None)
+        if not b_column or not h_column:
+            raise ValueError(f"BH curve CSV must have B and H columns: {path}")
+
+        points: list[list[float]] = []
+        for row in reader:
+            try:
+                b_value = float(row[b_column])
+                h_value = float(row[h_column])
+            except Exception:
+                continue
+            if math.isfinite(b_value) and math.isfinite(h_value) and b_value >= 0.0 and h_value >= 0.0:
+                points.append([b_value, h_value])
+
+    points.sort(key=lambda point: (point[1], point[0]))
+    unique_points: list[list[float]] = []
+    seen_h: set[float] = set()
+    for b_value, h_value in points:
+        rounded_h = round(h_value, 12)
+        if rounded_h in seen_h:
+            continue
+        seen_h.add(rounded_h)
+        unique_points.append([b_value, h_value])
+
+    if unique_points and (unique_points[0][0] > 0.0 or unique_points[0][1] > 0.0):
+        unique_points.insert(0, [0.0, 0.0])
+    return unique_points
+
+
+def get_core_bh_curve_metadata() -> dict[str, float]:
+    """Return summary metadata for the nonlinear B-H curve used by the core material."""
+    curve = _load_core_bh_curve()
+    if not curve:
+        return {
+            "bh_curve_points": 0,
+            "bh_curve_bmax_t": math.nan,
+            "bh_curve_hmax_a_per_m": math.nan,
+        }
+    return {
+        "bh_curve_points": len(curve),
+        "bh_curve_bmax_t": max(point[0] for point in curve),
+        "bh_curve_hmax_a_per_m": max(point[1] for point in curve),
+    }
+
+
 def get_core_material_properties() -> dict[str, float]:
     """Return scalar core material properties applied to the custom steel material."""
-    return {
+    properties = {
         "resistivity_ohm_m": DEFAULT_CORE_RESISTIVITY_OHM_M,
         "conductivity_s_per_m": DEFAULT_CORE_CONDUCTIVITY_S_PER_M,
         "mass_density_kg_per_m3": DEFAULT_CORE_MASS_DENSITY_KG_PER_M3,
     }
+    properties.update(get_core_bh_curve_metadata())
+    return properties
 
 
 def _set_electrical_steel_coreloss_with_y(mat: Any, coeff: dict[str, float], cut_depth: str = "0.3mm") -> None:
@@ -428,8 +490,26 @@ def _set_electrical_steel_coreloss_with_y(mat: Any, coeff: dict[str, float], cut
     mat.update()
 
 
-def _apply_core_material_properties(mat: Any, coeff: dict[str, float]) -> None:
-    mat.permeability = "1000"
+def _apply_core_bh_curve(mat: Any) -> dict[str, Any]:
+    bh_curve = _load_core_bh_curve()
+    if not bh_curve:
+        mat.permeability = "1000"
+        return {"source": "fallback_simple_permeability", "points": 0}
+
+    mat.permeability = bh_curve
+    # Explicit units keep the AEDT material editor aligned with the GUI table:
+    # H in A/m and B in tesla.
+    mat.permeability.set_non_linear(x_unit="A_per_meter", y_unit="tesla")
+    return {
+        "source": str(_material_dir() / DEFAULT_CORE_BH_CURVE_CSV),
+        "points": len(bh_curve),
+        "bmax_t": max(point[0] for point in bh_curve),
+        "hmax_a_per_m": max(point[1] for point in bh_curve),
+    }
+
+
+def _apply_core_material_properties(mat: Any, coeff: dict[str, float]) -> dict[str, Any]:
+    result = {"bh_curve": _apply_core_bh_curve(mat)}
     mat.conductivity = f"{DEFAULT_CORE_CONDUCTIVITY_S_PER_M:.12g}"
     mat.mass_density = f"{DEFAULT_CORE_MASS_DENSITY_KG_PER_M3:.12g}"
     try:
@@ -437,6 +517,7 @@ def _apply_core_material_properties(mat: Any, coeff: dict[str, float]) -> None:
     except Exception:
         pass
     _set_electrical_steel_coreloss_with_y(mat, coeff)
+    return result
 
 
 def ensure_ppt_materials(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
@@ -449,18 +530,20 @@ def ensure_ppt_materials(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
         result[spec.core_material] = "exists"
         try:
             mat = m2d.materials[spec.core_material]
-            _apply_core_material_properties(mat, coeff)
+            applied = _apply_core_material_properties(mat, coeff)
             result[f"{spec.core_material}_coreloss"] = coeff
             result[f"{spec.core_material}_properties"] = get_core_material_properties()
+            result[f"{spec.core_material}_bh_curve"] = applied["bh_curve"]
         except Exception as exc:
             result[f"{spec.core_material}_coreloss"] = f"skipped: {exc}"
     else:
         try:
             mat = m2d.materials.add_material(spec.core_material)
             try:
-                _apply_core_material_properties(mat, coeff)
+                applied = _apply_core_material_properties(mat, coeff)
                 result[f"{spec.core_material}_coreloss"] = coeff
                 result[f"{spec.core_material}_properties"] = get_core_material_properties()
+                result[f"{spec.core_material}_bh_curve"] = applied["bh_curve"]
             except Exception as exc:
                 result[f"{spec.core_material}_coreloss"] = f"skipped: {exc}"
             mat.update()
@@ -919,11 +1002,10 @@ def assign_three_phase_windings(
     except Exception as exc:
         return {"errors": [f"slot grouping failed: {exc}"], "objects": winding_names}
 
-    turns = spec.turns_per_coil_side
     phase_current = {
-        "PhaseA": f"{turns}*Imax*sin(2*pi*frq*time + Beta)",
-        "PhaseB": f"{turns}*Imax*sin(2*pi*frq*time - 120deg + Beta)",
-        "PhaseC": f"{turns}*Imax*sin(2*pi*frq*time - 240deg + Beta)",
+        "PhaseA": "Imax*sin(2*pi*frq*time + Beta)",
+        "PhaseB": "Imax*sin(2*pi*frq*time - 120deg + Beta)",
+        "PhaseC": "Imax*sin(2*pi*frq*time - 240deg + Beta)",
     }
     phase_coils = {phase: [] for phase in phase_current}
 
@@ -933,7 +1015,7 @@ def assign_three_phase_windings(
             try:
                 coil = m2d.assign_coil(
                     assignment=[obj_name],
-                    conductors_number=1,
+                    conductors_number=spec.turns_per_coil_side,
                     polarity=polarity,
                     name=coil_name,
                 )
@@ -952,7 +1034,7 @@ def assign_three_phase_windings(
             winding = m2d.assign_winding(
                 assignment=None,
                 winding_type="Current",
-                is_solid=True,
+                is_solid=False,
                 current=current,
                 parallel_branches=1,
                 name=phase,
