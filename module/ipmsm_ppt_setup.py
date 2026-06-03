@@ -77,20 +77,23 @@ class IPMSMPPTSpec:
     )
 
 
-DEFAULT_12S8P_SLOT_MAP = [
-    ("PhaseA", "Positive"),
-    ("PhaseC", "Negative"),
-    ("PhaseB", "Positive"),
+DEFAULT_12S8P_SECTOR_COIL_SIDE_MAP = [
     ("PhaseA", "Negative"),
-    ("PhaseC", "Positive"),
-    ("PhaseB", "Negative"),
-    ("PhaseA", "Positive"),
-    ("PhaseC", "Negative"),
     ("PhaseB", "Positive"),
-    ("PhaseA", "Negative"),
-    ("PhaseC", "Positive"),
     ("PhaseB", "Negative"),
+    ("PhaseC", "Positive"),
+    ("PhaseC", "Negative"),
+    ("PhaseA", "Positive"),
 ]
+DEFAULT_12S8P_COIL_SIDE_MAP = DEFAULT_12S8P_SECTOR_COIL_SIDE_MAP * 4
+LEGACY_12S8P_SLOT_MAP = [
+    ("PhaseA", "Positive"),
+    ("PhaseC", "Negative"),
+    ("PhaseB", "Positive"),
+    ("PhaseA", "Negative"),
+    ("PhaseC", "Positive"),
+    ("PhaseB", "Negative"),
+] * 2
 
 
 def _m2d(design: Any) -> Any:
@@ -410,7 +413,7 @@ def get_core_loss_coefficients() -> dict[str, float]:
 
 
 def _load_core_bh_curve() -> list[list[float]]:
-    """Load the nonlinear B-H curve as PyAEDT ``[[B_tesla, H_A_per_m], ...]`` pairs."""
+    """Load the nonlinear B-H curve as AEDT ``[[H_A_per_m, B_tesla], ...]`` pairs."""
     path = _material_dir() / DEFAULT_CORE_BH_CURVE_CSV
     if not path.exists():
         return []
@@ -431,17 +434,17 @@ def _load_core_bh_curve() -> list[list[float]]:
             except Exception:
                 continue
             if math.isfinite(b_value) and math.isfinite(h_value) and b_value >= 0.0 and h_value >= 0.0:
-                points.append([b_value, h_value])
+                points.append([h_value, b_value])
 
-    points.sort(key=lambda point: (point[1], point[0]))
+    points.sort(key=lambda point: (point[0], point[1]))
     unique_points: list[list[float]] = []
     seen_h: set[float] = set()
-    for b_value, h_value in points:
+    for h_value, b_value in points:
         rounded_h = round(h_value, 12)
         if rounded_h in seen_h:
             continue
         seen_h.add(rounded_h)
-        unique_points.append([b_value, h_value])
+        unique_points.append([h_value, b_value])
 
     if unique_points and (unique_points[0][0] > 0.0 or unique_points[0][1] > 0.0):
         unique_points.insert(0, [0.0, 0.0])
@@ -459,8 +462,8 @@ def get_core_bh_curve_metadata() -> dict[str, float]:
         }
     return {
         "bh_curve_points": len(curve),
-        "bh_curve_bmax_t": max(point[0] for point in curve),
-        "bh_curve_hmax_a_per_m": max(point[1] for point in curve),
+        "bh_curve_bmax_t": max(point[1] for point in curve),
+        "bh_curve_hmax_a_per_m": max(point[0] for point in curve),
     }
 
 
@@ -503,8 +506,8 @@ def _apply_core_bh_curve(mat: Any) -> dict[str, Any]:
     return {
         "source": str(_material_dir() / DEFAULT_CORE_BH_CURVE_CSV),
         "points": len(bh_curve),
-        "bmax_t": max(point[0] for point in bh_curve),
-        "hmax_a_per_m": max(point[1] for point in bh_curve),
+        "bmax_t": max(point[1] for point in bh_curve),
+        "hmax_a_per_m": max(point[0] for point in bh_curve),
     }
 
 
@@ -610,7 +613,13 @@ def clear_previous_ppt_setup(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
         "PhaseB",
         "PhaseC",
     ]
-    for slot_index, (phase, polarity) in enumerate(DEFAULT_12S8P_SLOT_MAP, start=1):
+    for slot_index, (phase, polarity) in enumerate(DEFAULT_12S8P_COIL_SIDE_MAP, start=1):
+        boundary_names.append(f"{phase}_{polarity}_{slot_index:02d}")
+
+    # Older helper versions incorrectly assigned the same excitation to both
+    # coil sides in a slot. Remove those names too so notebook reruns start
+    # from a clean boundary state.
+    for slot_index, (phase, polarity) in enumerate(LEGACY_12S8P_SLOT_MAP, start=1):
         boundary_names.append(f"{phase}_{polarity}_{slot_index:02d}")
         for piece_index in range(1, 5):
             boundary_names.append(f"{phase}_{polarity}_{slot_index:02d}_{piece_index:02d}")
@@ -982,25 +991,51 @@ def _slot_groups(winding_names: list[str], slot_count: int) -> list[list[str]]:
     raise ValueError(f"Expected {slot_count} or a multiple of {slot_count} winding objects, got {len(winding_names)}")
 
 
+def _sort_coil_sides_by_angle(m2d: Any, winding_names: list[str]) -> list[str]:
+    """Sort coil-side sheet objects by their polar angle around the machine center."""
+    sorted_by_name = sorted(winding_names, key=_natural_key)
+    angle_items: list[tuple[float, str]] = []
+
+    for name in sorted_by_name:
+        try:
+            obj = m2d.modeler.get_object_from_name(name)
+            bounding_box = [float(value) for value in obj.bounding_box]
+            x_center = 0.5 * (bounding_box[0] + bounding_box[3])
+            y_center = 0.5 * (bounding_box[1] + bounding_box[4])
+            angle = math.atan2(y_center, x_center)
+            if angle < 0.0:
+                angle += 2.0 * math.pi
+            angle_items.append((angle, name))
+        except Exception:
+            return sorted_by_name
+
+    return [name for _, name in sorted(angle_items)]
+
+
 def assign_three_phase_windings(
     design: Any,
     object_groups: dict[str, Any] | None,
     spec: IPMSMPPTSpec,
-    slot_map: list[tuple[str, str]] | None = None,
+    coil_side_map: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Assign A/B/C current windings for the 12-slot/8-pole practice motor."""
     m2d = _m2d(design)
     winding_names = _get_group(m2d, object_groups, "windings", ("winding",))
     numbered_windings = [name for name in winding_names if re.search(r"\d+$", name)]
-    if len(numbered_windings) >= spec.slot_number:
+    if len(numbered_windings) >= len(DEFAULT_12S8P_COIL_SIDE_MAP):
         winding_names = numbered_windings
-    slot_map = slot_map or DEFAULT_12S8P_SLOT_MAP
+    winding_names = _sort_coil_sides_by_angle(m2d, winding_names)
+    coil_side_map = coil_side_map or DEFAULT_12S8P_COIL_SIDE_MAP
     result: dict[str, Any] = {"errors": []}
 
-    try:
-        slot_groups = _slot_groups(winding_names, len(slot_map))
-    except Exception as exc:
-        return {"errors": [f"slot grouping failed: {exc}"], "objects": winding_names}
+    if len(winding_names) != len(coil_side_map):
+        return {
+            "errors": [
+                f"Expected {len(coil_side_map)} coil-side winding objects for the PPT 12-slot/8-pole layout, "
+                f"got {len(winding_names)}"
+            ],
+            "objects": winding_names,
+        }
 
     phase_current = {
         "PhaseA": "Imax*sin(2*pi*frq*time + Beta)",
@@ -1009,22 +1044,21 @@ def assign_three_phase_windings(
     }
     phase_coils = {phase: [] for phase in phase_current}
 
-    for slot_index, (objects, (phase, polarity)) in enumerate(zip(slot_groups, slot_map), start=1):
-        for piece_index, obj_name in enumerate(objects, start=1):
-            coil_name = f"{phase}_{polarity}_{slot_index:02d}_{piece_index:02d}"
-            try:
-                coil = m2d.assign_coil(
-                    assignment=[obj_name],
-                    conductors_number=spec.turns_per_coil_side,
-                    polarity=polarity,
-                    name=coil_name,
-                )
-                if coil:
-                    phase_coils[phase].append(coil.name)
-                else:
-                    result["errors"].append(f"{coil_name}: assign_coil returned False")
-            except Exception as exc:
-                result["errors"].append(f"{coil_name}: {exc}")
+    for side_index, (obj_name, (phase, polarity)) in enumerate(zip(winding_names, coil_side_map), start=1):
+        coil_name = f"{phase}_{polarity}_{side_index:02d}"
+        try:
+            coil = m2d.assign_coil(
+                assignment=[obj_name],
+                conductors_number=spec.turns_per_coil_side,
+                polarity=polarity,
+                name=coil_name,
+            )
+            if coil:
+                phase_coils[phase].append(coil.name)
+            else:
+                result["errors"].append(f"{coil_name}: assign_coil returned False")
+        except Exception as exc:
+            result["errors"].append(f"{coil_name}: {exc}")
 
     for phase, current in phase_current.items():
         if not phase_coils[phase]:
@@ -1047,6 +1081,7 @@ def assign_three_phase_windings(
             result["errors"].append(f"{phase}: {exc}")
 
     result.update(phase_coils)
+    result["coil_side_order"] = winding_names
     return result
 
 
