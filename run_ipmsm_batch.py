@@ -441,7 +441,6 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any) -> 
 def export_ppt_reports(design: Any, project_path: Path, case_id: str) -> dict[str, str]:
     """Export reports created by configure_ipmsm_from_ppt to per-case CSV files."""
     m2d = getattr(design, "solver_instance", design)
-    report_module = m2d.odesign.GetModule("ReportSetup")
     export_dir = project_path / "exports"
     export_dir.mkdir(parents=True, exist_ok=True)
 
@@ -449,11 +448,64 @@ def export_ppt_reports(design: Any, project_path: Path, case_id: str) -> dict[st
     for report_name in REPORT_NAMES:
         out_path = export_dir / f"{case_id}_{report_name}.csv"
         try:
-            report_module.ExportToFile(report_name, str(out_path), False)
+            exported_path = None
+            try:
+                exported_path = m2d.post.export_report_to_file(str(export_dir), report_name, ".csv")
+            except Exception:
+                exported_path = None
+
+            if exported_path and Path(exported_path).exists():
+                exported_file = Path(exported_path)
+                if exported_file.resolve() != out_path.resolve():
+                    if out_path.exists():
+                        out_path.unlink()
+                    exported_file.replace(out_path)
+            else:
+                report_modules = [
+                    getattr(getattr(m2d, "post", None), "oreportsetup", None),
+                    getattr(m2d, "oreportsetup", None),
+                ]
+                try:
+                    report_modules.append(m2d.odesign.GetModule("ReportSetup"))
+                except Exception:
+                    pass
+
+                for report_module in report_modules:
+                    if report_module is None:
+                        continue
+                    try:
+                        report_module.ExportToFile(report_name, str(out_path), False)
+                        break
+                    except Exception:
+                        continue
+
+            if not out_path.exists() or out_path.stat().st_size == 0:
+                raise RuntimeError("report export did not create a CSV file")
             exported[f"artifact_report_{report_name}"] = str(out_path)
         except Exception as exc:
             exported[f"artifact_report_{report_name}"] = f"skipped: {exc}"
     return exported
+
+
+def missing_required_output_metrics(output_summary: dict[str, Any]) -> list[str]:
+    """Return required transient metrics that were not exported/summarized."""
+    required = [
+        "output_torque_all_avg_nm",
+        "output_coreloss_all_avg_w",
+        "output_solidloss_all_avg_w",
+    ]
+    missing = []
+    for key in required:
+        value = output_summary.get(key)
+        if value is None:
+            missing.append(key)
+            continue
+        try:
+            if math.isnan(float(value)):
+                missing.append(key)
+        except Exception:
+            pass
+    return missing
 
 
 def safe_release_desktop(desktop: Any) -> None:
@@ -554,8 +606,11 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
 
         exported = export_ppt_reports(design, project_path, case_id) if options.analyze else {}
         output_summary = summarize_transient_outputs(exported, spec) if options.analyze else {}
-        if analysis_returned_false and not output_summary:
-            raise RuntimeError("AEDT analysis returned False and no transient report data could be exported.")
+        row.update(prefixed_row(output_summary, ""))
+        row.update(exported)
+        missing_outputs = missing_required_output_metrics(output_summary) if options.analyze else []
+        if missing_outputs:
+            raise RuntimeError(f"Missing required transient output metrics: {missing_outputs}")
         elapsed = time.time() - start
         success = True
 
@@ -568,8 +623,6 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         input_data["operation"] = str(case_value(case, "operation", default="sin_current"))
 
         row.update(prefixed_row(input_data, "input_"))
-        row.update(prefixed_row(output_summary, ""))
-        row.update(exported)
         row.update(
             {
                 "status": "ok",
