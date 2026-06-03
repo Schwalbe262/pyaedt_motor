@@ -478,6 +478,7 @@ def apply_ppt_design_variables(design: Any, spec: IPMSMPPTSpec) -> None:
     """Apply the numeric parameters stated in the practice deck."""
     pole_expr = "pole_num" if _has_design_variable(design, "pole_num") else str(spec.pole_number)
     slot_expr = "slot_num" if _has_design_variable(design, "slot_num") else str(spec.slot_number)
+    initial_wrapped_deg = spec.initial_position_deg % 360.0
     _set_var(design, "NumPoles", pole_expr)
     _set_var(design, "NumSlots", slot_expr)
     _set_var(design, "SymmetryFactor", str(spec.symmetry_factor))
@@ -488,10 +489,8 @@ def apply_ppt_design_variables(design: Any, spec: IPMSMPPTSpec) -> None:
     _set_var(design, "StackLength", f"{spec.stack_length_mm:g}mm")
     _set_var(design, "R_phase", f"{spec.phase_resistance_ohm:g}ohm")
     _set_var(design, "Vdc", f"{spec.vdc_v:g}V")
-    _set_var(design, "InitialPositionMD", "-180deg/NumPoles")
-    _set_var(design, "InitialPositionWrapped", "360deg-180deg/NumPoles")
-    _set_var(design, "NegativeMotionStop", "-360deg")
-    _set_var(design, "PositiveMotionStop", "360deg")
+    _set_var(design, "InitialPositionMD", f"{spec.initial_position_deg:g}deg")
+    _set_var(design, "InitialPositionWrapped", f"{initial_wrapped_deg:g}deg")
     _set_var(design, "frq", "BaseRPM*NumPoles/120*1Hz")
     _set_var(design, "ElectricFrequency", "frq")
     total_steps = spec.steps_per_period * spec.transient_periods
@@ -499,6 +498,9 @@ def apply_ppt_design_variables(design: Any, spec: IPMSMPPTSpec) -> None:
     _set_var(design, "StepsPerPeriod", str(spec.steps_per_period))
     _set_var(design, "StopTime", "TransientPeriods/frq")
     _set_var(design, "TimeStep", f"StopTime/{total_steps}")
+    _set_var(design, "MotionTravelAngle", "TransientPeriods*720deg/NumPoles")
+    _set_var(design, "NegativeMotionStop", "InitialPositionWrapped - 360deg")
+    _set_var(design, "PositiveMotionStop", "InitialPositionWrapped + MotionTravelAngle + 360deg")
 
 
 def clear_previous_ppt_setup(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
@@ -856,8 +858,8 @@ def assign_boundaries_and_motion(
                 positive_movement=True,
                 start_position="InitialPositionWrapped",
                 has_rotation_limits=True,
-                negative_limit=0,
-                positive_limit=360,
+                negative_limit="NegativeMotionStop",
+                positive_limit="PositiveMotionStop",
                 angular_velocity="MachineRPM",
             )
         except Exception as exc:
