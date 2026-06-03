@@ -209,36 +209,73 @@ def create_ipmsm_design(project: Any, sim: Any, design_name: str = "IPMSM") -> t
 
     magnet_height = abs(y0)
 
-    magnet_N = design1.modeler.create_rectangle(
+    same_pole_count = max(1, int(round(float(sim.pole_num) / 2.0)))
+
+    def sort_by_angle(objects):
+        def angle_of(obj):
+            cx, cy = object_center_xy(obj)
+            return math.atan2(cy, cx) % (2 * math.pi)
+
+        return sorted(objects, key=angle_of)
+
+    def duplicate_magnets(seed_obj, prefix):
+        result = design1.modeler.duplicate_around_axis(
+            assignment=[seed_obj],
+            axis="Z",
+            angle="(360/pole_num*2)deg",
+            clones=same_pole_count,
+            create_new_objects=True,
+        )
+        added_names = result[1] if isinstance(result, tuple) and len(result) > 1 else []
+        objects = [seed_obj]
+        for name in added_names:
+            obj = design1.modeler.get_object_from_name(name)
+            if obj:
+                objects.append(obj)
+        objects = sort_by_angle(objects)
+        if len(objects) > same_pole_count:
+            extras = objects[same_pole_count:]
+            design1.modeler.delete(assignment=extras)
+            objects = objects[:same_pole_count]
+        renamed = []
+        for index, obj in enumerate(objects, start=1):
+            obj.name = f"{prefix}_{index:02d}"
+            renamed.append(obj)
+        return renamed
+
+    magnet_N_seed = design1.modeler.create_rectangle(
         origin=["rotor_radius - magnet_setback", f"-{magnet_height}mm*magnet_height_ratio", 0], 
         sizes=["-magnet_thick", f"{magnet_height}mm*magnet_height_ratio*2"], 
-        name="magnet", 
+        name="magnet_N_seed", 
         material="iron")
-    magnet_N.color = [255, 0, 0]
-    magnet_N.transparency = 0
+    magnet_N_seed.color = [255, 0, 0]
+    magnet_N_seed.transparency = 0
     design1.modeler.delete(assignment=barrier)
 
 
     design1.modeler.duplicate_around_axis(assignment=[magnet_space], axis="Z", angle="(360/pole_num)deg", clones="pole_num", create_new_objects=False)
-    design1.modeler.duplicate_around_axis(assignment=[magnet_N], axis="Z", angle="(360/pole_num*2)deg", clones="pole_num", create_new_objects=False)
+    n_magnets = duplicate_magnets(magnet_N_seed, "magnet_N")
 
 
-    design1.modeler.copy(assignment=magnet_N)
-    magnet_S = design1.modeler.paste()
-    magnet_S = design1.modeler.get_object_from_name(magnet_S[0])
-    magnet_S.color = [0, 0, 255]
-    magnet_S.transparency = 0
-    design1.modeler.rotate(assignment=magnet_S, axis="Z", angle="(360/pole_num)deg")
+    design1.modeler.copy(assignment=n_magnets[0])
+    magnet_S_seed_names = design1.modeler.paste()
+    magnet_S_seed = design1.modeler.get_object_from_name(magnet_S_seed_names[0])
+    magnet_S_seed.name = "magnet_S_seed"
+    magnet_S_seed.color = [0, 0, 255]
+    magnet_S_seed.transparency = 0
+    design1.modeler.rotate(assignment=magnet_S_seed, axis="Z", angle="(360/pole_num)deg")
+    s_magnets = duplicate_magnets(magnet_S_seed, "magnet_S")
 
 
     design1.modeler.subtract(blank_list=rotator, tool_list=[magnet_space], keep_originals=True)
-    design1.modeler.subtract(blank_list=magnet_space, tool_list=[magnet_N, magnet_S], keep_originals=True)
+    all_magnets = n_magnets + s_magnets
+    design1.modeler.subtract(blank_list=magnet_space, tool_list=all_magnets, keep_originals=True)
 
     object_groups = {
         "stator": [main_stator.name],
         "rotor": [rotator.name],
         "shaft": [shaft.name],
-        "magnets": [magnet_N.name, magnet_S.name],
+        "magnets": [magnet.name for magnet in all_magnets],
         "windings": [w.name for w in windings],
         "region": ["Region"],
         "band": ["Band"],

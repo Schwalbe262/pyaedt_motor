@@ -744,7 +744,11 @@ def assign_magnet_coordinate_systems(
     magnets = _get_group(m2d, object_groups, "magnets", ("magnet",))
     explicit = _names(object_groups.get("magnets", [])) if object_groups else []
     south_candidates = set()
-    if len(explicit) >= 2:
+    has_named_polarity = any(
+        re.search(r"(^|[_-])[ns]($|[_-])", name.lower()) is not None
+        for name in explicit
+    )
+    if len(explicit) == 2 and not has_named_polarity:
         south_candidates.add(explicit[1])
 
     try:
