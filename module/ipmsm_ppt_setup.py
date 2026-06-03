@@ -63,7 +63,7 @@ class IPMSMPPTSpec:
     symmetry_factor: int = 1
     base_rpm: float = 1200.0
     i_peak_a: float = 137.8
-    beta_deg: float = 0.0
+    beta_deg: float = 30.0
     series_turns_per_phase: int = 48
     turns_per_coil_side: int = 12
     stack_length_mm: float = 49.45

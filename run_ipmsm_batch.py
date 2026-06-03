@@ -361,7 +361,7 @@ def build_spec(case: dict[str, Any], default_symmetry_factor: int = 4) -> Any:
         symmetry_factor=case_int(case, "symmetry_factor", default=default_symmetry_factor),
         base_rpm=case_float(case, "base_rpm", "rpm", default=1200.0),
         i_peak_a=case_float(case, "i_peak_a", "i_peak", "current_peak_a", default=137.8),
-        beta_deg=case_float(case, "beta_deg", "beta", default=0.0),
+        beta_deg=case_float(case, "beta_deg", "beta", default=defaults.beta_deg),
         series_turns_per_phase=case_int(case, "series_turns_per_phase", default=48),
         turns_per_coil_side=case_int(case, "turns_per_coil_side", default=12),
         stack_length_mm=case_float(case, "stack_length_mm", default=49.45),
