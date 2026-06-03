@@ -33,6 +33,19 @@ DEFAULT_CORE_BH_CURVE_CSV = "30PNF1600_BH.csv"
 PPT_REPORT_DEFS = {
     "PPT_Phase_Currents": ["InputCurrent(PhaseA)", "InputCurrent(PhaseB)", "InputCurrent(PhaseC)"],
     "PPT_Torque": ["Moving1.Torque"],
+    "PPT_Cogging_Torque": ["Moving1.Torque"],
+    "PPT_Back_EMF": ["InducedVoltage(PhaseA)", "InducedVoltage(PhaseB)", "InducedVoltage(PhaseC)"],
+    "PPT_Inductance_Matrix": [
+        "L(PhaseA,PhaseA)",
+        "L(PhaseA,PhaseB)",
+        "L(PhaseA,PhaseC)",
+        "L(PhaseB,PhaseA)",
+        "L(PhaseB,PhaseB)",
+        "L(PhaseB,PhaseC)",
+        "L(PhaseC,PhaseA)",
+        "L(PhaseC,PhaseB)",
+        "L(PhaseC,PhaseC)",
+    ],
     "PPT_PhaseA_Voltage_Limit": ["mag(InducedVoltage(PhaseA)+R_phase*InputCurrent(PhaseA))"],
     "PPT_Phase_Voltages": [
         "mag(InducedVoltage(PhaseA)+R_phase*InputCurrent(PhaseA))",
@@ -1163,6 +1176,18 @@ def create_ppt_transient_setup(design: Any, spec: IPMSMPPTSpec) -> Any:
     return setup
 
 
+def enable_ppt_transient_inductance(design: Any, incremental_matrix: bool = False) -> Any:
+    """Enable the transient inductance matrix used by the PPT Ld/Lq workflow."""
+    m2d = _m2d(design)
+    try:
+        return m2d.change_inductance_computation(
+            compute_transient_inductance=True,
+            incremental_matrix=incremental_matrix,
+        )
+    except Exception as exc:
+        return f"skipped: {exc}"
+
+
 def create_ppt_reports(design: Any, setup_name: str = "PPT_Transient") -> dict[str, Any]:
     """Create common reports from the deck: currents, torque, voltage, and losses."""
     m2d = _m2d(design)
@@ -1228,6 +1253,7 @@ def configure_ipmsm_from_ppt(
         "windings": assign_three_phase_windings(design, merged_groups, spec),
         "losses": assign_losses(design, merged_groups),
         "mesh": assign_mesh(design, merged_groups, spec),
+        "inductance_computation": enable_ppt_transient_inductance(design),
         "setup": create_ppt_transient_setup(design, spec),
     }
 

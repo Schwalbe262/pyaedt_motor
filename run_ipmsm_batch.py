@@ -64,6 +64,9 @@ add_local_library_paths()
 REPORT_NAMES = (
     "PPT_Phase_Currents",
     "PPT_Torque",
+    "PPT_Cogging_Torque",
+    "PPT_Back_EMF",
+    "PPT_Inductance_Matrix",
     "PPT_PhaseA_Voltage_Limit",
     "PPT_Phase_Voltages",
     "PPT_Losses",
@@ -71,26 +74,56 @@ REPORT_NAMES = (
 
 TIME_DOMAIN_WINDOWS = ("first", "last", "all")
 TIME_DOMAIN_STATS = ("avg", "rms", "min", "max", "peak_abs", "peak_signed")
+BACK_EMF_HARMONICS = (1, 3, 5, 7, 9, 11, 13)
+INDUCTANCE_MATRIX_ENTRIES = (
+    ("aa", "PhaseA", "PhaseA"),
+    ("ab", "PhaseA", "PhaseB"),
+    ("ac", "PhaseA", "PhaseC"),
+    ("ba", "PhaseB", "PhaseA"),
+    ("bb", "PhaseB", "PhaseB"),
+    ("bc", "PhaseB", "PhaseC"),
+    ("ca", "PhaseC", "PhaseA"),
+    ("cb", "PhaseC", "PhaseB"),
+    ("cc", "PhaseC", "PhaseC"),
+)
 TIME_DOMAIN_OUTPUT_METRICS = (
     ("torque", "nm"),
+    ("cogging_torque", "nm"),
     ("coreloss", "w"),
     ("solidloss", "w"),
     ("phasea_current", "a"),
     ("phaseb_current", "a"),
     ("phasec_current", "a"),
     ("phase_current", "a"),
+    ("back_emf_phasea", "v"),
+    ("back_emf_phaseb", "v"),
+    ("back_emf_phasec", "v"),
+    ("back_emf_phase", "v"),
+    *(("inductance_" + key, "h") for key, _, _ in INDUCTANCE_MATRIX_ENTRIES),
+    ("ld", "h"),
+    ("lq", "h"),
+    ("saliency_ratio", "ratio"),
     ("phasea_voltage", "v"),
     ("phaseb_voltage", "v"),
     ("phasec_voltage", "v"),
     ("phase_voltage", "v"),
 )
 DERIVED_OUTPUT_COLUMNS = (
+    "output_phase_voltage_limit_spwm_v",
+    "output_phase_voltage_limit_svpwm_v",
     *(f"output_torque_{window}_ripple_pct" for window in TIME_DOMAIN_WINDOWS),
     *(f"output_copperloss_{window}_avg_w" for window in TIME_DOMAIN_WINDOWS),
     *(f"output_total_loss_{window}_avg_w" for window in TIME_DOMAIN_WINDOWS),
     *(f"output_mech_power_{window}_w" for window in TIME_DOMAIN_WINDOWS),
     *(f"output_efficiency_{window}_pct" for window in TIME_DOMAIN_WINDOWS),
     *(f"output_voltage_margin_{window}_v" for window in TIME_DOMAIN_WINDOWS),
+    *(f"output_voltage_spwm_margin_{window}_v" for window in TIME_DOMAIN_WINDOWS),
+    *(f"output_voltage_svpwm_margin_{window}_v" for window in TIME_DOMAIN_WINDOWS),
+)
+HARMONIC_OUTPUT_COLUMNS = (
+    *(f"output_back_emf_phasea_h{harmonic}_rms_v" for harmonic in BACK_EMF_HARMONICS),
+    *(f"output_back_emf_phasea_h{harmonic}_pct" for harmonic in BACK_EMF_HARMONICS),
+    "output_back_emf_phasea_thd_pct",
 )
 OUTPUT_SUMMARY_COLUMNS = (
     "output_electric_frequency_hz",
@@ -102,6 +135,7 @@ OUTPUT_SUMMARY_COLUMNS = (
         for window in TIME_DOMAIN_WINDOWS
         for stat in TIME_DOMAIN_STATS
     ),
+    *HARMONIC_OUTPUT_COLUMNS,
     *DERIVED_OUTPUT_COLUMNS,
 )
 
@@ -460,6 +494,17 @@ VOLTAGE_UNITS_TO_VOLTS = {
     "": 1.0,
 }
 
+INDUCTANCE_UNITS_TO_HENRY = {
+    "H": 1.0,
+    "h": 1.0,
+    "mH": 1e-3,
+    "uH": 1e-6,
+    "µH": 1e-6,
+    "nH": 1e-9,
+    "pH": 1e-12,
+    "": 1.0,
+}
+
 TORQUE_UNITS_TO_NM = {
     "NewtonMeter": 1.0,
     "Newton Meter": 1.0,
@@ -505,6 +550,8 @@ def unit_scale_to_base(unit: str, unit_suffix: str) -> float:
         return CURRENT_UNITS_TO_AMPERES.get(unit, 1.0)
     if unit_suffix == "v":
         return VOLTAGE_UNITS_TO_VOLTS.get(unit, 1.0)
+    if unit_suffix == "h":
+        return INDUCTANCE_UNITS_TO_HENRY.get(unit, 1.0)
     return 1.0
 
 
@@ -539,7 +586,10 @@ def non_time_columns(columns: list[str]) -> list[str]:
 def read_report_csv(path: str) -> Any:
     import pandas as pd
 
-    return pd.read_csv(path)
+    with open(path, "r", encoding="utf-8-sig", errors="ignore") as fp:
+        header = fp.readline()
+    delimiter = ";" if header.count(";") > header.count(",") else ","
+    return pd.read_csv(path, sep=delimiter)
 
 
 def series_stats(values: Any) -> dict[str, float]:
@@ -593,6 +643,148 @@ def summarize_metric(
         stats = series_stats(selected)
         for stat in TIME_DOMAIN_STATS:
             result[f"{output_prefix}_{window_name}_{stat}_{unit_suffix}"] = stats[stat]
+    return result
+
+
+def report_time_value_pairs(df: Any, value_column: str, unit_suffix: str) -> list[tuple[float, float]]:
+    """Return finite ``(time_s, value_base_unit)`` pairs from an exported AEDT report."""
+    time_column = find_column(list(df.columns), ("time",)) or df.columns[0]
+    time_unit = extract_column_unit(time_column)
+    value_unit = extract_column_unit(value_column)
+    pairs: list[tuple[float, float]] = []
+    for raw_time, raw_value in zip(df[time_column], df[value_column]):
+        time_s = parse_time_seconds(raw_time, time_unit)
+        value = parse_report_value(raw_value, value_unit, unit_suffix)
+        if math.isfinite(time_s) and math.isfinite(value):
+            pairs.append((time_s, value))
+    return pairs
+
+
+def summarize_last_cycle_harmonics(
+    df: Any,
+    value_column: str,
+    output_prefix: str,
+    fundamental_hz: float,
+    period_s: float,
+    stop_s: float,
+    unit_suffix: str,
+) -> dict[str, float]:
+    """Estimate last-cycle RMS harmonics using sine/cosine projection.
+
+    The PPT analysis compares selected Back EMF harmonics.  AEDT exports the
+    waveform as a time trace, so this keeps the post-process local and avoids
+    depending on a separate FFT report object.
+    """
+    pairs = report_time_value_pairs(df, value_column, unit_suffix)
+    if not pairs or not math.isfinite(fundamental_hz) or fundamental_hz <= 0:
+        return {}
+
+    eps = max(period_s, stop_s, 1.0) * 1e-9
+    selected = [
+        (time_s, value)
+        for time_s, value in pairs
+        if stop_s - period_s - eps <= time_s <= stop_s + eps
+    ]
+    if len(selected) < 3:
+        selected = pairs
+
+    omega = 2.0 * math.pi * fundamental_hz
+    count = float(len(selected))
+    result: dict[str, float] = {}
+    harmonic_rms: dict[int, float] = {}
+    for harmonic in BACK_EMF_HARMONICS:
+        cos_sum = sum(value * math.cos(harmonic * omega * time_s) for time_s, value in selected)
+        sin_sum = sum(value * math.sin(harmonic * omega * time_s) for time_s, value in selected)
+        peak = 2.0 * math.sqrt(cos_sum * cos_sum + sin_sum * sin_sum) / count
+        rms = peak / math.sqrt(2.0)
+        harmonic_rms[harmonic] = rms
+        result[f"{output_prefix}_h{harmonic}_rms_{unit_suffix}"] = rms
+
+    fundamental_rms = harmonic_rms.get(1, math.nan)
+    for harmonic, rms in harmonic_rms.items():
+        result[f"{output_prefix}_h{harmonic}_pct"] = safe_divide(rms, fundamental_rms) * 100.0
+
+    thd_rms = math.sqrt(sum(rms * rms for harmonic, rms in harmonic_rms.items() if harmonic != 1))
+    result[f"{output_prefix}_thd_pct"] = safe_divide(thd_rms, fundamental_rms) * 100.0
+    return result
+
+
+def find_inductance_matrix_column(columns: list[str], source: str, target: str) -> str | None:
+    """Find an AEDT matrix column like ``L(PhaseA,PhaseB)`` regardless of unit suffixes."""
+    needle = f"l({source.lower()},{target.lower()})"
+    for column in columns:
+        compact = str(column).lower().replace(" ", "")
+        if needle in compact:
+            return column
+    return None
+
+
+def summarize_inductance_matrix(df: Any, spec: Any, period_s: float, stop_s: float) -> dict[str, float]:
+    """Summarize abc inductance entries and approximate D/Q inductance traces."""
+    result: dict[str, float] = {}
+    columns = list(df.columns)
+    matrix_columns: dict[str, str] = {}
+    for key, source, target in INDUCTANCE_MATRIX_ENTRIES:
+        column = find_inductance_matrix_column(columns, source, target)
+        if not column:
+            continue
+        matrix_columns[key] = column
+        result.update(summarize_metric(df, column, f"output_inductance_{key}", period_s, stop_s, "h"))
+
+    if len(matrix_columns) != len(INDUCTANCE_MATRIX_ENTRIES):
+        return result
+
+    time_column = find_column(columns, ("time",)) or df.columns[0]
+    time_unit = extract_column_unit(time_column)
+    omega_mech = 2.0 * math.pi * float(spec.base_rpm) / 60.0
+    pole_pairs = float(spec.pole_number) / 2.0
+    initial_mech_rad = math.radians(float(spec.initial_position_deg))
+
+    ld_values: list[float] = []
+    lq_values: list[float] = []
+    saliency_values: list[float] = []
+    for index in range(len(df)):
+        time_s = parse_time_seconds(df[time_column].iloc[index], time_unit)
+        values: dict[str, float] = {}
+        for key, column in matrix_columns.items():
+            unit = extract_column_unit(column)
+            values[key] = parse_report_value(df[column].iloc[index], unit, "h")
+        if not math.isfinite(time_s) or not all(math.isfinite(value) for value in values.values()):
+            ld_values.append(math.nan)
+            lq_values.append(math.nan)
+            saliency_values.append(math.nan)
+            continue
+
+        labc = [
+            [values["aa"], values["ab"], values["ac"]],
+            [values["ba"], values["bb"], values["bc"]],
+            [values["ca"], values["cb"], values["cc"]],
+        ]
+        theta = pole_pairs * (initial_mech_rad + omega_mech * time_s)
+        angles = (theta, theta - 2.0 * math.pi / 3.0, theta + 2.0 * math.pi / 3.0)
+
+        park = [
+            [(2.0 / 3.0) * math.cos(angle) for angle in angles],
+            [-(2.0 / 3.0) * math.sin(angle) for angle in angles],
+        ]
+        inverse_park = [
+            [math.cos(angle), -math.sin(angle)]
+            for angle in angles
+        ]
+
+        ld = sum(park[0][i] * labc[i][j] * inverse_park[j][0] for i in range(3) for j in range(3))
+        lq = sum(park[1][i] * labc[i][j] * inverse_park[j][1] for i in range(3) for j in range(3))
+        ld_values.append(ld)
+        lq_values.append(lq)
+        saliency_values.append(safe_divide(lq, ld))
+
+    derived = df[[time_column]].copy()
+    derived["Ld [H]"] = ld_values
+    derived["Lq [H]"] = lq_values
+    derived["SaliencyRatio"] = saliency_values
+    result.update(summarize_metric(derived, "Ld [H]", "output_ld", period_s, stop_s, "h"))
+    result.update(summarize_metric(derived, "Lq [H]", "output_lq", period_s, stop_s, "h"))
+    result.update(summarize_metric(derived, "SaliencyRatio", "output_saliency_ratio", period_s, stop_s, "ratio"))
     return result
 
 
@@ -665,7 +857,10 @@ def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None
     omega_mech_rad_s = 2.0 * math.pi * float(spec.base_rpm) / 60.0
     phase_resistance = float(spec.phase_resistance_ohm)
     vdc = float(spec.vdc_v)
-    phase_voltage_limit = vdc / math.sqrt(3.0)
+    phase_voltage_limit_spwm = vdc / 2.0
+    phase_voltage_limit_svpwm = vdc / math.sqrt(3.0)
+    output_summary["output_phase_voltage_limit_spwm_v"] = phase_voltage_limit_spwm
+    output_summary["output_phase_voltage_limit_svpwm_v"] = phase_voltage_limit_svpwm
 
     for window in TIME_DOMAIN_WINDOWS:
         torque_avg = finite_float(output_summary.get(f"output_torque_{window}_avg_nm"))
@@ -694,9 +889,16 @@ def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None
         )
 
         voltage_peak = finite_float(output_summary.get(f"output_phase_voltage_{window}_peak_abs_v"))
-        output_summary[f"output_voltage_margin_{window}_v"] = (
-            phase_voltage_limit - voltage_peak if math.isfinite(voltage_peak) else math.nan
+        output_summary[f"output_voltage_spwm_margin_{window}_v"] = (
+            phase_voltage_limit_spwm - voltage_peak if math.isfinite(voltage_peak) else math.nan
         )
+        output_summary[f"output_voltage_svpwm_margin_{window}_v"] = (
+            phase_voltage_limit_svpwm - voltage_peak if math.isfinite(voltage_peak) else math.nan
+        )
+        # Backward-compatible alias: the previous column used the SVPWM limit.
+        output_summary[f"output_voltage_margin_{window}_v"] = output_summary[
+            f"output_voltage_svpwm_margin_{window}_v"
+        ]
 
 
 def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, operation: str = "sin_current") -> dict[str, Any]:
@@ -717,7 +919,50 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
         if column:
             result.update(summarize_metric(df, column, "output_torque", period_s, stop_s, "nm"))
 
+    cogging_path = exported_reports.get("artifact_report_PPT_Cogging_Torque")
+    if not is_current_driven_operation(operation) and cogging_path and Path(cogging_path).exists():
+        df = read_report_csv(cogging_path)
+        column = find_column(list(df.columns), ("torque",))
+        if column:
+            result.update(summarize_metric(df, column, "output_cogging_torque", period_s, stop_s, "nm"))
+
     populate_commanded_current_metrics(result, spec, operation)
+
+    back_emf_path = exported_reports.get("artifact_report_PPT_Back_EMF")
+    if back_emf_path and Path(back_emf_path).exists():
+        df = read_report_csv(back_emf_path)
+        data_columns = non_time_columns(list(df.columns))
+        phase_columns: list[str | None] = []
+        for index, phase in enumerate(("a", "b", "c")):
+            column = find_column(list(df.columns), (f"phase{phase}",))
+            if not column and index < len(data_columns):
+                column = data_columns[index]
+            phase_columns.append(column)
+            if column:
+                result.update(summarize_metric(df, column, f"output_back_emf_phase{phase}", period_s, stop_s, "v"))
+        summarize_phase_envelope(
+            result,
+            ("output_back_emf_phasea", "output_back_emf_phaseb", "output_back_emf_phasec"),
+            "output_back_emf_phase",
+            "v",
+        )
+        if phase_columns and phase_columns[0]:
+            result.update(
+                summarize_last_cycle_harmonics(
+                    df,
+                    phase_columns[0],
+                    "output_back_emf_phasea",
+                    frq_hz,
+                    period_s,
+                    stop_s,
+                    "v",
+                )
+            )
+
+    inductance_path = exported_reports.get("artifact_report_PPT_Inductance_Matrix")
+    if inductance_path and Path(inductance_path).exists():
+        df = read_report_csv(inductance_path)
+        result.update(summarize_inductance_matrix(df, spec, period_s, stop_s))
 
     voltage_path = exported_reports.get("artifact_report_PPT_Phase_Voltages")
     if voltage_path and Path(voltage_path).exists():
@@ -766,8 +1011,68 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
     return result
 
 
+def is_inductance_quantity(quantity: str) -> bool:
+    """Return True for AEDT report quantities that look like inductance matrix entries."""
+    text = str(quantity).lower()
+    return "induct" in text or re.search(r"(^|[^a-z])l\s*\(", text) is not None
 
-def export_ppt_reports(design: Any, project_path: Path, case_id: str) -> dict[str, str]:
+
+def export_inductance_matrix_data(m2d: Any, out_path: Path, setup_name: str) -> None:
+    """Export transient inductance matrix quantities when AEDT exposes them."""
+    setup_sweep = f"{setup_name} : Transient"
+    categories = ("Transient", "Matrix", "AC Magnetic")
+    display_types = ("Data Table", "Rectangular Plot")
+
+    for category in categories:
+        for display_type in display_types:
+            try:
+                quantity_categories = m2d.post.available_quantities_categories(
+                    report_category=category,
+                    display_type=display_type,
+                    solution=setup_sweep,
+                )
+            except Exception:
+                quantity_categories = []
+
+            quantities: list[str] = []
+            for quantity_category in quantity_categories or [None]:
+                try:
+                    quantities.extend(
+                        m2d.post.available_report_quantities(
+                            report_category=category,
+                            display_type=display_type,
+                            solution=setup_sweep,
+                            quantities_category=quantity_category,
+                        )
+                    )
+                except Exception:
+                    continue
+
+            selected = []
+            for quantity in quantities:
+                if is_inductance_quantity(quantity) and quantity not in selected:
+                    selected.append(quantity)
+            if not selected:
+                continue
+
+            data = m2d.post.get_solution_data(
+                expressions=selected,
+                setup_sweep_name=setup_sweep,
+                domain="Sweep",
+                primary_sweep_variable="Time",
+                report_category=category,
+            )
+            if not data or not hasattr(data, "export_data_to_csv"):
+                continue
+            if not data.export_data_to_csv(str(out_path), delimiter=";"):
+                continue
+            if out_path.exists() and out_path.stat().st_size > 0:
+                return
+
+    raise RuntimeError("no transient inductance matrix quantities were available for export")
+
+
+def export_ppt_reports(design: Any, project_path: Path, case_id: str, setup_name: str = "PPT_Transient") -> dict[str, str]:
     """Export reports created by configure_ipmsm_from_ppt to per-case CSV files."""
     m2d = getattr(design, "solver_instance", design)
     export_dir = project_path / "exports"
@@ -777,6 +1082,11 @@ def export_ppt_reports(design: Any, project_path: Path, case_id: str) -> dict[st
     for report_name in REPORT_NAMES:
         out_path = export_dir / f"{case_id}_{report_name}.csv"
         try:
+            if report_name == "PPT_Inductance_Matrix":
+                export_inductance_matrix_data(m2d, out_path, setup_name)
+                exported[f"artifact_report_{report_name}"] = str(out_path)
+                continue
+
             exported_path = None
             try:
                 exported_path = m2d.post.export_report_to_file(str(export_dir), report_name, ".csv")
@@ -946,7 +1256,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         except Exception:
             logging.exception("Project save failed for %s", sim.PROJECT_NAME)
 
-        exported = export_ppt_reports(design, project_path, case_id) if options.analyze else {}
+        exported = export_ppt_reports(design, project_path, case_id, setup_name=spec.setup_name) if options.analyze else {}
         output_summary = summarize_transient_outputs(exported, spec, operation=operation) if options.analyze else {}
         row.update(prefixed_row(output_summary, ""))
         row.update(exported)
