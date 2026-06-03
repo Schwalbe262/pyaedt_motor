@@ -73,6 +73,7 @@ def submit_job(args: argparse.Namespace, job_index: int) -> None:
         "RESULT_CSV": args.result_csv,
         "SIMULATION_DIR": args.simulation_dir,
         "STAGGER_SECONDS": args.stagger_seconds,
+        "SBATCH_JOB_INDEX": job_index,
         "SETUP_ONLY": int(args.setup_only),
         "KEEP_PROJECTS": int(args.keep_projects),
         "PERIODIC_BOUNDARY": int(args.periodic_boundary),

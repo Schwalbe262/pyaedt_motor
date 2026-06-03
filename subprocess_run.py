@@ -27,6 +27,30 @@ from typing import Any
 BASE_DIR = Path(__file__).resolve().parent
 
 
+def safe_name_part(value: Any) -> str:
+    """Return a filesystem/CSV friendly identifier component."""
+    text = str(value).strip()
+    return "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in text)
+
+
+def default_log_prefix() -> str:
+    parts = []
+    submit_index = os.environ.get("SBATCH_JOB_INDEX")
+    slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    if submit_index:
+        parts.append(f"submit{safe_name_part(submit_index)}")
+    if slurm_job_id:
+        parts.append(f"job{safe_name_part(slurm_job_id)}")
+    return "_".join(parts) + "_" if parts else ""
+
+
+def normalize_log_prefix(prefix: str) -> str:
+    if not prefix:
+        return ""
+    normalized = safe_name_part(prefix)
+    return normalized if normalized.endswith("_") else normalized + "_"
+
+
 def int_env(name: str, default: int) -> int:
     value = os.environ.get(name)
     if value in (None, ""):
@@ -78,6 +102,16 @@ def split_cases(rows: list[dict[str, Any]], processes: int) -> list[list[dict[st
     for index, row in enumerate(rows):
         chunks[index % processes].append(row)
     return chunks
+
+
+def generated_cases(log_prefix: str, process_index: int, count: int) -> list[dict[str, Any]]:
+    case_prefix = normalize_log_prefix(
+        log_prefix + f"p{process_index:03d}"
+    ).rstrip("_")
+    return [
+        {"case_id": f"{case_prefix}_case_{case_index:04d}"}
+        for case_index in range(1, count + 1)
+    ]
 
 
 def build_command(args: argparse.Namespace, process_index: int, count: int | None, cases_path: Path | None) -> list[str]:
@@ -132,6 +166,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--simulation-dir", type=Path, default=BASE_DIR / "simulation")
     parser.add_argument("--result-csv", type=Path, default=BASE_DIR / "ipmsm_simulation_results.csv")
     parser.add_argument("--log-dir", type=Path, default=BASE_DIR / "simul_log")
+    parser.add_argument("--log-prefix", default=os.environ.get("LOG_PREFIX", ""))
     parser.add_argument("--stagger-seconds", type=float, default=float(os.environ.get("STAGGER_SECONDS", "30")))
     parser.add_argument("--symmetry-factor", type=int, default=int_env("SYMMETRY_FACTOR", 4))
     parser.add_argument("--periodic-boundary", action="store_true", default=os.environ.get("PERIODIC_BOUNDARY", "").lower() in {"1", "true", "yes"})
@@ -150,6 +185,7 @@ def main() -> int:
     args.simulation_dir = args.simulation_dir.resolve()
     args.result_csv = args.result_csv.resolve()
     args.log_dir = args.log_dir.resolve()
+    args.log_prefix = normalize_log_prefix(args.log_prefix or default_log_prefix())
 
     if args.processes < 1:
         raise RuntimeError("--processes must be at least 1.")
@@ -167,19 +203,24 @@ def main() -> int:
             if not chunk:
                 process_inputs.append((0, None))
                 continue
-            split_path = args.log_dir / f"cases_process_{index:03d}.csv"
+            split_path = args.log_dir / f"{args.log_prefix}cases_process_{index:03d}.csv"
             write_cases(split_path, chunk)
             process_inputs.append((None, split_path))
     else:
         total_count = args.total_count if args.total_count > 0 else args.processes * args.count_per_process
-        for count in split_counts(total_count, args.processes):
-            process_inputs.append((count, None))
+        for index, count in enumerate(split_counts(total_count, args.processes), start=1):
+            if count <= 0:
+                process_inputs.append((0, None))
+                continue
+            generated_path = args.log_dir / f"{args.log_prefix}generated_cases_process_{index:03d}.csv"
+            write_cases(generated_path, generated_cases(args.log_prefix, index, count))
+            process_inputs.append((None, generated_path))
 
     processes: list[tuple[int, subprocess.Popen[Any], Any]] = []
     for process_index, (count, cases_path) in enumerate(process_inputs, start=1):
         if count == 0 and cases_path is None:
             continue
-        log_path = args.log_dir / f"process_{process_index:03d}.log"
+        log_path = args.log_dir / f"{args.log_prefix}process_{process_index:03d}.log"
         command = build_command(args, process_index, count, cases_path)
         log_file = log_path.open("w", encoding="utf-8", buffering=1)
         log_file.write("COMMAND: " + " ".join(command) + "\n\n")
