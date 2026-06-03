@@ -728,7 +728,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             use_periodic_boundary=use_periodic_boundary,
             create_missing_region=True,
             create_missing_band=True,
-            create_reports=True,
+            create_reports=options.analyze,
             clear_existing=True,
             analyze=options.analyze,
             cores=options.cores,

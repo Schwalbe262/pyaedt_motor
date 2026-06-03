@@ -774,8 +774,8 @@ def assign_magnet_coordinate_systems(
 
         is_south = magnet in south_candidates or re.search(r"(^|[_-])s($|[_-])", magnet.lower()) is not None
         sign = -1.0 if is_south else 1.0
-        x_point = [cx + sign * math.cos(angle), cy + sign * math.sin(angle), 0]
-        y_point = [cx - sign * math.sin(angle), cy + sign * math.cos(angle), 0]
+        x_direction = [sign * math.cos(angle), sign * math.sin(angle), 0]
+        y_direction = [-sign * math.sin(angle), sign * math.cos(angle), 0]
         cs_name = f"{magnet}_PM_CS"
 
         try:
@@ -785,16 +785,16 @@ def assign_magnet_coordinate_systems(
                     reference_cs="Global",
                     name=cs_name,
                     mode="axis",
-                    x_pointing=x_point,
-                    y_pointing=y_point,
+                    x_pointing=x_direction,
+                    y_pointing=y_direction,
                 )
                 existing_cs.add(cs_name)
             obj.part_coordinate_system = cs_name
             result[magnet] = {
                 "coordinate_system": cs_name,
                 "polarity": "S" if is_south else "N",
-                "x_direction_xy": [sign * math.cos(angle), sign * math.sin(angle)],
-                "y_direction_xy": [-sign * math.sin(angle), sign * math.cos(angle)],
+                "x_direction_xy": x_direction[:2],
+                "y_direction_xy": y_direction[:2],
             }
         except Exception as exc:
             result[magnet] = f"skipped: {exc}"
