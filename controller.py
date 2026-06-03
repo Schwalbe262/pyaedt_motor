@@ -1,12 +1,16 @@
-"""Submit IPMSM Slurm batch jobs.
+"""Periodically submit IPMSM Slurm batch jobs.
 
-This controller is intentionally conservative.  It does not cancel all user
-jobs or delete result folders unless you explicitly ask it to.
+Default behavior matches the older project controller pattern:
+
+1. Cancel this user's Slurm jobs named ``ANSYS``.
+2. Submit ``simulation1.sh`` 10 times with 60 seconds between submissions.
+3. Wait 12 hours and repeat forever.
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import os
 from pathlib import Path
 import shutil
@@ -50,8 +54,10 @@ def clean_runtime_files() -> None:
 
 
 def cancel_ansys_jobs() -> None:
+    username = getpass.getuser()
+    print(f"Canceling existing Slurm jobs named ANSYS for user={username}.")
     subprocess.run(
-        ["scancel", "--name=ANSYS"],
+        ["scancel", "-u", username, "--name=ANSYS"],
         cwd=BASE_DIR,
         check=False,
     )
@@ -85,13 +91,15 @@ def submit_job(args: argparse.Namespace, job_index: int) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    cancel_default = os.environ.get("CANCEL_EXISTING", "1").lower() not in {"0", "false", "no"}
     parser = argparse.ArgumentParser(description="Submit simulation1.sh Slurm jobs.")
     parser.add_argument("--script", default="simulation1.sh")
-    parser.add_argument("--jobs", type=int, default=int(os.environ.get("SBATCH_JOBS", "1")))
+    parser.add_argument("--jobs", type=int, default=int(os.environ.get("SBATCH_JOBS", "10")))
     parser.add_argument("--interval-seconds", type=float, default=float(os.environ.get("SBATCH_INTERVAL_SECONDS", "60")))
-    parser.add_argument("--repeat-every-hours", type=float, default=0.0)
+    parser.add_argument("--repeat-every-hours", type=float, default=float(os.environ.get("SBATCH_REPEAT_EVERY_HOURS", "12")))
     parser.add_argument("--clean", action="store_true", help="Delete runtime folders/files before submitting.")
-    parser.add_argument("--cancel-existing", action="store_true", help="Cancel existing Slurm jobs named ANSYS before submitting.")
+    parser.add_argument("--cancel-existing", dest="cancel_existing", action="store_true", default=cancel_default, help="Cancel this user's existing Slurm jobs named ANSYS before each submit cycle.")
+    parser.add_argument("--no-cancel-existing", dest="cancel_existing", action="store_false", help="Do not cancel existing Slurm jobs before each submit cycle.")
     parser.add_argument("--processes", type=int, default=int(os.environ.get("NUM_PROCESSES", "10")))
     parser.add_argument("--cores-per-process", type=int, default=int(os.environ.get("CORES_PER_PROCESS", "4")))
     parser.add_argument("--count-per-process", type=int, default=int(os.environ.get("COUNT_PER_PROCESS", "1")))
@@ -111,7 +119,12 @@ def main() -> int:
     if args.jobs < 1:
         raise RuntimeError("--jobs must be at least 1.")
 
+    cycle = 1
     while True:
+        print(
+            f"Starting submit cycle {cycle}: jobs={args.jobs}, "
+            f"interval_seconds={args.interval_seconds}, repeat_every_hours={args.repeat_every_hours}."
+        )
         if args.cancel_existing:
             cancel_ansys_jobs()
         if args.clean:
@@ -127,6 +140,7 @@ def main() -> int:
         sleep_seconds = args.repeat_every_hours * 3600
         print(f"Sleeping {sleep_seconds:.0f} seconds before next submit cycle.")
         time.sleep(sleep_seconds)
+        cycle += 1
 
     return 0
 
