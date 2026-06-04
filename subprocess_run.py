@@ -154,13 +154,14 @@ def build_command(args: argparse.Namespace, process_index: int, count: int | Non
 def parse_args() -> argparse.Namespace:
     cores_default = default_cores_per_process()
     processes_default = default_process_count(cores_default)
+    loops_default = int_env("LOOPS_PER_PROCESS", int_env("COUNT_PER_PROCESS", 1000))
 
     parser = argparse.ArgumentParser(description="Run run_ipmsm_batch.py in parallel subprocesses.")
     parser.add_argument("--script", type=Path, default=BASE_DIR / "run_ipmsm_batch.py")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--processes", type=int, default=processes_default)
     parser.add_argument("--cores-per-process", type=int, default=cores_default)
-    parser.add_argument("--count-per-process", type=int, default=int_env("COUNT_PER_PROCESS", 1))
+    parser.add_argument("--count-per-process", "--loops-per-process", dest="count_per_process", type=int, default=loops_default)
     parser.add_argument("--total-count", type=int, default=int_env("TOTAL_COUNT", 0))
     parser.add_argument("--cases", type=Path, default=Path(os.environ["CASES_CSV"]) if os.environ.get("CASES_CSV") else None)
     parser.add_argument("--simulation-dir", type=Path, default=BASE_DIR / "simulation")
@@ -189,6 +190,8 @@ def main() -> int:
 
     if args.processes < 1:
         raise RuntimeError("--processes must be at least 1.")
+    if args.count_per_process < 1 and not args.cases and args.total_count <= 0:
+        raise RuntimeError("--count-per-process/--loops-per-process must be at least 1 when --cases and --total-count are omitted.")
     if not args.script.exists():
         raise FileNotFoundError(args.script)
 
@@ -199,6 +202,7 @@ def main() -> int:
     if args.cases:
         rows = read_cases(args.cases)
         chunks = split_cases(rows, args.processes)
+        print(f"Loaded {len(rows)} explicit case row(s) from {args.cases}.")
         for index, chunk in enumerate(chunks, start=1):
             if not chunk:
                 process_inputs.append((0, None))
@@ -206,8 +210,13 @@ def main() -> int:
             split_path = args.log_dir / f"{args.log_prefix}cases_process_{index:03d}.csv"
             write_cases(split_path, chunk)
             process_inputs.append((None, split_path))
+            print(f"Process {index} will run {len(chunk)} explicit case row(s).")
     else:
         total_count = args.total_count if args.total_count > 0 else args.processes * args.count_per_process
+        print(
+            f"Generating {total_count} fresh random case row(s): "
+            f"processes={args.processes}, loops_per_process={args.count_per_process}."
+        )
         for index, count in enumerate(split_counts(total_count, args.processes), start=1):
             if count <= 0:
                 process_inputs.append((0, None))
@@ -215,6 +224,7 @@ def main() -> int:
             generated_path = args.log_dir / f"{args.log_prefix}generated_cases_process_{index:03d}.csv"
             write_cases(generated_path, generated_cases(args.log_prefix, index, count))
             process_inputs.append((None, generated_path))
+            print(f"Process {index} will run {count} generated random case row(s): {generated_path}")
 
     processes: list[tuple[int, subprocess.Popen[Any], Any]] = []
     for process_index, (count, cases_path) in enumerate(process_inputs, start=1):

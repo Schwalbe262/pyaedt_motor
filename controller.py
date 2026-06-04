@@ -4,6 +4,7 @@ Default behavior matches the older project controller pattern:
 
 1. Cancel this user's Slurm jobs named ``ANSYS``.
 2. Submit ``simulation1.sh`` 10 times with 60 seconds between submissions.
+   Each subprocess runs 1000 fresh random cases unless overridden.
 3. Wait 12 hours and repeat forever.
 """
 
@@ -64,11 +65,13 @@ def cancel_ansys_jobs() -> None:
 
 
 def submit_job(args: argparse.Namespace, job_index: int) -> None:
+    loops_per_process = args.loops_per_process
     export_values = {
         "ALL": None,
         "NUM_PROCESSES": args.processes,
         "CORES_PER_PROCESS": args.cores_per_process,
-        "COUNT_PER_PROCESS": args.count_per_process,
+        "COUNT_PER_PROCESS": loops_per_process,
+        "LOOPS_PER_PROCESS": loops_per_process,
         "TOTAL_COUNT": args.total_count,
         "RESULT_CSV": args.result_csv,
         "SIMULATION_DIR": args.simulation_dir,
@@ -103,7 +106,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-cancel-existing", dest="cancel_existing", action="store_false", help="Do not cancel existing Slurm jobs before each submit cycle.")
     parser.add_argument("--processes", type=int, default=int(os.environ.get("NUM_PROCESSES", "10")))
     parser.add_argument("--cores-per-process", type=int, default=int(os.environ.get("CORES_PER_PROCESS", "4")))
-    parser.add_argument("--count-per-process", type=int, default=int(os.environ.get("COUNT_PER_PROCESS", "1")))
+    loops_default = int(os.environ.get("LOOPS_PER_PROCESS", os.environ.get("COUNT_PER_PROCESS", "1000")))
+    parser.add_argument("--count-per-process", "--loops-per-process", dest="loops_per_process", type=int, default=loops_default, help="Number of fresh random simulation cases each subprocess runs.")
     parser.add_argument("--total-count", type=int, default=int(os.environ.get("TOTAL_COUNT", "0")))
     parser.add_argument("--result-csv", default=os.environ.get("RESULT_CSV", "ipmsm_simulation_results.csv"))
     parser.add_argument("--simulation-dir", default=os.environ.get("SIMULATION_DIR", "simulation"))
