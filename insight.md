@@ -244,3 +244,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `inspect_ipmsm_scheduler_job.py` returns selected job fields, filtered interesting lines, tails, and non-fatal per-stream fetch errors.
 - Evidence: tests cover field filtering, log filtering, remote-file response shapes, and missing-log handling; live job detail inspection returned a compact completed status.
 - Remaining risk: actual setup-only job logs still need to prove the AEDT workflow on the scheduler environment.
+
+## 2026-06-16 01:45:57 +09:00 - Insight 25
+
+- Source loop: `note.md` Loop 25.
+- Improvement: scheduler dry-run payloads can be persisted as local review manifests.
+- Before: payload review depended on transient stdout or copying large JSON into project-memory files.
+- After: `submit_ipmsm_scheduler_job.py --write-manifest` writes LF-only JSON matching stdout, including validated case count and the exact scheduler payload.
+- Evidence: scheduler helper tests cover no-post manifest writing and LF output; smoke dry-run wrote `simul_log_smoke/scheduler_manifest_smoke.json` with `submit=false`, `validated_cases=1`, and `total_simulations=1`.
+- Remaining risk: manifest review does not prove the remote working tree, remote case path, or AEDT setup-only execution; those still need scheduler-side validation.

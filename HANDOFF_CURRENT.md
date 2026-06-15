@@ -36,7 +36,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 87 tests and passed; py_compile and scoped `git diff --check` passed after filtered scheduler job inspector.
+- 2026-06-16: `python -m unittest discover -s tests` ran 88 tests and passed; scheduler manifest smoke dry-run wrote LF JSON with 1 validated case; py_compile passed.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
@@ -50,13 +50,13 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler endpoint is verified at `http://localhost:8000`; actual submission needs pushed Git ref or scheduler `remote_path`; helper can bootstrap small validated case CSVs.
+- Scheduler endpoint is verified at `http://localhost:8000`; actual submission needs pushed Git ref or scheduler `remote_path`; helper can write review manifests and bootstrap small validated case CSVs.
 - GitHub push is blocked by remote HTTP 403 permissions for `Schwalbe262/pyaedt_motor.git`.
 
 ## Next steps
 
-1. Review and commit or split the current docs/ops plus simulation-quality changes.
-2. Run `python run_ipmsm_batch.py --cases simul_log_smoke/replay_quality_cases_200.csv --setup-only --workers 1` where AEDT is available, or Slurm with `controller.py --cases ... --jobs 1 --repeat-every-hours 0`.
+1. Fix GitHub credentials/permissions and push `chore/codex-context-budget`.
+2. Review a saved scheduler dry-run manifest for the actual Git ref or scheduler `remote_path` before any POST.
 3. After result CSVs exist, run `python analyze_ipmsm_quality_results.py --results path/to/results.csv --output path/to/comparison.csv`.
 4. Retrain in the ML environment with `python train_ipmsm_lightgbm.py --verification-output path/to/r2_check.csv --fail-on-threshold`.
 5. Re-run a small setup/analyze batch in AEDT to populate `missing_required_outputs`, validation, and analysis flags on any failed rows.
@@ -89,7 +89,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helper dry-runs setup jobs and inspector reports filtered job status/log evidence; all launch paths preflight inputs.
+- Scheduler helper dry-runs setup jobs, writes review manifests, and inspector reports filtered job status/log evidence; all launch paths preflight inputs.
 
 ## Risks and gotchas
 

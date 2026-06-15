@@ -61,6 +61,7 @@ def scheduler_args(**overrides: object) -> Namespace:
         "ramp_interval_seconds": 900,
         "timeout": 10.0,
         "check_health": False,
+        "write_manifest": None,
         "submit": False,
     }
     values.update(overrides)
@@ -218,6 +219,42 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         output = json.loads(stdout.getvalue())
         self.assertIn("cat > remote/cases.csv", output["payload"]["env_setup"])
         self.assertIn("case_0001,15", output["payload"]["env_setup"])
+
+    def test_main_writes_review_manifest_without_posting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.csv"
+            manifest_path = Path(tmp) / "review" / "scheduler_manifest.json"
+            with cases_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001"})
+
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "post_scheduler_job") as post:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = scheduler_job.main(
+                        [
+                            "--cases",
+                            str(cases_path),
+                            "--remote-cases",
+                            "remote/cases.csv",
+                            "--repo-url",
+                            "https://github.com/example/project.git",
+                            "--git-ref",
+                            "main",
+                            "--write-manifest",
+                            str(manifest_path),
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 0)
+            post.assert_not_called()
+            output = json.loads(stdout.getvalue())
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest, output)
+            self.assertEqual(manifest["manifest_path"], str(manifest_path))
+            self.assertEqual(manifest["payload"]["total_simulations"], 1)
+            self.assertNotIn(b"\r", manifest_path.read_bytes())
 
 
 if __name__ == "__main__":

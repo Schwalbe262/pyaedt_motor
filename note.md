@@ -342,3 +342,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use the scheduler submit helper plus inspector for a small setup-only smoke run after operator approval.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:45:57 +09:00 - Loop 25
+
+- Part: scheduler review manifest
+- Goal: save exact scheduler dry-run payloads for review before any POST.
+- Hypothesis: stdout-only dry-runs are easy to lose, while a local JSON manifest preserves auditable scheduler payload evidence without bloating startup context.
+- Actions: added `submit_ipmsm_scheduler_job.py --write-manifest`, LF-only JSON manifest writing, manifest path reporting, and a no-post unit test.
+- Candidates: paste payloads into handoff/journal versus write a local manifest file; chose local manifest because it keeps project memory short while preserving exact payloads for review.
+- Metrics: scheduler helper tests ran 14 tests and passed; full unittest discovery ran 88 tests and passed; py_compile passed; smoke dry-run wrote `simul_log_smoke/scheduler_manifest_smoke.json` with `submit=false`, `validated_cases=1`, `total_simulations=1`, and no CR bytes.
+- Result: scheduler dry-runs can now persist a reviewable payload manifest before explicit submission.
+- Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then review an actual scheduler manifest with the selected Git ref or `remote_path` before setup-only POST.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

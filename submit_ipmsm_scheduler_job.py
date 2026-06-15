@@ -191,6 +191,12 @@ def get_scheduler_health(scheduler_url: str, timeout: float) -> dict[str, Any]:
         return {"raw_response": body}
 
 
+def write_manifest(path: Path, output: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as file:
+        file.write(json.dumps(output, indent=2, sort_keys=True) + "\n")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dry-run or submit an IPMSM job to the Slurm Scheduler API.")
     parser.add_argument("--scheduler-url", default=DEFAULT_SCHEDULER_URL)
@@ -239,6 +245,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ramp-interval-seconds", type=int, default=900)
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--check-health", action="store_true")
+    parser.add_argument("--write-manifest", type=Path, help="Write the review JSON payload to this local path.")
     parser.add_argument("--submit", action="store_true", help="POST to scheduler. Omit for dry-run JSON only.")
     return parser.parse_args(argv)
 
@@ -266,6 +273,9 @@ def main(argv: list[str] | None = None) -> int:
         output["health"] = get_scheduler_health(args.scheduler_url, args.timeout)
     if args.submit:
         output["response"] = post_scheduler_job(args.scheduler_url, payload, args.timeout)
+    if args.write_manifest:
+        output["manifest_path"] = str(args.write_manifest)
+        write_manifest(args.write_manifest, output)
     print(json.dumps(output, indent=2, sort_keys=True))
     return 0
 
