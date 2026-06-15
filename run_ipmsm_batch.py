@@ -35,6 +35,7 @@ from typing import Any
 
 
 BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_MAX_CASES = 200
 
 
 def add_local_library_paths() -> None:
@@ -527,6 +528,33 @@ def load_cases(path: str | None, count: int) -> list[dict[str, Any]]:
         with Path(path).open("r", encoding="utf-8-sig", newline="") as file:
             return [dict(row) for row in csv.DictReader(file)]
     return [{"case_id": f"case_{idx:04d}"} for idx in range(1, count + 1)]
+
+
+def duplicate_case_ids(cases: list[dict[str, Any]]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for index, case in enumerate(cases, start=1):
+        case_id = str(case_value(case, "case_id", "id", default=f"case_{index:04d}"))
+        if case_id in seen and case_id not in duplicates:
+            duplicates.append(case_id)
+        seen.add(case_id)
+    return duplicates
+
+
+def validate_case_plan(cases: list[dict[str, Any]], max_cases: int, allow_over_budget: bool = False) -> None:
+    if not cases:
+        raise RuntimeError("No cases to run.")
+    duplicates = duplicate_case_ids(cases)
+    if duplicates:
+        preview = ", ".join(duplicates[:5])
+        raise RuntimeError(f"duplicate case_id value(s) in case plan: {preview}")
+    if max_cases < 1:
+        raise RuntimeError("--max-cases must be at least 1.")
+    if len(cases) > max_cases and not allow_over_budget:
+        raise RuntimeError(
+            f"case plan has {len(cases)} rows, exceeding --max-cases={max_cases}; "
+            "pass --allow-over-budget only for an intentional approved run."
+        )
 
 
 def dataframe_first_row(df: Any) -> dict[str, Any]:
@@ -1460,6 +1488,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run IPMSM PyAEDT cases as a batch job.")
     parser.add_argument("--cases", help="Optional CSV file with case columns such as rpm, beta_deg, i_peak_a.")
     parser.add_argument("--count", type=int, default=1, help="Number of default random-geometry cases if --cases is omitted.")
+    parser.add_argument("--max-cases", type=int, default=DEFAULT_MAX_CASES, help="Guardrail for planned case rows.")
+    parser.add_argument("--allow-over-budget", action="store_true", help="Allow planned case rows above --max-cases for an intentional approved run.")
     parser.add_argument("--workers", type=int, default=1, help="Number of parallel AEDT worker processes.")
     parser.add_argument("--cores", type=int, default=4, help="AEDT solver cores per worker.")
     parser.add_argument("--symmetry-factor", type=int, default=4, help="AEDT design symmetry multiplier.")
@@ -1482,8 +1512,7 @@ def main() -> int:
     )
     args = parse_args()
     cases = load_cases(args.cases, args.count)
-    if not cases:
-        raise RuntimeError("No cases to run.")
+    validate_case_plan(cases, args.max_cases, allow_over_budget=args.allow_over_budget)
 
     options = RunnerOptions(
         simulation_dir=args.simulation_dir,
@@ -1519,4 +1548,8 @@ def main() -> int:
 
 if __name__ == "__main__":
     mp.freeze_support()
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)

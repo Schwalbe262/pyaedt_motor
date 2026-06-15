@@ -102,6 +102,21 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
             ["output_torque_all_avg_nm", "output_solidloss_all_avg_w"],
         )
 
+    def test_validate_case_plan_rejects_duplicate_case_ids(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "duplicate case_id"):
+            run_ipmsm_batch.validate_case_plan(
+                [{"case_id": "dup"}, {"case_id": "dup"}],
+                max_cases=200,
+            )
+
+    def test_validate_case_plan_rejects_over_budget_rows(self) -> None:
+        cases = [{"case_id": f"case_{index}"} for index in range(3)]
+
+        with self.assertRaisesRegex(RuntimeError, "exceeding --max-cases=2"):
+            run_ipmsm_batch.validate_case_plan(cases, max_cases=2)
+
+        run_ipmsm_batch.validate_case_plan(cases, max_cases=2, allow_over_budget=True)
+
     def test_create_simulation_name_ignores_stale_low_counter(self) -> None:
         original_base_dir = run_ipmsm_batch.BASE_DIR
         with tempfile.TemporaryDirectory() as tmp:

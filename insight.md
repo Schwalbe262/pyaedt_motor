@@ -163,3 +163,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: optional AEDT imports happen inside the protected block after row initialization, so the shared CSV still records the failed case.
 - Evidence: focused test forces `pyaedt_module` import failure and verifies the returned row and CSV row are `failed`.
 - Remaining risk: actual missing-license or desktop-start failures still need validation in the AEDT environment.
+
+## 2026-06-16 00:51:23 +09:00 - Insight 16
+
+- Source loop: `note.md` Loop 16.
+- Improvement: the approved 200-case simulation budget is now enforced by executable entrypoint guards.
+- Before: old controller/subprocess defaults could plan thousands of analyze cases despite the current sprint's 200-simulation limit.
+- After: direct runner, subprocess launcher, Slurm shell wrapper, and controller all pass or enforce `--max-cases`, with explicit `--allow-over-budget` opt-in.
+- Evidence: 56 unit tests passed; compact CLI guard checks reject 201 direct/subprocess cases and the old 100000-case controller default.
+- Remaining risk: actual scheduler integration still needs endpoint/API validation after credentials and environment are available.

@@ -163,6 +163,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cores-per-process", type=int, default=cores_default)
     parser.add_argument("--count-per-process", "--loops-per-process", dest="count_per_process", type=int, default=loops_default)
     parser.add_argument("--total-count", type=int, default=int_env("TOTAL_COUNT", 0))
+    parser.add_argument("--max-cases", type=int, default=int_env("MAX_CASES", 200))
+    parser.add_argument("--allow-over-budget", action="store_true", default=os.environ.get("ALLOW_OVER_BUDGET", "").lower() in {"1", "true", "yes"})
     parser.add_argument("--cases", type=Path, default=Path(os.environ["CASES_CSV"]) if os.environ.get("CASES_CSV") else None)
     parser.add_argument("--simulation-dir", type=Path, default=BASE_DIR / "simulation")
     parser.add_argument("--result-csv", type=Path, default=BASE_DIR / "ipmsm_simulation_results.csv")
@@ -192,6 +194,8 @@ def main() -> int:
         raise RuntimeError("--processes must be at least 1.")
     if args.count_per_process < 1 and not args.cases and args.total_count <= 0:
         raise RuntimeError("--count-per-process/--loops-per-process must be at least 1 when --cases and --total-count are omitted.")
+    if args.max_cases < 1:
+        raise RuntimeError("--max-cases must be at least 1.")
     if not args.script.exists():
         raise FileNotFoundError(args.script)
 
@@ -201,6 +205,11 @@ def main() -> int:
     process_inputs: list[tuple[int | None, Path | None]] = []
     if args.cases:
         rows = read_cases(args.cases)
+        if len(rows) > args.max_cases and not args.allow_over_budget:
+            raise RuntimeError(
+                f"explicit case plan has {len(rows)} rows, exceeding --max-cases={args.max_cases}; "
+                "pass --allow-over-budget only for an intentional approved run."
+            )
         chunks = split_cases(rows, args.processes)
         print(f"Loaded {len(rows)} explicit case row(s) from {args.cases}.")
         for index, chunk in enumerate(chunks, start=1):
@@ -213,6 +222,11 @@ def main() -> int:
             print(f"Process {index} will run {len(chunk)} explicit case row(s).")
     else:
         total_count = args.total_count if args.total_count > 0 else args.processes * args.count_per_process
+        if total_count > args.max_cases and not args.allow_over_budget:
+            raise RuntimeError(
+                f"generated case plan has {total_count} rows, exceeding --max-cases={args.max_cases}; "
+                "pass --allow-over-budget only for an intentional approved run."
+            )
         print(
             f"Generating {total_count} fresh random case row(s): "
             f"processes={args.processes}, loops_per_process={args.count_per_process}."
@@ -232,6 +246,9 @@ def main() -> int:
             continue
         log_path = args.log_dir / f"{args.log_prefix}process_{process_index:03d}.log"
         command = build_command(args, process_index, count, cases_path)
+        command.extend(["--max-cases", str(args.max_cases)])
+        if args.allow_over_budget:
+            command.append("--allow-over-budget")
         log_file = log_path.open("w", encoding="utf-8", buffering=1)
         log_file.write("COMMAND: " + " ".join(command) + "\n\n")
         log_file.flush()
@@ -256,4 +273,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)

@@ -27,6 +27,8 @@ export TOTAL_COUNT="${TOTAL_COUNT:-0}"
 export RESULT_CSV="${RESULT_CSV:-ipmsm_simulation_results.csv}"
 export SIMULATION_DIR="${SIMULATION_DIR:-simulation}"
 export STAGGER_SECONDS="${STAGGER_SECONDS:-30}"
+export MAX_CASES="${MAX_CASES:-200}"
+export ALLOW_OVER_BUDGET="${ALLOW_OVER_BUDGET:-0}"
 
 export OMP_NUM_THREADS="${CORES_PER_PROCESS}"
 export MKL_NUM_THREADS="${CORES_PER_PROCESS}"
@@ -40,12 +42,14 @@ echo "LOOPS_PER_PROCESS=${LOOPS_PER_PROCESS}"
 echo "TOTAL_COUNT=${TOTAL_COUNT}"
 echo "RESULT_CSV=${RESULT_CSV}"
 echo "SIMULATION_DIR=${SIMULATION_DIR}"
+echo "MAX_CASES=${MAX_CASES}"
 
 cmd=(
   python subprocess_run.py
   --processes "${NUM_PROCESSES}"
   --cores-per-process "${CORES_PER_PROCESS}"
   --count-per-process "${COUNT_PER_PROCESS}"
+  --max-cases "${MAX_CASES}"
   --simulation-dir "${SIMULATION_DIR}"
   --result-csv "${RESULT_CSV}"
   --stagger-seconds "${STAGGER_SECONDS}"
@@ -68,6 +72,10 @@ fi
 
 if [[ "${PERIODIC_BOUNDARY:-0}" == "1" ]]; then
   cmd+=(--periodic-boundary)
+fi
+
+if [[ "${ALLOW_OVER_BUDGET:-0}" == "1" ]]; then
+  cmd+=(--allow-over-budget)
 fi
 
 if [[ "${KEEP_PROJECTS:-0}" == "1" ]]; then

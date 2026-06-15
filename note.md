@@ -200,6 +200,19 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Next action: run full validation, commit locally, and retry push.
 - Token usage: unavailable; live Codex DB path is still unknown.
 
+## 2026-06-16 00:51:23 +09:00 - Loop 16
+
+- Part: simulation budget plan guard
+- Goal: prevent direct or Slurm execution paths from accidentally planning more than the approved 200 simulation cases.
+- Hypothesis: old defaults in `controller.py` and subprocess launchers can schedule far more than 200 cases unless the budget is enforced close to every entrypoint.
+- Actions: added `--max-cases` and `--allow-over-budget` guards to `run_ipmsm_batch.py`, `subprocess_run.py`, `simulation1.sh`, and `controller.py`; rejected duplicate case IDs in direct case plans; added focused tests.
+- Candidates: document safe commands only versus executable guardrails; chose guardrails because old defaults can create costly accidental runs.
+- Metrics: focused runner/controller tests ran 22 tests and passed; CLI guard checks returned exit code 2 with compact `ERROR:` messages; full unittest discovery ran 56 tests and passed; py_compile and `git diff --check` passed.
+- Result: planned case counts above 200 now fail fast unless explicitly approved with `--allow-over-budget` / `ALLOW_OVER_BUDGET=1`.
+- Failure reason: no AEDT setup or solve was run locally because PyAEDT/Ansys packages are unavailable.
+- Next action: commit locally, retry push, then continue toward AEDT setup-only validation.
+- Token usage: unavailable; live Codex DB path is still unknown.
+
 ## 2026-06-16 00:45:37 +09:00 - Loop 15
 
 - Part: pre-AEDT failure row preservation

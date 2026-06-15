@@ -11,6 +11,7 @@ Default behavior matches the older project controller pattern:
 from __future__ import annotations
 
 import argparse
+import csv
 import getpass
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ import time
 
 
 BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_MAX_CASES = 200
 
 
 def rm_if_exists(path: Path) -> None:
@@ -81,6 +83,8 @@ def submit_job(args: argparse.Namespace, job_index: int) -> None:
         "SETUP_ONLY": int(args.setup_only),
         "KEEP_PROJECTS": int(args.keep_projects),
         "PERIODIC_BOUNDARY": int(args.periodic_boundary),
+        "MAX_CASES": args.max_cases,
+        "ALLOW_OVER_BUDGET": int(args.allow_over_budget),
     }
     if args.cases:
         export_values["CASES_CSV"] = args.cases
@@ -110,6 +114,8 @@ def parse_args() -> argparse.Namespace:
     loops_default = int(os.environ.get("LOOPS_PER_PROCESS", os.environ.get("COUNT_PER_PROCESS", "1000")))
     parser.add_argument("--count-per-process", "--loops-per-process", dest="loops_per_process", type=int, default=loops_default, help="Number of fresh random simulation cases each subprocess runs.")
     parser.add_argument("--total-count", type=int, default=int(os.environ.get("TOTAL_COUNT", "0")))
+    parser.add_argument("--max-cases", type=int, default=int(os.environ.get("MAX_CASES", str(DEFAULT_MAX_CASES))), help="Guardrail for planned case rows per submit cycle.")
+    parser.add_argument("--allow-over-budget", action="store_true", default=os.environ.get("ALLOW_OVER_BUDGET", "").lower() in {"1", "true", "yes"}, help="Allow planned case rows above --max-cases for an intentional approved run.")
     parser.add_argument("--result-csv", default=os.environ.get("RESULT_CSV", "ipmsm_simulation_results.csv"))
     parser.add_argument("--simulation-dir", default=os.environ.get("SIMULATION_DIR", "simulation"))
     parser.add_argument("--stagger-seconds", type=float, default=float(os.environ.get("STAGGER_SECONDS", "30")))
@@ -126,21 +132,47 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def count_case_rows(path: str) -> int:
+    with Path(path).open("r", encoding="utf-8-sig", newline="") as file:
+        return sum(1 for _ in csv.DictReader(file))
+
+
+def planned_cases_per_cycle(args: argparse.Namespace) -> int:
+    if args.cases:
+        return count_case_rows(args.cases) * args.jobs
+    if args.total_count > 0:
+        return args.total_count * args.jobs
+    return args.jobs * args.processes * args.loops_per_process
+
+
 def validate_args(args: argparse.Namespace) -> None:
     if args.jobs < 1:
         raise RuntimeError("--jobs must be at least 1.")
-    if not args.cases or args.allow_duplicate_cases:
-        return
-    if args.jobs != 1:
-        raise RuntimeError(
-            "--cases would submit the same explicit case CSV to multiple Slurm jobs; "
-            "use --jobs 1 or pass --allow-duplicate-cases intentionally."
-        )
-    if args.repeat_every_hours > 0:
-        raise RuntimeError(
-            "--cases would repeat the same explicit case CSV in later submit cycles; "
-            "use --repeat-every-hours 0 or pass --allow-duplicate-cases intentionally."
-        )
+    if args.max_cases < 1:
+        raise RuntimeError("--max-cases must be at least 1.")
+    if args.cases and not args.allow_duplicate_cases:
+        if args.jobs != 1:
+            raise RuntimeError(
+                "--cases would submit the same explicit case CSV to multiple Slurm jobs; "
+                "use --jobs 1 or pass --allow-duplicate-cases intentionally."
+            )
+        if args.repeat_every_hours > 0:
+            raise RuntimeError(
+                "--cases would repeat the same explicit case CSV in later submit cycles; "
+                "use --repeat-every-hours 0 or pass --allow-duplicate-cases intentionally."
+            )
+    if not args.allow_over_budget:
+        planned = planned_cases_per_cycle(args)
+        if planned > args.max_cases:
+            raise RuntimeError(
+                f"planned cases per submit cycle={planned}, exceeding --max-cases={args.max_cases}; "
+                "pass --allow-over-budget only for an intentional approved run."
+            )
+        if args.repeat_every_hours > 0 and not args.setup_only:
+            raise RuntimeError(
+                "--repeat-every-hours with analyze mode can exceed the approved simulation budget; "
+                "use --repeat-every-hours 0 or pass --allow-over-budget intentionally."
+            )
 
 
 def main() -> int:
