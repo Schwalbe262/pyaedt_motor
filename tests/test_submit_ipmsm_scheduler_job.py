@@ -87,10 +87,13 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertIn("--setup-only", text)
         self.assertNotIn("--analyze", text)
 
-    def test_build_job_payload_uses_python_git_scheduler_shape(self) -> None:
-        payload = scheduler_job.build_job_payload(scheduler_args())
+    def test_build_git_task_payload_uses_tasks_git_scheduler_shape(self) -> None:
+        args = scheduler_args()
+        payload = scheduler_job.build_git_task_payload(args)
 
-        self.assertEqual(payload["job_mode"], "python_git")
+        self.assertEqual(scheduler_job.scheduler_endpoint(args), "/tasks/git")
+        self.assertNotIn("job_mode", payload)
+        self.assertEqual(payload["job_name"], "ipmsm-replay-setup")
         self.assertEqual(payload["repo_url"], "https://github.com/example/project.git")
         self.assertEqual(payload["entrypoint"], "subprocess_run.py")
         self.assertEqual(payload["required_capability"], "ansys")
@@ -303,9 +306,10 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         post.assert_not_called()
         output = json.loads(stdout.getvalue())
         self.assertFalse(output["submit"])
+        self.assertEqual(output["scheduler_endpoint"], "/tasks/git")
         self.assertEqual(output["validated_cases"], 1)
         self.assertEqual(output["selected_cases"], 1)
-        self.assertEqual(output["payload"]["total_simulations"], 1)
+        self.assertIn("--setup-only", output["payload"]["arguments"])
 
     def test_main_bootstrap_remote_cases_appends_env_setup_without_posting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -410,9 +414,9 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         output = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 0)
         post.assert_not_called()
+        self.assertEqual(output["scheduler_endpoint"], "/tasks/git")
         self.assertEqual(output["validated_cases"], 3)
         self.assertEqual(output["selected_cases"], 1)
-        self.assertEqual(output["payload"]["total_simulations"], 1)
         self.assertNotIn("case_0001,10", output["payload"]["env_setup"])
         self.assertIn("case_0002,20", output["payload"]["env_setup"])
         self.assertNotIn("case_0003,30", output["payload"]["env_setup"])
@@ -577,7 +581,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["payload"], output["payload"])
             self.assertEqual(manifest["manifest_path"], str(manifest_path))
-            self.assertEqual(manifest["payload"]["total_simulations"], 1)
+            self.assertEqual(manifest["scheduler_endpoint"], "/tasks/git")
             self.assertNotIn(b"\r", manifest_path.read_bytes())
 
     def test_manifest_keeps_full_env_setup_when_stdout_is_redacted(self) -> None:
@@ -612,11 +616,12 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
             post.assert_not_called()
             output = json.loads(stdout.getvalue())
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(output["scheduler_endpoint"], "/tasks/git")
             self.assertIn("<redacted env_setup bytes=", output["payload"]["env_setup"])
             self.assertIn("cat > remote/cases.csv", manifest["payload"]["env_setup"])
             self.assertIn("case_0001,15", manifest["payload"]["env_setup"])
 
-    def test_main_submit_compacts_response_and_records_submitted_job(self) -> None:
+    def test_main_submit_compacts_response_and_records_submitted_git_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases_path = Path(tmp) / "cases.csv"
             with cases_path.open("w", encoding="utf-8", newline="") as file:
@@ -624,22 +629,19 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
                 writer.writeheader()
                 writer.writerow({"case_id": "case_0001"})
 
-            before_jobs = [{"id": 10, "job_name": "older"}]
+            before_tasks = [{"id": 10, "name": "older"}]
             submitted = {
                 "id": 11,
-                "job_name": "ipmsm-replay-setup",
+                "name": "ipmsm-replay-setup",
                 "status": "queued",
-                "job_mode": "python_git",
-                "repo_url": "https://github.com/example/project.git",
-                "git_ref": "main",
-                "entrypoint": "subprocess_run.py",
-                "arguments": "--cases remote/cases.csv --setup-only",
+                "account_name": "r1jae262",
+                "remote_cwd": "/remote/workspace/project",
             }
             stdout = io.StringIO()
-            with mock.patch.object(scheduler_job, "get_scheduler_jobs", side_effect=[before_jobs, [submitted, *before_jobs]]):
+            with mock.patch.object(scheduler_job, "get_scheduler_tasks", side_effect=[before_tasks, [submitted, *before_tasks]]):
                 with mock.patch.object(
                     scheduler_job,
-                    "post_scheduler_job",
+                    "post_scheduler_git_task",
                     return_value={
                         "response_format": "html",
                         "response_chars": 1234,
@@ -666,8 +668,10 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         post.assert_called_once()
         output = json.loads(stdout.getvalue())
+        self.assertEqual(output["scheduler_endpoint"], "/tasks/git")
         self.assertEqual(output["response"]["response_format"], "html")
-        self.assertEqual(output["submitted_job"]["id"], 11)
+        self.assertEqual(output["submitted_task"]["id"], 11)
+        self.assertNotIn("submitted_job", output)
         self.assertNotIn("raw_response", output["response"])
 
     def test_find_submitted_jobs_records_dynamic_packed_children(self) -> None:

@@ -641,3 +641,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no complete multi-geometry profile group yet; no R2-improving retraining evidence.
 - Next action: continue polling job 58 until baseline/mesh_fine/time_fine/mesh_time_fine complete for at least one source group, then run the guarded quality analysis.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 08:57:24 +09:00 - Loop 48
+
+- Part: scheduler policy alignment
+- Goal: check the latest `Schwalbe262/slurm_scheduler` policy and align local submission helpers without changing simulation behavior.
+- Hypothesis: latest scheduler policy prefers `/tasks/git` for Git-backed work while preserving `/jobs dynamic_packed_srun` for many-case simulation batches.
+- Actions: shallow-cloned latest scheduler main `7d9ed52`, inspected API/docs ranges for `/tasks`, `/tasks/git`, and `/jobs dynamic_packed_srun`, then updated `submit_ipmsm_scheduler_job.py` so default `python_git` posts to `/tasks/git` and packed modes keep `/jobs`.
+- Candidates: leave `/jobs python_git` as compatibility-only versus route new helper submissions through `/tasks/git`. Chose `/tasks/git` to match current scheduler policy while keeping packed FEA behavior unchanged.
+- Metrics: `python -m unittest tests.test_submit_ipmsm_scheduler_job` ran 35 tests and passed; full `python -m unittest discover -s tests` ran 151 tests and passed; temp-pycache `py_compile submit_ipmsm_scheduler_job.py` passed; dry-run showed `scheduler_endpoint=/tasks/git`; scheduler health returned ok with 59 jobs and 200 tasks; job 59 status is `completed`; job 58 remains running with 2/8 `ok` rows.
+- Result: Git-backed helper submissions now follow the updated scheduler API policy, and dynamic packed simulation submissions still use the correct `/jobs` path.
+- Failure reason: job 58 is still incomplete, so no new mesh/time quality conclusion or R2 improvement evidence.
+- Next action: commit/push this scheduler-policy checkpoint, then continue polling job 58 until complete profile groups are available for guarded analysis.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

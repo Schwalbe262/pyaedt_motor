@@ -30,7 +30,7 @@
 - `plan_ipmsm_quality_workflow.py`: writes a manual command plan for setup dry-run, quality analysis, filtering, gates, and retraining.
 - `train_ipmsm_lightgbm.py`: deterministic LightGBM training CLI with derived geometry input repair and recovered width-ratio feature.
 - `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the 200-solve guardrail.
-- `submit_ipmsm_scheduler_job.py` / `submit_ipmsm_scheduler_task.py`: dry-run-first Slurm Scheduler helpers for job-mode, `dynamic_packed_srun`, and updated `/tasks` remote-cwd submissions.
+- `submit_ipmsm_scheduler_job.py` / `submit_ipmsm_scheduler_task.py`: dry-run-first Slurm Scheduler helpers for `/tasks/git`, `/tasks`, and `dynamic_packed_srun`.
 - `inspect_ipmsm_scheduler_job.py`: filtered scheduler job/status/log inspector.
 - `run_ipmsm_batch.py`: batch execution and result CSV writer.
 - `module/ipmsm_ppt_setup.py`: mesh, transient setup, validation, and analysis.
@@ -43,8 +43,8 @@
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
 - 2026-06-16: scheduler job 57 fixed-geometry 4-profile analyze completed 4/4 `ok` on `cpu2`/`n111`; generated filtered comparison reports under `simul_log_smoke/fixed4_*`.
-- 2026-06-16: job 58 fixed-geometry next chunk is running on Slurm job 680506; result CSV currently has 2/8 `ok` rows as of 08:47 KST: baseline and mesh_fine for `submit7_job664260_p009_case_0021`; `time_fine` is solving.
-- 2026-06-16: setup-only dynamic packed probe job 59 selected the expected one-row `SIMULATION_ID=1` CSV and wrote 1/1 `ok` row for baseline setup in 49.888s; scheduler status still says `submitted`.
+- 2026-06-16: job 58 fixed-geometry next chunk is running on Slurm job 680506; result CSV still has 2/8 `ok` rows as of 08:57 KST: baseline and mesh_fine for `submit7_job664260_p009_case_0021`; `time_fine` is solving.
+- 2026-06-16: setup-only dynamic packed probe job 59 selected the expected one-row `SIMULATION_ID=1` CSV and wrote 1/1 `ok` row for baseline setup in 49.888s; scheduler status is now `completed`.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
@@ -65,9 +65,9 @@
 
 1. Verify/push the latest local commits and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
-3. Poll job 58 and job 59; fetch their result CSVs when available, then run `analyze_ipmsm_quality_results.py` on completed fixed-geometry analyze results.
+3. Poll job 58; fetch its result CSV when enough fixed-geometry profile groups complete, then run `analyze_ipmsm_quality_results.py` with the incomplete-group guard.
 4. For further dynamic packed submissions after partial child coverage, use `--case-start-index` / `--case-limit` to send only remaining validated replay rows.
-5. Update/restart the local scheduler service to latest `7d9ed52` before relying on `/tasks`; current live service likely still has the older `~/.../task.sh` expansion bug seen in task 33.
+5. For Git-backed scheduler work use `submit_ipmsm_scheduler_job.py` default `python_git`, which now posts to `/tasks/git`; use `/jobs` only for packed simulation modes.
 6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
 7. Run dataset quality gates and LightGBM retraining only after completed fixed-geometry quality results exist.
 
@@ -98,7 +98,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helpers and quality analysis now support dry-run review manifests, selected-row slicing, partial-child coverage warnings, incomplete profile-group gates, and filtered Slurm log inspection.
+- Scheduler helpers and quality analysis now support `/tasks/git` Git submissions, dry-run review manifests, selected-row slicing, partial-child coverage warnings, incomplete profile-group gates, and filtered Slurm log inspection.
 
 ## Risks and gotchas
 

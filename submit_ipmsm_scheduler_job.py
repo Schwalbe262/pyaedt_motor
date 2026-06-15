@@ -217,6 +217,39 @@ def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def build_git_task_payload(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "job_name": args.job_name,
+        "repo_url": args.repo_url,
+        "git_ref": args.git_ref,
+        "entrypoint": args.entrypoint,
+        "arguments": build_subprocess_arguments(args),
+        "env_setup": args.env_setup,
+        "required_capability": args.required_capability,
+        "env_profile": args.env_profile,
+        "account_name": args.account_name,
+        "partition": args.partition,
+        "cpus": args.cpus,
+        "memory": args.memory,
+        "gpus": args.gpus,
+        "gpu_model": args.gpu_model,
+        "node_name": args.node_name,
+        "exclusive_node": args.exclusive_node,
+    }
+
+
+def scheduler_endpoint(args: argparse.Namespace) -> str:
+    if args.job_mode == "python_git":
+        return "/tasks/git"
+    return "/jobs"
+
+
+def build_scheduler_payload(args: argparse.Namespace) -> dict[str, Any]:
+    if args.job_mode == "python_git":
+        return build_git_task_payload(args)
+    return build_job_payload(args)
+
+
 def validate_scheduler_request(args: argparse.Namespace) -> None:
     if args.job_mode == "python_git" and not args.repo_url:
         raise RuntimeError("--repo-url is required for --job-mode python_git")
@@ -252,8 +285,8 @@ def compact_non_json_response(body: str) -> dict[str, Any]:
     return summary
 
 
-def post_scheduler_job(scheduler_url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
-    url = scheduler_url.rstrip("/") + "/jobs"
+def post_scheduler_form(scheduler_url: str, endpoint: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    url = scheduler_url.rstrip("/") + endpoint
     encoded = parse.urlencode(payload).encode("utf-8")
     req = request.Request(
         url,
@@ -267,6 +300,14 @@ def post_scheduler_job(scheduler_url: str, payload: dict[str, Any], timeout: flo
         return json.loads(body)
     except json.JSONDecodeError:
         return compact_non_json_response(body)
+
+
+def post_scheduler_job(scheduler_url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    return post_scheduler_form(scheduler_url, "/jobs", payload, timeout)
+
+
+def post_scheduler_git_task(scheduler_url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    return post_scheduler_form(scheduler_url, "/tasks/git", payload, timeout)
 
 
 def get_scheduler_health(scheduler_url: str, timeout: float) -> dict[str, Any]:
@@ -289,6 +330,16 @@ def get_scheduler_jobs(scheduler_url: str, timeout: float) -> list[dict[str, Any
     return [job for job in data if isinstance(job, dict)]
 
 
+def get_scheduler_tasks(scheduler_url: str, timeout: float) -> list[dict[str, Any]]:
+    url = scheduler_url.rstrip("/") + "/api/tasks"
+    with request.urlopen(url, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
+    data = json.loads(body)
+    if not isinstance(data, list):
+        raise RuntimeError("/api/tasks did not return a JSON list")
+    return [task for task in data if isinstance(task, dict)]
+
+
 def job_id_set(jobs: list[dict[str, Any]]) -> set[int]:
     ids: set[int] = set()
     for job in jobs:
@@ -304,6 +355,22 @@ def job_id(job: dict[str, Any]) -> int | None:
         return int(job["id"])
     except Exception:
         return None
+
+
+def task_id(task: dict[str, Any]) -> int | None:
+    try:
+        return int(task["id"])
+    except Exception:
+        return None
+
+
+def task_id_set(tasks: list[dict[str, Any]]) -> set[int]:
+    ids: set[int] = set()
+    for task in tasks:
+        value = task_id(task)
+        if value is not None:
+            ids.add(value)
+    return ids
 
 
 def selected_submit_job_fields(job: dict[str, Any]) -> dict[str, Any]:
@@ -331,6 +398,40 @@ def selected_submit_job_fields(job: dict[str, Any]) -> dict[str, Any]:
         "finished_at",
     )
     return {key: job.get(key) for key in keys if key in job}
+
+
+def selected_submit_task_fields(task: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "id",
+        "name",
+        "status",
+        "account_name",
+        "allocation_id",
+        "remote_cwd",
+        "remote_dir",
+        "stdout_path",
+        "stderr_path",
+        "return_code",
+        "failure_message",
+        "created_at",
+        "started_at",
+        "updated_at",
+        "finished_at",
+    )
+    return {key: task.get(key) for key in keys if key in task}
+
+
+def find_submitted_git_task(
+    tasks: list[dict[str, Any]],
+    previous_ids: set[int],
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    new_tasks = [task for task in tasks if task_id(task) not in previous_ids]
+    candidates = new_tasks or tasks
+    for task in candidates:
+        if task.get("name") == args.job_name:
+            return task
+    return candidates[:1][0] if candidates else None
 
 
 def find_submitted_job(
@@ -492,9 +593,11 @@ def main(argv: list[str] | None = None) -> int:
             args.env_setup,
             build_remote_cases_bootstrap(remote_cases, rows, args.bootstrap_max_bytes),
         )
-    payload = build_job_payload(args)
+    endpoint = scheduler_endpoint(args)
+    payload = build_scheduler_payload(args)
     output: dict[str, Any] = {
         "scheduler_url": args.scheduler_url,
+        "scheduler_endpoint": endpoint,
         "submit": args.submit,
         "validated_cases": len(validated_rows),
         "selected_cases": len(rows),
@@ -505,32 +608,50 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_health:
         output["health"] = get_scheduler_health(args.scheduler_url, args.timeout)
     if args.submit:
-        pre_submit_job_ids: set[int] = set()
-        try:
-            pre_submit_job_ids = job_id_set(get_scheduler_jobs(args.scheduler_url, args.timeout))
-        except Exception as exc:
-            output["pre_submit_job_lookup_error"] = str(exc)
-        output["response"] = post_scheduler_job(args.scheduler_url, payload, args.timeout)
-        try:
-            submitted_jobs = find_submitted_jobs(
-                get_scheduler_jobs(args.scheduler_url, args.timeout),
-                pre_submit_job_ids,
-                args,
-            )
-            if submitted_jobs:
-                output["submitted_job"] = selected_submit_job_fields(submitted_jobs[0])
-                if len(submitted_jobs) > 1 or args.job_mode == "dynamic_packed_srun":
-                    output["submitted_jobs"] = [selected_submit_job_fields(job) for job in submitted_jobs]
-                if args.job_mode == "dynamic_packed_srun":
-                    count = submitted_simulation_count(submitted_jobs)
-                    output["submitted_simulation_count"] = count
-                    if count < args.total_simulations:
-                        output["submitted_simulation_count_warning"] = (
-                            f"scheduler created child jobs for {count}/{args.total_simulations} requested simulations; "
-                            "submit another dynamic request after capacity frees if more rows are needed"
-                        )
-        except Exception as exc:
-            output["submitted_job_lookup_error"] = str(exc)
+        if args.job_mode == "python_git":
+            pre_submit_task_ids: set[int] = set()
+            try:
+                pre_submit_task_ids = task_id_set(get_scheduler_tasks(args.scheduler_url, args.timeout))
+            except Exception as exc:
+                output["pre_submit_task_lookup_error"] = str(exc)
+            output["response"] = post_scheduler_git_task(args.scheduler_url, payload, args.timeout)
+            try:
+                submitted_task = find_submitted_git_task(
+                    get_scheduler_tasks(args.scheduler_url, args.timeout),
+                    pre_submit_task_ids,
+                    args,
+                )
+                if submitted_task:
+                    output["submitted_task"] = selected_submit_task_fields(submitted_task)
+            except Exception as exc:
+                output["submitted_task_lookup_error"] = str(exc)
+        else:
+            pre_submit_job_ids: set[int] = set()
+            try:
+                pre_submit_job_ids = job_id_set(get_scheduler_jobs(args.scheduler_url, args.timeout))
+            except Exception as exc:
+                output["pre_submit_job_lookup_error"] = str(exc)
+            output["response"] = post_scheduler_job(args.scheduler_url, payload, args.timeout)
+            try:
+                submitted_jobs = find_submitted_jobs(
+                    get_scheduler_jobs(args.scheduler_url, args.timeout),
+                    pre_submit_job_ids,
+                    args,
+                )
+                if submitted_jobs:
+                    output["submitted_job"] = selected_submit_job_fields(submitted_jobs[0])
+                    if len(submitted_jobs) > 1 or args.job_mode == "dynamic_packed_srun":
+                        output["submitted_jobs"] = [selected_submit_job_fields(job) for job in submitted_jobs]
+                    if args.job_mode == "dynamic_packed_srun":
+                        count = submitted_simulation_count(submitted_jobs)
+                        output["submitted_simulation_count"] = count
+                        if count < args.total_simulations:
+                            output["submitted_simulation_count_warning"] = (
+                                f"scheduler created child jobs for {count}/{args.total_simulations} requested simulations; "
+                                "submit another dynamic request after capacity frees if more rows are needed"
+                            )
+            except Exception as exc:
+                output["submitted_job_lookup_error"] = str(exc)
     if args.write_manifest:
         output["manifest_path"] = str(args.write_manifest)
         write_manifest(args.write_manifest, output)

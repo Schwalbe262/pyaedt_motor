@@ -86,7 +86,7 @@
 - Subprocess splitting now rejects duplicate explicit `case_id`s before worker CSV generation.
 - Scheduler endpoint is verified at `http://localhost:8000`; dry-run-first scheduler preparation now supports the updated `/tasks` API for existing remote working trees with exact `account_name`, `env_profile`, and optional small case-CSV bootstrap.
 - Latest `slurm_scheduler` policy at main `7d9ed52` prefers `/tasks` for existing remote directories, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case packed simulation batches; `/jobs python_git` is compatibility-only and becomes an attached task.
-- Scheduler `python_git` remains less reliable for this project path, but `/tasks` against `/home1/r1jae262/ipmsm_pyaedt_motor_work` works under account `r1jae262` when the live scheduler has the current task wrapper fixes.
+- Git-backed scheduler submissions now use `/tasks/git` instead of compatibility `/jobs python_git`; `/tasks` against `/home1/r1jae262/ipmsm_pyaedt_motor_work` works under account `r1jae262` for existing remote working trees.
 - `env_profile=pyaedt2026v1` must be combined with `module load ansys-electronics/v252`; task 18 setup-only completed 4/4 `ok` for baseline, mesh_fine, time_fine, and mesh_time_fine profiles.
 - Task 22 completed the first full analyze solve: baseline 1/1 `ok`, elapsed 936.238s, torque_last_avg 11.0863 Nm, efficiency_last 74.8655%, back-EMF phase-A THD 13.1410%, and no missing required outputs.
 - Job 57 completed a fixed-geometry 4-profile analyze comparison 4/4 `ok`: `time_fine` was close to `mesh_time_fine` on torque/efficiency at about 0.68x reference runtime, but this is only one source geometry.
@@ -100,5 +100,5 @@
 - Run the selected fixed-geometry replay plan to compare mesh/time-step quality on representative existing designs.
 - Use filtered regression verification after every retraining run and promote only evidence-backed simulation changes.
 - Prefer `train_ipmsm_lightgbm.py` over ad hoc notebook reruns for regression retraining and R2 gate output.
-- Use the verified scheduler `/tasks` endpoint for normal remote-cwd setup/analyze submissions, and use `dynamic_packed_srun` with one explicit case row per scheduler `SIMULATION_ID` for many-case packed replay batches.
+- Use `/tasks` for normal remote-cwd setup/analyze submissions, `/tasks/git` for Git-backed work, and `dynamic_packed_srun` with one explicit case row per scheduler `SIMULATION_ID` for many-case packed replay batches.
 - Build a repeatable before/after workflow that links simulation setup changes to regression `R^2` changes.
