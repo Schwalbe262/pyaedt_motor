@@ -38,8 +38,9 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 119 tests and passed; py_compile and scheduler submit response compaction tests passed.
-- 2026-06-16: `git ls-remote` confirms `origin/chore/codex-context-budget` at `e91fec4`; setup-only scheduler job 13 was submitted but failed before AEDT with `cd: slurm_scheduler/job-13-.../repo: No such file or directory`.
+- 2026-06-16: `python -m unittest discover -s tests` ran 124 tests and passed; focused scheduler/run-batch tests, py_compile, and `git diff --check` passed.
+- 2026-06-16: scheduler job 20 validated branch checkout/imports/case-plan checks; job 21 reached `run_ipmsm_batch.py` and wrote one structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
+- 2026-06-16: `git ls-remote` still shows `origin/chore/codex-context-budget` at `e91fec4`; local branch has later commits because GitHub push returns HTTP 403.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-16: `train_ipmsm_lightgbm.py --check-dependencies --dependency-report ...` reports numpy ok and pandas/sklearn/lightgbm missing locally.
@@ -48,19 +49,19 @@
 - 2026-06-15: import probe found `pyaedt_module=False` and no `ansys` package.
 - 2026-06-15: generated 4-row ignored smoke CSV at `simul_log_smoke/quality_cases_smoke.csv`.
 - Token command ran at closeout; default Codex SQLite DB was not found, so no live token sample was available.
-- No AEDT, Slurm, scheduler, or Ansys solve was run.
+- No successful AEDT setup or Ansys solve has run yet.
 
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler endpoint is verified at `http://localhost:8000`; `python_git` job 13 failed before AEDT on scheduler job-dir handling, so next submission needs scheduler fix or confirmed `remote_path`.
+- Scheduler reached the project runner, but the remote job environment used so far lacks the `ansys` Python package; one env-profile retry landed on an account without permission to the confirmed remote path.
 - GitHub push is blocked by remote HTTP 403 permissions for `Schwalbe262/pyaedt_motor.git`.
 
 ## Next steps
 
-1. Verify/push the latest local commit and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
-2. Generate a command plan with `python plan_ipmsm_quality_workflow.py --cases path/to/cases.csv --results path/to/results1.csv [path/to/results2.csv ...] --output path/to/quality_workflow_plan.json`; use `--job-mode packed_srun --remote-path ...` if GitHub push is still blocked.
-3. Do not retry `python_git` setup-only until the scheduler job-dir failure from job 13 is addressed; use confirmed `remote_path`/packed mode if available.
+1. Verify/push the latest local commits and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
+2. Retry setup-only only with an accessible scheduler path/account and an env profile that imports `ansys`; keep remote probe output enabled.
+3. Do not rely on `python_git` checkout until the scheduler honors `git_ref` or env setup forces the branch checkout.
 4. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
 5. Run `python analyze_ipmsm_dataset_quality.py --results path/to/training_ready.csv --output path/to/dataset_quality.csv --fail-on-quality --max-missing-required-rows 0 --max-duplicate-case-ids 0 --max-failed-rows 0`, then retrain if it passes.
 6. In the ML environment, run `python train_ipmsm_lightgbm.py --check-dependencies --dependency-report path/to/training_dependencies.json`, then retrain with `--data path/to/training_ready.csv --verification-output path/to/r2_check.csv --fail-on-threshold --max-invalid-training-rows 0`.
@@ -93,10 +94,10 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helper dry-runs setup jobs, writes full review manifests, redacts large bootstrap env setup from stdout, validates remote entrypoint files, and inspector reports filtered job/log evidence.
+- Scheduler helper dry-runs setup jobs, writes full review manifests, redacts large bootstrap env setup from stdout, validates/probes remote entrypoints, and inspector fetches filtered text/JSON job evidence.
 
 ## Risks and gotchas
 
 - Many local untracked artifacts exist; do not stage them by accident.
 - `pyaedt_test.ipynb` was already modified before this part; leave it untouched.
-- AEDT/Slurm validation is environment-dependent and should be explicit.
+- AEDT/Slurm validation is environment-dependent; record account, remote path, env profile, and exact failed row evidence.

@@ -36,6 +36,13 @@ def fixed_geometry_result_row(**overrides: str) -> dict[str, str]:
 
 
 class RunIpmsmBatchSpecTests(unittest.TestCase):
+    def test_safe_path_exists_treats_permission_errors_as_missing(self) -> None:
+        class PermissionDeniedPath:
+            def exists(self) -> bool:
+                raise PermissionError("denied")
+
+        self.assertFalse(run_ipmsm_batch.safe_path_exists(PermissionDeniedPath()))
+
     def test_result_schema_includes_quality_profile(self) -> None:
         self.assertIn("input_quality_profile", run_ipmsm_batch.RESULT_COLUMN_ORDER)
 

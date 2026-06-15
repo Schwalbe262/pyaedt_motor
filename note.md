@@ -498,3 +498,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, or regression retraining was run; scheduler `python_git` currently fails before entering the cloned repo; local ML dependencies are still unavailable.
 - Next action: commit locally, verify remote sync with `ls-remote`, then either fix scheduler `python_git` job-dir behavior or use a confirmed scheduler `remote_path` for setup-only replay.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 03:19:13 +09:00 - Loop 37
+
+- Part: scheduler remote setup diagnostics and environment evidence
+- Goal: make packed scheduler setup-only retries produce fetchable remote evidence and avoid false failures from inaccessible library paths.
+- Hypothesis: the scheduler-visible repo can reach project Python execution if the branch is forced and bootstrap evidence is fetchable, but the actual AEDT blocker must be captured as a structured failed row.
+- Actions: added optional remote probe generation to scheduler submissions; taught scheduler inspection to fetch plain-text remote files and normalize `remote_job_dir` query paths; guarded local library path probing against `PermissionError`; ran scheduler diagnostics through jobs 18-22; updated tests.
+- Candidates: keep retrying `python_git` versus use the inferred scheduler `remote_path`; assume the remote checkout was correct versus force `git checkout -f origin/chore/codex-context-budget`; treat inaccessible library paths as fatal versus missing; chose forced checkout, packed remote-path probes, and nonfatal path checks because the evidence isolated branch/env issues before AEDT.
+- Metrics: focused scheduler/run-batch tests ran 54 tests and passed; full unittest discovery ran 124 tests and passed; py_compile and scoped `git diff --check` passed; scheduler job 20 validated imports and case-plan checks; job 21 wrote one structured failed result row with `ModuleNotFoundError("No module named 'ansys'")`.
+- Result: scheduler execution is now observable through fetchable probe/result files, and the next blocker is the remote Ansys/PyAEDT environment rather than project entrypoint or case-plan validation.
+- Failure reason: no successful AEDT setup, solve, or regression retraining was run; one env-profile retry landed on an account without permission to the confirmed remote path; GitHub push still returns HTTP 403.
+- Next action: commit locally, retry GitHub push, then run a setup-only retry on an accessible scheduler path/account with an env profile that imports `ansys`.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage --label "loop37 scheduler setup evidence"` could not find a local Codex SQLite database.

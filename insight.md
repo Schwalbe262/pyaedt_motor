@@ -352,3 +352,30 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: non-JSON responses are summarized by type, size, title, and hash, and `/api/jobs` lookup records the submitted job fields for follow-up inspection.
 - Evidence: real setup-only job 13 was created and then failed before AEDT; tests cover HTML compaction and submitted-job lookup; full unittest discovery ran 119 tests and passed.
 - Remaining risk: this improves observability only; scheduler `python_git` still fails before repo entry, and AEDT setup/solve plus R2 evidence remain missing.
+
+## 2026-06-16 03:19:13 +09:00 - Insight 37
+
+- Source loop: `note.md` Loop 37.
+- Improvement: scheduler setup retries can write small fetchable remote probe files before project execution.
+- Before: a failed scheduler job could leave only wrapper stdout/stderr, making it hard to prove the actual PWD, user, Python version, and entrypoint file state.
+- After: `submit_ipmsm_scheduler_job.py --remote-probe-output ...` appends a compact diagnostic script before optional entrypoint validation.
+- Evidence: scheduler job 18 produced `scheduler_probe_single.txt` with PWD, HOME, USER, Python version, entrypoint status, and remote-dir status; tests cover probe generation and ordering.
+- Remaining risk: probes prove scheduler environment and files, not AEDT availability or solve quality.
+
+## 2026-06-16 03:19:13 +09:00 - Insight 38
+
+- Source loop: `note.md` Loop 37.
+- Improvement: scheduler remote-file inspection can handle text diagnostics and `remote_job_dir`-relative paths.
+- Before: `inspect_ipmsm_scheduler_job.py` expected JSON remote-file responses and used the raw remote path, which missed files when the API expected a relative path under `remote_job_dir`.
+- After: the inspector accepts text or JSON responses and strips the `remote_job_dir` prefix when requested.
+- Evidence: remote probe/result files from jobs 18, 20, and 21 were fetched as compact text/CSV evidence; tests cover text responses and path normalization.
+- Remaining risk: the inspector still depends on scheduler API availability and permissions for the selected account/path.
+
+## 2026-06-16 03:19:13 +09:00 - Insight 39
+
+- Source loop: `note.md` Loop 37.
+- Improvement: inaccessible HPC library path probes should be treated as missing paths, not fatal import-time errors.
+- Before: importing `run_ipmsm_batch.py` could fail with `PermissionError` while checking another user's candidate PyAEDT library path.
+- After: `safe_path_exists()` catches `OSError` and `add_local_library_paths()` skips inaccessible paths.
+- Evidence: scheduler job 20 imported `run_ipmsm_batch` successfully after applying the path check, and unit tests cover `PermissionError` as a missing path.
+- Remaining risk: this does not install or load PyAEDT/Ansys; job 21 still failed with `ModuleNotFoundError("No module named 'ansys'")`.

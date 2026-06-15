@@ -38,6 +38,13 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_MAX_CASES = 200
 
 
+def safe_path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
 def add_local_library_paths() -> None:
     """Add the local pyaedt_library path used by this project."""
     if os.name == "nt":
@@ -55,7 +62,7 @@ def add_local_library_paths() -> None:
             Path("/home1/wjddn5916/NEC/git/pyaedt_library/src"),
         ]
     for candidate in candidates:
-        if candidate.exists():
+        if safe_path_exists(candidate):
             sys.path.insert(0, str(candidate))
             return
 

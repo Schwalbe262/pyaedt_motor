@@ -26,6 +26,18 @@ def get_json(scheduler_url: str, path: str, query: dict[str, str] | None = None,
     return json.loads(body)
 
 
+def get_text_or_json(scheduler_url: str, path: str, query: dict[str, str] | None = None, timeout: float = 10.0) -> Any:
+    url = scheduler_url.rstrip("/") + path
+    if query:
+        url += "?" + parse.urlencode(query)
+    with request.urlopen(url, timeout=timeout) as response:
+        body = response.read().decode("utf-8", errors="replace")
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return body
+
+
 def selected_job_fields(job: dict[str, Any]) -> dict[str, Any]:
     keys = (
         "id",
@@ -91,13 +103,24 @@ def fetch_remote_file(
     base: str,
     timeout: float,
 ) -> str:
-    response = get_json(
+    response = get_text_or_json(
         scheduler_url,
         f"/api/jobs/{job_id}/remote-file",
         query={"path": path, "base": base},
         timeout=timeout,
     )
     return unwrap_remote_file_response(response)
+
+
+def remote_file_query_path(job: dict[str, Any], path: str, base: str) -> str:
+    if base != "remote_job_dir":
+        return path
+    remote_job_dir = str(job.get("remote_job_dir") or "").strip("/")
+    normalized = path.strip("/")
+    prefix = remote_job_dir + "/"
+    if remote_job_dir and normalized.startswith(prefix):
+        return normalized[len(prefix) :]
+    return path
 
 
 def inspect_job(args: argparse.Namespace) -> dict[str, Any]:
@@ -109,12 +132,17 @@ def inspect_job(args: argparse.Namespace) -> dict[str, Any]:
     if args.stderr and job.get("stderr_path"):
         requested_logs.append(("stderr", str(job["stderr_path"])))
     for label, path in requested_logs:
+        query_path = remote_file_query_path(job, path, args.base)
         try:
-            text = fetch_remote_file(args.scheduler_url, args.job_id, path, args.base, args.timeout)
+            text = fetch_remote_file(args.scheduler_url, args.job_id, query_path, args.base, args.timeout)
         except Exception as exc:
             result[label] = {"path": path, "error": str(exc)}
+            if query_path != path:
+                result[label]["query_path"] = query_path
             continue
         result[label] = {"path": path, **summarize_log_text(text, args.tail_lines, args.max_interesting)}
+        if query_path != path:
+            result[label]["query_path"] = query_path
     return result
 
 

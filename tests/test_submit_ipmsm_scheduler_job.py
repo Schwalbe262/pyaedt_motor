@@ -40,6 +40,7 @@ def scheduler_args(**overrides: object) -> Namespace:
         "periodic_boundary": False,
         "keep_projects": False,
         "env_setup": "",
+        "remote_probe_output": "",
         "validate_remote_entrypoint": False,
         "required_capability": "ansys",
         "env_profile": "",
@@ -134,6 +135,15 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertIn("test -f subprocess_run.py", script)
         self.assertIn("test -f run_ipmsm_batch.py", script)
         self.assertIn("required scheduler file missing", script)
+
+    def test_build_remote_probe_writes_fetchable_diagnostics(self) -> None:
+        script = scheduler_job.build_remote_probe("diagnostics/scheduler_probe.txt", "subprocess_run.py")
+
+        self.assertIn("mkdir -p diagnostics", script)
+        self.assertIn("SCHEDULER_REMOTE_PROBE=1", script)
+        self.assertIn("python --version", script)
+        self.assertIn("entrypoint_ok=subprocess_run.py", script)
+        self.assertIn("> diagnostics/scheduler_probe.txt 2>&1", script)
 
     def test_compact_non_json_response_summarizes_html_without_body(self) -> None:
         body = "<!doctype html><html><head><title>Slurm Scheduler</title></head><body>" + ("x" * 1000)
@@ -305,6 +315,39 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         output = json.loads(stdout.getvalue())
         self.assertIn("test -f subprocess_run.py", output["payload"]["env_setup"])
         self.assertIn("test -f run_ipmsm_batch.py", output["payload"]["env_setup"])
+
+    def test_main_can_add_remote_probe_before_entrypoint_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.csv"
+            with path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001"})
+
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "post_scheduler_job") as post:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = scheduler_job.main(
+                        [
+                            "--cases",
+                            str(path),
+                            "--remote-cases",
+                            "remote/cases.csv",
+                            "--repo-url",
+                            "https://github.com/example/project.git",
+                            "--git-ref",
+                            "main",
+                            "--remote-probe-output",
+                            "scheduler_probe.txt",
+                            "--validate-remote-entrypoint",
+                            "--show-env-setup",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        post.assert_not_called()
+        env_setup = json.loads(stdout.getvalue())["payload"]["env_setup"]
+        self.assertLess(env_setup.index("SCHEDULER_REMOTE_PROBE=1"), env_setup.index("required scheduler file missing"))
 
     def test_main_writes_review_manifest_without_posting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

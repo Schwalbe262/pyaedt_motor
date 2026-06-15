@@ -29,6 +29,13 @@ class InspectIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(inspector.unwrap_remote_file_response({"content": "from content"}), "from content")
         self.assertEqual(inspector.unwrap_remote_file_response({"text": "from text"}), "from text")
 
+    def test_fetch_remote_file_accepts_plain_text_endpoint(self) -> None:
+        with mock.patch.object(inspector, "get_text_or_json", return_value="plain log") as get_text_or_json:
+            text = inspector.fetch_remote_file("http://scheduler", 4, "slurm.out", "remote_job_dir", 1.0)
+
+        self.assertEqual(text, "plain log")
+        self.assertEqual(get_text_or_json.call_count, 1)
+
     def test_summarize_log_text_returns_tail_and_interesting_lines(self) -> None:
         text = "\n".join(
             [
@@ -46,6 +53,18 @@ class InspectIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(summary["tail"], ["Finished case_0001: failed", "last line"])
         self.assertEqual(summary["interesting"], ["ERROR: mesh failed", "Finished case_0001: failed"])
 
+    def test_remote_file_query_path_strips_remote_job_dir_prefix(self) -> None:
+        job = {"remote_job_dir": "slurm_scheduler/job-14-123"}
+
+        self.assertEqual(
+            inspector.remote_file_query_path(job, "slurm_scheduler/job-14-123/slurm-1.out", "remote_job_dir"),
+            "slurm-1.out",
+        )
+        self.assertEqual(
+            inspector.remote_file_query_path(job, "simul_log/process.log", "remote_path"),
+            "simul_log/process.log",
+        )
+
     def test_inspect_job_fetches_only_requested_logs(self) -> None:
         args = Namespace(
             scheduler_url="http://scheduler",
@@ -61,19 +80,18 @@ class InspectIpmsmSchedulerJobTests(unittest.TestCase):
         with mock.patch.object(
             inspector,
             "get_json",
-            side_effect=[
-                {"id": 12, "status": "completed", "stdout_path": "stdout.log", "stderr_path": "stderr.log"},
-                {"content": "line1\nERROR: bad\nline3"},
-            ],
+            return_value={"id": 12, "status": "completed", "stdout_path": "stdout.log", "stderr_path": "stderr.log"},
         ) as get_json:
-            result = inspector.inspect_job(args)
+            with mock.patch.object(inspector, "get_text_or_json", return_value={"content": "line1\nERROR: bad\nline3"}) as get_text:
+                result = inspector.inspect_job(args)
 
         self.assertEqual(result["job"]["id"], 12)
         self.assertIn("stdout", result)
         self.assertNotIn("stderr", result)
         self.assertEqual(result["stdout"]["tail"], ["line3"])
         self.assertEqual(result["stdout"]["path"], "stdout.log")
-        self.assertEqual(get_json.call_count, 2)
+        self.assertEqual(get_json.call_count, 1)
+        self.assertEqual(get_text.call_count, 1)
 
     def test_inspect_job_reports_log_fetch_error_without_losing_status(self) -> None:
         args = Namespace(
@@ -87,15 +105,9 @@ class InspectIpmsmSchedulerJobTests(unittest.TestCase):
             max_interesting=5,
         )
 
-        with mock.patch.object(
-            inspector,
-            "get_json",
-            side_effect=[
-                {"id": 12, "status": "completed", "stdout_path": "missing.log"},
-                RuntimeError("not found"),
-            ],
-        ):
-            result = inspector.inspect_job(args)
+        with mock.patch.object(inspector, "get_json", return_value={"id": 12, "status": "completed", "stdout_path": "missing.log"}):
+            with mock.patch.object(inspector, "get_text_or_json", side_effect=RuntimeError("not found")):
+                result = inspector.inspect_job(args)
 
         self.assertEqual(result["job"]["status"], "completed")
         self.assertEqual(result["stdout"]["path"], "missing.log")

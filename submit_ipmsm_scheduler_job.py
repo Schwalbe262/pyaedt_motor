@@ -7,6 +7,7 @@ import csv
 import hashlib
 import io
 import json
+import posixpath
 from pathlib import Path
 import re
 import shlex
@@ -132,6 +133,30 @@ def build_remote_entrypoint_validation(entrypoint: str) -> str:
             f'{{ echo "ERROR: required scheduler file missing: {path}" >&2; exit 2; }}'
         )
     return "\n".join(lines)
+
+
+def build_remote_probe(remote_probe_output: str, entrypoint: str) -> str:
+    quoted_output = shlex.quote(remote_probe_output)
+    parent = posixpath.dirname(remote_probe_output)
+    setup_lines = []
+    if parent and parent != ".":
+        setup_lines.append(f"mkdir -p {shlex.quote(parent)}")
+    setup_lines.extend(
+        [
+            "{",
+            "echo SCHEDULER_REMOTE_PROBE=1",
+            "printf 'PWD='; pwd",
+            "echo HOME=${HOME:-}",
+            "echo USER=${USER:-}",
+            "python --version || true",
+            f"test -f {shlex.quote(entrypoint)} && echo entrypoint_ok={entrypoint} || echo entrypoint_missing={entrypoint}",
+            "test -f run_ipmsm_batch.py && echo run_ipmsm_batch_ok=1 || echo run_ipmsm_batch_missing=1",
+            "test -d remote && echo remote_dir_ok=1 || echo remote_dir_missing=1",
+            "ls -ld . || true",
+            f"}} > {quoted_output} 2>&1",
+        ]
+    )
+    return "\n".join(setup_lines)
 
 
 def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -347,6 +372,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--periodic-boundary", action="store_true")
     parser.add_argument("--keep-projects", action="store_true")
     parser.add_argument("--env-setup", default="")
+    parser.add_argument("--remote-probe-output", default="", help="Write scheduler working-tree diagnostics to this remote file before validation.")
     parser.add_argument("--validate-remote-entrypoint", action="store_true", help="Check expected project files in the scheduler working tree before running.")
     parser.add_argument("--required-capability", default="")
     parser.add_argument("--env-profile", default="")
@@ -381,6 +407,8 @@ def main(argv: list[str] | None = None) -> int:
     rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
     if args.total_simulations <= 0:
         args.total_simulations = len(rows)
+    if args.remote_probe_output:
+        args.env_setup = append_env_setup(args.env_setup, build_remote_probe(args.remote_probe_output, args.entrypoint))
     if args.validate_remote_entrypoint:
         args.env_setup = append_env_setup(args.env_setup, build_remote_entrypoint_validation(args.entrypoint))
     if args.bootstrap_remote_cases:
