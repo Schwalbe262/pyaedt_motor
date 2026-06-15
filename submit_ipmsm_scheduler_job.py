@@ -56,6 +56,23 @@ def load_and_validate_cases(cases_path: Path, max_cases: int, allow_over_budget:
     return rows
 
 
+def select_case_rows(rows: list[dict[str, Any]], start_index: int, case_limit: int) -> list[dict[str, Any]]:
+    if start_index < 1:
+        raise RuntimeError("--case-start-index must be >= 1")
+    if case_limit < 0:
+        raise RuntimeError("--case-limit must be >= 0")
+    if start_index > len(rows):
+        raise RuntimeError(
+            f"--case-start-index={start_index} is outside the validated case plan with {len(rows)} row(s)"
+        )
+    start = start_index - 1
+    end = None if case_limit == 0 else start + case_limit
+    selected = rows[start:end]
+    if not selected:
+        raise RuntimeError("case row selection is empty")
+    return selected
+
+
 def build_subprocess_arguments(args: argparse.Namespace) -> str:
     job_mode = getattr(args, "job_mode", "python_git")
     processes = 1 if job_mode == "dynamic_packed_srun" else args.processes
@@ -211,6 +228,10 @@ def validate_scheduler_request(args: argparse.Namespace) -> None:
         raise RuntimeError("absolute local --cases requires --remote-cases for scheduler submission")
     if args.bootstrap_remote_cases and not (args.remote_cases or not args.cases.is_absolute()):
         raise RuntimeError("--bootstrap-remote-cases with an absolute --cases path requires --remote-cases")
+    if args.case_start_index < 1:
+        raise RuntimeError("--case-start-index must be >= 1")
+    if args.case_limit < 0:
+        raise RuntimeError("--case-limit must be >= 0")
 
 
 def compact_non_json_response(body: str) -> dict[str, Any]:
@@ -395,6 +416,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--remote-cases", default="", help="Case CSV path visible to the scheduler job; defaults to --cases.")
     parser.add_argument("--bootstrap-remote-cases", action="store_true", help="Embed the validated case CSV into env_setup for remote job startup.")
     parser.add_argument("--bootstrap-max-bytes", type=int, default=DEFAULT_BOOTSTRAP_MAX_BYTES)
+    parser.add_argument("--case-start-index", type=int, default=1, help="1-based first validated case row to submit.")
+    parser.add_argument("--case-limit", type=int, default=0, help="Maximum selected case rows to submit; 0 means all rows from --case-start-index.")
     parser.add_argument("--repo-url", default=default_repo_url())
     parser.add_argument("--git-ref", default=default_git_ref())
     parser.add_argument("--job-mode", choices=("python_git", "packed_srun", "dynamic_packed_srun"), default="python_git")
@@ -449,9 +472,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     validate_scheduler_request(args)
-    rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
+    validated_rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
+    rows = select_case_rows(validated_rows, args.case_start_index, args.case_limit)
     if args.total_simulations <= 0:
         args.total_simulations = len(rows)
+    elif args.job_mode == "dynamic_packed_srun" and args.total_simulations > len(rows):
+        raise RuntimeError(
+            "--total-simulations cannot exceed selected case rows for --job-mode dynamic_packed_srun"
+        )
     if args.env_setup_file is not None:
         args.env_setup = append_env_setup(args.env_setup, read_env_setup_file(args.env_setup_file))
     if args.remote_probe_output:
@@ -468,7 +496,10 @@ def main(argv: list[str] | None = None) -> int:
     output: dict[str, Any] = {
         "scheduler_url": args.scheduler_url,
         "submit": args.submit,
-        "validated_cases": len(rows),
+        "validated_cases": len(validated_rows),
+        "selected_cases": len(rows),
+        "case_start_index": args.case_start_index,
+        "case_limit": args.case_limit,
         "payload": payload,
     }
     if args.check_health:

@@ -20,6 +20,8 @@ def scheduler_args(**overrides: object) -> Namespace:
         "remote_cases": "remote/cases.csv",
         "bootstrap_remote_cases": False,
         "bootstrap_max_bytes": 50000,
+        "case_start_index": 1,
+        "case_limit": 0,
         "repo_url": "https://github.com/example/project.git",
         "git_ref": "main",
         "job_mode": "python_git",
@@ -180,6 +182,19 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "exceeding --bootstrap-max-bytes"):
             scheduler_job.build_remote_cases_bootstrap("remote/cases.csv", rows, max_bytes=5)
 
+    def test_select_case_rows_uses_one_based_start_and_limit(self) -> None:
+        rows = [{"case_id": "case1"}, {"case_id": "case2"}, {"case_id": "case3"}]
+
+        selected = scheduler_job.select_case_rows(rows, start_index=2, case_limit=1)
+
+        self.assertEqual([row["case_id"] for row in selected], ["case2"])
+        self.assertEqual(
+            [row["case_id"] for row in scheduler_job.select_case_rows(rows, start_index=2, case_limit=0)],
+            ["case2", "case3"],
+        )
+        with self.assertRaisesRegex(RuntimeError, "outside the validated case plan"):
+            scheduler_job.select_case_rows(rows, start_index=4, case_limit=0)
+
     def test_build_remote_entrypoint_validation_checks_project_files(self) -> None:
         script = scheduler_job.build_remote_entrypoint_validation("subprocess_run.py")
 
@@ -253,6 +268,13 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "--bootstrap-remote-cases"):
             scheduler_job.validate_scheduler_request(args)
 
+    def test_validate_scheduler_request_rejects_bad_case_slice(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "--case-start-index"):
+            scheduler_job.validate_scheduler_request(scheduler_args(case_start_index=0))
+
+        with self.assertRaisesRegex(RuntimeError, "--case-limit"):
+            scheduler_job.validate_scheduler_request(scheduler_args(case_limit=-1))
+
     def test_main_dry_run_does_not_post(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.csv"
@@ -282,6 +304,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         output = json.loads(stdout.getvalue())
         self.assertFalse(output["submit"])
         self.assertEqual(output["validated_cases"], 1)
+        self.assertEqual(output["selected_cases"], 1)
         self.assertEqual(output["payload"]["total_simulations"], 1)
 
     def test_main_bootstrap_remote_cases_appends_env_setup_without_posting(self) -> None:
@@ -347,6 +370,76 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertIn("cat > remote/cases.csv", output["payload"]["env_setup"])
         self.assertIn("case_0001,15", output["payload"]["env_setup"])
         self.assertNotIn("output_redactions", output)
+
+    def test_main_bootstrap_uses_selected_case_slice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.csv"
+            with path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id", "beta_deg"])
+                writer.writeheader()
+                writer.writerows(
+                    [
+                        {"case_id": "case_0001", "beta_deg": "10"},
+                        {"case_id": "case_0002", "beta_deg": "20"},
+                        {"case_id": "case_0003", "beta_deg": "30"},
+                    ]
+                )
+
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "post_scheduler_job") as post:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = scheduler_job.main(
+                        [
+                            "--cases",
+                            str(path),
+                            "--remote-cases",
+                            "remote/cases.csv",
+                            "--repo-url",
+                            "https://github.com/example/project.git",
+                            "--git-ref",
+                            "main",
+                            "--case-start-index",
+                            "2",
+                            "--case-limit",
+                            "1",
+                            "--bootstrap-remote-cases",
+                            "--show-env-setup",
+                        ]
+                    )
+
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        post.assert_not_called()
+        self.assertEqual(output["validated_cases"], 3)
+        self.assertEqual(output["selected_cases"], 1)
+        self.assertEqual(output["payload"]["total_simulations"], 1)
+        self.assertNotIn("case_0001,10", output["payload"]["env_setup"])
+        self.assertIn("case_0002,20", output["payload"]["env_setup"])
+        self.assertNotIn("case_0003,30", output["payload"]["env_setup"])
+
+    def test_main_rejects_dynamic_total_above_selected_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.csv"
+            with path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001"})
+
+            with self.assertRaisesRegex(RuntimeError, "cannot exceed selected case rows"):
+                scheduler_job.main(
+                    [
+                        "--cases",
+                        str(path),
+                        "--remote-cases",
+                        "remote/cases.csv",
+                        "--job-mode",
+                        "dynamic_packed_srun",
+                        "--remote-path",
+                        "/remote/project",
+                        "--total-simulations",
+                        "2",
+                    ]
+                )
 
     def test_main_can_add_remote_entrypoint_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -602,3 +602,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: job 58 is still incomplete and job 59 has not started, so multi-geometry quality conclusions and R2 improvement remain unproven.
 - Next action: commit/push the monitoring helper checkpoint, then continue polling job 58 until enough fixed-geometry rows are available for quality analysis.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 08:36:19 +09:00 - Loop 45
+
+- Part: dynamic packed replay continuation
+- Goal: make it safe to continue a replay plan after the scheduler creates child jobs for only part of a dynamic packed request.
+- Hypothesis: adding validated row-window selection to the scheduler job helper lets operators submit remaining replay rows without hand-editing CSVs or duplicating already-covered rows.
+- Actions: added `--case-start-index` and `--case-limit` to `submit_ipmsm_scheduler_job.py`; selected rows are now used for remote CSV bootstrap and default dynamic `total_simulations`; dynamic requests reject totals larger than the selected row count.
+- Candidates: leave operators to manually slice CSVs versus build slicing into the reviewed dry-run helper. Chose helper slicing so manifests and stdout show `validated_cases`, `selected_cases`, and the exact case window.
+- Metrics: dry-run against `replay_quality_cases_fixed8_next.csv` with `--case-start-index 2 --case-limit 2` reported 8 validated rows, 2 selected rows, dynamic total 2, `--processes 1`, and `--case-index-from-simulation-id`; full `python -m unittest discover -s tests` ran 149 tests and passed; job 58 still had 1/8 `ok` rows and job 59 remained queued.
+- Result: future dynamic packed submissions can target remaining fixed replay rows deterministically after partial child coverage.
+- Failure reason: no new completed simulation rows yet, so fixed-geometry quality conclusions and retraining remain unproven.
+- Next action: commit/push the row-slicing helper, then keep polling job 58 and analyze only after completed profile groups are available.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

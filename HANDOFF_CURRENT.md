@@ -38,7 +38,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 145 tests and passed; touched-file py_compile and `git diff --check` passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 149 tests and passed; touched-file py_compile and `git diff --check` passed.
 - 2026-06-16: scheduler job 20 validated branch checkout/imports/case-plan checks; job 21 reached `run_ipmsm_batch.py` and wrote one structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
@@ -66,10 +66,10 @@
 1. Verify/push the latest local commits and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Poll job 58 and job 59; fetch their result CSVs when available, then run `analyze_ipmsm_quality_results.py` on completed fixed-geometry analyze results.
-4. Update/restart the local scheduler service to latest `7d9ed52` before relying on `/tasks`; current live service likely still has the older `~/.../task.sh` expansion bug seen in task 33.
-5. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
-6. Run `python analyze_ipmsm_dataset_quality.py --results path/to/training_ready.csv --output path/to/dataset_quality.csv --fail-on-quality --max-missing-required-rows 0 --max-duplicate-case-ids 0 --max-failed-rows 0`, then retrain if it passes.
-7. In the ML environment, run `python train_ipmsm_lightgbm.py --check-dependencies --dependency-report path/to/training_dependencies.json`, then retrain with `--data path/to/training_ready.csv --verification-output path/to/r2_check.csv --fail-on-threshold --max-invalid-training-rows 0`.
+4. For further dynamic packed submissions after partial child coverage, use `--case-start-index` / `--case-limit` to send only remaining validated replay rows.
+5. Update/restart the local scheduler service to latest `7d9ed52` before relying on `/tasks`; current live service likely still has the older `~/.../task.sh` expansion bug seen in task 33.
+6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
+7. Run dataset quality gates and LightGBM retraining only after completed fixed-geometry quality results exist.
 
 ## Token/context policy
 
@@ -98,7 +98,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helpers dry-run setup/analyze jobs, write full review manifests, redact large bootstrap env setup from stdout, support updated `/tasks`, exact `account_name`, `dynamic_packed_srun` row dispatch, partial-child coverage warnings, and filtered Slurm log inspection.
+- Scheduler helpers dry-run setup/analyze jobs, write full review manifests, redact large bootstrap env setup from stdout, support updated `/tasks`, exact `account_name`, `dynamic_packed_srun` row dispatch, selected-row slicing, partial-child coverage warnings, and filtered Slurm log inspection.
 
 ## Risks and gotchas
 
