@@ -628,3 +628,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: job 58 remains running with 1/8 `ok` rows and job 59 remains queued, so multi-geometry quality conclusions and R2 improvement remain unproven.
 - Next action: commit/push the completeness gate, then continue polling job 58 until complete profile groups are available.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 08:47:46 +09:00 - Loop 47
+
+- Part: scheduler replay polling and dynamic dispatch validation
+- Goal: gather authoritative scheduler evidence without drawing premature mesh/time conclusions from partial rows.
+- Hypothesis: job 59 can validate the new dynamic packed row-dispatch path while job 58 continues the slower analyze replay.
+- Actions: fetched filtered scheduler status/log/result evidence for jobs 58 and 59; inspected job 59's generated one-row worker CSV and setup result row; checked job 58's current result rows and worker progress.
+- Candidates: run quality comparison now versus wait for complete profile groups. Chose to wait because job 58 still lacks time_fine and mesh_time_fine for the first source group.
+- Metrics: job 59 selected `replay_0002_submit7_job664260_p009_case_0021_baseline` via `SIMULATION_ID=1`, loaded `ansys-electronics/v252`, and wrote 1/1 `ok` setup-only row in 49.888s; job 58 advanced to 2/8 `ok` rows with baseline elapsed 1564.573s and mesh_fine elapsed 1993.09s for the first source geometry; job 58 is now solving `time_fine`.
+- Result: dynamic packed row dispatch is validated for setup-only work, and job 58 is making progress but remains incomplete for quality conclusions.
+- Failure reason: no complete multi-geometry profile group yet; no R2-improving retraining evidence.
+- Next action: continue polling job 58 until baseline/mesh_fine/time_fine/mesh_time_fine complete for at least one source group, then run the guarded quality analysis.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

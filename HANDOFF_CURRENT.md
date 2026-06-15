@@ -43,8 +43,8 @@
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
 - 2026-06-16: scheduler job 57 fixed-geometry 4-profile analyze completed 4/4 `ok` on `cpu2`/`n111`; generated filtered comparison reports under `simul_log_smoke/fixed4_*`.
-- 2026-06-16: job 58 fixed-geometry next chunk is running on Slurm job 680506; result CSV currently has 1/8 `ok` row as of 08:30 KST; worker log shows `simulation16` solving and a non-fatal PyAEDT cleanup/session TypeError after the completed first row.
-- 2026-06-16: submitted setup-only dynamic packed probe; scheduler created child job 59 with `simulation_start=1`, `simulation_count=1`, queued on `cpu2`/`n112` as of 08:23 KST.
+- 2026-06-16: job 58 fixed-geometry next chunk is running on Slurm job 680506; result CSV currently has 2/8 `ok` rows as of 08:47 KST: baseline and mesh_fine for `submit7_job664260_p009_case_0021`; `time_fine` is solving.
+- 2026-06-16: setup-only dynamic packed probe job 59 selected the expected one-row `SIMULATION_ID=1` CSV and wrote 1/1 `ok` row for baseline setup in 49.888s; scheduler status still says `submitted`.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
@@ -54,7 +54,7 @@
 - 2026-06-15: import probe found `pyaedt_module=False` and no `ansys` package.
 - 2026-06-15: generated 4-row ignored smoke CSV at `simul_log_smoke/quality_cases_smoke.csv`.
 - Token command ran at closeout; default Codex SQLite DB was not found, so no live token sample was available.
-- First successful AEDT setup, solve, and fixed-geometry 4-profile comparison evidence exists; multi-geometry job 58 is still partial and now correctly fails the incomplete-profile guard; no R2-improving retraining evidence exists yet.
+- First successful AEDT setup, solve, fixed-geometry 4-profile comparison, and dynamic packed row-dispatch evidence exists; multi-geometry job 58 is still partial and correctly fails the incomplete-profile guard; no R2-improving retraining evidence exists yet.
 
 ## Current blocker
 

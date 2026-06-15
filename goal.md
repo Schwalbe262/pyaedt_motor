@@ -90,6 +90,7 @@
 - `env_profile=pyaedt2026v1` must be combined with `module load ansys-electronics/v252`; task 18 setup-only completed 4/4 `ok` for baseline, mesh_fine, time_fine, and mesh_time_fine profiles.
 - Task 22 completed the first full analyze solve: baseline 1/1 `ok`, elapsed 936.238s, torque_last_avg 11.0863 Nm, efficiency_last 74.8655%, back-EMF phase-A THD 13.1410%, and no missing required outputs.
 - Job 57 completed a fixed-geometry 4-profile analyze comparison 4/4 `ok`: `time_fine` was close to `mesh_time_fine` on torque/efficiency at about 0.68x reference runtime, but this is only one source geometry.
+- Job 59 validated dynamic packed row dispatch for setup-only work: `SIMULATION_ID=1` selected the expected single replay row and produced 1/1 `ok` baseline setup in 49.888s.
 - Multi-geometry quality replay job 58 is running and has only partial evidence so far; no R2-improving retraining evidence exists yet.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
 - Next focus is multi-geometry quality validation, targeted 200-case quality replay selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
