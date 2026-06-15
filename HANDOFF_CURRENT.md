@@ -29,13 +29,14 @@
 - `train_ipmsm_lightgbm.py`: deterministic LightGBM training CLI with derived geometry input repair and recovered width-ratio feature.
 - `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the 200-solve guardrail.
 - `submit_ipmsm_scheduler_job.py`: dry-run-first Slurm Scheduler API helper for validated replay setup jobs.
+- `inspect_ipmsm_scheduler_job.py`: filtered scheduler job/status/log inspector.
 - `run_ipmsm_batch.py`: batch execution and result CSV writer.
 - `module/ipmsm_ppt_setup.py`: mesh, transient setup, validation, and analysis.
 
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 82 tests and passed; py_compile and scoped `git diff --check` passed after scheduler case bootstrap support.
+- 2026-06-16: `python -m unittest discover -s tests` ran 87 tests and passed; py_compile and scoped `git diff --check` passed after filtered scheduler job inspector.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
@@ -88,7 +89,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helper supports dry-run `python_git`/`packed_srun` payloads and optional small case-CSV bootstrap; all launch paths preflight inputs.
+- Scheduler helper dry-runs setup jobs and inspector reports filtered job status/log evidence; all launch paths preflight inputs.
 
 ## Risks and gotchas
 

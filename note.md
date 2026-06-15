@@ -329,3 +329,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use actual scheduler `remote_path` and a small bootstrap smoke case for setup-only validation after operator approval.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:38:40 +09:00 - Loop 24
+
+- Part: filtered scheduler job inspection
+- Goal: make setup-only scheduler evidence review possible without dumping full remote logs.
+- Hypothesis: after any scheduler POST, the next required evidence is job status plus filtered stdout/stderr signals, and historical remote log paths may be unavailable.
+- Actions: added `inspect_ipmsm_scheduler_job.py`; selected compact job fields; added filtered tail/interesting-line summaries; made per-stream log fetch failures non-fatal; added focused tests.
+- Candidates: use raw scheduler UI/log downloads versus a CLI that emits compact JSON; chose compact JSON because it matches large-output policy and can be reused in journals/handoffs.
+- Metrics: focused inspector tests ran 5 tests and passed; live read-only job 10 status returned `completed`; requesting historical stdout/stderr now preserves status while reporting per-stream errors; full unittest discovery ran 87 tests and passed; py_compile and scoped `git diff --check` passed.
+- Result: future setup-only scheduler jobs can be inspected with status and filtered log evidence, even if one log stream is unavailable.
+- Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use the scheduler submit helper plus inspector for a small setup-only smoke run after operator approval.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

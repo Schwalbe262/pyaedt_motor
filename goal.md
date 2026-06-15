@@ -85,6 +85,7 @@
 - Direct, subprocess, Slurm shell, and controller entrypoints now enforce the 200-case planning guard by default.
 - Subprocess splitting now rejects duplicate explicit `case_id`s before worker CSV generation.
 - Scheduler endpoint is verified at `http://localhost:8000`; dry-run-first scheduler job preparation is available for validated setup-only replay plans through Git or scheduler `remote_path` modes, with optional small case-CSV bootstrap.
+- Filtered scheduler job inspection is available for status and log evidence after setup-only submissions.
 - Next focus is AEDT setup-only validation, targeted solve selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
 
 ## Later Milestones

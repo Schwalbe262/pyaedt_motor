@@ -235,3 +235,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `submit_ipmsm_scheduler_job.py --bootstrap-remote-cases` appends a size-limited heredoc that writes normalized validated rows before the entrypoint runs.
 - Evidence: tests cover heredoc generation, size guard, absolute-path guard, and no-post dry-run behavior; smoke dry-run produced a compact CR-free env setup.
 - Remaining risk: use this only for small smoke/setup-only plans; larger replay CSVs should be staged through a real remote file path.
+
+## 2026-06-16 01:38:40 +09:00 - Insight 24
+
+- Source loop: `note.md` Loop 24.
+- Improvement: scheduler job evidence can be inspected as compact status plus filtered log signals.
+- Before: setup-only follow-up would require manual UI checks or raw log dumps.
+- After: `inspect_ipmsm_scheduler_job.py` returns selected job fields, filtered interesting lines, tails, and non-fatal per-stream fetch errors.
+- Evidence: tests cover field filtering, log filtering, remote-file response shapes, and missing-log handling; live job detail inspection returned a compact completed status.
+- Remaining risk: actual setup-only job logs still need to prove the AEDT workflow on the scheduler environment.
