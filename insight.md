@@ -289,3 +289,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `TrainingQualityReport` records filter breakdown, stores it in metadata, and exposes strict CLI gates for invalid training rows and removed outliers.
 - Evidence: tests cover failure reasons and negative option validation; full unittest discovery ran 98 tests and passed; help output lists the new gate options.
 - Remaining risk: actual retraining still requires the ML environment dependencies and passing simulation-result quality evidence.
+
+## 2026-06-16 02:05:25 +09:00 - Insight 30
+
+- Source loop: `note.md` Loop 30.
+- Improvement: transient setup quality experiments now preserve effective time discretization in result rows.
+- Before: rows contained raw periods/steps but not total steps, electrical period, stop time, or time step, and zero transient settings could reach later setup code.
+- After: `run_ipmsm_batch.py` validates transient settings before AEDT and writes input-side derived transient metadata even on pre-AEDT failed rows.
+- Evidence: tests cover schema columns, invalid transient settings, derived time-step metadata, and failed-row preservation; full unittest discovery ran 101 tests and passed.
+- Remaining risk: actual AEDT setup-only and solve runs are still required to confirm solver-side behavior and runtime impact.

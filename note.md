@@ -407,3 +407,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; local runtime still lacks pandas/sklearn/lightgbm and GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use these training gates in the ML environment after dataset quality gate passes.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 02:05:25 +09:00 - Loop 30
+
+- Part: transient setup metadata and validation
+- Goal: make mesh/time-step quality experiments trace the effective time discretization and reject impossible transient settings before AEDT.
+- Hypothesis: raw `transient_periods` and `steps_per_period` are not enough for review; result rows should preserve total steps, electrical period, stop time, and time step, and zero/negative settings should fail before setup.
+- Actions: added transient spec validation, derived transient setup metadata, result schema columns, and tests for failed-row metadata preservation.
+- Candidates: rely on existing output period columns versus add input-side setup metadata; chose input-side metadata because setup-only and failed rows need the same traceability before outputs exist.
+- Metrics: run batch spec tests ran 24 tests and passed; full unittest discovery ran 101 tests and passed; py_compile passed using a temp pycache after the default pycache rename hit a Windows filesystem error; scoped `git diff --check` passed.
+- Result: invalid transient timing cases now fail during preflight, and future result rows expose effective time-step settings for quality/runtime comparison.
+- Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use these metadata columns in actual setup/solve quality comparisons.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

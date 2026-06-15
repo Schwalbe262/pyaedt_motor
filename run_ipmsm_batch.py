@@ -158,6 +158,11 @@ INPUT_SPEC_COLUMNS = (
     "input_initial_position_deg",
     "input_transient_periods",
     "input_steps_per_period",
+    "input_transient_total_steps",
+    "input_electric_frequency_hz",
+    "input_electrical_period_s",
+    "input_transient_stop_time_s",
+    "input_transient_time_step_s",
     "input_core_material",
     "input_core_material_fallbacks",
     "input_magnet_material",
@@ -380,6 +385,32 @@ def build_mesh_elements(case: dict[str, Any], defaults: Any) -> dict[str, int]:
     return mesh_elements
 
 
+def validate_transient_spec(spec: Any) -> None:
+    if int(spec.pole_number) < 1:
+        raise ValueError("pole_number must be >= 1")
+    if float(spec.base_rpm) <= 0.0:
+        raise ValueError("base_rpm must be > 0")
+    if int(spec.transient_periods) < 1:
+        raise ValueError("transient_periods must be >= 1")
+    if int(spec.steps_per_period) < 1:
+        raise ValueError("steps_per_period must be >= 1")
+
+
+def transient_setup_metadata(spec: Any) -> dict[str, Any]:
+    validate_transient_spec(spec)
+    electric_frequency_hz = float(spec.base_rpm) * float(spec.pole_number) / 120.0
+    electrical_period_s = 1.0 / electric_frequency_hz
+    total_steps = int(spec.transient_periods) * int(spec.steps_per_period)
+    stop_time_s = float(spec.transient_periods) * electrical_period_s
+    return {
+        "transient_total_steps": total_steps,
+        "electric_frequency_hz": electric_frequency_hz,
+        "electrical_period_s": electrical_period_s,
+        "transient_stop_time_s": stop_time_s,
+        "transient_time_step_s": stop_time_s / total_steps,
+    }
+
+
 FIXED_GEOMETRY_REQUIRED_KEYS = (
     "slot_num",
     "pole_num",
@@ -587,7 +618,7 @@ def build_spec(case: dict[str, Any], default_symmetry_factor: int = 4) -> Any:
     from module.ipmsm_ppt_setup import IPMSMPPTSpec
 
     defaults = IPMSMPPTSpec()
-    return IPMSMPPTSpec(
+    spec = IPMSMPPTSpec(
         pole_number=case_int(case, "pole_number", "pole_num", default=8),
         slot_number=case_int(case, "slot_number", "slot_num", default=12),
         symmetry_factor=case_int(case, "symmetry_factor", default=default_symmetry_factor),
@@ -606,6 +637,8 @@ def build_spec(case: dict[str, Any], default_symmetry_factor: int = 4) -> Any:
         magnet_material=str(case_value(case, "magnet_material", default=defaults.magnet_material)),
         mesh_elements=build_mesh_elements(case, defaults),
     )
+    validate_transient_spec(spec)
+    return spec
 
 
 def load_cases(path: str | None, count: int) -> list[dict[str, Any]]:
@@ -1482,6 +1515,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
 
         input_data = {}
         input_data.update(asdict(spec))
+        input_data.update(transient_setup_metadata(spec))
         input_data.update({f"mesh_{key}_elements": spec.mesh_elements.get(key, "") for key in MESH_ELEMENT_KEYS})
         input_data.update({f"coreloss_{key}": value for key, value in get_core_loss_coefficients().items()})
         input_data.update({f"core_{key}": value for key, value in get_core_material_properties().items()})

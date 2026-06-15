@@ -50,6 +50,13 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
     def test_result_schema_includes_missing_required_outputs(self) -> None:
         self.assertIn("missing_required_outputs", run_ipmsm_batch.RESULT_COLUMN_ORDER)
 
+    def test_result_schema_includes_transient_setup_metadata(self) -> None:
+        self.assertIn("input_transient_total_steps", run_ipmsm_batch.RESULT_COLUMN_ORDER)
+        self.assertIn("input_electric_frequency_hz", run_ipmsm_batch.RESULT_COLUMN_ORDER)
+        self.assertIn("input_electrical_period_s", run_ipmsm_batch.RESULT_COLUMN_ORDER)
+        self.assertIn("input_transient_stop_time_s", run_ipmsm_batch.RESULT_COLUMN_ORDER)
+        self.assertIn("input_transient_time_step_s", run_ipmsm_batch.RESULT_COLUMN_ORDER)
+
     def test_build_spec_accepts_mesh_override_columns(self) -> None:
         spec = run_ipmsm_batch.build_spec(
             {
@@ -79,6 +86,27 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
     def test_build_spec_rejects_non_positive_mesh_counts(self) -> None:
         with self.assertRaisesRegex(ValueError, "mesh element count must be >= 1"):
             run_ipmsm_batch.build_spec({"mesh_band_elements": "0"})
+
+    def test_build_spec_rejects_non_positive_transient_settings(self) -> None:
+        with self.assertRaisesRegex(ValueError, "steps_per_period must be >= 1"):
+            run_ipmsm_batch.build_spec({"steps_per_period": "0"})
+
+        with self.assertRaisesRegex(ValueError, "transient_periods must be >= 1"):
+            run_ipmsm_batch.build_spec({"transient_periods": "0"})
+
+        with self.assertRaisesRegex(ValueError, "base_rpm must be > 0"):
+            run_ipmsm_batch.build_spec({"base_rpm": "0"})
+
+    def test_transient_setup_metadata_records_effective_time_step(self) -> None:
+        spec = run_ipmsm_batch.build_spec({"base_rpm": "1200", "pole_number": "8", "transient_periods": "10", "steps_per_period": "90"})
+
+        metadata = run_ipmsm_batch.transient_setup_metadata(spec)
+
+        self.assertEqual(metadata["transient_total_steps"], 900)
+        self.assertAlmostEqual(metadata["electric_frequency_hz"], 80.0)
+        self.assertAlmostEqual(metadata["electrical_period_s"], 0.0125)
+        self.assertAlmostEqual(metadata["transient_stop_time_s"], 0.125)
+        self.assertAlmostEqual(metadata["transient_time_step_s"], 0.125 / 900.0)
 
     def test_extract_fixed_geometry_from_existing_result_columns(self) -> None:
         fixed = run_ipmsm_batch.extract_fixed_geometry(fixed_geometry_result_row())
@@ -255,6 +283,8 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
         self.assertEqual(rows[0]["case_id"], "missing_import")
         self.assertEqual(rows[0]["status"], "failed")
         self.assertIn("input_quality_profile", rows[0])
+        self.assertEqual(rows[0]["input_transient_total_steps"], "900")
+        self.assertEqual(rows[0]["input_electric_frequency_hz"], "80.0")
 
 
 if __name__ == "__main__":
