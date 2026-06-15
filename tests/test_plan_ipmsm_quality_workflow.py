@@ -99,6 +99,28 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
         self.assertIn("--bootstrap-remote-cases", scheduler_args)
         self.assertNotIn("--submit", scheduler_args)
 
+    def test_build_plan_can_target_dynamic_packed_srun_remote_path(self) -> None:
+        args = workflow_plan.build_parser().parse_args(
+            [
+                "--cases",
+                "cases.csv",
+                "--results",
+                "results.csv",
+                "--output",
+                "plan.json",
+                "--job-mode",
+                "dynamic_packed_srun",
+                "--remote-path",
+                "/home/user/pyaedt_motor",
+            ]
+        )
+
+        plan = workflow_plan.build_plan(args)
+
+        scheduler_args = plan["steps"][0]["args"]
+        self.assertIn("dynamic_packed_srun", scheduler_args)
+        self.assertIn("/home/user/pyaedt_motor", scheduler_args)
+
     def test_main_writes_plan_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "plan.json"
@@ -133,6 +155,24 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
                         "plan.json",
                         "--job-mode",
                         "packed_srun",
+                    ]
+                )
+
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_main_rejects_dynamic_packed_srun_without_remote_path(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                workflow_plan.main(
+                    [
+                        "--cases",
+                        "cases.csv",
+                        "--results",
+                        "results.csv",
+                        "--output",
+                        "plan.json",
+                        "--job-mode",
+                        "dynamic_packed_srun",
                     ]
                 )
 

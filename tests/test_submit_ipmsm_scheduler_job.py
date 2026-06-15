@@ -129,6 +129,17 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(payload["total_simulations"], 20)
         self.assertEqual(payload["max_new_jobs"], 4)
         self.assertEqual(payload["account_name"], "r1jae262")
+        self.assertIn("--processes 1", payload["arguments"])
+        self.assertIn("--case-index-from-simulation-id", payload["arguments"])
+
+    def test_dynamic_packed_srun_ignores_nested_process_count(self) -> None:
+        args = scheduler_args(job_mode="dynamic_packed_srun", processes=8)
+
+        text = scheduler_job.build_subprocess_arguments(args)
+
+        self.assertIn("--processes 1", text)
+        self.assertNotIn("--processes 8", text)
+        self.assertIn("--case-index-from-simulation-id", text)
 
     def test_load_and_validate_cases_rejects_bad_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

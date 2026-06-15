@@ -550,3 +550,29 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: one geometry is not enough to choose the production mesh/time setting or prove R2 improvement; local ML dependencies are still unavailable.
 - Next action: update/restart the scheduler service to latest `5215dbb` before relying on `/tasks`, then run a multi-geometry fixed replay chunk and only then decide whether to scale toward the approved 200 simulations.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage --label "loop40 scheduler policy fixed4 analyze"` could not find a local Codex SQLite database.
+
+## 2026-06-16 08:12:58 +09:00 - Loop 41
+
+- Part: multi-geometry fixed replay submission
+- Goal: extend fixed-geometry mesh/time evidence beyond one source geometry without starting the full 200-simulation replay.
+- Hypothesis: the next two `source_case_id` groups from `replay_quality_cases_200.csv` can run as an 8-row `packed_srun` job while live `/tasks` remains queued/lagging.
+- Actions: submitted two no-solve `/tasks` probes to test live task wrapper behavior; they remained queued; created `simul_log_smoke/replay_quality_cases_fixed8_next.csv` from rows 5-12 of the 200-row replay plan; submitted scheduler job 58 through `packed_srun` with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252`.
+- Candidates: wait for `/tasks` service update versus keep using verified packed jobs; submit full 200 rows versus an 8-row multi-geometry chunk. Chose packed job 58 and an 8-row chunk.
+- Metrics: job 58 became Slurm job 680506 on `cpu1`; status was `running` at 2026-06-15 23:09 scheduler time; stderr had no error patterns; no result CSV existed yet after about 22 minutes.
+- Result: multi-geometry replay is in progress but not yet validated.
+- Failure reason: no completed rows yet, so mesh/time conclusion and retraining remain unproven.
+- Next action: poll job 58, fetch `ipmsm_scheduler_job_module_fixed8_next_analyze_results.csv`, run quality comparison, and record profile deltas.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage --label "loop41 fixed8 queued running"` could not find a local Codex SQLite database.
+
+## 2026-06-16 08:19:37 +09:00 - Loop 42
+
+- Part: scheduler policy refresh and dynamic packed dispatch
+- Goal: align this repo's scheduler helpers with the latest `Schwalbe262/slurm_scheduler` policy while job 58 continues running.
+- Hypothesis: `dynamic_packed_srun` can safely run explicit replay batches if each scheduler `SIMULATION_ID` selects exactly one CSV row and per-worker logs include the simulation id.
+- Actions: checked upstream scheduler main `7d9ed52`, README/API source ranges for `/tasks`, `/tasks/git`, and `/jobs dynamic_packed_srun`; updated `subprocess_run.py` to select one explicit case row from `SIMULATION_ID`; updated `submit_ipmsm_scheduler_job.py` to generate `--case-index-from-simulation-id` and force nested `--processes 1` for dynamic packed jobs; updated workflow planning to accept `dynamic_packed_srun`.
+- Candidates: keep using only `packed_srun` versus implement `SIMULATION_ID`-aware dynamic dispatch. Chose dynamic support because the latest scheduler policy identifies it as the many-case packed simulation path.
+- Metrics: dry-run dynamic payload produced `job_mode=dynamic_packed_srun`, `total_simulations=8`, `--processes 1`, and `--case-index-from-simulation-id`; focused tests ran 44 tests and passed; full unittest discovery ran 142 tests and passed; job 58 remained running on Slurm job 680506 with 1/8 `ok` result row available.
+- Result: future many-case replay submissions can use the updated scheduler dynamic packed path without duplicating the whole CSV per scheduler worker.
+- Failure reason: job 58 is still incomplete, so multi-geometry quality conclusions and R2 improvement remain unproven.
+- Next action: commit/push the dynamic dispatch checkpoint, then poll job 58 until the 8-row result CSV is complete and run `analyze_ipmsm_quality_results.py`.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

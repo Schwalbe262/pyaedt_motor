@@ -64,6 +64,22 @@ class SubprocessRunTests(unittest.TestCase):
         self.assertEqual([row["case_id"] for row in chunks[0]], ["dup", "other"])
         self.assertEqual([row["case_id"] for row in chunks[1]], ["dup"])
 
+    def test_simulation_id_from_env_requires_positive_integer(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "requires SIMULATION_ID"):
+            subprocess_run.simulation_id_from_env({})
+
+        with self.assertRaisesRegex(RuntimeError, "positive integer"):
+            subprocess_run.simulation_id_from_env({"SIMULATION_ID": "0"})
+
+        self.assertEqual(subprocess_run.simulation_id_from_env({"SIMULATION_ID": "12"}), 12)
+
+    def test_select_case_for_simulation_id_uses_one_based_index(self) -> None:
+        rows = [{"case_id": "first"}, {"case_id": "second"}]
+
+        self.assertEqual(subprocess_run.select_case_for_simulation_id(rows, 2)["case_id"], "second")
+        with self.assertRaisesRegex(RuntimeError, "outside the explicit case plan"):
+            subprocess_run.select_case_for_simulation_id(rows, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

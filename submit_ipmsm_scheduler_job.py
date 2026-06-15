@@ -57,11 +57,13 @@ def load_and_validate_cases(cases_path: Path, max_cases: int, allow_over_budget:
 
 
 def build_subprocess_arguments(args: argparse.Namespace) -> str:
+    job_mode = getattr(args, "job_mode", "python_git")
+    processes = 1 if job_mode == "dynamic_packed_srun" else args.processes
     command = [
         "--cases",
         args.remote_cases or str(args.cases),
         "--processes",
-        str(args.processes),
+        str(processes),
         "--cores-per-process",
         str(args.cores_per_process),
         "--max-cases",
@@ -80,6 +82,8 @@ def build_subprocess_arguments(args: argparse.Namespace) -> str:
     command.append("--analyze" if args.analyze else "--setup-only")
     if args.allow_over_budget:
         command.append("--allow-over-budget")
+    if job_mode == "dynamic_packed_srun":
+        command.append("--case-index-from-simulation-id")
     if args.periodic_boundary:
         command.append("--periodic-boundary")
     if args.keep_projects:
@@ -381,7 +385,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--repo-url", default=default_repo_url())
     parser.add_argument("--git-ref", default=default_git_ref())
     parser.add_argument("--job-mode", choices=("python_git", "packed_srun", "dynamic_packed_srun"), default="python_git")
-    parser.add_argument("--remote-path", default="", help="Scheduler-accessible working directory for packed_srun mode.")
+    parser.add_argument("--remote-path", default="", help="Scheduler-accessible working directory for packed scheduler modes.")
     parser.add_argument("--entrypoint", default="subprocess_run.py")
     parser.add_argument("--job-name", default="ipmsm-replay-setup")
     parser.add_argument("--processes", type=int, default=1)

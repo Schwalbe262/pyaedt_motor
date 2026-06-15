@@ -37,10 +37,13 @@ def default_log_prefix() -> str:
     parts = []
     submit_index = os.environ.get("SBATCH_JOB_INDEX")
     slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    simulation_id = os.environ.get("SIMULATION_ID")
     if submit_index:
         parts.append(f"submit{safe_name_part(submit_index)}")
     if slurm_job_id:
         parts.append(f"job{safe_name_part(slurm_job_id)}")
+    if simulation_id:
+        parts.append(f"sim{safe_name_part(simulation_id)}")
     return "_".join(parts) + "_" if parts else ""
 
 
@@ -148,6 +151,30 @@ def split_cases(rows: list[dict[str, Any]], processes: int) -> list[list[dict[st
     return chunks
 
 
+def simulation_id_from_env(env: dict[str, str] | None = None) -> int:
+    source = os.environ if env is None else env
+    value = source.get("SIMULATION_ID")
+    if value in (None, ""):
+        raise RuntimeError("--case-index-from-simulation-id requires SIMULATION_ID")
+    try:
+        simulation_id = int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"SIMULATION_ID must be a positive integer, got {value!r}") from exc
+    if simulation_id < 1:
+        raise RuntimeError(f"SIMULATION_ID must be a positive integer, got {value!r}")
+    return simulation_id
+
+
+def select_case_for_simulation_id(rows: list[dict[str, Any]], simulation_id: int) -> dict[str, Any]:
+    index = simulation_id - 1
+    if index >= len(rows):
+        raise RuntimeError(
+            f"SIMULATION_ID={simulation_id} is outside the explicit case plan "
+            f"with {len(rows)} row(s)"
+        )
+    return rows[index]
+
+
 def generated_cases(log_prefix: str, process_index: int, count: int) -> list[dict[str, Any]]:
     case_prefix = normalize_log_prefix(
         log_prefix + f"p{process_index:03d}"
@@ -210,6 +237,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-cases", type=int, default=int_env("MAX_CASES", 200))
     parser.add_argument("--allow-over-budget", action="store_true", default=os.environ.get("ALLOW_OVER_BUDGET", "").lower() in {"1", "true", "yes"})
     parser.add_argument("--cases", type=Path, default=Path(os.environ["CASES_CSV"]) if os.environ.get("CASES_CSV") else None)
+    parser.add_argument(
+        "--case-index-from-simulation-id",
+        action="store_true",
+        help="Run exactly the 1-based explicit case row selected by scheduler SIMULATION_ID.",
+    )
     parser.add_argument("--simulation-dir", type=Path, default=BASE_DIR / "simulation")
     parser.add_argument("--result-csv", type=Path, default=BASE_DIR / "ipmsm_simulation_results.csv")
     parser.add_argument("--log-dir", type=Path, default=BASE_DIR / "simul_log")
@@ -232,10 +264,19 @@ def main() -> int:
     args.simulation_dir = args.simulation_dir.resolve()
     args.result_csv = args.result_csv.resolve()
     args.log_dir = args.log_dir.resolve()
+    explicit_log_prefix = bool(args.log_prefix)
     args.log_prefix = normalize_log_prefix(args.log_prefix or default_log_prefix())
+    if args.case_index_from_simulation_id:
+        sim_id = simulation_id_from_env()
+        if explicit_log_prefix:
+            args.log_prefix = normalize_log_prefix(args.log_prefix + f"sim{safe_name_part(sim_id)}_")
+    else:
+        sim_id = None
 
     if args.processes < 1:
         raise RuntimeError("--processes must be at least 1.")
+    if args.case_index_from_simulation_id and not args.cases:
+        raise RuntimeError("--case-index-from-simulation-id requires --cases")
     if args.count_per_process < 1 and not args.cases and args.total_count <= 0:
         raise RuntimeError("--count-per-process/--loops-per-process must be at least 1 when --cases and --total-count are omitted.")
     if args.max_cases < 1:
@@ -250,8 +291,13 @@ def main() -> int:
     if args.cases:
         rows = read_cases(args.cases)
         validate_explicit_case_plan(rows, args.max_cases, args.allow_over_budget)
+        if sim_id is not None:
+            rows = [select_case_for_simulation_id(rows, sim_id)]
+            args.processes = 1
         chunks = split_cases(rows, args.processes)
         print(f"Loaded {len(rows)} explicit case row(s) from {args.cases}.")
+        if sim_id is not None:
+            print(f"Selected explicit case row {sim_id} from SIMULATION_ID.")
         for index, chunk in enumerate(chunks, start=1):
             if not chunk:
                 process_inputs.append((0, None))
