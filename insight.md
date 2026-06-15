@@ -154,3 +154,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `run_ipmsm_batch.py` chooses the max of the counter value and the next directory-derived simulation number.
 - Evidence: focused tests cover stale-low and future-counter cases.
 - Remaining risk: actual AEDT project creation still needs validation in the Ansys environment.
+
+## 2026-06-16 00:45:37 +09:00 - Insight 15
+
+- Source loop: `note.md` Loop 15.
+- Improvement: environment/import failures before AEDT desktop startup now become structured failed case rows.
+- Before: `run_one_case` imported `pyaedt_module` before entering its `try/finally`, so missing wrapper packages could terminate the worker without appending a result row.
+- After: optional AEDT imports happen inside the protected block after row initialization, so the shared CSV still records the failed case.
+- Evidence: focused test forces `pyaedt_module` import failure and verifies the returned row and CSV row are `failed`.
+- Remaining risk: actual missing-license or desktop-start failures still need validation in the AEDT environment.

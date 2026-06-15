@@ -200,6 +200,19 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Next action: run full validation, commit locally, and retry push.
 - Token usage: unavailable; live Codex DB path is still unknown.
 
+## 2026-06-16 00:45:37 +09:00 - Loop 15
+
+- Part: pre-AEDT failure row preservation
+- Goal: ensure every attempted case writes a structured result row even when the AEDT wrapper import fails before desktop startup.
+- Hypothesis: importing `pyaedt_module` before `run_one_case` enters its `try/finally` can make environment/setup failures disappear from result CSVs, weakening observability and dataset-quality accounting.
+- Actions: moved optional AEDT imports inside the protected execution block after case metadata initialization; added a deterministic test that forces `pyaedt_module` import failure and verifies a failed row is appended.
+- Candidates: keep import failures as process-level errors versus preserve them as case-level failed rows; chose case-level rows because the project requires failed cases to be traceable by status/error/artifact metadata.
+- Metrics: focused runner tests ran 11 tests and passed; full unittest discovery ran 50 tests and passed; py_compile and `git diff --check` passed.
+- Result: missing PyAEDT wrapper or similar pre-desktop failures now return/write a failed row with `case_id`, `status`, `error`, elapsed time, and input metadata.
+- Failure reason: no AEDT setup or solve was run locally because PyAEDT/Ansys packages are unavailable.
+- Next action: run full validation, commit locally, and retry push.
+- Token usage: unavailable; live Codex DB path is still unknown.
+
 ## 2026-06-16 00:42:01 +09:00 - Loop 14
 
 - Part: simulation project-name allocator hardening

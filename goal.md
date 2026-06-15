@@ -81,6 +81,7 @@
 - Future result rows and retraining now use geometry inputs consistent with AEDT design expressions; existing CSVs can recover `input_stator_teeth_width_ratio` and repair 13,748 stale rotor/shaft radius rows.
 - Slurm submission now guards explicit case CSVs from accidental multi-job or repeated-cycle duplication unless the operator opts in.
 - Simulation project naming now avoids reusing existing `simulationN` folders when `simulation_num.txt` is stale.
+- Pre-AEDT import/setup failures now still produce structured failed result rows instead of losing the case.
 - Next focus is AEDT setup-only validation, targeted solve selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
 
 ## Later Milestones

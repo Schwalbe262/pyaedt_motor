@@ -1316,23 +1316,6 @@ def cleanup_project_folder(project_path: Path, cleanup_linux: bool, success: boo
 
 def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, Any]:
     """Run one IPMSM case. Designed to be called by multiprocessing workers."""
-    from pyaedt_module.core import pyDesktop
-
-    from module.ipmsm_geometry import create_ipmsm_design
-    from module.ipmsm_ppt_setup import (
-        configure_ipmsm_from_ppt,
-        get_core_loss_coefficients,
-        get_core_material_properties,
-    )
-
-    try:
-        from ansys.aedt.core import settings
-
-        settings.skip_license_check = True
-        settings.wait_for_license = False
-    except Exception:
-        pass
-
     case, option_dict = payload
     options = RunnerOptions(**option_dict)
     simulation_dir = Path(options.simulation_dir)
@@ -1361,6 +1344,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         )
         operation = str(case_value(case, "operation", default="sin_current"))
 
+        from module.ipmsm_ppt_setup import get_core_loss_coefficients, get_core_material_properties
+
         input_data = {}
         input_data.update(asdict(spec))
         input_data.update({f"mesh_{key}_elements": spec.mesh_elements.get(key, "") for key in MESH_ELEMENT_KEYS})
@@ -1374,6 +1359,19 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         input_data["operation"] = operation
         row.update(prefixed_row(input_data, "input_"))
         row.update(summarize_transient_outputs({}, spec, operation=operation))
+
+        from pyaedt_module.core import pyDesktop
+
+        from module.ipmsm_geometry import create_ipmsm_design
+        from module.ipmsm_ppt_setup import configure_ipmsm_from_ppt
+
+        try:
+            from ansys.aedt.core import settings
+
+            settings.skip_license_check = True
+            settings.wait_for_license = False
+        except Exception:
+            pass
 
         desktop = pyDesktop(
             version=None,

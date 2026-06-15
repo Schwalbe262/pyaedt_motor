@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import builtins
+import csv
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import run_ipmsm_batch
 
@@ -135,6 +138,41 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
 
             self.assertEqual(sim.PROJECT_NAME, "simulation9")
             self.assertEqual((base_dir / "simulation_num.txt").read_text(encoding="utf-8"), "10")
+
+    def test_run_one_case_writes_failed_row_when_pyaedt_import_fails(self) -> None:
+        original_import = builtins.__import__
+
+        def fail_pyaedt_import(name: str, *args: object, **kwargs: object) -> object:
+            if name.startswith("pyaedt_module"):
+                raise ModuleNotFoundError("forced missing pyaedt_module")
+            return original_import(name, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result_csv = Path(tmp) / "results.csv"
+            options = run_ipmsm_batch.RunnerOptions(
+                simulation_dir=str(Path(tmp) / "simulation"),
+                result_csv=str(result_csv),
+                analyze=False,
+                non_graphical=True,
+                cleanup_linux=False,
+                symmetry_factor=4,
+                use_periodic_boundary=False,
+                cores=1,
+            )
+
+            with mock.patch("builtins.__import__", side_effect=fail_pyaedt_import), mock.patch("logging.exception"):
+                row = run_ipmsm_batch.run_one_case(({"case_id": "missing_import"}, options.__dict__))
+
+            with result_csv.open("r", encoding="utf-8-sig", newline="") as file:
+                rows = list(csv.DictReader(file))
+
+        self.assertEqual(row["case_id"], "missing_import")
+        self.assertEqual(row["status"], "failed")
+        self.assertIn("forced missing pyaedt_module", row["error"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["case_id"], "missing_import")
+        self.assertEqual(rows[0]["status"], "failed")
+        self.assertIn("input_quality_profile", rows[0])
 
 
 if __name__ == "__main__":
