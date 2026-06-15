@@ -615,3 +615,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no new completed simulation rows yet, so fixed-geometry quality conclusions and retraining remain unproven.
 - Next action: commit/push the row-slicing helper, then keep polling job 58 and analyze only after completed profile groups are available.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 08:42:50 +09:00 - Loop 46
+
+- Part: quality analysis completeness gate
+- Goal: prevent partial fixed-geometry replay outputs from being treated as valid mesh/time comparison evidence.
+- Hypothesis: the quality analysis CLI should fail before writing outputs when a source-geometry group lacks any required successful profile row.
+- Actions: added `--required-profiles` and `--fail-on-incomplete-groups` to `analyze_ipmsm_quality_results.py`; wired the guard into `plan_ipmsm_quality_workflow.py`; added tests for missing/failed profiles and CLI no-write failure.
+- Candidates: rely on operator judgment versus add an explicit gate. Chose the explicit gate because job 58 currently has only a baseline row and would otherwise produce misleading partial reports.
+- Metrics: complete job 57 fixed4 output passed the guard with 4/4 rows and profiles baseline/mesh_fine/time_fine/mesh_time_fine; partial job 58 output failed with missing mesh_fine/time_fine/mesh_time_fine and wrote no output; full `python -m unittest discover -s tests` ran 151 tests and passed; py_compile passed with a temp pycache prefix after the default repo `__pycache__` hit a Windows access error.
+- Result: the repeatable workflow now rejects incomplete fixed-geometry profile groups before quality conclusions or retraining gates.
+- Failure reason: job 58 remains running with 1/8 `ok` rows and job 59 remains queued, so multi-geometry quality conclusions and R2 improvement remain unproven.
+- Next action: commit/push the completeness gate, then continue polling job 58 until complete profile groups are available.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

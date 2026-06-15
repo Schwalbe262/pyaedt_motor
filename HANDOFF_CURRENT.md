@@ -38,7 +38,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 149 tests and passed; touched-file py_compile and `git diff --check` passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 151 tests and passed; touched-file py_compile with temp pycache and `git diff --check` passed.
 - 2026-06-16: scheduler job 20 validated branch checkout/imports/case-plan checks; job 21 reached `run_ipmsm_batch.py` and wrote one structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
@@ -54,7 +54,7 @@
 - 2026-06-15: import probe found `pyaedt_module=False` and no `ansys` package.
 - 2026-06-15: generated 4-row ignored smoke CSV at `simul_log_smoke/quality_cases_smoke.csv`.
 - Token command ran at closeout; default Codex SQLite DB was not found, so no live token sample was available.
-- First successful AEDT setup, solve, and fixed-geometry 4-profile comparison evidence exists; multi-geometry job 58 is running; no R2-improving retraining evidence exists yet.
+- First successful AEDT setup, solve, and fixed-geometry 4-profile comparison evidence exists; multi-geometry job 58 is still partial and now correctly fails the incomplete-profile guard; no R2-improving retraining evidence exists yet.
 
 ## Current blocker
 
@@ -98,7 +98,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helpers dry-run setup/analyze jobs, write full review manifests, redact large bootstrap env setup from stdout, support updated `/tasks`, exact `account_name`, `dynamic_packed_srun` row dispatch, selected-row slicing, partial-child coverage warnings, and filtered Slurm log inspection.
+- Scheduler helpers and quality analysis now support dry-run review manifests, selected-row slicing, partial-child coverage warnings, incomplete profile-group gates, and filtered Slurm log inspection.
 
 ## Risks and gotchas
 

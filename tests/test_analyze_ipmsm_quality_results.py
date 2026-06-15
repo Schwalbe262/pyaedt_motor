@@ -198,6 +198,20 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
         self.assertEqual(rows_by_profile["baseline"]["within_tolerance"], "no")
         self.assertEqual(rows_by_profile["mesh_fine"]["recommended_rank"], "")
 
+    def test_incomplete_group_issues_report_missing_successful_profiles(self) -> None:
+        rows = self.sample_rows()
+        rows[1]["status"] = "failed"
+
+        issues = quality_results.incomplete_group_issues(
+            rows,
+            ("baseline", "mesh_fine", "time_fine"),
+        )
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["group_source_case_id"], "source_a")
+        self.assertEqual(issues[0]["present_profiles"], "baseline,mesh_fine")
+        self.assertEqual(issues[0]["missing_profiles"], "mesh_fine,time_fine")
+
     def test_cli_rejects_negative_convergence_tolerance(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as error:
@@ -213,6 +227,35 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
                 )
 
         self.assertEqual(error.exception.code, 2)
+
+    def test_cli_can_fail_on_incomplete_quality_groups_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_path = Path(tmp) / "results.csv"
+            output_path = Path(tmp) / "comparison.csv"
+            rows = self.sample_rows()[:1]
+            with results_path.open("w", encoding="utf-8-sig", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as error:
+                    quality_results.main(
+                        [
+                            "--results",
+                            str(results_path),
+                            "--output",
+                            str(output_path),
+                            "--required-profiles",
+                            "baseline,mesh_fine",
+                            "--fail-on-incomplete-groups",
+                        ]
+                    )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("incomplete quality group", stderr.getvalue())
+        self.assertFalse(output_path.exists())
 
     def test_cli_writes_filtered_comparison_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -103,8 +103,65 @@ def parse_metrics(text: str) -> tuple[str, ...]:
     return metrics
 
 
+def parse_profiles(text: str) -> tuple[str, ...]:
+    profiles = tuple(part.strip() for part in text.split(",") if part.strip())
+    if not profiles:
+        raise ValueError("at least one profile is required")
+    return profiles
+
+
 def profile_sort_key(profile: str, baseline_profile: str) -> tuple[int, str]:
     return (0 if profile == baseline_profile else 1, profile)
+
+
+def row_has_complete_outputs(row: dict[str, str]) -> bool:
+    status = first_value(row, "status").lower()
+    if status and status != "ok":
+        return False
+    return not missing_required_outputs(row)
+
+
+def incomplete_group_issues(
+    rows: Iterable[dict[str, str]],
+    required_profiles: tuple[str, ...],
+) -> list[dict[str, str]]:
+    rows_by_group: dict[tuple[str, ...], list[dict[str, str]]] = {}
+    for row in rows:
+        rows_by_group.setdefault(group_key(row), []).append(row)
+
+    issues: list[dict[str, str]] = []
+    for key in sorted(rows_by_group):
+        group_rows = rows_by_group[key]
+        complete_profiles = {
+            infer_quality_profile(row)
+            for row in group_rows
+            if infer_quality_profile(row) in required_profiles and row_has_complete_outputs(row)
+        }
+        missing_profiles = [profile for profile in required_profiles if profile not in complete_profiles]
+        if missing_profiles:
+            present_profiles = sorted({infer_quality_profile(row) for row in group_rows if infer_quality_profile(row)})
+            issues.append(
+                {
+                    "group_source_case_id": key[0],
+                    "group_base_rpm": key[1],
+                    "group_i_peak_a": key[2],
+                    "group_beta_deg": key[3],
+                    "present_profiles": ",".join(present_profiles),
+                    "missing_profiles": ",".join(missing_profiles),
+                }
+            )
+    return issues
+
+
+def format_incomplete_group_issues(issues: list[dict[str, str]], limit: int = 5) -> str:
+    preview = []
+    for issue in issues[:limit]:
+        source = issue["group_source_case_id"] or "<no-source>"
+        present = issue["present_profiles"] or "<none>"
+        missing = issue["missing_profiles"] or "<none>"
+        preview.append(f"{source}: missing={missing} present={present}")
+    suffix = "" if len(issues) <= limit else f"; +{len(issues) - limit} more"
+    return "; ".join(preview) + suffix
 
 
 def build_comparison_rows(
@@ -419,6 +476,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--convergence-output", type=Path, help="Optional convergence summary against --reference-profile.")
     parser.add_argument("--reference-profile", default="mesh_time_fine", help="Quality profile used as the convergence reference.")
     parser.add_argument("--convergence-pct-tolerance", type=float, default=2.0)
+    parser.add_argument(
+        "--required-profiles",
+        default="",
+        help="Comma-separated profiles that must be complete in every fixed-geometry group.",
+    )
+    parser.add_argument(
+        "--fail-on-incomplete-groups",
+        action="store_true",
+        help="Fail before writing outputs when any group is missing a required successful profile row.",
+    )
     return parser
 
 
@@ -432,6 +499,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.convergence_pct_tolerance < 0:
         parser.error("--convergence-pct-tolerance must be >= 0")
     rows = read_rows_from_paths(args.results)
+    if args.fail_on_incomplete_groups:
+        try:
+            required_profiles = parse_profiles(args.required_profiles or ",".join(QUALITY_PROFILES))
+        except ValueError as exc:
+            parser.error(str(exc))
+        issues = incomplete_group_issues(rows, required_profiles)
+        if issues:
+            parser.error(
+                f"{len(issues)} incomplete quality group(s): "
+                f"{format_incomplete_group_issues(issues)}"
+            )
     comparison_rows = build_comparison_rows(rows, metrics, baseline_profile=args.baseline_profile)
     write_comparison(args.output, comparison_rows, metrics)
     print(f"Wrote {len(comparison_rows)} IPMSM quality comparison row(s) to {args.output}")

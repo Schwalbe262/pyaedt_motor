@@ -46,6 +46,8 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
         self.assertIn("--validate-remote-entrypoint", scheduler_args)
         self.assertNotIn("--submit", scheduler_args)
         self.assertIn("--convergence-output", plan["steps"][1]["args"])
+        self.assertIn("--fail-on-incomplete-groups", plan["steps"][1]["args"])
+        self.assertIn("baseline,mesh_fine,time_fine,mesh_time_fine", plan["steps"][1]["args"])
         self.assertIn("--fail-on-filter", plan["steps"][2]["args"])
         self.assertIn("--fail-on-quality", plan["steps"][3]["args"])
         self.assertIn("--check-dependencies", plan["steps"][4]["args"])

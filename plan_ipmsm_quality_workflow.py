@@ -78,6 +78,9 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 args.reference_profile,
                 "--convergence-pct-tolerance",
                 str(args.convergence_pct_tolerance),
+                "--required-profiles",
+                args.required_profiles,
+                "--fail-on-incomplete-groups",
             ],
             [comparison_csv, profile_summary_csv, convergence_csv],
         ),
@@ -187,6 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, required=True, help="JSON plan path to write.")
     parser.add_argument("--reference-profile", default="mesh_time_fine")
     parser.add_argument("--convergence-pct-tolerance", type=float, default=2.0)
+    parser.add_argument("--required-profiles", default="baseline,mesh_fine,time_fine,mesh_time_fine")
     parser.add_argument("--min-kept-rows", type=int, default=1)
     parser.add_argument("--r2-threshold", type=float, default=0.95)
     return parser

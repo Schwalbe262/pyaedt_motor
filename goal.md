@@ -71,7 +71,7 @@
 - Root project-memory files now define the default context budget.
 - Existing runnable entrypoints are source scripts, not a packaged CLI.
 - Token usage logging did not exist before this part.
-- Mesh/time-step case generation, per-case mesh CSV overrides, quality-result comparison/profile summary/convergence ranking, and regression R2 verification are implemented.
+- Mesh/time-step case generation, per-case mesh CSV overrides, quality-result comparison/profile summary/convergence ranking, incomplete profile-group gates, and regression R2 verification are implemented.
 - Existing LightGBM artifact is below target: test split has 8/8 targets below `R^2 >= 0.95`, min R2 0.7105, avg R2 0.8116.
 - Existing simulation result CSVs contain 13,748 rows; audited training filtering keeps 13,549 training-ready rows, rejects 199 rows, and the filtered CSV passes the strict dataset quality gate.
 - Future failed rows now preserve missing required output names, validation, analysis flags, and effective setup metadata for faster diagnosis.
