@@ -537,3 +537,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no 4-profile analyze comparison, 200-case quality replay, or R2-improving retraining has run yet.
 - Next action: commit and push the `/tasks` helper checkpoint, then submit and monitor a 4-case analyze task through the same scheduler path.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage --label "loop39 scheduler tasks module solve"` could not find a local Codex SQLite database.
+
+## 2026-06-16 07:39:10 +09:00 - Loop 40
+
+- Part: scheduler policy refresh and fixed-geometry quality smoke
+- Goal: adapt to the latest `Schwalbe262/slurm_scheduler` policy and run a valid mesh/time comparison through the scheduler.
+- Hypothesis: current scheduler policy makes `/tasks` the normal virtual-job path, while packed simulation work should use `/jobs`; quality comparison also requires fixed geometry across profiles, not random smoke rows.
+- Actions: checked latest scheduler main `5215dbb`, README/API/scheduling-principles/source; added `dynamic_packed_srun` policy support and account-constrained child-job lookup to `submit_ipmsm_scheduler_job.py`; pushed commits `8d16e8e` and `e6d4f65`; submitted job 54 random-geometry smoke and job 57 fixed-geometry replay chunk; fetched filtered CSV evidence and generated `simul_log_smoke/fixed4_*` reports.
+- Candidates: keep using `/tasks` immediately versus use `/jobs packed_srun` until the live scheduler includes the task wrapper `$HOME` path fix; use `quality_cases_smoke.csv` for profile comparison versus fixed replay rows; chose packed fallback and fixed replay rows.
+- Metrics: latest scheduler policy says `/jobs python_git` is compatibility-only and converts to attached tasks; task 33 failed with the older `~/.../task.sh` expansion symptom; helper tests ran 28 tests and passed, full unittest ran 137 tests and passed; job 57 completed 4/4 `ok` on `cpu2`/`n111` with no missing required outputs.
+- Result: fixed-geometry comparison for `submit8_job664261_p009_case_0016` shows baseline elapsed 641.765s, mesh_fine 936.448s, time_fine 837.189s, mesh_time_fine 1237.684s; time_fine is close to mesh_time_fine on selected metrics at lower runtime for this one geometry.
+- Failure reason: one geometry is not enough to choose the production mesh/time setting or prove R2 improvement; local ML dependencies are still unavailable.
+- Next action: update/restart the scheduler service to latest `5215dbb` before relying on `/tasks`, then run a multi-geometry fixed replay chunk and only then decide whether to scale toward the approved 200 simulations.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage --label "loop40 scheduler policy fixed4 analyze"` could not find a local Codex SQLite database.

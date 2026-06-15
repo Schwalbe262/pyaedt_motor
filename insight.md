@@ -433,3 +433,21 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `settings.enable_error_handler = False` is set with the existing license settings before Desktop startup, and the unit test verifies the setting is applied.
 - Evidence: disabling the handler exposed the real AEDT installation/module issue, which led to the successful `ansys-electronics/v252` `/tasks` run.
 - Remaining risk: clearer exceptions do not replace runtime monitoring; failed rows still need filtered log/result evidence.
+
+## 2026-06-16 07:39:10 +09:00 - Insight 46
+
+- Source loop: `note.md` Loop 40.
+- Improvement: mesh/time quality comparisons must use fixed-geometry replay rows, not random smoke rows with profile labels.
+- Before: `quality_cases_smoke.csv` proved setup/solve execution but omitted geometry columns, so each profile generated a different random motor geometry.
+- After: `replay_quality_cases_200.csv` and `replay_quality_cases_fixed4.csv` keep the same `source_case_id` and geometry across baseline, mesh_fine, time_fine, and mesh_time_fine profiles.
+- Evidence: job 54 completed 4/4 `ok` but had different geometry inputs across profiles; job 57 completed 4/4 `ok` with one shared `input_source_case_id` and produced valid fixed-geometry comparison reports.
+- Remaining risk: one fixed geometry is only a smoke comparison; broader geometry coverage is still needed before production settings or retraining.
+
+## 2026-06-16 07:39:10 +09:00 - Insight 47
+
+- Source loop: `note.md` Loop 40.
+- Improvement: scheduler clients should follow the latest virtual-job policy: `/tasks` for existing remote work, `/tasks/git` for Git work, and `/jobs` only for packed simulation batches or compatibility.
+- Before: helper behavior treated `/jobs python_git` like a direct job and lacked explicit `dynamic_packed_srun` support.
+- After: `submit_ipmsm_scheduler_job.py` supports `dynamic_packed_srun`, records packed child jobs, and carries exact `account_name`; normal remote execution uses `submit_ipmsm_scheduler_task.py`.
+- Evidence: latest scheduler main `5215dbb` docs/source show `/jobs python_git` creates an attached task; helper tests cover dynamic packed payloads and child lookup; commit `e6d4f65` pushed the policy update.
+- Remaining risk: the live local scheduler may lag the latest repo; task 33 showed the older `~/.../task.sh` path expansion failure, so update/restart the scheduler before relying on `/tasks`.
