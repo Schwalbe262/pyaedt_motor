@@ -10,6 +10,31 @@ from unittest import mock
 import run_ipmsm_batch
 
 
+def fixed_geometry_result_row(**overrides: str) -> dict[str, str]:
+    row = {
+        "input_slot_num": "12",
+        "input_pole_num": "8",
+        "input_stator_outer_radius": "155.0",
+        "input_stator_back_yoke_thick_ratio": "0.142",
+        "input_stator_back_yoke_thick": "22.01",
+        "input_stator_inner_ratio": "0.513",
+        "input_stator_inner_radius": "79.515",
+        "input_stator_shoe_thick": "1.1",
+        "input_stator_teeth_length_ratio": "0.847",
+        "input_stator_teeth_length": "45.293325",
+        "input_stator_teeth_width": "33.931477685988845",
+        "input_stator_gap": "2.43",
+        "input_rotator_gap": "1.54",
+        "input_shaft_ratio": "0.516",
+        "input_magnet_shield_thick": "1.435",
+        "input_magnet_setback_ratio": "0.163",
+        "input_magnet_thick_ratio": "0.313",
+        "input_magnet_height_ratio": "1.0",
+    }
+    row.update(overrides)
+    return row
+
+
 class RunIpmsmBatchSpecTests(unittest.TestCase):
     def test_result_schema_includes_quality_profile(self) -> None:
         self.assertIn("input_quality_profile", run_ipmsm_batch.RESULT_COLUMN_ORDER)
@@ -56,28 +81,7 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
             run_ipmsm_batch.build_spec({"mesh_band_elements": "0"})
 
     def test_extract_fixed_geometry_from_existing_result_columns(self) -> None:
-        fixed = run_ipmsm_batch.extract_fixed_geometry(
-            {
-                "input_slot_num": "12",
-                "input_pole_num": "8",
-                "input_stator_outer_radius": "155.0",
-                "input_stator_back_yoke_thick_ratio": "0.142",
-                "input_stator_back_yoke_thick": "22.01",
-                "input_stator_inner_ratio": "0.513",
-                "input_stator_inner_radius": "79.515",
-                "input_stator_shoe_thick": "1.1",
-                "input_stator_teeth_length_ratio": "0.847",
-                "input_stator_teeth_length": "45.293325",
-                "input_stator_teeth_width": "33.931477685988845",
-                "input_stator_gap": "2.43",
-                "input_rotator_gap": "1.54",
-                "input_shaft_ratio": "0.516",
-                "input_magnet_shield_thick": "1.435",
-                "input_magnet_setback_ratio": "0.163",
-                "input_magnet_thick_ratio": "0.313",
-                "input_magnet_height_ratio": "1.0",
-            }
-        )
+        fixed = run_ipmsm_batch.extract_fixed_geometry(fixed_geometry_result_row())
 
         self.assertEqual(fixed["slot_num"], 12)
         self.assertEqual(fixed["pole_num"], 8)
@@ -88,6 +92,31 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
     def test_extract_fixed_geometry_rejects_incomplete_rows(self) -> None:
         with self.assertRaisesRegex(ValueError, "fixed geometry columns are incomplete"):
             run_ipmsm_batch.extract_fixed_geometry({"input_slot_num": "12"})
+
+    def test_extract_fixed_geometry_rejects_non_integer_topology(self) -> None:
+        with self.assertRaisesRegex(ValueError, "slot_num must be a positive integer"):
+            run_ipmsm_batch.extract_fixed_geometry(fixed_geometry_result_row(input_slot_num="12.5"))
+
+    def test_extract_fixed_geometry_rejects_infeasible_rotor_radius(self) -> None:
+        with self.assertRaisesRegex(ValueError, "rotor_radius must be > 0"):
+            run_ipmsm_batch.extract_fixed_geometry(fixed_geometry_result_row(input_rotator_gap="90"))
+
+    def test_extract_fixed_geometry_rejects_stator_gap_overlap(self) -> None:
+        with self.assertRaisesRegex(ValueError, "stator_airgap_clearance must be > 0"):
+            run_ipmsm_batch.extract_fixed_geometry(fixed_geometry_result_row(input_stator_gap="20"))
+
+    def test_extract_fixed_geometry_rejects_magnet_radial_overlap(self) -> None:
+        with self.assertRaisesRegex(ValueError, "magnet_radial_clearance must be > 0"):
+            run_ipmsm_batch.extract_fixed_geometry(
+                fixed_geometry_result_row(
+                    input_magnet_setback_ratio="0.8",
+                    input_magnet_thick_ratio="0.5",
+                )
+            )
+
+    def test_extract_fixed_geometry_rejects_infeasible_magnet_height(self) -> None:
+        with self.assertRaisesRegex(ValueError, "magnet_height must be > 0"):
+            run_ipmsm_batch.extract_fixed_geometry(fixed_geometry_result_row(input_magnet_shield_thick="80"))
 
     def test_missing_required_output_metrics_detects_missing_and_nan_values(self) -> None:
         missing = run_ipmsm_batch.missing_required_output_metrics(

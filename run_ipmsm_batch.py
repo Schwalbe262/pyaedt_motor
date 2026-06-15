@@ -448,6 +448,89 @@ def derive_stator_teeth_width_ratio(values: dict[str, float]) -> float:
     return width / denominator
 
 
+def validate_fixed_geometry(values: dict[str, float]) -> None:
+    errors: list[str] = []
+
+    def require_positive(key: str) -> None:
+        if values[key] <= 0.0:
+            errors.append(f"{key} must be > 0")
+
+    def require_ratio(key: str) -> None:
+        if values[key] <= 0.0 or values[key] > 1.0:
+            errors.append(f"{key} must be > 0 and <= 1")
+
+    for key in ("slot_num", "pole_num"):
+        if values[key] <= 0.0 or not math.isclose(values[key], round(values[key]), abs_tol=1e-9):
+            errors.append(f"{key} must be a positive integer")
+
+    for key in ("stator_outer_radius", "stator_shoe_thick", "stator_gap", "rotator_gap", "magnet_shield_thick"):
+        require_positive(key)
+
+    for key in (
+        "stator_back_yoke_thick_ratio",
+        "stator_inner_ratio",
+        "stator_teeth_length_ratio",
+        "stator_teeth_width_ratio",
+        "slot_opening_ratio",
+        "shaft_ratio",
+        "magnet_setback_ratio",
+        "magnet_thick_ratio",
+        "magnet_space_height_ratio",
+        "magnet_height_ratio",
+    ):
+        require_ratio(key)
+
+    if errors:
+        raise ValueError(f"fixed geometry is invalid: {'; '.join(errors)}")
+
+    slot_num = int(round(values["slot_num"]))
+    pole_num = int(round(values["pole_num"]))
+    stator_outer_radius = values["stator_outer_radius"]
+    stator_back_yoke_thick = stator_outer_radius * values["stator_back_yoke_thick_ratio"]
+    stator_inner_radius = stator_outer_radius * values["stator_inner_ratio"]
+    stator_radial_space = stator_outer_radius - stator_back_yoke_thick - stator_inner_radius
+    stator_teeth_length = stator_radial_space * values["stator_teeth_length_ratio"]
+    stator_tooth_base_radius = stator_outer_radius - stator_back_yoke_thick - stator_teeth_length
+    angle_rad = math.radians(360.0 / slot_num)
+    stator_teeth_width = stator_tooth_base_radius * math.tan(angle_rad / 2.0) * values["stator_teeth_width_ratio"] * 2.0
+    stator_airgap_clearance = stator_tooth_base_radius - (stator_inner_radius + values["stator_gap"])
+    slot_opening = (
+        2.0 * stator_tooth_base_radius * math.sin(angle_rad / 2.0)
+        - stator_teeth_width * math.cos(angle_rad / 2.0)
+    ) * values["slot_opening_ratio"]
+    rotor_radius = stator_inner_radius - values["rotator_gap"]
+    shaft_radius = rotor_radius * values["shaft_ratio"]
+    rotor_thick = rotor_radius - shaft_radius
+    magnet_setback = rotor_thick * values["magnet_setback_ratio"]
+    magnet_thick = rotor_thick * values["magnet_thick_ratio"]
+    magnet_radial_clearance = rotor_thick - magnet_setback - magnet_thick
+    magnet_height = (
+        (rotor_radius - magnet_setback - magnet_thick) * math.cos(math.pi / pole_num)
+        - values["magnet_shield_thick"]
+    )
+
+    derived_checks = {
+        "stator_radial_space": stator_radial_space,
+        "stator_teeth_length": stator_teeth_length,
+        "stator_tooth_base_radius": stator_tooth_base_radius,
+        "stator_teeth_width": stator_teeth_width,
+        "stator_airgap_clearance": stator_airgap_clearance,
+        "slot_opening": slot_opening,
+        "rotor_radius": rotor_radius,
+        "shaft_radius": shaft_radius,
+        "rotor_thick": rotor_thick,
+        "magnet_setback": magnet_setback,
+        "magnet_thick": magnet_thick,
+        "magnet_radial_clearance": magnet_radial_clearance,
+        "magnet_height": magnet_height,
+        "magnet_space_height": magnet_height * values["magnet_space_height_ratio"],
+        "scaled_magnet_height": magnet_height * values["magnet_height_ratio"],
+    }
+    derived_errors = [f"{key} must be > 0" for key, value in derived_checks.items() if value <= 0.0]
+    if derived_errors:
+        raise ValueError(f"fixed geometry is invalid: {'; '.join(derived_errors)}")
+
+
 def extract_fixed_geometry(case: dict[str, Any]) -> dict[str, float]:
     """Extract fixed geometry values from case rows or prior result CSV rows."""
     values: dict[str, float] = {}
@@ -470,6 +553,8 @@ def extract_fixed_geometry(case: dict[str, Any]) -> dict[str, float]:
     missing = [key for key in FIXED_GEOMETRY_REQUIRED_KEYS if key not in values]
     if missing:
         raise ValueError(f"fixed geometry columns are incomplete; missing: {missing}")
+
+    validate_fixed_geometry(values)
 
     values["slot_num"] = int(round(values["slot_num"]))
     values["pole_num"] = int(round(values["pole_num"]))

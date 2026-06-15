@@ -34,7 +34,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 61 tests and passed; py_compile and scoped `git diff --check` passed after explicit CSV case-id normalization.
+- 2026-06-16: `python -m unittest discover -s tests` ran 66 tests and passed; py_compile and scoped `git diff --check` passed after fixed-geometry feasibility validation.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
@@ -87,7 +87,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Direct and subprocess CSV readers normalize blank/missing explicit `case_id`s before validation, splitting, and worker execution.
+- Direct/subprocess CSV readers normalize blank/missing explicit `case_id`s, and fixed replay geometry is formula-validated before AEDT execution.
 
 ## Risks and gotchas
 

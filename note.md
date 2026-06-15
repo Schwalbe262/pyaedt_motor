@@ -264,3 +264,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup or solve was run locally because PyAEDT/Ansys packages are unavailable; GitHub push failed with remote HTTP 403 permissions.
 - Next action: fix GitHub credentials/permissions, push the local branch, then continue toward AEDT setup-only validation once credentials/environment are available.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:09:53 +09:00 - Loop 19
+
+- Part: fixed-geometry feasibility validation
+- Goal: reject impossible replay geometries before they reach costly AEDT setup or solve runs.
+- Hypothesis: completeness checks alone can allow corrupted fixed-geometry rows with fractional topology, invalid clearances, or impossible magnet dimensions.
+- Actions: added formula-based validation for fixed replay geometry in `run_ipmsm_batch.py`; checked integer slot/pole values, positive dimensions, ratio bounds, stator gap clearance, rotor/shaft clearance, magnet radial clearance, and magnet height; added focused tests.
+- Candidates: validate only raw ranges versus validate derived geometry formulas; chose derived formula validation because it matches the actual design-variable expressions consumed by geometry creation.
+- Metrics: focused runner/variable tests ran 21 tests and passed; existing 200-row replay CSV validated 200/200 fixed rows; full unittest discovery ran 66 tests and passed; py_compile and scoped `git diff --check` passed.
+- Result: bad fixed replay rows now fail fast with named invalid derived quantities before Ansys execution.
+- Failure reason: no AEDT setup or solve was run locally because PyAEDT/Ansys packages are unavailable; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then run setup-only validation in the AEDT environment once available.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

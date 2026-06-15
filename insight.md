@@ -190,3 +190,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: direct and subprocess CSV readers assign deterministic `case_id`s, preserving legacy `id` values before validation, splitting, and execution.
 - Evidence: focused reader tests cover blank, legacy, and explicit IDs; full unittest discovery ran 61 tests and passed.
 - Remaining risk: raw programmatic `run_one_case` calls still need caller-provided IDs when running more than one case outside the CLI loaders.
+
+## 2026-06-16 01:09:53 +09:00 - Insight 19
+
+- Source loop: `note.md` Loop 19.
+- Improvement: fixed-geometry replay rows are checked against derived geometry feasibility before AEDT runs.
+- Before: complete fixed rows could still encode impossible slot, rotor, shaft, stator-gap, or magnet dimensions and fail later inside expensive geometry creation.
+- After: `run_ipmsm_batch.py` validates topology, raw dimensions, ratios, and derived clearances/heights before worker execution.
+- Evidence: focused tests cover fractional slot count, rotor-radius failure, stator-gap overlap, magnet radial overlap, and magnet-height failure; the 200-row replay plan still validates.
+- Remaining risk: the checks mirror current formulas, but actual AEDT setup-only validation is still required to catch API/modeler-specific failures.
