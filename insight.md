@@ -307,3 +307,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `filter_ipmsm_training_dataset.py` writes a reviewed CSV and summary using the same training input/output columns as `train_ipmsm_lightgbm.py`.
 - Evidence: tests cover duplicate handling, missing columns, CLI pass/fail behavior; existing root CSVs filtered to 13,549 kept rows and passed strict dataset quality.
 - Remaining risk: filtered historical data still has the old simulation-quality limitations; new AEDT replay solves and ML retraining are still required for the R2 target.
+
+## 2026-06-16 02:15:24 +09:00 - Insight 32
+
+- Source loop: `note.md` Loop 32.
+- Improvement: expensive quality/retraining work can start from a generated command plan.
+- Before: the setup dry-run, quality analysis, filtering, gates, and retraining commands lived as separate tools and handoff bullets.
+- After: `plan_ipmsm_quality_workflow.py` writes ordered JSON steps with exact command args and expected outputs, without executing costly work.
+- Evidence: tests cover ordered steps, no scheduler submit flag, required gates, JSON writing, and threshold validation; smoke plan generation wrote 5 manual steps.
+- Remaining risk: the plan is only orchestration evidence; actual AEDT/Slurm and ML environment execution still must be performed and inspected.

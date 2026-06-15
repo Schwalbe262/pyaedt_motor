@@ -433,3 +433,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; local runtime still lacks pandas/sklearn/lightgbm and GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use the filtered CSV for retraining in the ML environment or replace failed rows with new quality replay solves.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 02:15:24 +09:00 - Loop 32
+
+- Part: quality workflow command plan
+- Goal: make the setup dry-run, quality analysis, training filter, dataset gate, and retraining sequence reproducible without executing costly steps.
+- Hypothesis: the project now has the needed individual CLIs, but a generated command plan reduces operator error and gives a reviewable artifact before scheduler POSTs or ML retraining.
+- Actions: added `plan_ipmsm_quality_workflow.py`; emitted ordered JSON steps with command args and expected outputs; covered scheduler dry-run manifest, quality comparison/convergence, training filter, dataset gate, and retrain/R2 verification; added tests.
+- Candidates: document commands only in handoff versus generate a JSON plan; chose JSON because it is precise, reviewable, and can be archived without dumping logs.
+- Metrics: workflow plan tests ran 3 tests and passed; full unittest discovery ran 108 tests and passed; py_compile and scoped `git diff --check` passed; smoke plan generation wrote 5 manual steps.
+- Result: operators can now generate a deterministic workflow command plan before expensive setup/solve/retrain execution.
+- Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use the generated plan in the AEDT/ML environments when credentials and runtime are available.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
