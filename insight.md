@@ -298,3 +298,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `run_ipmsm_batch.py` validates transient settings before AEDT and writes input-side derived transient metadata even on pre-AEDT failed rows.
 - Evidence: tests cover schema columns, invalid transient settings, derived time-step metadata, and failed-row preservation; full unittest discovery ran 101 tests and passed.
 - Remaining risk: actual AEDT setup-only and solve runs are still required to confirm solver-side behavior and runtime impact.
+
+## 2026-06-16 02:10:30 +09:00 - Insight 31
+
+- Source loop: `note.md` Loop 31.
+- Improvement: retraining inputs can be materialized as audited training-ready CSVs before model fitting.
+- Before: failed or nonfinite result rows were filtered inside training or blocked by strict gates, but there was no standalone filtered training artifact.
+- After: `filter_ipmsm_training_dataset.py` writes a reviewed CSV and summary using the same training input/output columns as `train_ipmsm_lightgbm.py`.
+- Evidence: tests cover duplicate handling, missing columns, CLI pass/fail behavior; existing root CSVs filtered to 13,549 kept rows and passed strict dataset quality.
+- Remaining risk: filtered historical data still has the old simulation-quality limitations; new AEDT replay solves and ML retraining are still required for the R2 target.

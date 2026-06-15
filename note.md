@@ -420,3 +420,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use these metadata columns in actual setup/solve quality comparisons.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 02:10:30 +09:00 - Loop 31
+
+- Part: training-ready dataset filter
+- Goal: explicitly create audited training CSVs from simulation result CSVs before retraining.
+- Hypothesis: strict dataset gates can fail on raw result files with failed rows, but a deterministic filter can preserve an auditable training-ready subset instead of relying only on silent training-time filtering.
+- Actions: added `filter_ipmsm_training_dataset.py`; reused training input/output column definitions; kept last duplicate case IDs; rejected non-ok rows and nonfinite input/output rows; added summary CSV and fail-on-filter thresholds; added tests.
+- Candidates: retrain directly with `train_ipmsm_lightgbm.py` internal filtering versus materialize a filtered CSV first; chose a materialized CSV because it gives reviewable evidence and lets dataset gates run on the exact training input.
+- Metrics: filter tests ran 4 tests and passed; full unittest discovery ran 105 tests and passed; py_compile and scoped `git diff --check` passed; filtering existing root CSVs kept 13,549/13,748 rows, rejected 199, and strict dataset gate passed on the filtered CSV.
+- Result: existing historical data now has a deterministic training-ready subset and audit summary for the ML environment.
+- Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; local runtime still lacks pandas/sklearn/lightgbm and GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use the filtered CSV for retraining in the ML environment or replace failed rows with new quality replay solves.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

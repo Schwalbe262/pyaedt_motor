@@ -26,6 +26,7 @@
 - `analyze_ipmsm_quality_results.py`: filtered before/after comparison report for quality result CSVs.
 - `analyze_ipmsm_dataset_quality.py`: streaming quality summary for large simulation result CSVs.
 - `verify_regression_metrics.py`: filtered regression R2 verification against the project threshold.
+- `filter_ipmsm_training_dataset.py`: creates audited training-ready CSVs from simulation result CSVs.
 - `train_ipmsm_lightgbm.py`: deterministic LightGBM training CLI with derived geometry input repair and recovered width-ratio feature.
 - `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the 200-solve guardrail.
 - `submit_ipmsm_scheduler_job.py`: dry-run-first Slurm Scheduler API helper for validated replay setup jobs.
@@ -36,11 +37,11 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 101 tests and passed; transient setup metadata tests and py_compile passed with temp pycache.
+- 2026-06-16: `python -m unittest discover -s tests` ran 105 tests and passed; training dataset filter tests and py_compile passed.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
-- 2026-06-16: strict dataset promotion gate on existing CSVs found 13,748 rows, 13,550 complete, 198 failed/missing, 0 duplicate case IDs; gate failed as expected.
+- 2026-06-16: training filter on existing CSVs kept 13,549/13,748 rows, rejected 199, then strict dataset gate passed on the filtered CSV.
 - 2026-06-15: existing LightGBM test metrics failed R2 gate: 8/8 targets below 0.95, min R2 0.7105, avg R2 0.8116.
 - 2026-06-15: import probe found `pyaedt_module=False` and no `ansys` package.
 - 2026-06-15: generated 4-row ignored smoke CSV at `simul_log_smoke/quality_cases_smoke.csv`.
@@ -58,10 +59,10 @@
 1. Fix GitHub credentials/permissions and push `chore/codex-context-budget`.
 2. Review a saved scheduler dry-run manifest for the actual Git ref or scheduler `remote_path` before any POST.
 3. After result CSVs exist, run `python analyze_ipmsm_quality_results.py --results path/to/results.csv --output path/to/comparison.csv --profile-summary-output path/to/profile_summary.csv --convergence-output path/to/convergence.csv`.
-4. Before retraining, run `python analyze_ipmsm_dataset_quality.py --results path/to/results.csv --output path/to/dataset_quality.csv --fail-on-quality --max-missing-required-rows 0 --max-duplicate-case-ids 0 --max-failed-rows 0`.
-5. If the dataset gate passes, retrain in the ML environment with `python train_ipmsm_lightgbm.py --verification-output path/to/r2_check.csv --fail-on-threshold --max-invalid-training-rows 0`.
-6. Re-run a small setup/analyze batch in AEDT to populate `missing_required_outputs`, validation, and analysis flags on any failed rows.
-7. Use passing setup-only evidence before selecting any full Ansys/Slurm solve batch.
+4. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
+5. Run `python analyze_ipmsm_dataset_quality.py --results path/to/training_ready.csv --output path/to/dataset_quality.csv --fail-on-quality --max-missing-required-rows 0 --max-duplicate-case-ids 0 --max-failed-rows 0`, then retrain if it passes.
+6. Retrain in the ML environment with `python train_ipmsm_lightgbm.py --data path/to/training_ready.csv --verification-output path/to/r2_check.csv --fail-on-threshold --max-invalid-training-rows 0`.
+7. Re-run a small setup/analyze batch in AEDT to populate `missing_required_outputs`, validation, and analysis flags on any failed rows.
 
 ## Token/context policy
 
@@ -84,7 +85,7 @@
 - Created canonical root project-memory files plus read-only Codex thread token accounting CLI.
 - Ignored downloaded sidecars and generated local model/report artifacts.
 - Added deterministic IPMSM quality cases, per-case mesh overrides, fixed-geometry replay selection, filtered quality comparison, per-profile summary, and convergence ranking.
-- Added dataset quality promotion gates and regression R2 verifiers; current LightGBM artifact misses the 0.95 R2 gate.
+- Added audited training-ready dataset filtering, dataset quality promotion gates, and regression R2 verifiers; current LightGBM artifact misses the 0.95 R2 gate.
 - Added deterministic LightGBM training CLI with stable target seeds, recovered width-ratio feature, derived geometry repair, and input quality gates.
 - `run_one_case` now writes structured failed rows for pre-AEDT import/setup errors, records missing required outputs, and preserves transient setup metadata.
 - Hardened simulation project naming against stale `simulation_num.txt` counters.

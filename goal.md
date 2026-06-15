@@ -73,7 +73,7 @@
 - Token usage logging did not exist before this part.
 - Mesh/time-step case generation, per-case mesh CSV overrides, quality-result comparison/profile summary/convergence ranking, and regression R2 verification are implemented.
 - Existing LightGBM artifact is below target: test split has 8/8 targets below `R^2 >= 0.95`, min R2 0.7105, avg R2 0.8116.
-- Existing simulation result CSVs contain 13,748 rows with 13,550 required-output-complete rows, 198 failed/missing-output rows, and 0 duplicate case IDs; strict training-promotion gate fails until failed/missing rows are excluded or replaced.
+- Existing simulation result CSVs contain 13,748 rows; audited training filtering keeps 13,549 training-ready rows, rejects 199 rows, and the filtered CSV passes the strict dataset quality gate.
 - Future failed rows now preserve missing required output names, validation, analysis flags, and effective setup metadata for faster diagnosis.
 - Deterministic LightGBM retraining is now available as `train_ipmsm_lightgbm.py` with input quality gates; local runtime still lacks pandas, scikit-learn, and LightGBM.
 - Existing result geometries can now be replayed as fixed AEDT case rows; a geometry-spread 200-row mesh/time replay plan is available under `simul_log_smoke/`.
