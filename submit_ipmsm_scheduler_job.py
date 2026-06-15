@@ -173,6 +173,7 @@ def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
         "env_setup": args.env_setup,
         "required_capability": args.required_capability,
         "env_profile": args.env_profile,
+        "account_name": args.account_name,
         "partition": args.partition,
         "time_limit": args.time_limit,
         "cpus": args.cpus,
@@ -381,6 +382,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--validate-remote-entrypoint", action="store_true", help="Check expected project files in the scheduler working tree before running.")
     parser.add_argument("--required-capability", default="")
     parser.add_argument("--env-profile", default="")
+    parser.add_argument("--account-name", default="", help="Exact scheduler account constraint, or comma-separated ordered candidates.")
     parser.add_argument("--partition", default="auto")
     parser.add_argument("--time-limit", default="01:00:00")
     parser.add_argument("--cpus", type=int, default=4)

@@ -45,6 +45,7 @@ def scheduler_args(**overrides: object) -> Namespace:
         "validate_remote_entrypoint": False,
         "required_capability": "ansys",
         "env_profile": "",
+        "account_name": "",
         "partition": "auto",
         "time_limit": "01:00:00",
         "cpus": 8,
@@ -91,10 +92,16 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(payload["repo_url"], "https://github.com/example/project.git")
         self.assertEqual(payload["entrypoint"], "subprocess_run.py")
         self.assertEqual(payload["required_capability"], "ansys")
+        self.assertEqual(payload["account_name"], "")
         self.assertIn("--setup-only", payload["arguments"])
 
     def test_build_job_payload_supports_packed_srun_remote_path(self) -> None:
-        args = scheduler_args(job_mode="packed_srun", repo_url="", remote_path="/home/user/pyaedt_motor")
+        args = scheduler_args(
+            job_mode="packed_srun",
+            repo_url="",
+            remote_path="/home/user/pyaedt_motor",
+            account_name="r1jae262",
+        )
 
         scheduler_job.validate_scheduler_request(args)
         payload = scheduler_job.build_job_payload(args)
@@ -102,6 +109,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(payload["job_mode"], "packed_srun")
         self.assertEqual(payload["repo_url"], "")
         self.assertEqual(payload["remote_path"], "/home/user/pyaedt_motor")
+        self.assertEqual(payload["account_name"], "r1jae262")
 
     def test_load_and_validate_cases_rejects_bad_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
