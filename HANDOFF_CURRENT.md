@@ -38,10 +38,10 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 110 tests and passed; packed-srun workflow plan tests, py_compile, and smoke plan generation passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 113 tests and passed; py_compile and packed-srun multi-result workflow smoke passed.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
-- 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
+- 2026-06-16: `train_ipmsm_lightgbm.py --check-dependencies --dependency-report ...` reports numpy ok and pandas/sklearn/lightgbm missing locally.
 - 2026-06-16: training filter on existing CSVs kept 13,549/13,748 rows, rejected 199, then strict dataset gate passed on the filtered CSV.
 - 2026-06-15: existing LightGBM test metrics failed R2 gate: 8/8 targets below 0.95, min R2 0.7105, avg R2 0.8116.
 - 2026-06-15: import probe found `pyaedt_module=False` and no `ansys` package.
@@ -58,11 +58,11 @@
 ## Next steps
 
 1. Fix GitHub credentials/permissions and push `chore/codex-context-budget`.
-2. Generate a command plan with `python plan_ipmsm_quality_workflow.py --cases path/to/cases.csv --results path/to/results.csv --output path/to/quality_workflow_plan.json`; use `--job-mode packed_srun --remote-path ...` if GitHub push is still blocked.
+2. Generate a command plan with `python plan_ipmsm_quality_workflow.py --cases path/to/cases.csv --results path/to/results1.csv [path/to/results2.csv ...] --output path/to/quality_workflow_plan.json`; use `--job-mode packed_srun --remote-path ...` if GitHub push is still blocked.
 3. Review the saved scheduler dry-run manifest for the actual Git ref or scheduler `remote_path` before any POST.
 4. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
 5. Run `python analyze_ipmsm_dataset_quality.py --results path/to/training_ready.csv --output path/to/dataset_quality.csv --fail-on-quality --max-missing-required-rows 0 --max-duplicate-case-ids 0 --max-failed-rows 0`, then retrain if it passes.
-6. Retrain in the ML environment with `python train_ipmsm_lightgbm.py --data path/to/training_ready.csv --verification-output path/to/r2_check.csv --fail-on-threshold --max-invalid-training-rows 0`.
+6. In the ML environment, run `python train_ipmsm_lightgbm.py --check-dependencies --dependency-report path/to/training_dependencies.json`, then retrain with `--data path/to/training_ready.csv --verification-output path/to/r2_check.csv --fail-on-threshold --max-invalid-training-rows 0`.
 7. Re-run a small setup/analyze batch in AEDT to populate `missing_required_outputs`, validation, and analysis flags on any failed rows.
 
 ## Token/context policy
@@ -86,7 +86,7 @@
 - Created canonical root project-memory files plus read-only Codex thread token accounting CLI.
 - Ignored downloaded sidecars and generated local model/report artifacts.
 - Added deterministic IPMSM quality cases, per-case mesh overrides, fixed-geometry replay selection, filtered quality comparison, per-profile summary, and convergence ranking.
-- Added audited quality workflow command plans, training-ready dataset filtering, dataset quality promotion gates, and regression R2 verifiers; current LightGBM artifact misses the 0.95 R2 gate.
+- Added audited multi-result quality workflow command plans, training dependency gates, training-ready dataset filtering, dataset quality promotion gates, and regression R2 verifiers; current LightGBM artifact misses the 0.95 R2 gate.
 - Added deterministic LightGBM training CLI with stable target seeds, recovered width-ratio feature, derived geometry repair, and input quality gates.
 - `run_one_case` now writes structured failed rows for pre-AEDT import/setup errors, records missing required outputs, and preserves transient setup metadata.
 - Hardened simulation project naming against stale `simulation_num.txt` counters.

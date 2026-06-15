@@ -30,6 +30,7 @@ DEFAULT_DATA_PATHS = (
     PROJECT_DIR / "ipmsm_simulation_results2.csv",
 )
 DEFAULT_MODEL_DIR = PROJECT_DIR / "lightgbm_ipmsm_models"
+REQUIRED_TRAINING_DEPENDENCY_MODULES = ("numpy", "pandas", "sklearn.model_selection", "lightgbm")
 
 RAW_INPUT_COLUMNS = (
     "input_slot_num",
@@ -201,6 +202,55 @@ class SplitData:
 
 class MissingTrainingDependencyError(ImportError):
     """Raised when optional training dependencies are unavailable."""
+
+
+def inspect_training_dependencies(
+    import_module: Callable[[str], Any] = importlib.import_module,
+) -> list[dict[str, str]]:
+    report: list[dict[str, str]] = []
+    for name in REQUIRED_TRAINING_DEPENDENCY_MODULES:
+        try:
+            module = import_module(name)
+        except ImportError as exc:
+            report.append(
+                {"module": name, "status": "missing", "version": "", "error": str(exc)}
+            )
+        else:
+            report.append(
+                {
+                    "module": name,
+                    "status": "ok",
+                    "version": str(getattr(module, "__version__", "")),
+                    "error": "",
+                }
+            )
+    return report
+
+
+def missing_training_dependency_modules(report: Iterable[dict[str, str]]) -> list[str]:
+    return [row.get("module", "") for row in report if row.get("status") != "ok"]
+
+
+def write_training_dependency_report(path: Path, report: list[dict[str, str]]) -> None:
+    missing = missing_training_dependency_modules(report)
+    payload = {"ready": not missing, "missing_modules": missing, "dependencies": report}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def print_training_dependency_report(report: list[dict[str, str]]) -> None:
+    missing = missing_training_dependency_modules(report)
+    print(
+        f"training_dependencies ready={str(not missing).lower()} "
+        f"ok={len(report) - len(missing)} missing={len(missing)}"
+    )
+    for row in report:
+        detail = f"dependency module={row['module']} status={row['status']}"
+        if row.get("version"):
+            detail += f" version={row['version']}"
+        if row.get("error"):
+            detail += f" error={row['error']}"
+        print(detail)
 
 
 def require_training_dependencies(
@@ -745,6 +795,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--r2-threshold", type=float, default=R2_THRESHOLD)
     parser.add_argument("--verification-output", type=Path, help="Optional compact R2 verification CSV to write.")
     parser.add_argument("--fail-on-threshold", action="store_true", help="Return exit code 1 if any test R2 misses the threshold.")
+    parser.add_argument("--check-dependencies", action="store_true", help="Only report optional training dependency availability.")
+    parser.add_argument("--dependency-report", type=Path, help="Optional JSON path for --check-dependencies output.")
     parser.add_argument("--max-invalid-training-rows", type=int, help="Fail if status/nonfinite filtering removes more rows than this.")
     parser.add_argument(
         "--max-removed-output-outlier-rows",
@@ -769,6 +821,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         validate_training_options(args)
+        if args.check_dependencies:
+            report = inspect_training_dependencies()
+            if args.dependency_report:
+                write_training_dependency_report(args.dependency_report, report)
+                print(f"wrote_training_dependency_report path={args.dependency_report}")
+            print_training_dependency_report(report)
+            return 0 if not missing_training_dependency_modules(report) else 2
         deps = require_training_dependencies()
         return run_training(args, deps)
     except MissingTrainingDependencyError as exc:

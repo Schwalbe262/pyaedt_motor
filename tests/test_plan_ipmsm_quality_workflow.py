@@ -37,6 +37,7 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
                 "quality_comparison",
                 "training_filter",
                 "dataset_quality_gate",
+                "training_environment_gate",
                 "retrain_and_verify",
             ],
         )
@@ -46,7 +47,29 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
         self.assertIn("--convergence-output", plan["steps"][1]["args"])
         self.assertIn("--fail-on-filter", plan["steps"][2]["args"])
         self.assertIn("--fail-on-quality", plan["steps"][3]["args"])
-        self.assertIn("--fail-on-threshold", plan["steps"][4]["args"])
+        self.assertIn("--check-dependencies", plan["steps"][4]["args"])
+        self.assertIn("--fail-on-threshold", plan["steps"][5]["args"])
+
+    def test_build_plan_passes_multiple_result_csvs_to_analysis_steps(self) -> None:
+        args = workflow_plan.build_parser().parse_args(
+            [
+                "--cases",
+                "cases.csv",
+                "--results",
+                "first_results.csv",
+                "second_results.csv",
+                "--output",
+                "plan.json",
+            ]
+        )
+
+        plan = workflow_plan.build_plan(args)
+
+        self.assertEqual(plan["inputs"]["results"], ["first_results.csv", "second_results.csv"])
+        self.assertIn("first_results.csv", plan["steps"][1]["args"])
+        self.assertIn("second_results.csv", plan["steps"][1]["args"])
+        self.assertIn("first_results.csv", plan["steps"][2]["args"])
+        self.assertIn("second_results.csv", plan["steps"][2]["args"])
 
     def test_build_plan_can_target_packed_srun_remote_path(self) -> None:
         args = workflow_plan.build_parser().parse_args(
@@ -92,9 +115,9 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
                 )
 
             self.assertEqual(code, 0)
-            self.assertIn("steps=5", stdout.getvalue())
+            self.assertIn("steps=6", stdout.getvalue())
             plan = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(plan["steps"][4]["outputs"][0], "simul_log_quality_workflow\\model")
+        self.assertEqual(plan["steps"][5]["outputs"][0], "simul_log_quality_workflow\\model")
 
     def test_main_rejects_packed_srun_without_remote_path(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()):

@@ -459,3 +459,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use packed-srun plans only after confirming the scheduler-visible project path.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 02:28:15 +09:00 - Loop 34
+
+- Part: training dependency gate and multi-result workflow inputs
+- Goal: make retraining plans fail early when the ML dependency environment is missing and allow workflow plans to cover multiple result CSVs.
+- Hypothesis: local retraining cannot proceed without pandas/sklearn/lightgbm, and generated workflow plans should preserve that fact as an explicit gate instead of relying on a late training failure.
+- Actions: added `train_ipmsm_lightgbm.py --check-dependencies` with optional JSON report; added a `training_environment_gate` workflow step; extended quality analysis and workflow planning to accept multiple `--results` CSVs; added tests.
+- Candidates: keep dependency checks implicit in retraining versus add a preflight command; keep workflow `--results` single-file versus align it with filter/dataset quality CLIs; chose explicit preflight and multi-result inputs for reviewable operations.
+- Metrics: focused unittest ran 32 tests and passed; full unittest discovery ran 113 tests and passed; py_compile passed; smoke plan generation wrote 6 manual steps with both root result CSVs; local dependency preflight found numpy ok and pandas/sklearn/lightgbm missing.
+- Result: generated workflow plans now include a deterministic dependency report gate before LightGBM retraining and can pass multiple completed result CSVs through quality comparison and filtering.
+- Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; local runtime still lacks pandas/sklearn/lightgbm and GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then run the dependency gate and retraining in the ML environment after setup/solve quality evidence is available.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

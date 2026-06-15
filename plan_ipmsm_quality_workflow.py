@@ -25,6 +25,7 @@ def step(name: str, description: str, args: list[str], outputs: list[Path] | Non
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     work_dir = args.work_dir
+    result_args = [str(path) for path in args.results]
     scheduler_manifest = work_dir / "scheduler_setup_manifest.json"
     comparison_csv = work_dir / "quality_comparison.csv"
     profile_summary_csv = work_dir / "quality_profile_summary.csv"
@@ -32,6 +33,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     training_ready_csv = work_dir / "training_ready.csv"
     training_filter_summary_csv = work_dir / "training_filter_summary.csv"
     dataset_quality_csv = work_dir / "dataset_quality.csv"
+    training_dependency_report_json = work_dir / "training_dependencies.json"
     r2_verification_csv = work_dir / "r2_verification.csv"
     model_dir = work_dir / "model"
 
@@ -64,7 +66,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "python",
                 "analyze_ipmsm_quality_results.py",
                 "--results",
-                str(args.results),
+                *result_args,
                 "--output",
                 str(comparison_csv),
                 "--profile-summary-output",
@@ -85,7 +87,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "python",
                 "filter_ipmsm_training_dataset.py",
                 "--results",
-                str(args.results),
+                *result_args,
                 "--output",
                 str(training_ready_csv),
                 "--summary-output",
@@ -121,6 +123,18 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             [dataset_quality_csv],
         ),
         step(
+            "training_environment_gate",
+            "Fail early if optional ML dependencies required for LightGBM retraining are unavailable.",
+            [
+                "python",
+                "train_ipmsm_lightgbm.py",
+                "--check-dependencies",
+                "--dependency-report",
+                str(training_dependency_report_json),
+            ],
+            [training_dependency_report_json],
+        ),
+        step(
             "retrain_and_verify",
             "Retrain deterministic LightGBM models and fail if any test target misses the R2 gate.",
             [
@@ -147,11 +161,11 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "notes": [
             "This file is a command plan only; it does not submit scheduler jobs, run AEDT, or train models.",
             "Review scheduler manifest output before adding --submit to the scheduler helper.",
-            "Run retraining only in an environment with pandas, scikit-learn, and LightGBM.",
+            "The training_environment_gate step must pass before retraining.",
         ],
         "inputs": {
             "cases": str(args.cases),
-            "results": str(args.results),
+            "results": result_args,
             "remote_cases": args.remote_cases,
         },
         "steps": steps,
@@ -161,7 +175,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Write an IPMSM quality workflow command plan JSON.")
     parser.add_argument("--cases", type=Path, required=True, help="Case CSV for scheduler setup dry-run validation.")
-    parser.add_argument("--results", type=Path, required=True, help="Completed result CSV for quality/retraining steps.")
+    parser.add_argument("--results", nargs="+", type=Path, required=True, help="Completed result CSVs for quality/retraining steps.")
     parser.add_argument("--remote-cases", default="remote/cases.csv")
     parser.add_argument("--job-mode", choices=("python_git", "packed_srun"), default="python_git")
     parser.add_argument("--remote-path", default="")

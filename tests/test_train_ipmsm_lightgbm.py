@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 
@@ -138,6 +141,40 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
         args = trainer.build_parser().parse_args([])
 
         trainer.validate_training_options(args)
+
+    def test_inspect_training_dependencies_reports_versions_and_missing_modules(self) -> None:
+        modules = {
+            "numpy": SimpleNamespace(__version__="2.4.3"),
+            "sklearn.model_selection": SimpleNamespace(),
+            "lightgbm": SimpleNamespace(__version__="4.6.0"),
+        }
+
+        def fake_import(name: str) -> object:
+            if name == "pandas":
+                raise ImportError("No module named pandas")
+            return modules[name]
+
+        report = trainer.inspect_training_dependencies(fake_import)
+        by_module = {row["module"]: row for row in report}
+
+        self.assertEqual(by_module["numpy"]["status"], "ok")
+        self.assertEqual(by_module["numpy"]["version"], "2.4.3")
+        self.assertEqual(by_module["pandas"]["status"], "missing")
+        self.assertEqual(trainer.missing_training_dependency_modules(report), ["pandas"])
+
+    def test_write_training_dependency_report_marks_readiness(self) -> None:
+        report = [
+            {"module": "numpy", "status": "ok", "version": "2.4.3", "error": ""},
+            {"module": "pandas", "status": "missing", "version": "", "error": "missing"},
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "deps.json"
+            trainer.write_training_dependency_report(path, report)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertFalse(payload["ready"])
+        self.assertEqual(payload["missing_modules"], ["pandas"])
 
     def test_require_training_dependencies_reports_missing_modules(self) -> None:
         def fake_import(name: str) -> object:

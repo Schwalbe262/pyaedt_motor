@@ -34,6 +34,13 @@ def read_rows(path: Path) -> list[dict[str, str]]:
         return [dict(row) for row in csv.DictReader(file)]
 
 
+def read_rows_from_paths(paths: Iterable[Path]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for path in paths:
+        rows.extend(read_rows(path))
+    return rows
+
+
 def first_value(row: dict[str, str], *names: str) -> str:
     for name in names:
         value = row.get(name, "")
@@ -404,7 +411,7 @@ def summarize(rows: list[dict[str, str]], comparison_rows: list[dict[str, str]])
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Summarize IPMSM mesh/time-step quality result CSVs.")
-    parser.add_argument("--results", type=Path, required=True, help="Result CSV from run_ipmsm_batch.py.")
+    parser.add_argument("--results", nargs="+", type=Path, required=True, help="One or more result CSVs from run_ipmsm_batch.py.")
     parser.add_argument("--output", type=Path, required=True, help="Filtered comparison CSV to write.")
     parser.add_argument("--baseline-profile", default="baseline")
     parser.add_argument("--metrics", default=",".join(DEFAULT_METRICS), help="Comma-separated output metrics to compare.")
@@ -424,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
     if args.convergence_pct_tolerance < 0:
         parser.error("--convergence-pct-tolerance must be >= 0")
-    rows = read_rows(args.results)
+    rows = read_rows_from_paths(args.results)
     comparison_rows = build_comparison_rows(rows, metrics, baseline_profile=args.baseline_profile)
     write_comparison(args.output, comparison_rows, metrics)
     print(f"Wrote {len(comparison_rows)} IPMSM quality comparison row(s) to {args.output}")

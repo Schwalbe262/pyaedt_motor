@@ -325,3 +325,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `plan_ipmsm_quality_workflow.py` accepts scheduler mode, remote path, repo/ref, and bootstrap flags while still omitting `--submit`.
 - Evidence: tests cover packed-srun args and remote-path validation; smoke plan contains `packed_srun`, `--remote-path`, bootstrap, and no submit flag.
 - Remaining risk: the operator still must verify the remote path exists and contains the intended working tree before any scheduler POST.
+
+## 2026-06-16 02:28:15 +09:00 - Insight 34
+
+- Source loop: `note.md` Loop 34.
+- Improvement: retraining workflows can fail at a dedicated ML dependency gate before model fitting.
+- Before: missing pandas/sklearn/lightgbm was discovered only when `train_ipmsm_lightgbm.py` started training, and workflow plans accepted only one result CSV.
+- After: `train_ipmsm_lightgbm.py --check-dependencies --dependency-report ...` writes a compact readiness report, and `plan_ipmsm_quality_workflow.py` includes that gate while passing multiple result CSVs.
+- Evidence: tests cover dependency inspection/report JSON and multi-result workflow args; smoke plan generation wrote 6 steps with both root result CSVs; local preflight reported numpy ok and pandas/sklearn/lightgbm missing.
+- Remaining risk: dependency readiness does not prove the model reaches R2 >= 0.95; actual ML retraining and AEDT quality replay evidence are still required.

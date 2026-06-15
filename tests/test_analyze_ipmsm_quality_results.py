@@ -216,21 +216,28 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
 
     def test_cli_writes_filtered_comparison_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            results_path = Path(tmp) / "results.csv"
+            first_results_path = Path(tmp) / "results_first.csv"
+            second_results_path = Path(tmp) / "results_second.csv"
             output_path = Path(tmp) / "comparison.csv"
             summary_path = Path(tmp) / "profile_summary.csv"
             convergence_path = Path(tmp) / "convergence.csv"
-            with results_path.open("w", encoding="utf-8-sig", newline="") as file:
-                writer = csv.DictWriter(file, fieldnames=list(self.convergence_rows()[0]))
+            rows = self.convergence_rows()
+            with first_results_path.open("w", encoding="utf-8-sig", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=list(rows[0]))
                 writer.writeheader()
-                writer.writerows(self.convergence_rows())
+                writer.writerows(rows[:2])
+            with second_results_path.open("w", encoding="utf-8-sig", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows[2:])
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
                 code = quality_results.main(
                     [
                         "--results",
-                        str(results_path),
+                        str(first_results_path),
+                        str(second_results_path),
                         "--output",
                         str(output_path),
                         "--metrics",
