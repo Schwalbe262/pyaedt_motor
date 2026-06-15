@@ -28,13 +28,14 @@
 - `verify_regression_metrics.py`: filtered regression R2 verification against the project threshold.
 - `train_ipmsm_lightgbm.py`: deterministic LightGBM training CLI with derived geometry input repair and recovered width-ratio feature.
 - `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the 200-solve guardrail.
+- `submit_ipmsm_scheduler_job.py`: dry-run-first Slurm Scheduler API helper for validated replay setup jobs.
 - `run_ipmsm_batch.py`: batch execution and result CSV writer.
 - `module/ipmsm_ppt_setup.py`: mesh, transient setup, validation, and analysis.
 
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 69 tests and passed; py_compile and scoped `git diff --check` passed after pre-AEDT case-input validation.
+- 2026-06-16: `python -m unittest discover -s tests` ran 75 tests and passed; py_compile and scoped `git diff --check` passed after scheduler dry-run helper.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
@@ -48,7 +49,7 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler URL from prompt used `localhhost`; verify the actual endpoint before integration.
+- Scheduler endpoint is verified at `http://localhost:8000`; actual submission still needs a scheduler-accessible Git ref and remote case path.
 - GitHub push is blocked by remote HTTP 403 permissions for `Schwalbe262/pyaedt_motor.git`.
 
 ## Next steps
@@ -87,7 +88,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Direct/subprocess launchers preflight case inputs, normalize blank/missing IDs, and formula-validate fixed replay geometry before AEDT execution.
+- Added dry-run-first scheduler helper; direct/subprocess/scheduler paths preflight case inputs before AEDT execution.
 
 ## Risks and gotchas
 

@@ -208,3 +208,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: direct `validate_case_plan` and subprocess explicit-plan validation call shared spec/geometry input checks before workers start.
 - Evidence: focused tests cover invalid mesh and fixed geometry in direct/subprocess paths; the existing 200-row replay plan passes the stronger validation.
 - Remaining risk: setup-only validation in AEDT is still required for modeler/API failures that cannot be proven from CSV formulas.
+
+## 2026-06-16 01:21:42 +09:00 - Insight 21
+
+- Source loop: `note.md` Loop 21.
+- Improvement: scheduler submissions are prepared through a validated dry-run payload before any POST.
+- Before: the project had local `sbatch` scripts but no safe integration path for the live Slurm Scheduler API at `localhost:8000`.
+- After: `submit_ipmsm_scheduler_job.py` validates case CSVs, emits the `/jobs` payload by default, and requires explicit `--submit` plus `--confirm-analyze` for solves.
+- Evidence: scheduler helper tests passed; dry-run against the 200-row replay plan reported `submit=false` and `validated_cases=200`.
+- Remaining risk: actual scheduler submission still needs a scheduler-accessible Git ref and remote case path, then AEDT setup-only validation.

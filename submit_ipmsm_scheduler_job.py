@@ -1,0 +1,222 @@
+"""Prepare or submit an IPMSM scheduler job through the local Slurm Scheduler API."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+from typing import Any
+from urllib import parse, request
+
+import subprocess_run
+
+
+DEFAULT_SCHEDULER_URL = "http://localhost:8000"
+DEFAULT_MAX_CASES = 200
+
+
+def git_value(args: list[str], default: str = "") -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=Path(__file__).resolve().parent,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return default
+    return result.stdout.strip() or default
+
+
+def default_git_ref() -> str:
+    branch = git_value(["rev-parse", "--abbrev-ref", "HEAD"])
+    if branch and branch != "HEAD":
+        return branch
+    return git_value(["rev-parse", "HEAD"], default="main")
+
+
+def default_repo_url() -> str:
+    return git_value(["config", "--get", "remote.origin.url"])
+
+
+def load_and_validate_cases(cases_path: Path, max_cases: int, allow_over_budget: bool) -> list[dict[str, Any]]:
+    rows = subprocess_run.read_cases(cases_path)
+    subprocess_run.validate_explicit_case_plan(rows, max_cases=max_cases, allow_over_budget=allow_over_budget)
+    return rows
+
+
+def build_subprocess_arguments(args: argparse.Namespace) -> str:
+    command = [
+        "--cases",
+        args.remote_cases or str(args.cases),
+        "--processes",
+        str(args.processes),
+        "--cores-per-process",
+        str(args.cores_per_process),
+        "--max-cases",
+        str(args.max_cases),
+        "--stagger-seconds",
+        str(args.stagger_seconds),
+        "--simulation-dir",
+        args.simulation_dir,
+        "--result-csv",
+        args.result_csv,
+        "--log-dir",
+        args.log_dir,
+        "--log-prefix",
+        args.log_prefix,
+    ]
+    command.append("--analyze" if args.analyze else "--setup-only")
+    if args.allow_over_budget:
+        command.append("--allow-over-budget")
+    if args.periodic_boundary:
+        command.append("--periodic-boundary")
+    if args.keep_projects:
+        command.append("--keep-projects")
+    return shlex.join(command)
+
+
+def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.repo_url:
+        raise RuntimeError("--repo-url is required when git remote origin is unavailable.")
+    return {
+        "job_mode": "python_git",
+        "repo_url": args.repo_url,
+        "git_ref": args.git_ref,
+        "entrypoint": args.entrypoint,
+        "arguments": build_subprocess_arguments(args),
+        "env_setup": args.env_setup,
+        "required_capability": args.required_capability,
+        "env_profile": args.env_profile,
+        "partition": args.partition,
+        "time_limit": args.time_limit,
+        "cpus": args.cpus,
+        "memory": args.memory,
+        "gpus": args.gpus,
+        "gpu_model": args.gpu_model,
+        "node_name": args.node_name,
+        "exclusive_node": args.exclusive_node,
+        "job_name": args.job_name,
+        "total_simulations": args.total_simulations,
+        "simulations_per_job": args.simulations_per_job,
+        "cpus_per_simulation": args.cpus_per_simulation,
+        "mem_per_simulation_gb": args.mem_per_simulation_gb,
+        "max_workers_per_job": args.max_workers_per_job,
+        "max_new_jobs": args.max_new_jobs,
+        "oversubscribe_factor": args.oversubscribe_factor,
+        "load_target": args.load_target,
+        "ramp_interval_seconds": args.ramp_interval_seconds,
+    }
+
+
+def validate_scheduler_request(args: argparse.Namespace) -> None:
+    if args.submit and args.analyze and not args.confirm_analyze:
+        raise RuntimeError("scheduler solve submission requires --confirm-analyze with --analyze")
+    if args.submit and not args.remote_cases and args.cases.is_absolute():
+        raise RuntimeError("absolute local --cases requires --remote-cases for scheduler submission")
+
+
+def post_scheduler_job(scheduler_url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    url = scheduler_url.rstrip("/") + "/jobs"
+    encoded = parse.urlencode(payload).encode("utf-8")
+    req = request.Request(
+        url,
+        data=encoded,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with request.urlopen(req, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return {"raw_response": body}
+
+
+def get_scheduler_health(scheduler_url: str, timeout: float) -> dict[str, Any]:
+    url = scheduler_url.rstrip("/") + "/api/health"
+    with request.urlopen(url, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return {"raw_response": body}
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Dry-run or submit an IPMSM job to the Slurm Scheduler API.")
+    parser.add_argument("--scheduler-url", default=DEFAULT_SCHEDULER_URL)
+    parser.add_argument("--cases", type=Path, required=True, help="Local case CSV to validate before submission.")
+    parser.add_argument("--remote-cases", default="", help="Case CSV path visible to the scheduler job; defaults to --cases.")
+    parser.add_argument("--repo-url", default=default_repo_url())
+    parser.add_argument("--git-ref", default=default_git_ref())
+    parser.add_argument("--entrypoint", default="subprocess_run.py")
+    parser.add_argument("--job-name", default="ipmsm-replay-setup")
+    parser.add_argument("--processes", type=int, default=1)
+    parser.add_argument("--cores-per-process", type=int, default=4)
+    parser.add_argument("--max-cases", type=int, default=DEFAULT_MAX_CASES)
+    parser.add_argument("--allow-over-budget", action="store_true")
+    parser.add_argument("--stagger-seconds", type=float, default=30.0)
+    parser.add_argument("--simulation-dir", default="simulation")
+    parser.add_argument("--result-csv", default="ipmsm_scheduler_results.csv")
+    parser.add_argument("--log-dir", default="simul_log_scheduler")
+    parser.add_argument("--log-prefix", default="scheduler_")
+    parser.add_argument("--analyze", action="store_true", help="Run solves; default is setup-only.")
+    parser.add_argument("--confirm-analyze", action="store_true", help="Allow --submit with --analyze.")
+    parser.add_argument("--periodic-boundary", action="store_true")
+    parser.add_argument("--keep-projects", action="store_true")
+    parser.add_argument("--env-setup", default="")
+    parser.add_argument("--required-capability", default="")
+    parser.add_argument("--env-profile", default="")
+    parser.add_argument("--partition", default="auto")
+    parser.add_argument("--time-limit", default="01:00:00")
+    parser.add_argument("--cpus", type=int, default=4)
+    parser.add_argument("--memory", default="16G")
+    parser.add_argument("--gpus", type=int, default=0)
+    parser.add_argument("--gpu-model", default="")
+    parser.add_argument("--node-name", default="")
+    parser.add_argument("--exclusive-node", action="store_true")
+    parser.add_argument("--total-simulations", type=int, default=1)
+    parser.add_argument("--simulations-per-job", type=int, default=1)
+    parser.add_argument("--cpus-per-simulation", type=int, default=4)
+    parser.add_argument("--mem-per-simulation-gb", type=float, default=4.0)
+    parser.add_argument("--max-workers-per-job", type=int, default=1)
+    parser.add_argument("--max-new-jobs", type=int, default=1)
+    parser.add_argument("--oversubscribe-factor", type=float, default=1.0)
+    parser.add_argument("--load-target", type=float, default=0.75)
+    parser.add_argument("--ramp-interval-seconds", type=int, default=900)
+    parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument("--check-health", action="store_true")
+    parser.add_argument("--submit", action="store_true", help="POST to scheduler. Omit for dry-run JSON only.")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    validate_scheduler_request(args)
+    rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
+    payload = build_job_payload(args)
+    output: dict[str, Any] = {
+        "scheduler_url": args.scheduler_url,
+        "submit": args.submit,
+        "validated_cases": len(rows),
+        "payload": payload,
+    }
+    if args.check_health:
+        output["health"] = get_scheduler_health(args.scheduler_url, args.timeout)
+    if args.submit:
+        output["response"] = post_scheduler_job(args.scheduler_url, payload, args.timeout)
+    print(json.dumps(output, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)

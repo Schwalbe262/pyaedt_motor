@@ -290,3 +290,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup or solve was run locally because PyAEDT/Ansys packages are unavailable; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then continue toward setup-only validation in the AEDT environment.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:21:42 +09:00 - Loop 21
+
+- Part: scheduler dry-run helper
+- Goal: prepare scheduler setup-only replay submission without accidentally posting or launching solves.
+- Hypothesis: the scheduler endpoint is available locally, but a dry-run-first client is needed to validate cases and review the `/jobs` payload before any costly Slurm action.
+- Actions: verified `http://localhost:8000` and `/openapi.json`; added `submit_ipmsm_scheduler_job.py` for validated dry-run payloads and explicit `--submit`; defaulted to setup-only; required `--confirm-analyze` for solve submission; added focused tests.
+- Candidates: integrate `controller.py` directly versus scheduler `/jobs` `python_git` payload; chose a separate helper targeting `subprocess_run.py` so scheduler submission does not recursively call `sbatch`.
+- Metrics: scheduler helper tests ran 6 tests and passed; targeted scheduler/subprocess tests ran 9 tests and passed; dry-run against the 200-row replay CSV returned `submit=false` and `validated_cases=200`; full unittest discovery ran 75 tests and passed; py_compile and scoped `git diff --check` passed.
+- Result: setup-only replay scheduler jobs can now be validated and reviewed locally before explicit POST submission.
+- Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions, so the scheduler may not yet access the local branch commits.
+- Next action: commit locally, retry GitHub push, then run scheduler setup-only submission only after the branch/ref and remote case path are accessible.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
