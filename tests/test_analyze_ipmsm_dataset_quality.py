@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+import contextlib
+import csv
+import io
+from pathlib import Path
+import tempfile
+import unittest
+
+import analyze_ipmsm_dataset_quality as dataset_quality
+
+
+class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
+    def write_results(self, path: Path) -> None:
+        rows = [
+            {
+                "case_id": "case_1",
+                "status": "ok",
+                "elapsed_s": "10",
+                "output_torque_all_avg_nm": "1.0",
+                "output_coreloss_all_avg_w": "2.0",
+                "output_solidloss_all_avg_w": "3.0",
+                "error": "",
+            },
+            {
+                "case_id": "case_1",
+                "status": "failed",
+                "elapsed_s": "4",
+                "output_torque_all_avg_nm": "",
+                "output_coreloss_all_avg_w": "nan",
+                "output_solidloss_all_avg_w": "3.0",
+                "error": "RuntimeError('Missing required transient output metrics')",
+            },
+            {
+                "case_id": "case_2",
+                "status": "ok",
+                "elapsed_s": "12",
+                "output_torque_all_avg_nm": "1.2",
+                "output_coreloss_all_avg_w": "2.2",
+                "output_solidloss_all_avg_w": "3.2",
+                "error": "",
+            },
+        ]
+        with path.open("w", encoding="utf-8-sig", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def test_analyze_file_summarizes_status_missing_outputs_and_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "results.csv"
+            self.write_results(path)
+
+            summary = dataset_quality.analyze_file(path, dataset_quality.DEFAULT_REQUIRED_OUTPUTS).summary_row("file", str(path))
+
+            self.assertEqual(summary["rows"], "3")
+            self.assertEqual(summary["unique_case_ids"], "2")
+            self.assertEqual(summary["duplicate_case_ids"], "1")
+            self.assertEqual(summary["status_ok"], "2")
+            self.assertEqual(summary["status_failed"], "1")
+            self.assertEqual(summary["required_complete_rows"], "2")
+            self.assertEqual(summary["missing_required_rows"], "1")
+            self.assertIn("output_torque_all_avg_nm:1", summary["missing_required_by_column"])
+            self.assertEqual(summary["elapsed_min_s"], "4")
+            self.assertEqual(summary["elapsed_avg_s"], "8.66666666667")
+            self.assertEqual(summary["elapsed_max_s"], "12")
+
+    def test_cli_writes_file_and_combined_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "first.csv"
+            second = Path(tmp) / "second.csv"
+            output = Path(tmp) / "summary.csv"
+            self.write_results(first)
+            self.write_results(second)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = dataset_quality.main(["--results", str(first), str(second), "--output", str(output)])
+
+            self.assertEqual(code, 0)
+            self.assertIn("dataset_quality rows=6", stdout.getvalue())
+            with output.open("r", encoding="utf-8-sig", newline="") as file:
+                rows = list(csv.DictReader(file))
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(rows[-1]["scope"], "combined")
+            self.assertEqual(rows[-1]["duplicate_case_ids"], "4")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -75,6 +75,7 @@ REPORT_NAMES = (
 TIME_DOMAIN_WINDOWS = ("first", "last", "all")
 TIME_DOMAIN_STATS = ("avg", "rms", "min", "max", "peak_abs", "peak_signed")
 BACK_EMF_HARMONICS = (1, 3, 5, 7, 9, 11, 13)
+MESH_ELEMENT_KEYS = ("magnet", "rotor", "stator", "winding", "band")
 INDUCTANCE_MATRIX_ENTRIES = (
     ("aa", "PhaseA", "PhaseA"),
     ("ab", "PhaseA", "PhaseB"),
@@ -164,6 +165,7 @@ INPUT_SPEC_COLUMNS = (
     "input_air_material",
     "input_setup_name",
     "input_mesh_elements",
+    *(f"input_mesh_{key}_elements" for key in MESH_ELEMENT_KEYS),
 )
 
 INPUT_GEOMETRY_COLUMNS = (
@@ -176,9 +178,11 @@ INPUT_GEOMETRY_COLUMNS = (
     "input_stator_inner_radius",
     "input_stator_shoe_thick",
     "input_stator_teeth_length_ratio",
+    "input_stator_teeth_width_ratio",
     "input_stator_teeth_length",
     "input_stator_teeth_width",
     "input_stator_gap",
+    "input_slot_opening_ratio",
     "input_rotator_gap",
     "input_shaft_ratio",
     "input_rotor_radius",
@@ -186,6 +190,7 @@ INPUT_GEOMETRY_COLUMNS = (
     "input_magnet_shield_thick",
     "input_magnet_setback_ratio",
     "input_magnet_thick_ratio",
+    "input_magnet_space_height_ratio",
     "input_magnet_height_ratio",
 )
 
@@ -204,6 +209,10 @@ INPUT_CORE_COLUMNS = (
 )
 
 INPUT_RUN_COLUMNS = (
+    "input_quality_profile",
+    "input_geometry_mode",
+    "input_source_case_id",
+    "input_source_result_path",
     "input_use_periodic_boundary",
     "input_operation",
 )
@@ -214,6 +223,7 @@ RUN_METADATA_COLUMNS = (
     "project_path",
     "analyze",
     "analysis_returned_false",
+    "missing_required_outputs",
     "validation",
     "elapsed_s",
     "finished_at",
@@ -350,6 +360,142 @@ def case_bool(case: dict[str, Any], *names: str, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def build_mesh_elements(case: dict[str, Any], defaults: Any) -> dict[str, int]:
+    """Build per-case mesh element counts from stable CSV column names."""
+    mesh_elements = dict(defaults.mesh_elements)
+    for key in MESH_ELEMENT_KEYS:
+        aliases = (
+            f"mesh_{key}_elements",
+            f"{key}_mesh_elements",
+            f"mesh_{key}",
+        )
+        raw_value = case_value(case, *aliases, default=None)
+        if raw_value in (None, ""):
+            continue
+        value = int(float(raw_value))
+        if value < 1:
+            raise ValueError(f"mesh element count must be >= 1 for {aliases[0]}")
+        mesh_elements[key] = value
+    return mesh_elements
+
+
+FIXED_GEOMETRY_REQUIRED_KEYS = (
+    "slot_num",
+    "pole_num",
+    "stator_outer_radius",
+    "stator_back_yoke_thick_ratio",
+    "stator_inner_ratio",
+    "stator_shoe_thick",
+    "stator_teeth_length_ratio",
+    "stator_teeth_width_ratio",
+    "stator_gap",
+    "rotator_gap",
+    "shaft_ratio",
+    "magnet_shield_thick",
+    "magnet_setback_ratio",
+    "magnet_thick_ratio",
+    "magnet_height_ratio",
+)
+FIXED_GEOMETRY_OPTIONAL_DEFAULTS = {
+    "slot_opening_ratio": 0.09,
+    "magnet_space_height_ratio": 1.0,
+}
+FIXED_GEOMETRY_ALIASES = {
+    key: (f"input_{key}", key)
+    for key in (
+        *FIXED_GEOMETRY_REQUIRED_KEYS,
+        *FIXED_GEOMETRY_OPTIONAL_DEFAULTS,
+        "stator_back_yoke_thick",
+        "stator_inner_radius",
+        "stator_teeth_length",
+        "stator_teeth_width",
+    )
+}
+FIXED_GEOMETRY_ALIASES["slot_num"] = ("input_slot_num", "slot_num", "slot_number")
+FIXED_GEOMETRY_ALIASES["pole_num"] = ("input_pole_num", "pole_num", "pole_number")
+
+
+def finite_case_value(case: dict[str, Any], *names: str) -> float:
+    raw_value = case_value(case, *names, default=None)
+    if raw_value in (None, ""):
+        return math.nan
+    try:
+        value = float(raw_value)
+    except Exception:
+        return math.nan
+    return value if math.isfinite(value) else math.nan
+
+
+def derive_stator_teeth_width_ratio(values: dict[str, float]) -> float:
+    width = values.get("stator_teeth_width", math.nan)
+    outer_radius = values.get("stator_outer_radius", math.nan)
+    back_yoke = values.get("stator_back_yoke_thick", math.nan)
+    if not math.isfinite(back_yoke):
+        back_yoke = outer_radius * values.get("stator_back_yoke_thick_ratio", math.nan)
+    teeth_length = values.get("stator_teeth_length", math.nan)
+    if not math.isfinite(teeth_length):
+        inner_radius = values.get("stator_inner_radius", math.nan)
+        if not math.isfinite(inner_radius):
+            inner_radius = outer_radius * values.get("stator_inner_ratio", math.nan)
+        teeth_length = (outer_radius - back_yoke - inner_radius) * values.get("stator_teeth_length_ratio", math.nan)
+    slot_num = values.get("slot_num", math.nan)
+    if not all(math.isfinite(value) for value in (width, outer_radius, back_yoke, teeth_length, slot_num)):
+        return math.nan
+    denominator = (outer_radius - back_yoke - teeth_length) * math.tan(math.radians(360.0 / slot_num) / 2.0) * 2.0
+    if denominator <= 0.0:
+        return math.nan
+    return width / denominator
+
+
+def extract_fixed_geometry(case: dict[str, Any]) -> dict[str, float]:
+    """Extract fixed geometry values from case rows or prior result CSV rows."""
+    values: dict[str, float] = {}
+    for key, aliases in FIXED_GEOMETRY_ALIASES.items():
+        value = finite_case_value(case, *aliases)
+        if math.isfinite(value):
+            values[key] = value
+
+    if not values:
+        return {}
+
+    if "stator_teeth_width_ratio" not in values:
+        derived = derive_stator_teeth_width_ratio(values)
+        if math.isfinite(derived):
+            values["stator_teeth_width_ratio"] = derived
+
+    for key, default in FIXED_GEOMETRY_OPTIONAL_DEFAULTS.items():
+        values.setdefault(key, default)
+
+    missing = [key for key in FIXED_GEOMETRY_REQUIRED_KEYS if key not in values]
+    if missing:
+        raise ValueError(f"fixed geometry columns are incomplete; missing: {missing}")
+
+    values["slot_num"] = int(round(values["slot_num"]))
+    values["pole_num"] = int(round(values["pole_num"]))
+    return {
+        key: values[key]
+        for key in (
+            "slot_num",
+            "pole_num",
+            "stator_outer_radius",
+            "stator_back_yoke_thick_ratio",
+            "stator_inner_ratio",
+            "stator_shoe_thick",
+            "stator_teeth_length_ratio",
+            "stator_teeth_width_ratio",
+            "stator_gap",
+            "slot_opening_ratio",
+            "rotator_gap",
+            "shaft_ratio",
+            "magnet_shield_thick",
+            "magnet_setback_ratio",
+            "magnet_thick_ratio",
+            "magnet_space_height_ratio",
+            "magnet_height_ratio",
+        )
+    }
+
+
 def build_spec(case: dict[str, Any], default_symmetry_factor: int = 4) -> Any:
     """Build the PPT setup spec from one CSV/default case row."""
     from module.ipmsm_ppt_setup import IPMSMPPTSpec
@@ -372,6 +518,7 @@ def build_spec(case: dict[str, Any], default_symmetry_factor: int = 4) -> Any:
         steps_per_period=case_int(case, "steps_per_period", default=90),
         core_material=str(case_value(case, "core_material", default=defaults.core_material)),
         magnet_material=str(case_value(case, "magnet_material", default=defaults.magnet_material)),
+        mesh_elements=build_mesh_elements(case, defaults),
     )
 
 
@@ -1206,6 +1353,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
 
     try:
         spec = build_spec(case, default_symmetry_factor=options.symmetry_factor)
+        fixed_geometry = extract_fixed_geometry(case)
         use_periodic_boundary = case_bool(
             case,
             "use_periodic_boundary",
@@ -1215,8 +1363,13 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
 
         input_data = {}
         input_data.update(asdict(spec))
+        input_data.update({f"mesh_{key}_elements": spec.mesh_elements.get(key, "") for key in MESH_ELEMENT_KEYS})
         input_data.update({f"coreloss_{key}": value for key, value in get_core_loss_coefficients().items()})
         input_data.update({f"core_{key}": value for key, value in get_core_material_properties().items()})
+        input_data["quality_profile"] = case_value(case, "quality_profile", default="")
+        input_data["geometry_mode"] = "fixed" if fixed_geometry else "random"
+        input_data["source_case_id"] = case_value(case, "source_case_id", default="")
+        input_data["source_result_path"] = case_value(case, "source_result_path", default="")
         input_data["use_periodic_boundary"] = use_periodic_boundary
         input_data["operation"] = operation
         row.update(prefixed_row(input_data, "input_"))
@@ -1229,6 +1382,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             new_desktop=True,
         )
         sim = Simulation(desktop=desktop, cores=options.cores)
+        sim.fixed_geometry = fixed_geometry
         sim.create_simulation_name(simulation_dir)
         project = sim.create_project(simulation_dir)
         project_path = Path(project.path)
@@ -1250,6 +1404,15 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             cores=options.cores,
         )
         analysis_returned_false = options.analyze and setup_result.get("analysis") is False
+        row.update(
+            {
+                "simulation_name": sim.PROJECT_NAME,
+                "project_path": str(project_path),
+                "analyze": options.analyze,
+                "analysis_returned_false": analysis_returned_false,
+                "validation": str(setup_result.get("validation")),
+            }
+        )
 
         try:
             project.save()
@@ -1261,6 +1424,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         row.update(prefixed_row(output_summary, ""))
         row.update(exported)
         missing_outputs = missing_required_output_metrics(output_summary) if options.analyze else []
+        row["missing_required_outputs"] = ";".join(missing_outputs)
         if missing_outputs:
             raise RuntimeError(f"Missing required transient output metrics: {missing_outputs}")
         elapsed = time.time() - start
@@ -1269,11 +1433,6 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         row.update(
             {
                 "status": "ok",
-                "simulation_name": sim.PROJECT_NAME,
-                "project_path": str(project_path),
-                "analyze": options.analyze,
-                "analysis_returned_false": analysis_returned_false,
-                "validation": str(setup_result.get("validation")),
                 "elapsed_s": round(elapsed, 3),
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
             }

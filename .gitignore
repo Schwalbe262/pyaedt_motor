@@ -186,3 +186,16 @@ cython_debug/
 
 # Simulation outputs
 simulation/
+simulation_num.txt
+log/
+simul_log/
+simul_log_*/
+simulation_log/
+
+# Downloaded Windows metadata sidecars
+*Zone.Identifier
+
+# Local generated model/report artifacts
+lightgbm_ipmsm_models/
+ppt_slide_export/
+ppt_slide66_export/
