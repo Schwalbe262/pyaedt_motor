@@ -115,10 +115,44 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
         self.assertEqual(source_b_mesh["output_torque_all_avg_nm_baseline"], "100")
         self.assertEqual(source_b_mesh["output_torque_all_avg_nm_delta"], "5")
 
+    def test_build_profile_summary_rows_aggregates_runtime_and_metric_deltas(self) -> None:
+        comparison_rows = quality_results.build_comparison_rows(
+            self.sample_rows(),
+            ("output_torque_all_avg_nm", "output_efficiency_all_pct"),
+        )
+
+        summary_rows = quality_results.build_profile_summary_rows(
+            comparison_rows,
+            ("output_torque_all_avg_nm", "output_efficiency_all_pct"),
+        )
+
+        summary_by_profile = {row["quality_profile"]: row for row in summary_rows}
+        self.assertEqual(summary_by_profile["baseline"]["rows"], "1")
+        self.assertEqual(summary_by_profile["baseline"]["avg_elapsed_ratio"], "1")
+        self.assertEqual(summary_by_profile["mesh_fine"]["rows_with_baseline"], "1")
+        self.assertEqual(summary_by_profile["mesh_fine"]["rows_without_baseline"], "0")
+        self.assertEqual(summary_by_profile["mesh_fine"]["avg_elapsed_ratio"], "1.25")
+        self.assertEqual(summary_by_profile["mesh_fine"]["output_torque_all_avg_nm_avg_abs_pct_delta"], "5")
+        self.assertEqual(summary_by_profile["mesh_fine"]["output_efficiency_all_pct_max_abs_pct_delta"], "1.11111111111")
+
+    def test_build_profile_summary_rows_reports_missing_baselines(self) -> None:
+        comparison_rows = quality_results.build_comparison_rows(
+            [self.sample_rows()[1]],
+            ("output_torque_all_avg_nm",),
+        )
+
+        summary_rows = quality_results.build_profile_summary_rows(comparison_rows, ("output_torque_all_avg_nm",))
+
+        self.assertEqual(summary_rows[0]["quality_profile"], "mesh_fine")
+        self.assertEqual(summary_rows[0]["rows_with_baseline"], "0")
+        self.assertEqual(summary_rows[0]["rows_without_baseline"], "1")
+        self.assertEqual(summary_rows[0]["output_torque_all_avg_nm_avg_abs_pct_delta"], "")
+
     def test_cli_writes_filtered_comparison_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results_path = Path(tmp) / "results.csv"
             output_path = Path(tmp) / "comparison.csv"
+            summary_path = Path(tmp) / "profile_summary.csv"
             with results_path.open("w", encoding="utf-8-sig", newline="") as file:
                 writer = csv.DictWriter(file, fieldnames=list(self.sample_rows()[0]))
                 writer.writeheader()
@@ -134,16 +168,23 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
                         str(output_path),
                         "--metrics",
                         "output_torque_all_avg_nm,output_efficiency_all_pct",
+                        "--profile-summary-output",
+                        str(summary_path),
                     ]
                 )
 
             self.assertEqual(code, 0)
             self.assertIn("rows=2 comparisons=2", stdout.getvalue())
+            self.assertIn("profile summary row(s)", stdout.getvalue())
             with output_path.open("r", encoding="utf-8-sig", newline="") as file:
                 comparison_rows = list(csv.DictReader(file))
             self.assertEqual(len(comparison_rows), 2)
             self.assertEqual(comparison_rows[1]["quality_profile"], "mesh_fine")
             self.assertIn("output_torque_all_avg_nm_pct_delta", comparison_rows[1])
+            with summary_path.open("r", encoding="utf-8-sig", newline="") as file:
+                summary_rows = list(csv.DictReader(file))
+            self.assertEqual(len(summary_rows), 2)
+            self.assertIn("output_torque_all_avg_nm_avg_abs_pct_delta", summary_rows[0])
 
 
 if __name__ == "__main__":

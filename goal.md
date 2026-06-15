@@ -71,7 +71,7 @@
 - Root project-memory files now define the default context budget.
 - Existing runnable entrypoints are source scripts, not a packaged CLI.
 - Token usage logging did not exist before this part.
-- Mesh/time-step case generation, per-case mesh CSV overrides, quality-result comparison, and regression R2 verification are implemented.
+- Mesh/time-step case generation, per-case mesh CSV overrides, quality-result comparison/profile summary, and regression R2 verification are implemented.
 - Existing LightGBM artifact is below target: test split has 8/8 targets below `R^2 >= 0.95`, min R2 0.7105, avg R2 0.8116.
 - Existing simulation result CSVs contain 13,748 rows with 13,550 required-output-complete rows, 198 failed/missing-output rows, and 0 duplicate case IDs.
 - Future failed rows now preserve missing required output names, validation, analysis flags, and setup metadata for faster diagnosis.

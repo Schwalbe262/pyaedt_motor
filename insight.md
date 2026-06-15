@@ -253,3 +253,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `submit_ipmsm_scheduler_job.py --write-manifest` writes LF-only JSON matching stdout, including validated case count and the exact scheduler payload.
 - Evidence: scheduler helper tests cover no-post manifest writing and LF output; smoke dry-run wrote `simul_log_smoke/scheduler_manifest_smoke.json` with `submit=false`, `validated_cases=1`, and `total_simulations=1`.
 - Remaining risk: manifest review does not prove the remote working tree, remote case path, or AEDT setup-only execution; those still need scheduler-side validation.
+
+## 2026-06-16 01:49:49 +09:00 - Insight 26
+
+- Source loop: `note.md` Loop 26.
+- Improvement: quality experiment outputs can be reviewed by profile-level runtime and metric-delta aggregates.
+- Before: `analyze_ipmsm_quality_results.py` wrote exact row deltas but no compact profile summary for comparing mesh/time-step tradeoffs.
+- After: `--profile-summary-output` writes per-profile row counts, missing-output counts, baseline coverage, elapsed ratios, and absolute percent metric deltas.
+- Evidence: quality analyzer tests cover aggregate deltas, missing baselines, and CLI summary output; full unittest discovery ran 90 tests and passed.
+- Remaining risk: the summary is only as meaningful as the completed AEDT result CSVs; actual setup/solve data is still required before choosing a preferred simulation profile.

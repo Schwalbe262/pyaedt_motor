@@ -169,10 +169,73 @@ def comparison_fieldnames(metrics: tuple[str, ...]) -> list[str]:
     return fields
 
 
+def profile_summary_fieldnames(metrics: tuple[str, ...]) -> list[str]:
+    fields = [
+        "quality_profile",
+        "rows",
+        "missing_required_rows",
+        "rows_with_baseline",
+        "rows_without_baseline",
+        "avg_elapsed_ratio",
+        "max_elapsed_ratio",
+    ]
+    for metric in metrics:
+        fields.extend([f"{metric}_avg_abs_pct_delta", f"{metric}_max_abs_pct_delta"])
+    return fields
+
+
+def average(values: list[float]) -> float:
+    finite_values = [value for value in values if math.isfinite(value)]
+    if not finite_values:
+        return math.nan
+    return sum(finite_values) / len(finite_values)
+
+
+def maximum(values: list[float]) -> float:
+    finite_values = [value for value in values if math.isfinite(value)]
+    if not finite_values:
+        return math.nan
+    return max(finite_values)
+
+
+def build_profile_summary_rows(comparison_rows: Iterable[dict[str, str]], metrics: tuple[str, ...]) -> list[dict[str, str]]:
+    rows_by_profile: dict[str, list[dict[str, str]]] = {}
+    for row in comparison_rows:
+        rows_by_profile.setdefault(row.get("quality_profile", ""), []).append(row)
+
+    summary_rows: list[dict[str, str]] = []
+    for profile in sorted(rows_by_profile):
+        rows = rows_by_profile[profile]
+        elapsed_ratios = [finite_float(row.get("elapsed_ratio", "")) for row in rows]
+        out = {
+            "quality_profile": profile,
+            "rows": str(len(rows)),
+            "missing_required_rows": str(sum(1 for row in rows if row.get("missing_required_outputs", ""))),
+            "rows_with_baseline": str(sum(1 for row in rows if row.get("baseline_case_id", ""))),
+            "rows_without_baseline": str(sum(1 for row in rows if not row.get("baseline_case_id", ""))),
+            "avg_elapsed_ratio": format_number(average(elapsed_ratios)),
+            "max_elapsed_ratio": format_number(maximum(elapsed_ratios)),
+        }
+        for metric in metrics:
+            deltas = [abs(finite_float(row.get(f"{metric}_pct_delta", ""))) for row in rows]
+            out[f"{metric}_avg_abs_pct_delta"] = format_number(average(deltas))
+            out[f"{metric}_max_abs_pct_delta"] = format_number(maximum(deltas))
+        summary_rows.append(out)
+    return summary_rows
+
+
 def write_comparison(path: Path, rows: list[dict[str, str]], metrics: tuple[str, ...]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=comparison_fieldnames(metrics), extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_profile_summary(path: Path, rows: list[dict[str, str]], metrics: tuple[str, ...]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=profile_summary_fieldnames(metrics), extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -203,6 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, required=True, help="Filtered comparison CSV to write.")
     parser.add_argument("--baseline-profile", default="baseline")
     parser.add_argument("--metrics", default=",".join(DEFAULT_METRICS), help="Comma-separated output metrics to compare.")
+    parser.add_argument("--profile-summary-output", type=Path, help="Optional per-quality-profile aggregate summary CSV.")
     return parser
 
 
@@ -217,6 +281,10 @@ def main(argv: list[str] | None = None) -> int:
     comparison_rows = build_comparison_rows(rows, metrics, baseline_profile=args.baseline_profile)
     write_comparison(args.output, comparison_rows, metrics)
     print(f"Wrote {len(comparison_rows)} IPMSM quality comparison row(s) to {args.output}")
+    if args.profile_summary_output:
+        profile_summary_rows = build_profile_summary_rows(comparison_rows, metrics)
+        write_profile_summary(args.profile_summary_output, profile_summary_rows, metrics)
+        print(f"Wrote {len(profile_summary_rows)} IPMSM quality profile summary row(s) to {args.profile_summary_output}")
     print(summarize(rows, comparison_rows))
     return 0
 

@@ -355,3 +355,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then review an actual scheduler manifest with the selected Git ref or `remote_path` before setup-only POST.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:49:49 +09:00 - Loop 26
+
+- Part: quality profile aggregate evidence
+- Goal: make mesh/time-step result review easier after setup-only/solve outputs exist.
+- Hypothesis: row-level deltas are useful but too granular for deciding whether a quality profile improves fidelity enough to justify runtime cost.
+- Actions: added optional `analyze_ipmsm_quality_results.py --profile-summary-output`; summarized rows, missing outputs, baseline coverage, elapsed ratios, and per-metric absolute percent deltas by quality profile; added tests.
+- Candidates: emit only row-level comparison versus write an optional aggregate CSV; chose optional aggregate output so exact row evidence remains available while operator review gets compact profile evidence.
+- Metrics: quality analyzer tests ran 6 tests and passed; full unittest discovery ran 90 tests and passed; py_compile and scoped `git diff --check` passed.
+- Result: completed quality experiment CSVs can now produce both detailed before/after rows and compact per-profile evidence for runtime/accuracy tradeoff review.
+- Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use profile summaries on actual setup/solve result CSVs when the AEDT/Slurm environment is available.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
