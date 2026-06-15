@@ -316,3 +316,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `plan_ipmsm_quality_workflow.py` writes ordered JSON steps with exact command args and expected outputs, without executing costly work.
 - Evidence: tests cover ordered steps, no scheduler submit flag, required gates, JSON writing, and threshold validation; smoke plan generation wrote 5 manual steps.
 - Remaining risk: the plan is only orchestration evidence; actual AEDT/Slurm and ML environment execution still must be performed and inspected.
+
+## 2026-06-16 02:19:02 +09:00 - Insight 33
+
+- Source loop: `note.md` Loop 33.
+- Improvement: workflow plans can target scheduler `packed_srun` remote-path runs when Git-based submission is blocked.
+- Before: command plans assumed the default scheduler mode and did not expose remote-path/bootstrap options.
+- After: `plan_ipmsm_quality_workflow.py` accepts scheduler mode, remote path, repo/ref, and bootstrap flags while still omitting `--submit`.
+- Evidence: tests cover packed-srun args and remote-path validation; smoke plan contains `packed_srun`, `--remote-path`, bootstrap, and no submit flag.
+- Remaining risk: the operator still must verify the remote path exists and contains the intended working tree before any scheduler POST.

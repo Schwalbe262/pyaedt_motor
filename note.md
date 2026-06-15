@@ -446,3 +446,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use the generated plan in the AEDT/ML environments when credentials and runtime are available.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 02:19:02 +09:00 - Loop 33
+
+- Part: packed scheduler workflow plan
+- Goal: let workflow command plans target scheduler-accessible remote working trees when GitHub push is blocked.
+- Hypothesis: generated plans that assume `python_git` are less useful while remote push returns HTTP 403; supporting `packed_srun` keeps setup-only planning viable with a known `remote_path`.
+- Actions: added `--job-mode`, `--remote-path`, `--repo-url`, `--git-ref`, and `--bootstrap-remote-cases` to `plan_ipmsm_quality_workflow.py`; validated that packed mode requires a remote path; added tests.
+- Candidates: leave packed mode only in `submit_ipmsm_scheduler_job.py` versus expose it in workflow plans; chose plan exposure so the full manual sequence stays coherent under current GitHub permissions.
+- Metrics: workflow plan tests ran 5 tests and passed; full unittest discovery ran 110 tests and passed; py_compile and scoped `git diff --check` passed; packed-srun smoke plan includes `--remote-path`, bootstrap, and no `--submit`.
+- Result: workflow plans can now be generated for pushed Git refs or scheduler `remote_path` setups without accidental scheduler submission.
+- Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use packed-srun plans only after confirming the scheduler-visible project path.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

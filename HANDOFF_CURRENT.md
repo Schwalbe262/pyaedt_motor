@@ -38,7 +38,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 108 tests and passed; workflow plan tests, py_compile, and smoke plan generation passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 110 tests and passed; packed-srun workflow plan tests, py_compile, and smoke plan generation passed.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
@@ -58,7 +58,7 @@
 ## Next steps
 
 1. Fix GitHub credentials/permissions and push `chore/codex-context-budget`.
-2. Generate a command plan with `python plan_ipmsm_quality_workflow.py --cases path/to/cases.csv --results path/to/results.csv --output path/to/quality_workflow_plan.json`.
+2. Generate a command plan with `python plan_ipmsm_quality_workflow.py --cases path/to/cases.csv --results path/to/results.csv --output path/to/quality_workflow_plan.json`; use `--job-mode packed_srun --remote-path ...` if GitHub push is still blocked.
 3. Review the saved scheduler dry-run manifest for the actual Git ref or scheduler `remote_path` before any POST.
 4. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
 5. Run `python analyze_ipmsm_dataset_quality.py --results path/to/training_ready.csv --output path/to/dataset_quality.csv --fail-on-quality --max-missing-required-rows 0 --max-duplicate-case-ids 0 --max-failed-rows 0`, then retrain if it passes.

@@ -46,8 +46,14 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 str(args.cases),
                 "--remote-cases",
                 args.remote_cases,
+                "--job-mode",
+                args.job_mode,
                 "--write-manifest",
                 str(scheduler_manifest),
+                *(["--remote-path", args.remote_path] if args.remote_path else []),
+                *(["--repo-url", args.repo_url] if args.repo_url else []),
+                *(["--git-ref", args.git_ref] if args.git_ref else []),
+                *(["--bootstrap-remote-cases"] if args.bootstrap_remote_cases else []),
             ],
             [scheduler_manifest],
         ),
@@ -157,6 +163,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cases", type=Path, required=True, help="Case CSV for scheduler setup dry-run validation.")
     parser.add_argument("--results", type=Path, required=True, help="Completed result CSV for quality/retraining steps.")
     parser.add_argument("--remote-cases", default="remote/cases.csv")
+    parser.add_argument("--job-mode", choices=("python_git", "packed_srun"), default="python_git")
+    parser.add_argument("--remote-path", default="")
+    parser.add_argument("--repo-url", default="")
+    parser.add_argument("--git-ref", default="")
+    parser.add_argument("--bootstrap-remote-cases", action="store_true")
     parser.add_argument("--work-dir", type=Path, default=Path("simul_log_quality_workflow"))
     parser.add_argument("--output", type=Path, required=True, help="JSON plan path to write.")
     parser.add_argument("--reference-profile", default="mesh_time_fine")
@@ -175,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--convergence-pct-tolerance must be >= 0")
     if args.r2_threshold < 0:
         parser.error("--r2-threshold must be >= 0")
+    if args.job_mode == "packed_srun" and not args.remote_path:
+        parser.error("--remote-path is required for --job-mode packed_srun")
     plan = build_plan(args)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
