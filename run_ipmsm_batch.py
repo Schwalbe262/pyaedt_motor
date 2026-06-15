@@ -273,7 +273,7 @@ class Simulation:
             file.seek(0)
             raw = file.read().strip()
             if raw.isdigit():
-                current = int(raw)
+                current = max(int(raw), next_simulation_number(simulation_dir))
             else:
                 current = next_simulation_number(simulation_dir)
 

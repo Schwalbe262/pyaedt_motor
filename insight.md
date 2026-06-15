@@ -145,3 +145,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: explicit case CSV mode requires `--jobs 1 --repeat-every-hours 0` unless `--allow-duplicate-cases` is intentionally passed.
 - Evidence: focused controller tests cover multi-job, repeat-cycle, random-generation, opt-in duplicate, and invalid job-count cases.
 - Remaining risk: scheduler/web integration still needs the actual endpoint and API validation.
+
+## 2026-06-16 00:42:01 +09:00 - Insight 14
+
+- Source loop: `note.md` Loop 14.
+- Improvement: simulation project-name allocation now resists stale counter files.
+- Before: a stale-low `simulation_num.txt` could allocate `simulation1` even when `simulation1` or higher directories already existed.
+- After: `run_ipmsm_batch.py` chooses the max of the counter value and the next directory-derived simulation number.
+- Evidence: focused tests cover stale-low and future-counter cases.
+- Remaining risk: actual AEDT project creation still needs validation in the Ansys environment.

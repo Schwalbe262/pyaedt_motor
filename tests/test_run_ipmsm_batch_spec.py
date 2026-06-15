@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+import tempfile
 import unittest
 
 import run_ipmsm_batch
@@ -96,6 +98,43 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
             missing,
             ["output_torque_all_avg_nm", "output_solidloss_all_avg_w"],
         )
+
+    def test_create_simulation_name_ignores_stale_low_counter(self) -> None:
+        original_base_dir = run_ipmsm_batch.BASE_DIR
+        with tempfile.TemporaryDirectory() as tmp:
+            base_dir = Path(tmp) / "base"
+            simulation_dir = Path(tmp) / "simulation"
+            base_dir.mkdir()
+            (simulation_dir / "simulation1").mkdir(parents=True)
+            (simulation_dir / "simulation2").mkdir()
+            (base_dir / "simulation_num.txt").write_text("1", encoding="utf-8")
+            try:
+                run_ipmsm_batch.BASE_DIR = base_dir
+                sim = run_ipmsm_batch.Simulation(desktop=None)
+                sim.create_simulation_name(simulation_dir)
+            finally:
+                run_ipmsm_batch.BASE_DIR = original_base_dir
+
+            self.assertEqual(sim.PROJECT_NAME, "simulation3")
+            self.assertEqual((base_dir / "simulation_num.txt").read_text(encoding="utf-8"), "4")
+
+    def test_create_simulation_name_honors_future_counter(self) -> None:
+        original_base_dir = run_ipmsm_batch.BASE_DIR
+        with tempfile.TemporaryDirectory() as tmp:
+            base_dir = Path(tmp) / "base"
+            simulation_dir = Path(tmp) / "simulation"
+            base_dir.mkdir()
+            (simulation_dir / "simulation1").mkdir(parents=True)
+            (base_dir / "simulation_num.txt").write_text("9", encoding="utf-8")
+            try:
+                run_ipmsm_batch.BASE_DIR = base_dir
+                sim = run_ipmsm_batch.Simulation(desktop=None)
+                sim.create_simulation_name(simulation_dir)
+            finally:
+                run_ipmsm_batch.BASE_DIR = original_base_dir
+
+            self.assertEqual(sim.PROJECT_NAME, "simulation9")
+            self.assertEqual((base_dir / "simulation_num.txt").read_text(encoding="utf-8"), "10")
 
 
 if __name__ == "__main__":

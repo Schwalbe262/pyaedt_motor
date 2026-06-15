@@ -199,3 +199,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: GitHub push remains blocked by HTTP 403 credentials; no AEDT solve was run locally.
 - Next action: run full validation, commit locally, and retry push.
 - Token usage: unavailable; live Codex DB path is still unknown.
+
+## 2026-06-16 00:42:01 +09:00 - Loop 14
+
+- Part: simulation project-name allocator hardening
+- Goal: prevent repeated or resumed runs from reusing an existing AEDT project folder name.
+- Hypothesis: if `simulation_num.txt` is stale below existing `simulationN` directories, `run_ipmsm_batch.py` can allocate a duplicate project name and risk overwriting or mixing project artifacts.
+- Actions: changed `Simulation.create_simulation_name` to use the max of the counter file and directory scan; added tests for stale-low and future counters.
+- Candidates: reset counters during cleanup versus make allocation robust; chose robust allocation because cleanup is optional and explicit replay runs may keep projects for inspection.
+- Metrics: focused runner tests ran 10 tests and passed; full unittest discovery ran 49 tests and passed; py_compile and `git diff --check` passed.
+- Result: project naming now avoids stale-low counter collisions while preserving higher future counters.
+- Failure reason: no AEDT project creation was run locally because PyAEDT/Ansys packages are unavailable.
+- Next action: run full validation, commit locally, and retry push.
+- Token usage: unavailable; live Codex DB path is still unknown.
