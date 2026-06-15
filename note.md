@@ -213,6 +213,19 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Next action: commit locally, retry push, then continue toward AEDT setup-only validation.
 - Token usage: unavailable; live Codex DB path is still unknown.
 
+## 2026-06-16 00:55:18 +09:00 - Loop 17
+
+- Part: subprocess duplicate case guard
+- Goal: prevent duplicate explicit `case_id`s from bypassing validation when `subprocess_run.py` splits a case CSV across workers.
+- Hypothesis: duplicates can land in different split worker CSVs, so per-worker `run_ipmsm_batch.py` validation may not see the whole-plan duplicate.
+- Actions: added launcher-level duplicate `case_id` detection in `subprocess_run.py`; added focused tests proving duplicates can be split across chunks and are rejected before split execution.
+- Candidates: rely on worker validation versus validate the full explicit plan before splitting; chose full-plan validation because result rows and report artifact names are keyed by `case_id`.
+- Metrics: focused subprocess tests ran 3 tests and passed; duplicate-case CLI guard returned exit code 2 with compact `ERROR:`; full unittest discovery ran 59 tests and passed; py_compile and `git diff --check` passed.
+- Result: explicit case plans with duplicate IDs fail before worker CSVs or subprocesses are created.
+- Failure reason: no AEDT setup or solve was run locally because PyAEDT/Ansys packages are unavailable.
+- Next action: commit locally, retry push, then continue toward AEDT setup-only validation.
+- Token usage: unavailable; live Codex DB path is still unknown.
+
 ## 2026-06-16 00:45:37 +09:00 - Loop 15
 
 - Part: pre-AEDT failure row preservation

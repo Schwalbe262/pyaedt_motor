@@ -83,6 +83,7 @@
 - Simulation project naming now avoids reusing existing `simulationN` folders when `simulation_num.txt` is stale.
 - Pre-AEDT import/setup failures now still produce structured failed result rows instead of losing the case.
 - Direct, subprocess, Slurm shell, and controller entrypoints now enforce the 200-case planning guard by default.
+- Subprocess splitting now rejects duplicate explicit `case_id`s before worker CSV generation.
 - Next focus is AEDT setup-only validation, targeted solve selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
 
 ## Later Milestones

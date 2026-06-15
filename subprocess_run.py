@@ -76,6 +76,37 @@ def read_cases(path: Path) -> list[dict[str, Any]]:
         return list(csv.DictReader(file))
 
 
+def case_value(case: dict[str, Any], *names: str, default: Any = None) -> Any:
+    for name in names:
+        value = case.get(name)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def duplicate_case_ids(rows: list[dict[str, Any]]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for index, row in enumerate(rows, start=1):
+        case_id = str(case_value(row, "case_id", "id", default=f"case_{index:04d}"))
+        if case_id in seen and case_id not in duplicates:
+            duplicates.append(case_id)
+        seen.add(case_id)
+    return duplicates
+
+
+def validate_explicit_case_plan(rows: list[dict[str, Any]], max_cases: int, allow_over_budget: bool) -> None:
+    duplicates = duplicate_case_ids(rows)
+    if duplicates:
+        preview = ", ".join(duplicates[:5])
+        raise RuntimeError(f"duplicate case_id value(s) in explicit case plan: {preview}")
+    if len(rows) > max_cases and not allow_over_budget:
+        raise RuntimeError(
+            f"explicit case plan has {len(rows)} rows, exceeding --max-cases={max_cases}; "
+            "pass --allow-over-budget only for an intentional approved run."
+        )
+
+
 def write_cases(path: Path, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
@@ -205,11 +236,7 @@ def main() -> int:
     process_inputs: list[tuple[int | None, Path | None]] = []
     if args.cases:
         rows = read_cases(args.cases)
-        if len(rows) > args.max_cases and not args.allow_over_budget:
-            raise RuntimeError(
-                f"explicit case plan has {len(rows)} rows, exceeding --max-cases={args.max_cases}; "
-                "pass --allow-over-budget only for an intentional approved run."
-            )
+        validate_explicit_case_plan(rows, args.max_cases, args.allow_over_budget)
         chunks = split_cases(rows, args.processes)
         print(f"Loaded {len(rows)} explicit case row(s) from {args.cases}.")
         for index, chunk in enumerate(chunks, start=1):

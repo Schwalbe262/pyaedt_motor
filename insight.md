@@ -172,3 +172,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: direct runner, subprocess launcher, Slurm shell wrapper, and controller all pass or enforce `--max-cases`, with explicit `--allow-over-budget` opt-in.
 - Evidence: 56 unit tests passed; compact CLI guard checks reject 201 direct/subprocess cases and the old 100000-case controller default.
 - Remaining risk: actual scheduler integration still needs endpoint/API validation after credentials and environment are available.
+
+## 2026-06-16 00:55:18 +09:00 - Insight 17
+
+- Source loop: `note.md` Loop 17.
+- Improvement: duplicate explicit case IDs are now rejected before `subprocess_run.py` splits the plan across worker CSVs.
+- Before: duplicate `case_id`s could be distributed to different workers, bypass per-worker duplicate checks, and collide in result rows or report artifact names.
+- After: `subprocess_run.py` validates the full explicit plan before writing split CSVs or launching workers.
+- Evidence: 59 unit tests passed; focused test shows duplicates can split across chunks and the CLI guard rejects them with exit code 2.
+- Remaining risk: existing historical result CSVs still need downstream duplicate audits when merging new AEDT outputs.
