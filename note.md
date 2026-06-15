@@ -394,3 +394,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: existing data still fails the strict quality gate; no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use this gate on new quality replay outputs before retraining.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 02:01:46 +09:00 - Loop 29
+
+- Part: training input quality gate
+- Goal: make regression retraining fail loudly if training-time status/nonfinite/outlier filtering removes more rows than allowed.
+- Hypothesis: dataset-level gates are necessary but training still needs its own filter breakdown because derived repairs, finite checks, duplicate handling, and outlier removal happen inside `train_ipmsm_lightgbm.py`.
+- Actions: added `TrainingQualityReport`, printed `training_filter_rows`, persisted `training_quality` metadata, and added `--max-invalid-training-rows` plus `--max-removed-output-outlier-rows`; added tests.
+- Candidates: rely only on pre-training dataset quality versus enforce both pre-training and training-time gates; chose both because the training CLI performs additional transformations before model fitting.
+- Metrics: training CLI tests ran 15 tests and passed; full unittest discovery ran 98 tests and passed; py_compile, help probe, and scoped `git diff --check` passed.
+- Result: retraining pipelines can now require zero unexpected training-row filtering before model fitting and R2 verification.
+- Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; local runtime still lacks pandas/sklearn/lightgbm and GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use these training gates in the ML environment after dataset quality gate passes.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

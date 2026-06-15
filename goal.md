@@ -75,7 +75,7 @@
 - Existing LightGBM artifact is below target: test split has 8/8 targets below `R^2 >= 0.95`, min R2 0.7105, avg R2 0.8116.
 - Existing simulation result CSVs contain 13,748 rows with 13,550 required-output-complete rows, 198 failed/missing-output rows, and 0 duplicate case IDs; strict training-promotion gate fails until failed/missing rows are excluded or replaced.
 - Future failed rows now preserve missing required output names, validation, analysis flags, and setup metadata for faster diagnosis.
-- Deterministic LightGBM retraining is now available as `train_ipmsm_lightgbm.py`; local runtime still lacks pandas, scikit-learn, and LightGBM.
+- Deterministic LightGBM retraining is now available as `train_ipmsm_lightgbm.py` with input quality gates; local runtime still lacks pandas, scikit-learn, and LightGBM.
 - Existing result geometries can now be replayed as fixed AEDT case rows; a geometry-spread 200-row mesh/time replay plan is available under `simul_log_smoke/`.
 - Quality comparison now preserves replay source identity so mesh/time deltas are compared against the matching source geometry baseline.
 - Future result rows and retraining now use geometry inputs consistent with AEDT design expressions; existing CSVs can recover `input_stator_teeth_width_ratio` and repair 13,748 stale rotor/shaft radius rows.

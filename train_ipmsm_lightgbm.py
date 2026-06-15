@@ -137,6 +137,56 @@ class PreparedData:
     output_name_map: dict[str, str]
     removed_output_outliers: int
     repaired_derived_inputs: dict[str, int]
+    quality_report: "TrainingQualityReport"
+
+
+@dataclass(frozen=True)
+class TrainingQualityReport:
+    raw_rows: int
+    rows_after_dedup: int
+    dropped_duplicate_case_id_rows: int
+    status_rejected_rows: int
+    nonfinite_input_rows: int
+    nonfinite_output_rows: int
+    valid_rows_before_outliers: int
+    removed_output_outliers: int
+    valid_rows: int
+
+    @property
+    def invalid_training_rows(self) -> int:
+        return self.rows_after_dedup - self.valid_rows_before_outliers
+
+    def failure_reasons(
+        self,
+        *,
+        max_invalid_training_rows: int | None = None,
+        max_removed_output_outlier_rows: int | None = None,
+    ) -> list[str]:
+        failures: list[str] = []
+        if max_invalid_training_rows is not None and self.invalid_training_rows > max_invalid_training_rows:
+            failures.append(f"invalid_training_rows {self.invalid_training_rows} > {max_invalid_training_rows}")
+        if (
+            max_removed_output_outlier_rows is not None
+            and self.removed_output_outliers > max_removed_output_outlier_rows
+        ):
+            failures.append(
+                f"removed_output_outlier_rows {self.removed_output_outliers} > {max_removed_output_outlier_rows}"
+            )
+        return failures
+
+    def as_metadata(self) -> dict[str, int]:
+        return {
+            "raw_rows": self.raw_rows,
+            "rows_after_dedup": self.rows_after_dedup,
+            "dropped_duplicate_case_id_rows": self.dropped_duplicate_case_id_rows,
+            "status_rejected_rows": self.status_rejected_rows,
+            "nonfinite_input_rows": self.nonfinite_input_rows,
+            "nonfinite_output_rows": self.nonfinite_output_rows,
+            "invalid_training_rows": self.invalid_training_rows,
+            "valid_rows_before_outliers": self.valid_rows_before_outliers,
+            "removed_output_outliers": self.removed_output_outliers,
+            "valid_rows": self.valid_rows,
+        }
 
 
 @dataclass(frozen=True)
@@ -340,9 +390,11 @@ def prepare_training_data(
 
     raw_df = deps.pd.concat(frames, ignore_index=True, sort=False)
     before_dedup = len(raw_df)
+    dropped_duplicate_case_id_rows = 0
     if drop_duplicate_case_id and "case_id" in raw_df.columns:
         raw_df = raw_df.drop_duplicates(subset="case_id", keep="last").reset_index(drop=True)
-        print(f"dropped_duplicate_case_id_rows={before_dedup - len(raw_df)}")
+        dropped_duplicate_case_id_rows = before_dedup - len(raw_df)
+        print(f"dropped_duplicate_case_id_rows={dropped_duplicate_case_id_rows}")
     print(f"united_raw_rows={len(raw_df)} columns={len(raw_df.columns)}")
 
     output_columns, output_name_map = resolve_output_columns(raw_df.columns)
@@ -366,7 +418,12 @@ def prepare_training_data(
     status_ok = df["status"].astype(str).str.lower().eq("ok") if "status" in df.columns else deps.pd.Series(True, index=df.index)
     finite_inputs = deps.np.isfinite(df[list(input_columns)]).all(axis=1)
     finite_outputs = deps.np.isfinite(df[list(output_columns)]).all(axis=1)
-    valid_df = df.loc[status_ok & finite_inputs & finite_outputs].copy()
+    valid_mask = status_ok & finite_inputs & finite_outputs
+    status_rejected_rows = int((~status_ok).sum())
+    nonfinite_input_rows = int((~finite_inputs).sum())
+    nonfinite_output_rows = int((~finite_outputs).sum())
+    valid_rows_before_outliers = int(valid_mask.sum())
+    valid_df = df.loc[valid_mask].copy()
 
     removed_output_outliers = 0
     if remove_output_outliers:
@@ -385,6 +442,21 @@ def prepare_training_data(
 
     for requested_col, actual_col in output_name_map.items():
         print(f"output_column requested={requested_col} actual={actual_col}")
+    quality_report = TrainingQualityReport(
+        raw_rows=before_dedup,
+        rows_after_dedup=len(raw_df),
+        dropped_duplicate_case_id_rows=dropped_duplicate_case_id_rows,
+        status_rejected_rows=status_rejected_rows,
+        nonfinite_input_rows=nonfinite_input_rows,
+        nonfinite_output_rows=nonfinite_output_rows,
+        valid_rows_before_outliers=valid_rows_before_outliers,
+        removed_output_outliers=removed_output_outliers,
+        valid_rows=len(valid_df),
+    )
+    print(
+        "training_filter_rows "
+        + " ".join(f"{key}={value}" for key, value in quality_report.as_metadata().items())
+    )
     print(f"valid_rows={len(valid_df)} raw_rows={len(raw_df)}")
     return PreparedData(
         raw_df=raw_df,
@@ -394,6 +466,7 @@ def prepare_training_data(
         output_name_map=output_name_map,
         removed_output_outliers=removed_output_outliers,
         repaired_derived_inputs=repaired_derived_inputs,
+        quality_report=quality_report,
     )
 
 
@@ -559,6 +632,10 @@ def validate_training_options(args: argparse.Namespace) -> None:
         raise ValueError("--early-stopping-rounds must be at least 1")
     if args.outlier_iqr_weight < 0.0:
         raise ValueError("--outlier-iqr-weight must be zero or greater")
+    if args.max_invalid_training_rows is not None and args.max_invalid_training_rows < 0:
+        raise ValueError("--max-invalid-training-rows must be zero or greater")
+    if args.max_removed_output_outlier_rows is not None and args.max_removed_output_outlier_rows < 0:
+        raise ValueError("--max-removed-output-outlier-rows must be zero or greater")
 
 
 def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
@@ -573,6 +650,12 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
     )
     if len(prepared.valid_df) < args.min_valid_rows:
         raise RuntimeError(f"valid data is too small for robust training: {len(prepared.valid_df)} rows")
+    quality_failures = prepared.quality_report.failure_reasons(
+        max_invalid_training_rows=args.max_invalid_training_rows,
+        max_removed_output_outlier_rows=args.max_removed_output_outlier_rows,
+    )
+    if quality_failures:
+        raise RuntimeError("training data quality gate failed: " + "; ".join(quality_failures))
 
     split = split_training_data(deps, prepared, args.test_size, args.val_size, args.seed)
     models: dict[str, Any] = {}
@@ -622,6 +705,7 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
         "valid_rows": int(len(prepared.valid_df)),
         "removed_output_outliers": int(prepared.removed_output_outliers),
         "repaired_derived_inputs": prepared.repaired_derived_inputs,
+        "training_quality": prepared.quality_report.as_metadata(),
         "enable_tuning": bool(args.enable_tuning),
         "n_tuning_trials": int(args.n_tuning_trials),
         "seed": int(args.seed),
@@ -661,6 +745,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--r2-threshold", type=float, default=R2_THRESHOLD)
     parser.add_argument("--verification-output", type=Path, help="Optional compact R2 verification CSV to write.")
     parser.add_argument("--fail-on-threshold", action="store_true", help="Return exit code 1 if any test R2 misses the threshold.")
+    parser.add_argument("--max-invalid-training-rows", type=int, help="Fail if status/nonfinite filtering removes more rows than this.")
+    parser.add_argument(
+        "--max-removed-output-outlier-rows",
+        type=int,
+        help="Fail if output outlier filtering removes more rows than this.",
+    )
     parser.add_argument("--keep-duplicate-case-id", dest="drop_duplicate_case_id", action="store_false")
     parser.set_defaults(drop_duplicate_case_id=True)
 

@@ -99,10 +99,39 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
         self.assertIn(params["a"], search_space["a"])
         self.assertIn(params["b"], search_space["b"])
 
+    def test_training_quality_report_exposes_filter_failures(self) -> None:
+        report = trainer.TrainingQualityReport(
+            raw_rows=10,
+            rows_after_dedup=9,
+            dropped_duplicate_case_id_rows=1,
+            status_rejected_rows=2,
+            nonfinite_input_rows=1,
+            nonfinite_output_rows=1,
+            valid_rows_before_outliers=6,
+            removed_output_outliers=2,
+            valid_rows=4,
+        )
+
+        self.assertEqual(report.invalid_training_rows, 3)
+        self.assertEqual(
+            report.failure_reasons(max_invalid_training_rows=0, max_removed_output_outlier_rows=1),
+            ["invalid_training_rows 3 > 0", "removed_output_outlier_rows 2 > 1"],
+        )
+        self.assertEqual(report.as_metadata()["valid_rows"], 4)
+
     def test_validate_training_options_rejects_bad_split_sum(self) -> None:
         args = trainer.build_parser().parse_args(["--test-size", "0.8", "--val-size", "0.3"])
 
         with self.assertRaisesRegex(ValueError, "must be less than 1"):
+            trainer.validate_training_options(args)
+
+    def test_validate_training_options_rejects_negative_quality_limits(self) -> None:
+        args = trainer.build_parser().parse_args(["--max-invalid-training-rows", "-1"])
+        with self.assertRaisesRegex(ValueError, "--max-invalid-training-rows"):
+            trainer.validate_training_options(args)
+
+        args = trainer.build_parser().parse_args(["--max-removed-output-outlier-rows", "-1"])
+        with self.assertRaisesRegex(ValueError, "--max-removed-output-outlier-rows"):
             trainer.validate_training_options(args)
 
     def test_validate_training_options_accepts_defaults(self) -> None:

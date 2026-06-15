@@ -280,3 +280,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `--fail-on-quality` enforces configurable complete-row, missing-output, duplicate-ID, and failed-row thresholds.
 - Evidence: tests cover gate failures and passes; strict gate on existing result CSVs correctly failed with 198 failed/missing rows and 0 duplicates.
 - Remaining risk: strict gating must be paired with either filtering or replacement of failed rows before retraining; it does not itself improve simulation outputs.
+
+## 2026-06-16 02:01:46 +09:00 - Insight 29
+
+- Source loop: `note.md` Loop 29.
+- Improvement: model retraining can fail on unexpected training-time row filtering.
+- Before: `train_ipmsm_lightgbm.py` filtered status, nonfinite values, duplicates, and output outliers but only reported final valid row counts.
+- After: `TrainingQualityReport` records filter breakdown, stores it in metadata, and exposes strict CLI gates for invalid training rows and removed outliers.
+- Evidence: tests cover failure reasons and negative option validation; full unittest discovery ran 98 tests and passed; help output lists the new gate options.
+- Remaining risk: actual retraining still requires the ML environment dependencies and passing simulation-result quality evidence.
