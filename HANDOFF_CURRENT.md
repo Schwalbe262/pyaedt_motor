@@ -43,7 +43,7 @@
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
 - 2026-06-16: scheduler job 57 fixed-geometry 4-profile analyze completed 4/4 `ok` on `cpu2`/`n111`; generated filtered comparison reports under `simul_log_smoke/fixed4_*`.
-- 2026-06-16: job 58 fixed-geometry next chunk is running on Slurm job 680506; result CSV currently has 1/8 `ok` row as of 08:29 KST; filtered worker log shows a later solve in progress, no stderr errors.
+- 2026-06-16: job 58 fixed-geometry next chunk is running on Slurm job 680506; result CSV currently has 1/8 `ok` row as of 08:30 KST; worker log shows `simulation16` solving and a non-fatal PyAEDT cleanup/session TypeError after the completed first row.
 - 2026-06-16: submitted setup-only dynamic packed probe; scheduler created child job 59 with `simulation_start=1`, `simulation_count=1`, queued on `cpu2`/`n112` as of 08:23 KST.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
