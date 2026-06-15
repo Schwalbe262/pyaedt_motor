@@ -292,6 +292,7 @@ def selected_submit_job_fields(job: dict[str, Any]) -> dict[str, Any]:
         "status",
         "job_mode",
         "account_name",
+        "slurm_job_id",
         "repo_url",
         "git_ref",
         "entrypoint",
@@ -301,6 +302,8 @@ def selected_submit_job_fields(job: dict[str, Any]) -> dict[str, Any]:
         "stdout_path",
         "stderr_path",
         "failure_message",
+        "simulation_start",
+        "simulation_count",
         "created_at",
         "submitted_at",
         "updated_at",
@@ -345,6 +348,16 @@ def find_submitted_jobs(
         ):
             return [job]
     return candidates[:1]
+
+
+def submitted_simulation_count(jobs: list[dict[str, Any]]) -> int:
+    total = 0
+    for job in jobs:
+        try:
+            total += int(job.get("simulation_count") or job.get("simulations_per_job") or 0)
+        except Exception:
+            continue
+    return total
 
 
 def write_manifest(path: Path, output: dict[str, Any]) -> None:
@@ -477,6 +490,14 @@ def main(argv: list[str] | None = None) -> int:
                 output["submitted_job"] = selected_submit_job_fields(submitted_jobs[0])
                 if len(submitted_jobs) > 1 or args.job_mode == "dynamic_packed_srun":
                     output["submitted_jobs"] = [selected_submit_job_fields(job) for job in submitted_jobs]
+                if args.job_mode == "dynamic_packed_srun":
+                    count = submitted_simulation_count(submitted_jobs)
+                    output["submitted_simulation_count"] = count
+                    if count < args.total_simulations:
+                        output["submitted_simulation_count_warning"] = (
+                            f"scheduler created child jobs for {count}/{args.total_simulations} requested simulations; "
+                            "submit another dynamic request after capacity frees if more rows are needed"
+                        )
         except Exception as exc:
             output["submitted_job_lookup_error"] = str(exc)
     if args.write_manifest:

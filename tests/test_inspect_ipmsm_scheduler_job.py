@@ -13,6 +13,8 @@ class InspectIpmsmSchedulerJobTests(unittest.TestCase):
             {
                 "id": 7,
                 "status": "completed",
+                "slurm_job_id": "1234",
+                "account_name": "account_a",
                 "entrypoint": "subprocess_run.py",
                 "env_setup": "large setup script",
                 "stdout_path": "out.log",
@@ -22,6 +24,8 @@ class InspectIpmsmSchedulerJobTests(unittest.TestCase):
 
         self.assertEqual(selected["id"], 7)
         self.assertEqual(selected["status"], "completed")
+        self.assertEqual(selected["slurm_job_id"], "1234")
+        self.assertEqual(selected["account_name"], "account_a")
         self.assertNotIn("env_setup", selected)
 
     def test_unwrap_remote_file_response_accepts_common_shapes(self) -> None:
@@ -64,6 +68,11 @@ class InspectIpmsmSchedulerJobTests(unittest.TestCase):
             inspector.remote_file_query_path(job, "simul_log/process.log", "remote_path"),
             "simul_log/process.log",
         )
+
+    def test_parse_args_defaults_log_base_to_remote_job_dir(self) -> None:
+        args = inspector.parse_args(["12", "--stdout"])
+
+        self.assertEqual(args.base, "remote_job_dir")
 
     def test_inspect_job_fetches_only_requested_logs(self) -> None:
         args = Namespace(

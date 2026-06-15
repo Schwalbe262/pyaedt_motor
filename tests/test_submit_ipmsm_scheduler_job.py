@@ -606,6 +606,57 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
 
         self.assertEqual([job["id"] for job in matches], [2, 3])
 
+    def test_submitted_simulation_count_sums_child_jobs(self) -> None:
+        jobs = [
+            {"simulation_count": "2"},
+            {"simulations_per_job": 3},
+            {"simulation_count": "bad"},
+        ]
+
+        self.assertEqual(scheduler_job.submitted_simulation_count(jobs), 5)
+
+    def test_main_warns_when_dynamic_children_cover_partial_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.csv"
+            with cases_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerows([{"case_id": "case1"}, {"case_id": "case2"}])
+            submitted = {
+                "id": 19,
+                "job_name": "ipmsm-dynamic-1-1",
+                "job_mode": "packed_srun",
+                "entrypoint": "subprocess_run.py",
+                "remote_path": "/remote/project",
+                "simulation_count": 1,
+            }
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "get_scheduler_jobs", side_effect=[[], [submitted]]):
+                with mock.patch.object(scheduler_job, "post_scheduler_job", return_value={"response_format": "html"}):
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = scheduler_job.main(
+                            [
+                                "--cases",
+                                str(cases_path),
+                                "--remote-cases",
+                                "remote/cases.csv",
+                                "--job-mode",
+                                "dynamic_packed_srun",
+                                "--remote-path",
+                                "/remote/project",
+                                "--job-name",
+                                "ipmsm-dynamic",
+                                "--total-simulations",
+                                "2",
+                                "--submit",
+                            ]
+                        )
+
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output["submitted_simulation_count"], 1)
+        self.assertIn("1/2 requested", output["submitted_simulation_count_warning"])
+
 
 if __name__ == "__main__":
     unittest.main()

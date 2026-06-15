@@ -44,15 +44,20 @@ def selected_job_fields(job: dict[str, Any]) -> dict[str, Any]:
         "job_name",
         "status",
         "job_mode",
+        "account_name",
         "repo_url",
         "git_ref",
         "entrypoint",
         "arguments",
+        "partition",
+        "node_name",
+        "slurm_job_id",
         "remote_path",
         "remote_job_dir",
         "stdout_path",
         "stderr_path",
         "failure_message",
+        "simulation_start",
         "simulation_count",
         "created_at",
         "submitted_at",
@@ -152,7 +157,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--scheduler-url", default=DEFAULT_SCHEDULER_URL)
     parser.add_argument("--stdout", action="store_true", help="Fetch and filter stdout_path.")
     parser.add_argument("--stderr", action="store_true", help="Fetch and filter stderr_path.")
-    parser.add_argument("--base", default="remote_path", help="remote-file base parameter.")
+    parser.add_argument("--base", default="remote_job_dir", help="remote-file base parameter for log fetches.")
     parser.add_argument("--tail-lines", type=int, default=20)
     parser.add_argument("--max-interesting", type=int, default=20)
     parser.add_argument("--timeout", type=float, default=10.0)

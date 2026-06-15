@@ -589,3 +589,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no job 59 execution evidence yet; job 58 is still incomplete.
 - Next action: poll jobs 58 and 59; if job 59 starts, fetch stdout/stderr/result CSV and verify the selected case row matches `SIMULATION_ID=1`.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 08:29:25 +09:00 - Loop 44
+
+- Part: filtered scheduler evidence tooling
+- Goal: improve scheduler monitoring while fixed replay jobs continue, without dumping large logs or CSVs.
+- Hypothesis: the stored Slurm stdout/stderr paths are relative to `remote_job_dir`, and dynamic packed submissions may cover fewer simulations than requested when scheduler capacity only plans a subset of child jobs.
+- Actions: updated `inspect_ipmsm_scheduler_job.py` so log fetches default to `remote_job_dir` and include key compact job fields; updated `submit_ipmsm_scheduler_job.py` to include `slurm_job_id`, `simulation_start`, and `simulation_count` in submitted job summaries and warn when dynamic children cover fewer simulations than requested.
+- Candidates: manually pass `--base remote_job_dir` forever versus make the inspector default match log paths; silently accept partial dynamic children versus emit a warning. Chose tool fixes.
+- Metrics: `python -m unittest tests.test_submit_ipmsm_scheduler_job tests.test_inspect_ipmsm_scheduler_job` ran 39 tests and passed; full `python -m unittest discover -s tests` ran 145 tests and passed; job 58 remained running with 1/8 `ok` rows and no stderr interesting lines; job 59 remained queued with no Slurm id.
+- Result: scheduler status/log evidence is easier to collect in filtered form, and future dynamic submissions will show partial child coverage explicitly.
+- Failure reason: job 58 is still incomplete and job 59 has not started, so multi-geometry quality conclusions and R2 improvement remain unproven.
+- Next action: commit/push the monitoring helper checkpoint, then continue polling job 58 until enough fixed-geometry rows are available for quality analysis.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
