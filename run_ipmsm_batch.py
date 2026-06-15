@@ -1543,6 +1543,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         try:
             from ansys.aedt.core import settings
 
+            settings.enable_error_handler = False
             settings.skip_license_check = True
             settings.wait_for_license = False
         except Exception:

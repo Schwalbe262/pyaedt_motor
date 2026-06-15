@@ -84,18 +84,18 @@
 - Pre-AEDT import/setup failures now still produce structured failed result rows instead of losing the case.
 - Direct, subprocess, Slurm shell, and controller entrypoints now enforce the 200-case planning guard by default.
 - Subprocess splitting now rejects duplicate explicit `case_id`s before worker CSV generation.
-- Scheduler endpoint is verified at `http://localhost:8000`; dry-run-first scheduler job preparation is available for validated setup-only replay plans through Git or scheduler `remote_path` modes, with optional small case-CSV bootstrap.
-- Scheduler job 13 showed `python_git` left the working tree on `main` and the wrapper failed before AEDT; packed diagnostics against the inferred remote repo reached Python execution.
-- Scheduler job 29 proved `env_profile=pyaedt2026v1` imports `ansys.aedt.core` and `pyaedt` under account `r1jae262`; job 35 reached `run_ipmsm_batch.py` through a packed repo wrapper and wrote structured setup-only failed rows.
-- Current AEDT blocker is desktop startup: `pyDesktop` fails before project creation with no usable desktop instance, even after using the `pyaedt2026v1` environment and local `pyaedt_module` copy.
-- No successful AEDT setup, Ansys solve, or R2-improving retraining evidence exists yet.
+- Scheduler endpoint is verified at `http://localhost:8000`; dry-run-first scheduler preparation now supports the updated `/tasks` API for existing remote working trees with exact `account_name`, `env_profile`, and optional small case-CSV bootstrap.
+- Scheduler `python_git` remains less reliable for this project path, but `/tasks` against `/home1/r1jae262/ipmsm_pyaedt_motor_work` works under account `r1jae262`.
+- `env_profile=pyaedt2026v1` must be combined with `module load ansys-electronics/v252`; task 18 setup-only completed 4/4 `ok` for baseline, mesh_fine, time_fine, and mesh_time_fine profiles.
+- Task 22 completed the first full analyze solve: baseline 1/1 `ok`, elapsed 936.238s, torque_last_avg 11.0863 Nm, efficiency_last 74.8655%, back-EMF phase-A THD 13.1410%, and no missing required outputs.
+- No 4-profile analyze comparison, 200-case quality replay, or R2-improving retraining evidence exists yet.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
-- Next focus is AEDT setup-only validation, targeted solve selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
+- Next focus is 4-profile analyze validation, targeted 200-case quality replay selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
 
 ## Later Milestones
 
 - Run the selected fixed-geometry replay plan to compare mesh/time-step quality on representative existing designs.
 - Use filtered regression verification after every retraining run and promote only evidence-backed simulation changes.
 - Prefer `train_ipmsm_lightgbm.py` over ad hoc notebook reruns for regression retraining and R2 gate output.
-- Use the verified scheduler endpoint for setup-only replay submission after fixing the `python_git` job-dir issue or confirming a scheduler `remote_path`; bootstrap only small validated case CSVs.
+- Use the verified scheduler `/tasks` endpoint for remote-cwd setup/analyze/replay submissions; bootstrap only small validated case CSVs and keep large result/log evidence filtered.
 - Build a repeatable before/after workflow that links simulation setup changes to regression `R^2` changes.

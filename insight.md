@@ -406,3 +406,30 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `run_ipmsm_batch.py` converts that startup failure into a clear RuntimeError before project creation.
 - Evidence: tests cover the clearer failed row, and scheduler jobs 38/43 wrote the clearer error after reaching `run_ipmsm_batch.py`.
 - Remaining risk: this improves diagnosis but does not fix AEDT desktop startup, solve quality, or R2 metrics.
+
+## 2026-06-16 04:58:51 +09:00 - Insight 43
+
+- Source loop: `note.md` Loop 39.
+- Improvement: existing scheduler-visible project trees should use the updated `/tasks` API with exact `account_name` instead of the older Git job path.
+- Before: `python_git` jobs could land in the wrong working tree or fail before entering the cloned repo, and packed wrappers carried extra setup complexity.
+- After: `submit_ipmsm_scheduler_task.py` builds dry-run-first `/tasks` payloads with `remote_cwd`, `account_name`, `env_profile`, resource fields, compact stdout, and submitted-task lookup.
+- Evidence: scheduler task 18 completed setup-only 4/4 `ok`, and task 22 completed analyze 1/1 `ok` under account `r1jae262` from `/home1/r1jae262/ipmsm_pyaedt_motor_work`; tests cover payload fields, analyze confirmation, case bootstrap, env setup files, and lookup.
+- Remaining risk: `/tasks` proves submission and execution, not mesh/time quality convergence or the final R2 target.
+
+## 2026-06-16 04:58:51 +09:00 - Insight 44
+
+- Source loop: `note.md` Loop 39.
+- Improvement: `pyaedt2026v1` must be paired with `module load ansys-electronics/v252` for AEDT startup on the scheduler.
+- Before: the conda env imported `ansys.aedt.core`/`pyaedt`, but Desktop startup still failed because `ansysedt` was not on the runtime path.
+- After: task env setup loads `ansys-electronics/v252`, and probes show `ansysedt` under `/opt/ohpc/pub/Electronics/v252/AnsysEM/ansysedt`.
+- Evidence: task 18 setup-only and task 22 analyze both completed successfully only after the module load was added.
+- Remaining risk: module availability can vary by cluster/account; future tasks should keep env probes or at least record module/account evidence.
+
+## 2026-06-16 04:58:51 +09:00 - Insight 45
+
+- Source loop: `note.md` Loop 39.
+- Improvement: disable PyAEDT's error handler before `pyDesktop` during batch runs to preserve actionable startup exceptions.
+- Before: the PyAEDT handler could collapse Desktop startup failures into ambiguous falsey values or secondary `NoneType` errors.
+- After: `settings.enable_error_handler = False` is set with the existing license settings before Desktop startup, and the unit test verifies the setting is applied.
+- Evidence: disabling the handler exposed the real AEDT installation/module issue, which led to the successful `ansys-electronics/v252` `/tasks` run.
+- Remaining risk: clearer exceptions do not replace runtime monitoring; failed rows still need filtered log/result evidence.

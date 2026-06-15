@@ -297,6 +297,8 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
 
     def test_run_one_case_writes_clear_error_when_desktop_startup_returns_none(self) -> None:
         core_module = types.ModuleType("pyaedt_module.core")
+        ansys_core_module = types.ModuleType("ansys.aedt.core")
+        settings = types.SimpleNamespace(enable_error_handler=True, skip_license_check=False, wait_for_license=True)
 
         def fail_desktop_startup(**_kwargs: object) -> object:
             raise AttributeError("'NoneType' object has no attribute 'EnableAutoSave'")
@@ -304,6 +306,7 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
         core_module.pyDesktop = fail_desktop_startup
         package_module = types.ModuleType("pyaedt_module")
         package_module.core = core_module
+        ansys_core_module.settings = settings
 
         with tempfile.TemporaryDirectory() as tmp:
             result_csv = Path(tmp) / "results.csv"
@@ -318,13 +321,23 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
                 cores=1,
             )
 
-            with mock.patch.dict(sys.modules, {"pyaedt_module": package_module, "pyaedt_module.core": core_module}):
+            with mock.patch.dict(
+                sys.modules,
+                {
+                    "pyaedt_module": package_module,
+                    "pyaedt_module.core": core_module,
+                    "ansys.aedt.core": ansys_core_module,
+                },
+            ):
                 with mock.patch("logging.exception"):
                     row = run_ipmsm_batch.run_one_case(({"case_id": "desktop_none"}, options.__dict__))
 
         self.assertEqual(row["case_id"], "desktop_none")
         self.assertEqual(row["status"], "failed")
         self.assertIn("AEDT desktop startup failed before project creation", row["error"])
+        self.assertFalse(settings.enable_error_handler)
+        self.assertTrue(settings.skip_license_check)
+        self.assertFalse(settings.wait_for_license)
 
 
 if __name__ == "__main__":

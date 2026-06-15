@@ -524,3 +524,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no successful AEDT setup, solve, or regression retraining was run; `pyDesktop` still fails before project creation in `pyaedt2026v1`; GitHub push remains blocked by HTTP 403.
 - Next action: commit local helper/error-reporting fixes, retry push, then investigate AEDT desktop startup configuration or scheduler node/license requirements before running the 200-case replay.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage --label "loop38 scheduler pyaedt profile setup"` could not find a local Codex SQLite database.
+
+## 2026-06-16 04:58:51 +09:00 - Loop 39
+
+- Part: updated scheduler tasks and AEDT module validation
+- Goal: use the updated `Schwalbe262/slurm_scheduler` task API to submit IPMSM work through a scheduler-visible remote project path.
+- Hypothesis: the new `/tasks` endpoint with exact `account_name` and `remote_cwd` avoids the earlier `python_git` job-dir issue, and AEDT startup requires loading the Ansys Electronics module in addition to `pyaedt2026v1`.
+- Actions: inspected the updated scheduler API shape; added `submit_ipmsm_scheduler_task.py` and tests; disabled the PyAEDT error handler before `pyDesktop` so startup failures expose the real cause; submitted `/tasks` setup/analyze runs with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252`.
+- Candidates: continue packed `/jobs` wrappers versus switch to `/tasks`; use env profile alone versus explicit Ansys module load; submit 200 cases immediately versus validate setup and one solve first. Chose `/tasks`, explicit module load, and small validation runs.
+- Metrics: scheduler task 18 setup-only completed 4/4 `ok`; task 22 analyze completed 1/1 `ok` in 936.238s with torque_last_avg 11.086342 Nm, efficiency_last 74.865470%, back-EMF phase-A THD 13.140956%, and no missing required outputs; full unittest discovery ran 134 tests and passed.
+- Result: AEDT setup and one full solve now work through the updated scheduler task path; the next evidence gap is 4-profile analyze comparison before scaling toward the approved 200 simulations.
+- Failure reason: no 4-profile analyze comparison, 200-case quality replay, or R2-improving retraining has run yet.
+- Next action: commit and push the `/tasks` helper checkpoint, then submit and monitor a 4-case analyze task through the same scheduler path.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage --label "loop39 scheduler tasks module solve"` could not find a local Codex SQLite database.
