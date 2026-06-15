@@ -277,3 +277,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup or solve was run locally because PyAEDT/Ansys packages are unavailable; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then run setup-only validation in the AEDT environment once available.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:14:50 +09:00 - Loop 20
+
+- Part: pre-AEDT case input validation
+- Goal: reject bad explicit case rows before direct/subprocess launchers start AEDT workers or write split CSVs.
+- Hypothesis: count/duplicate guards alone can still let invalid mesh or fixed-geometry inputs reach worker execution, wasting setup time and producing avoidable failed rows.
+- Actions: added `run_ipmsm_batch.validate_case_inputs`; wired it into direct `validate_case_plan` and subprocess explicit-plan validation; added focused tests for invalid mesh and fixed geometry.
+- Candidates: leave validation inside `run_one_case` versus preflight launcher inputs; chose preflight because it fails before fan-out and does not require PyAEDT imports.
+- Metrics: targeted runner/subprocess tests ran 26 tests and passed; existing 200-row replay CSV passed `validate_case_plan`; full unittest discovery ran 69 tests and passed; py_compile and scoped `git diff --check` passed.
+- Result: invalid mesh and fixed-geometry CSV rows now fail before AEDT worker launch.
+- Failure reason: no AEDT setup or solve was run locally because PyAEDT/Ansys packages are unavailable; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then continue toward setup-only validation in the AEDT environment.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

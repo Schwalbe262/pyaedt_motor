@@ -146,6 +146,25 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
 
         run_ipmsm_batch.validate_case_plan(cases, max_cases=2, allow_over_budget=True)
 
+    def test_validate_case_plan_rejects_bad_mesh_before_aedt(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "case plan row bad_mesh has invalid inputs"):
+            run_ipmsm_batch.validate_case_plan(
+                [{"case_id": "bad_mesh", "mesh_band_elements": "0"}],
+                max_cases=200,
+            )
+
+    def test_validate_case_plan_rejects_bad_fixed_geometry_before_aedt(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "case plan row bad_geometry has invalid inputs"):
+            run_ipmsm_batch.validate_case_plan(
+                [
+                    {
+                        **fixed_geometry_result_row(input_rotator_gap="90"),
+                        "case_id": "bad_geometry",
+                    }
+                ],
+                max_cases=200,
+            )
+
     def test_load_cases_normalizes_blank_explicit_case_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases_path = Path(tmp) / "cases.csv"

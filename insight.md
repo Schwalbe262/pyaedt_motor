@@ -199,3 +199,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `run_ipmsm_batch.py` validates topology, raw dimensions, ratios, and derived clearances/heights before worker execution.
 - Evidence: focused tests cover fractional slot count, rotor-radius failure, stator-gap overlap, magnet radial overlap, and magnet-height failure; the 200-row replay plan still validates.
 - Remaining risk: the checks mirror current formulas, but actual AEDT setup-only validation is still required to catch API/modeler-specific failures.
+
+## 2026-06-16 01:14:50 +09:00 - Insight 20
+
+- Source loop: `note.md` Loop 20.
+- Improvement: case CSV inputs are preflighted before direct or subprocess AEDT fan-out.
+- Before: invalid mesh or fixed-geometry fields were mostly caught inside worker execution, after launch/split overhead.
+- After: direct `validate_case_plan` and subprocess explicit-plan validation call shared spec/geometry input checks before workers start.
+- Evidence: focused tests cover invalid mesh and fixed geometry in direct/subprocess paths; the existing 200-row replay plan passes the stronger validation.
+- Remaining risk: setup-only validation in AEDT is still required for modeler/API failures that cannot be proven from CSV formulas.

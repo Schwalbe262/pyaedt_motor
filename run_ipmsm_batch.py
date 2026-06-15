@@ -636,6 +636,16 @@ def duplicate_case_ids(cases: list[dict[str, Any]]) -> list[str]:
     return duplicates
 
 
+def validate_case_inputs(cases: list[dict[str, Any]]) -> None:
+    for index, case in enumerate(cases, start=1):
+        case_id = str(case_value(case, "case_id", "id", default=f"case_{index:04d}"))
+        try:
+            build_spec(case)
+            extract_fixed_geometry(case)
+        except Exception as exc:
+            raise RuntimeError(f"case plan row {case_id} has invalid inputs: {exc}") from exc
+
+
 def validate_case_plan(cases: list[dict[str, Any]], max_cases: int, allow_over_budget: bool = False) -> None:
     if not cases:
         raise RuntimeError("No cases to run.")
@@ -650,6 +660,7 @@ def validate_case_plan(cases: list[dict[str, Any]], max_cases: int, allow_over_b
             f"case plan has {len(cases)} rows, exceeding --max-cases={max_cases}; "
             "pass --allow-over-budget only for an intentional approved run."
         )
+    validate_case_inputs(cases)
 
 
 def dataframe_first_row(df: Any) -> dict[str, Any]:

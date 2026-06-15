@@ -27,6 +27,12 @@ class SubprocessRunTests(unittest.TestCase):
 
         subprocess_run.validate_explicit_case_plan(rows, max_cases=2, allow_over_budget=True)
 
+    def test_validate_explicit_case_plan_rejects_bad_inputs_before_split(self) -> None:
+        rows = [{"case_id": "bad_mesh", "mesh_band_elements": "0"}]
+
+        with self.assertRaisesRegex(RuntimeError, "case plan row bad_mesh has invalid inputs"):
+            subprocess_run.validate_explicit_case_plan(rows, max_cases=200, allow_over_budget=False)
+
     def test_read_cases_normalizes_blank_explicit_case_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases_path = Path(tmp) / "cases.csv"

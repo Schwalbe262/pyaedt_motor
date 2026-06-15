@@ -115,6 +115,9 @@ def validate_explicit_case_plan(rows: list[dict[str, Any]], max_cases: int, allo
             f"explicit case plan has {len(rows)} rows, exceeding --max-cases={max_cases}; "
             "pass --allow-over-budget only for an intentional approved run."
         )
+    import run_ipmsm_batch
+
+    run_ipmsm_batch.validate_case_inputs(rows)
 
 
 def write_cases(path: Path, rows: list[dict[str, Any]]) -> None:
