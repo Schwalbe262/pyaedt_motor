@@ -81,10 +81,8 @@ def build_subprocess_arguments(args: argparse.Namespace) -> str:
 
 
 def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
-    if not args.repo_url:
-        raise RuntimeError("--repo-url is required when git remote origin is unavailable.")
     return {
-        "job_mode": "python_git",
+        "job_mode": args.job_mode,
         "repo_url": args.repo_url,
         "git_ref": args.git_ref,
         "entrypoint": args.entrypoint,
@@ -101,6 +99,7 @@ def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
         "node_name": args.node_name,
         "exclusive_node": args.exclusive_node,
         "job_name": args.job_name,
+        "remote_path": args.remote_path,
         "total_simulations": args.total_simulations,
         "simulations_per_job": args.simulations_per_job,
         "cpus_per_simulation": args.cpus_per_simulation,
@@ -114,6 +113,10 @@ def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def validate_scheduler_request(args: argparse.Namespace) -> None:
+    if args.job_mode == "python_git" and not args.repo_url:
+        raise RuntimeError("--repo-url is required for --job-mode python_git")
+    if args.job_mode == "packed_srun" and not args.remote_path:
+        raise RuntimeError("--remote-path is required for --job-mode packed_srun")
     if args.submit and args.analyze and not args.confirm_analyze:
         raise RuntimeError("scheduler solve submission requires --confirm-analyze with --analyze")
     if args.submit and not args.remote_cases and args.cases.is_absolute():
@@ -154,6 +157,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--remote-cases", default="", help="Case CSV path visible to the scheduler job; defaults to --cases.")
     parser.add_argument("--repo-url", default=default_repo_url())
     parser.add_argument("--git-ref", default=default_git_ref())
+    parser.add_argument("--job-mode", choices=("python_git", "packed_srun"), default="python_git")
+    parser.add_argument("--remote-path", default="", help="Scheduler-accessible working directory for packed_srun mode.")
     parser.add_argument("--entrypoint", default="subprocess_run.py")
     parser.add_argument("--job-name", default="ipmsm-replay-setup")
     parser.add_argument("--processes", type=int, default=1)
@@ -180,7 +185,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gpu-model", default="")
     parser.add_argument("--node-name", default="")
     parser.add_argument("--exclusive-node", action="store_true")
-    parser.add_argument("--total-simulations", type=int, default=1)
+    parser.add_argument("--total-simulations", type=int, default=0, help="Scheduler simulation count; 0 uses validated case rows.")
     parser.add_argument("--simulations-per-job", type=int, default=1)
     parser.add_argument("--cpus-per-simulation", type=int, default=4)
     parser.add_argument("--mem-per-simulation-gb", type=float, default=4.0)
@@ -199,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     validate_scheduler_request(args)
     rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
+    if args.total_simulations <= 0:
+        args.total_simulations = len(rows)
     payload = build_job_payload(args)
     output: dict[str, Any] = {
         "scheduler_url": args.scheduler_url,

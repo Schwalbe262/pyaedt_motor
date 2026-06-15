@@ -217,3 +217,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `submit_ipmsm_scheduler_job.py` validates case CSVs, emits the `/jobs` payload by default, and requires explicit `--submit` plus `--confirm-analyze` for solves.
 - Evidence: scheduler helper tests passed; dry-run against the 200-row replay plan reported `submit=false` and `validated_cases=200`.
 - Remaining risk: actual scheduler submission still needs a scheduler-accessible Git ref and remote case path, then AEDT setup-only validation.
+
+## 2026-06-16 01:27:18 +09:00 - Insight 22
+
+- Source loop: `note.md` Loop 22.
+- Improvement: scheduler dry-runs can target either pushed Git refs or existing scheduler remote working trees.
+- Before: helper payloads assumed `python_git`, which was blocked when GitHub push failed.
+- After: `submit_ipmsm_scheduler_job.py` also supports `packed_srun` with `remote_path` and uses the validated case count for scheduler `total_simulations`.
+- Evidence: read-only scheduler job metadata showed existing `packed_srun` jobs; tests cover mode validation; 200-row dry-runs produced `total_simulations=200`.
+- Remaining risk: actual `remote_path` and case CSV visibility must still be confirmed before any setup-only POST.

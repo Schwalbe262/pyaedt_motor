@@ -20,6 +20,8 @@ def scheduler_args(**overrides: object) -> Namespace:
         "remote_cases": "remote/cases.csv",
         "repo_url": "https://github.com/example/project.git",
         "git_ref": "main",
+        "job_mode": "python_git",
+        "remote_path": "",
         "entrypoint": "subprocess_run.py",
         "job_name": "ipmsm-replay-setup",
         "processes": 2,
@@ -46,7 +48,7 @@ def scheduler_args(**overrides: object) -> Namespace:
         "gpu_model": "",
         "node_name": "",
         "exclusive_node": False,
-        "total_simulations": 1,
+        "total_simulations": 0,
         "simulations_per_job": 1,
         "cpus_per_simulation": 4,
         "mem_per_simulation_gb": 4.0,
@@ -84,6 +86,16 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(payload["required_capability"], "ansys")
         self.assertIn("--setup-only", payload["arguments"])
 
+    def test_build_job_payload_supports_packed_srun_remote_path(self) -> None:
+        args = scheduler_args(job_mode="packed_srun", repo_url="", remote_path="/home/user/pyaedt_motor")
+
+        scheduler_job.validate_scheduler_request(args)
+        payload = scheduler_job.build_job_payload(args)
+
+        self.assertEqual(payload["job_mode"], "packed_srun")
+        self.assertEqual(payload["repo_url"], "")
+        self.assertEqual(payload["remote_path"], "/home/user/pyaedt_motor")
+
     def test_load_and_validate_cases_rejects_bad_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.csv"
@@ -102,6 +114,18 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
             scheduler_job.validate_scheduler_request(args)
 
         scheduler_job.validate_scheduler_request(scheduler_args(submit=True, analyze=True, confirm_analyze=True))
+
+    def test_validate_scheduler_request_requires_repo_for_python_git(self) -> None:
+        args = scheduler_args(repo_url="")
+
+        with self.assertRaisesRegex(RuntimeError, "--repo-url is required"):
+            scheduler_job.validate_scheduler_request(args)
+
+    def test_validate_scheduler_request_requires_remote_path_for_packed_srun(self) -> None:
+        args = scheduler_args(job_mode="packed_srun", repo_url="", remote_path="")
+
+        with self.assertRaisesRegex(RuntimeError, "--remote-path is required"):
+            scheduler_job.validate_scheduler_request(args)
 
     def test_validate_scheduler_request_requires_remote_cases_for_absolute_submit_path(self) -> None:
         args = scheduler_args(submit=True, cases=Path.cwd() / "cases.csv", remote_cases="")
@@ -138,6 +162,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         output = json.loads(stdout.getvalue())
         self.assertFalse(output["submit"])
         self.assertEqual(output["validated_cases"], 1)
+        self.assertEqual(output["payload"]["total_simulations"], 1)
 
 
 if __name__ == "__main__":

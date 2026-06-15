@@ -303,3 +303,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions, so the scheduler may not yet access the local branch commits.
 - Next action: commit locally, retry GitHub push, then run scheduler setup-only submission only after the branch/ref and remote case path are accessible.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:27:18 +09:00 - Loop 22
+
+- Part: scheduler remote-path mode
+- Goal: reduce dependence on GitHub push for scheduler setup-only runs when a scheduler-visible working tree already exists.
+- Hypothesis: existing scheduler jobs use `job_mode=packed_srun` with `remote_path`, so the helper should dry-run that payload shape as well as `python_git`.
+- Actions: inspected read-only scheduler job metadata; added `--job-mode python_git|packed_srun`, `--remote-path`, mode-specific validation, and default `total_simulations` from validated case rows; added focused tests.
+- Candidates: require pushed Git refs only versus support scheduler remote working directories; chose both modes because GitHub push is currently blocked and the scheduler already exposes `remote_path`.
+- Metrics: scheduler helper tests ran 9 tests and passed; dry-run against the 200-row replay CSV produced `total_simulations=200` for both `python_git` and `packed_srun`; full unittest discovery ran 78 tests and passed; py_compile and scoped `git diff --check` passed.
+- Result: setup-only replay payloads can now be prepared for a pushed Git ref or a scheduler-accessible remote working tree.
+- Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use `packed_srun` dry-run values with the actual remote project path before setup-only submission.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

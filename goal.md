@@ -84,7 +84,7 @@
 - Pre-AEDT import/setup failures now still produce structured failed result rows instead of losing the case.
 - Direct, subprocess, Slurm shell, and controller entrypoints now enforce the 200-case planning guard by default.
 - Subprocess splitting now rejects duplicate explicit `case_id`s before worker CSV generation.
-- Scheduler endpoint is verified at `http://localhost:8000`; dry-run-first scheduler job preparation is available for validated setup-only replay plans.
+- Scheduler endpoint is verified at `http://localhost:8000`; dry-run-first scheduler job preparation is available for validated setup-only replay plans through Git or scheduler `remote_path` modes.
 - Next focus is AEDT setup-only validation, targeted solve selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
 
 ## Later Milestones
@@ -92,5 +92,5 @@
 - Run the selected fixed-geometry replay plan to compare mesh/time-step quality on representative existing designs.
 - Use filtered regression verification after every retraining run and promote only evidence-backed simulation changes.
 - Prefer `train_ipmsm_lightgbm.py` over ad hoc notebook reruns for regression retraining and R2 gate output.
-- Use the verified scheduler endpoint for setup-only replay submission after the Git branch/ref and remote case paths are available to the scheduler.
+- Use the verified scheduler endpoint for setup-only replay submission after the Git branch/ref or scheduler `remote_path` and remote case paths are available.
 - Build a repeatable before/after workflow that links simulation setup changes to regression `R^2` changes.

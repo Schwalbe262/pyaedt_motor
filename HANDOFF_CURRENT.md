@@ -49,7 +49,7 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler endpoint is verified at `http://localhost:8000`; actual submission still needs a scheduler-accessible Git ref and remote case path.
+- Scheduler endpoint is verified at `http://localhost:8000`; actual submission needs either a pushed Git ref or a scheduler-accessible `remote_path` plus case CSV path.
 - GitHub push is blocked by remote HTTP 403 permissions for `Schwalbe262/pyaedt_motor.git`.
 
 ## Next steps
@@ -88,7 +88,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Added dry-run-first scheduler helper; direct/subprocess/scheduler paths preflight case inputs before AEDT execution.
+- Scheduler helper supports dry-run `python_git` and `packed_srun` payloads; all launch paths preflight case inputs before AEDT execution.
 
 ## Risks and gotchas
 
