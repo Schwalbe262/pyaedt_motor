@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 
 
@@ -113,16 +114,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--simulation-dir", default=os.environ.get("SIMULATION_DIR", "simulation"))
     parser.add_argument("--stagger-seconds", type=float, default=float(os.environ.get("STAGGER_SECONDS", "30")))
     parser.add_argument("--cases", default=os.environ.get("CASES_CSV", ""))
+    parser.add_argument(
+        "--allow-duplicate-cases",
+        action="store_true",
+        default=os.environ.get("ALLOW_DUPLICATE_CASES", "").lower() in {"1", "true", "yes"},
+        help="Allow submitting the same explicit case CSV in multiple jobs or repeated submit cycles.",
+    )
     parser.add_argument("--setup-only", action="store_true", default=os.environ.get("SETUP_ONLY", "") in {"1", "true", "TRUE"})
     parser.add_argument("--keep-projects", action="store_true", default=os.environ.get("KEEP_PROJECTS", "") in {"1", "true", "TRUE"})
     parser.add_argument("--periodic-boundary", action="store_true", default=os.environ.get("PERIODIC_BOUNDARY", "") in {"1", "true", "TRUE"})
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
+def validate_args(args: argparse.Namespace) -> None:
     if args.jobs < 1:
         raise RuntimeError("--jobs must be at least 1.")
+    if not args.cases or args.allow_duplicate_cases:
+        return
+    if args.jobs != 1:
+        raise RuntimeError(
+            "--cases would submit the same explicit case CSV to multiple Slurm jobs; "
+            "use --jobs 1 or pass --allow-duplicate-cases intentionally."
+        )
+    if args.repeat_every_hours > 0:
+        raise RuntimeError(
+            "--cases would repeat the same explicit case CSV in later submit cycles; "
+            "use --repeat-every-hours 0 or pass --allow-duplicate-cases intentionally."
+        )
+
+
+def main() -> int:
+    args = parse_args()
+    validate_args(args)
 
     cycle = 1
     while True:
@@ -151,4 +174,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)

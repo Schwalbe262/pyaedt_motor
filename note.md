@@ -186,3 +186,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no LightGBM retraining was run because local pandas/sklearn/lightgbm are unavailable.
 - Next action: retrain in the ML environment and compare R2 against the prior metrics gate.
 - Token usage: unavailable; live Codex DB path is still unknown.
+
+## 2026-06-16 00:38:18 +09:00 - Loop 13
+
+- Part: explicit-case Slurm submission guard
+- Goal: protect the bounded 200-case replay experiment from accidental duplicate Slurm submissions.
+- Hypothesis: passing `--cases` to `controller.py` with default multiple jobs or repeated cycles would submit the same explicit case CSV more than once, exceeding the intended solve budget and corrupting before/after comparisons.
+- Actions: added `controller.validate_args`; rejected explicit case CSVs when `--jobs != 1` or `--repeat-every-hours > 0` unless `--allow-duplicate-cases` is set; added focused controller tests; made CLI operator errors print compact `ERROR:` messages.
+- Candidates: silently change defaults versus fail fast; chose fail-fast because duplicate explicit solves are costly and should require an explicit operator opt-in.
+- Metrics: targeted controller tests ran 5 tests and passed; CLI guard returns exit code 2 with compact error; full unittest discovery ran 47 tests and passed; py_compile and `git diff --check` passed.
+- Result: Slurm case CSV execution now requires a non-duplicating plan by default.
+- Failure reason: GitHub push remains blocked by HTTP 403 credentials; no AEDT solve was run locally.
+- Next action: run full validation, commit locally, and retry push.
+- Token usage: unavailable; live Codex DB path is still unknown.

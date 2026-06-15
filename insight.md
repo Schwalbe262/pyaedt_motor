@@ -136,3 +136,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `train_ipmsm_lightgbm.py` derives `input_stator_teeth_width_ratio`, includes it in model inputs, and leaves unrecoverable new ratios optional for future complete datasets.
 - Evidence: 42 unit tests passed; existing CSV scan recovered the width ratio for 13,748/13,748 rows with the expected 0.4-0.8 range.
 - Remaining risk: the R2 impact is not measured until retraining runs in the ML environment.
+
+## 2026-06-16 00:38:18 +09:00 - Insight 13
+
+- Source loop: `note.md` Loop 13.
+- Improvement: explicit case CSV Slurm runs now fail fast when the same case plan would be submitted more than once.
+- Before: `controller.py --cases replay.csv` could use the default 10 jobs and 12-hour repeat loop, duplicating the bounded replay plan.
+- After: explicit case CSV mode requires `--jobs 1 --repeat-every-hours 0` unless `--allow-duplicate-cases` is intentionally passed.
+- Evidence: focused controller tests cover multi-job, repeat-cycle, random-generation, opt-in duplicate, and invalid job-count cases.
+- Remaining risk: scheduler/web integration still needs the actual endpoint and API validation.

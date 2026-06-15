@@ -79,6 +79,7 @@
 - Existing result geometries can now be replayed as fixed AEDT case rows; a geometry-spread 200-row mesh/time replay plan is available under `simul_log_smoke/`.
 - Quality comparison now preserves replay source identity so mesh/time deltas are compared against the matching source geometry baseline.
 - Future result rows and retraining now use geometry inputs consistent with AEDT design expressions; existing CSVs can recover `input_stator_teeth_width_ratio` and repair 13,748 stale rotor/shaft radius rows.
+- Slurm submission now guards explicit case CSVs from accidental multi-job or repeated-cycle duplication unless the operator opts in.
 - Next focus is AEDT setup-only validation, targeted solve selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
 
 ## Later Milestones

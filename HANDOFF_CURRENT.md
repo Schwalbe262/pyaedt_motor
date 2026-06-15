@@ -34,7 +34,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 42 tests and passed; py_compile and `git diff --check` passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 47 tests and passed; py_compile and `git diff --check` passed.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
@@ -53,7 +53,7 @@
 ## Next steps
 
 1. Review and commit or split the current docs/ops plus simulation-quality changes.
-2. Run `python run_ipmsm_batch.py --cases simul_log_smoke/replay_quality_cases_200.csv --setup-only --workers 1` where AEDT is available.
+2. Run `python run_ipmsm_batch.py --cases simul_log_smoke/replay_quality_cases_200.csv --setup-only --workers 1` where AEDT is available, or Slurm with `controller.py --cases ... --jobs 1 --repeat-every-hours 0`.
 3. After result CSVs exist, run `python analyze_ipmsm_quality_results.py --results path/to/results.csv --output path/to/comparison.csv`.
 4. Retrain in the ML environment with `python train_ipmsm_lightgbm.py --verification-output path/to/r2_check.csv --fail-on-threshold`.
 5. Re-run a small setup/analyze batch in AEDT to populate `missing_required_outputs`, validation, and analysis flags on any failed rows.
@@ -87,6 +87,7 @@
 - Improved failed-row observability for missing required transient outputs.
 - Added deterministic LightGBM training CLI with stable target seeds, threshold verification, recovered width-ratio feature, and derived geometry repair.
 - Added fixed-geometry replay support, source-grouped replay comparison, and a deterministic geometry-spread 200-case replay selector.
+- Added a controller guard against accidentally duplicating explicit case CSVs across Slurm jobs or repeated submit cycles.
 
 ## Risks and gotchas
 
