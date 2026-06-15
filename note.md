@@ -472,3 +472,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; local runtime still lacks pandas/sklearn/lightgbm and GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then run the dependency gate and retraining in the ML environment after setup/solve quality evidence is available.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 02:35:27 +09:00 - Loop 35
+
+- Part: scheduler setup-only preflight output hygiene
+- Goal: make scheduler setup dry-runs safe to review for bootstrap case CSVs without dumping large env setup scripts, and fail remote-path mistakes with clearer evidence.
+- Hypothesis: the scheduler endpoint is live, but existing jobs show unrelated remote paths; setup-only submission should therefore carry a remote entrypoint check and compact stdout before any POST.
+- Actions: redacted `payload.env_setup` in scheduler helper stdout by default while preserving full manifests; added `--show-env-setup`; added `--validate-remote-entrypoint` to inject shell checks for `subprocess_run.py` and `run_ipmsm_batch.py`; added the flag to workflow plans; added tests.
+- Candidates: rely on operator discipline to avoid large stdout versus make compact stdout the default; submit a smoke job with an unconfirmed remote path versus add remote-path validation first; chose compact stdout plus explicit validation because no project-specific scheduler path is confirmed.
+- Metrics: scheduler/workflow tests ran 24 tests and passed; full unittest discovery ran 117 tests and passed; py_compile and diff check passed; dry-run smoke wrote a full manifest while stdout showed a redacted env setup summary; scheduler health remained ok with 12 jobs and 0 tasks.
+- Result: setup-only scheduler reviews are now less likely to pollute logs/context, and future scheduler jobs can fail early if the remote working tree is not the intended project checkout.
+- Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; scheduler `remote_path` for this project is still unconfirmed and GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then confirm the scheduler-visible project path or fixed Git permission before setup-only POST.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

@@ -50,6 +50,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 args.remote_cases,
                 "--job-mode",
                 args.job_mode,
+                "--validate-remote-entrypoint",
                 "--write-manifest",
                 str(scheduler_manifest),
                 *(["--remote-path", args.remote_path] if args.remote_path else []),

@@ -43,6 +43,7 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
         )
         scheduler_args = plan["steps"][0]["args"]
         self.assertIn("--write-manifest", scheduler_args)
+        self.assertIn("--validate-remote-entrypoint", scheduler_args)
         self.assertNotIn("--submit", scheduler_args)
         self.assertIn("--convergence-output", plan["steps"][1]["args"])
         self.assertIn("--fail-on-filter", plan["steps"][2]["args"])

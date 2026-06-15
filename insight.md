@@ -334,3 +334,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `train_ipmsm_lightgbm.py --check-dependencies --dependency-report ...` writes a compact readiness report, and `plan_ipmsm_quality_workflow.py` includes that gate while passing multiple result CSVs.
 - Evidence: tests cover dependency inspection/report JSON and multi-result workflow args; smoke plan generation wrote 6 steps with both root result CSVs; local preflight reported numpy ok and pandas/sklearn/lightgbm missing.
 - Remaining risk: dependency readiness does not prove the model reaches R2 >= 0.95; actual ML retraining and AEDT quality replay evidence are still required.
+
+## 2026-06-16 02:35:27 +09:00 - Insight 35
+
+- Source loop: `note.md` Loop 35.
+- Improvement: scheduler setup dry-runs can preserve full review manifests without dumping large bootstrap scripts to stdout.
+- Before: `--bootstrap-remote-cases` printed the full `env_setup` script, so 200-case setup plans could flood logs and Codex context.
+- After: stdout redacts `payload.env_setup` by default with byte/line/hash evidence, `--show-env-setup` restores full output, and `--validate-remote-entrypoint` checks project files in the scheduler working tree.
+- Evidence: tests cover redacted stdout, full-manifest preservation, opt-in full stdout, and remote entrypoint checks; packed-srun smoke manifest kept full env setup while stdout remained compact.
+- Remaining risk: this improves submission evidence quality but does not confirm the correct scheduler `remote_path`, AEDT setup success, solve quality, or R2 target.

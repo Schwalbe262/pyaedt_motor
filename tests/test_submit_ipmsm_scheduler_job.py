@@ -40,6 +40,7 @@ def scheduler_args(**overrides: object) -> Namespace:
         "periodic_boundary": False,
         "keep_projects": False,
         "env_setup": "",
+        "validate_remote_entrypoint": False,
         "required_capability": "ansys",
         "env_profile": "",
         "partition": "auto",
@@ -62,6 +63,7 @@ def scheduler_args(**overrides: object) -> Namespace:
         "timeout": 10.0,
         "check_health": False,
         "write_manifest": None,
+        "show_env_setup": False,
         "submit": False,
     }
     values.update(overrides)
@@ -125,6 +127,13 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "exceeding --bootstrap-max-bytes"):
             scheduler_job.build_remote_cases_bootstrap("remote/cases.csv", rows, max_bytes=5)
+
+    def test_build_remote_entrypoint_validation_checks_project_files(self) -> None:
+        script = scheduler_job.build_remote_entrypoint_validation("subprocess_run.py")
+
+        self.assertIn("test -f subprocess_run.py", script)
+        self.assertIn("test -f run_ipmsm_batch.py", script)
+        self.assertIn("required scheduler file missing", script)
 
     def test_validate_scheduler_request_requires_confirm_for_analyze_submit(self) -> None:
         args = scheduler_args(submit=True, analyze=True)
@@ -217,8 +226,73 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         post.assert_not_called()
         output = json.loads(stdout.getvalue())
+        self.assertIn("<redacted env_setup bytes=", output["payload"]["env_setup"])
+        self.assertIn("payload.env_setup", output["output_redactions"])
+
+    def test_main_can_show_full_env_setup_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.csv"
+            with path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id", "beta_deg"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001", "beta_deg": "15"})
+
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "post_scheduler_job") as post:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = scheduler_job.main(
+                        [
+                            "--cases",
+                            str(path),
+                            "--remote-cases",
+                            "remote/cases.csv",
+                            "--repo-url",
+                            "https://github.com/example/project.git",
+                            "--git-ref",
+                            "main",
+                            "--bootstrap-remote-cases",
+                            "--show-env-setup",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        post.assert_not_called()
+        output = json.loads(stdout.getvalue())
         self.assertIn("cat > remote/cases.csv", output["payload"]["env_setup"])
         self.assertIn("case_0001,15", output["payload"]["env_setup"])
+        self.assertNotIn("output_redactions", output)
+
+    def test_main_can_add_remote_entrypoint_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.csv"
+            with path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001"})
+
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "post_scheduler_job") as post:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = scheduler_job.main(
+                        [
+                            "--cases",
+                            str(path),
+                            "--remote-cases",
+                            "remote/cases.csv",
+                            "--repo-url",
+                            "https://github.com/example/project.git",
+                            "--git-ref",
+                            "main",
+                            "--validate-remote-entrypoint",
+                            "--show-env-setup",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        post.assert_not_called()
+        output = json.loads(stdout.getvalue())
+        self.assertIn("test -f subprocess_run.py", output["payload"]["env_setup"])
+        self.assertIn("test -f run_ipmsm_batch.py", output["payload"]["env_setup"])
 
     def test_main_writes_review_manifest_without_posting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -251,10 +325,46 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
             post.assert_not_called()
             output = json.loads(stdout.getvalue())
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertEqual(manifest, output)
+            self.assertEqual(manifest["payload"], output["payload"])
             self.assertEqual(manifest["manifest_path"], str(manifest_path))
             self.assertEqual(manifest["payload"]["total_simulations"], 1)
             self.assertNotIn(b"\r", manifest_path.read_bytes())
+
+    def test_manifest_keeps_full_env_setup_when_stdout_is_redacted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.csv"
+            manifest_path = Path(tmp) / "review" / "scheduler_manifest.json"
+            with cases_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id", "beta_deg"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001", "beta_deg": "15"})
+
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "post_scheduler_job") as post:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = scheduler_job.main(
+                        [
+                            "--cases",
+                            str(cases_path),
+                            "--remote-cases",
+                            "remote/cases.csv",
+                            "--repo-url",
+                            "https://github.com/example/project.git",
+                            "--git-ref",
+                            "main",
+                            "--bootstrap-remote-cases",
+                            "--write-manifest",
+                            str(manifest_path),
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 0)
+            post.assert_not_called()
+            output = json.loads(stdout.getvalue())
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertIn("<redacted env_setup bytes=", output["payload"]["env_setup"])
+            self.assertIn("cat > remote/cases.csv", manifest["payload"]["env_setup"])
+            self.assertIn("case_0001,15", manifest["payload"]["env_setup"])
 
 
 if __name__ == "__main__":

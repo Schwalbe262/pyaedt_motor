@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -119,6 +120,18 @@ def append_env_setup(existing: str, extra: str) -> str:
     return existing.rstrip() + "\n" + extra
 
 
+def build_remote_entrypoint_validation(entrypoint: str) -> str:
+    required_paths = list(dict.fromkeys([entrypoint, "run_ipmsm_batch.py"]))
+    lines = []
+    for path in required_paths:
+        quoted_path = shlex.quote(path)
+        lines.append(
+            f"test -f {quoted_path} || "
+            f'{{ echo "ERROR: required scheduler file missing: {path}" >&2; exit 2; }}'
+        )
+    return "\n".join(lines)
+
+
 def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "job_mode": args.job_mode,
@@ -197,6 +210,28 @@ def write_manifest(path: Path, output: dict[str, Any]) -> None:
         file.write(json.dumps(output, indent=2, sort_keys=True) + "\n")
 
 
+def redacted_env_setup(value: str) -> str:
+    if not value:
+        return value
+    encoded = value.encode("utf-8")
+    line_count = value.count("\n") + 1
+    digest = hashlib.sha256(encoded).hexdigest()[:16]
+    return f"<redacted env_setup bytes={len(encoded)} lines={line_count} sha256={digest}>"
+
+
+def build_stdout_output(output: dict[str, Any], show_env_setup: bool) -> dict[str, Any]:
+    if show_env_setup:
+        return output
+    stdout_output = json.loads(json.dumps(output))
+    payload = stdout_output.get("payload")
+    if isinstance(payload, dict) and payload.get("env_setup"):
+        payload["env_setup"] = redacted_env_setup(str(payload["env_setup"]))
+        stdout_output["output_redactions"] = {
+            "payload.env_setup": "redacted in stdout; use --show-env-setup or --write-manifest for the full script"
+        }
+    return stdout_output
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dry-run or submit an IPMSM job to the Slurm Scheduler API.")
     parser.add_argument("--scheduler-url", default=DEFAULT_SCHEDULER_URL)
@@ -224,6 +259,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--periodic-boundary", action="store_true")
     parser.add_argument("--keep-projects", action="store_true")
     parser.add_argument("--env-setup", default="")
+    parser.add_argument("--validate-remote-entrypoint", action="store_true", help="Check expected project files in the scheduler working tree before running.")
     parser.add_argument("--required-capability", default="")
     parser.add_argument("--env-profile", default="")
     parser.add_argument("--partition", default="auto")
@@ -246,6 +282,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--check-health", action="store_true")
     parser.add_argument("--write-manifest", type=Path, help="Write the review JSON payload to this local path.")
+    parser.add_argument("--show-env-setup", action="store_true", help="Print full env_setup in stdout instead of redacting it.")
     parser.add_argument("--submit", action="store_true", help="POST to scheduler. Omit for dry-run JSON only.")
     return parser.parse_args(argv)
 
@@ -256,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
     rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
     if args.total_simulations <= 0:
         args.total_simulations = len(rows)
+    if args.validate_remote_entrypoint:
+        args.env_setup = append_env_setup(args.env_setup, build_remote_entrypoint_validation(args.entrypoint))
     if args.bootstrap_remote_cases:
         remote_cases = args.remote_cases or str(args.cases)
         args.env_setup = append_env_setup(
@@ -276,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.write_manifest:
         output["manifest_path"] = str(args.write_manifest)
         write_manifest(args.write_manifest, output)
-    print(json.dumps(output, indent=2, sort_keys=True))
+    print(json.dumps(build_stdout_output(output, args.show_env_setup), indent=2, sort_keys=True))
     return 0
 
 
