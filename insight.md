@@ -271,3 +271,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `--convergence-output` writes reference-relative metric drift, runtime ratio, tolerance status, and recommendation rank.
 - Evidence: tests cover fastest-within-tolerance ranking, missing reference handling, negative tolerance rejection, and CLI convergence output; full unittest discovery ran 93 tests and passed.
 - Remaining risk: convergence ranking depends on representative completed AEDT result rows and an operator-chosen tolerance; it is not a substitute for solve/retraining evidence.
+
+## 2026-06-16 01:57:43 +09:00 - Insight 28
+
+- Source loop: `note.md` Loop 28.
+- Improvement: regression retraining can be gated on simulation result quality before model metrics are trusted.
+- Before: `analyze_ipmsm_dataset_quality.py` reported missing outputs, duplicates, and failed rows but could not fail a pipeline.
+- After: `--fail-on-quality` enforces configurable complete-row, missing-output, duplicate-ID, and failed-row thresholds.
+- Evidence: tests cover gate failures and passes; strict gate on existing result CSVs correctly failed with 198 failed/missing rows and 0 duplicates.
+- Remaining risk: strict gating must be paired with either filtering or replacement of failed rows before retraining; it does not itself improve simulation outputs.

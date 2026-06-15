@@ -381,3 +381,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use convergence output on actual mesh/time replay results before choosing larger solve settings.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:57:43 +09:00 - Loop 28
+
+- Part: dataset quality promotion gate
+- Goal: prevent incomplete or duplicated simulation result rows from moving into regression retraining unnoticed.
+- Hypothesis: existing summaries show dataset quality, but an opt-in failing gate is needed before model training or R2 verification can be trusted.
+- Actions: added `analyze_ipmsm_dataset_quality.py --fail-on-quality` plus minimum complete row, maximum missing output, duplicate case ID, and failed row thresholds; added tests.
+- Candidates: keep dataset quality as report-only versus add CI/CLI failure behavior; chose opt-in failure behavior so historical audits still run while retraining pipelines can enforce strict quality.
+- Metrics: dataset quality tests ran 5 tests and passed; full unittest discovery ran 96 tests and passed; py_compile and scoped `git diff --check` passed; strict gate on existing root result CSVs found 13,748 rows, 13,550 complete, 198 failed/missing, 0 duplicates, and returned exit code 1.
+- Result: retraining can now be blocked deterministically when result CSVs contain failed/missing rows, duplicates, or too few complete samples.
+- Failure reason: existing data still fails the strict quality gate; no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use this gate on new quality replay outputs before retraining.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

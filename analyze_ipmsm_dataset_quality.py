@@ -155,6 +155,45 @@ def parse_required_outputs(text: str) -> tuple[str, ...]:
     return outputs
 
 
+def nonnegative_int(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("value must be >= 0")
+    return value
+
+
+def int_field(row: dict[str, str], key: str) -> int:
+    try:
+        return int(row.get(key, "0"))
+    except ValueError:
+        return 0
+
+
+def quality_gate_failures(
+    summary_row: dict[str, str],
+    *,
+    min_required_complete_rows: int = 0,
+    max_missing_required_rows: int | None = None,
+    max_duplicate_case_ids: int | None = None,
+    max_failed_rows: int | None = None,
+) -> list[str]:
+    failures: list[str] = []
+    required_complete_rows = int_field(summary_row, "required_complete_rows")
+    missing_required_rows = int_field(summary_row, "missing_required_rows")
+    duplicate_case_ids = int_field(summary_row, "duplicate_case_ids")
+    failed_rows = int_field(summary_row, "status_failed")
+
+    if required_complete_rows < min_required_complete_rows:
+        failures.append(f"required_complete_rows {required_complete_rows} < {min_required_complete_rows}")
+    if max_missing_required_rows is not None and missing_required_rows > max_missing_required_rows:
+        failures.append(f"missing_required_rows {missing_required_rows} > {max_missing_required_rows}")
+    if max_duplicate_case_ids is not None and duplicate_case_ids > max_duplicate_case_ids:
+        failures.append(f"duplicate_case_ids {duplicate_case_ids} > {max_duplicate_case_ids}")
+    if max_failed_rows is not None and failed_rows > max_failed_rows:
+        failures.append(f"status_failed {failed_rows} > {max_failed_rows}")
+    return failures
+
+
 def analyze_file(path: Path, required_outputs: tuple[str, ...]) -> DatasetQualityAccumulator:
     accumulator = DatasetQualityAccumulator(required_outputs)
     with path.open("r", encoding="utf-8-sig", newline="") as file:
@@ -194,6 +233,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--results", nargs="+", type=Path, required=True, help="One or more run_ipmsm_batch.py result CSVs.")
     parser.add_argument("--output", type=Path, required=True, help="Compact quality summary CSV to write.")
     parser.add_argument("--required-outputs", default=",".join(DEFAULT_REQUIRED_OUTPUTS))
+    parser.add_argument("--min-required-complete-rows", type=nonnegative_int, default=0)
+    parser.add_argument("--max-missing-required-rows", type=nonnegative_int)
+    parser.add_argument("--max-duplicate-case-ids", type=nonnegative_int)
+    parser.add_argument("--max-failed-rows", type=nonnegative_int)
+    parser.add_argument("--fail-on-quality", action="store_true", help="Return exit code 1 when any quality gate fails.")
     return parser
 
 
@@ -222,7 +266,18 @@ def main(argv: list[str] | None = None) -> int:
         f"required_complete={combined['required_complete_rows']} missing_required={combined['missing_required_rows']} "
         f"duplicates={combined['duplicate_case_ids']} output={args.output}"
     )
-    return 0
+    failures = quality_gate_failures(
+        combined,
+        min_required_complete_rows=args.min_required_complete_rows,
+        max_missing_required_rows=args.max_missing_required_rows,
+        max_duplicate_case_ids=args.max_duplicate_case_ids,
+        max_failed_rows=args.max_failed_rows,
+    )
+    if failures:
+        print("quality_gate failed " + "; ".join(failures))
+    elif args.fail_on_quality:
+        print("quality_gate passed")
+    return 1 if args.fail_on_quality and failures else 0
 
 
 if __name__ == "__main__":
