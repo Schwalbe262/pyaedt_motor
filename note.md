@@ -368,3 +368,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use profile summaries on actual setup/solve result CSVs when the AEDT/Slurm environment is available.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:54:08 +09:00 - Loop 27
+
+- Part: quality convergence selector
+- Goal: select the fastest mesh/time-step profile that is close enough to a refined reference profile after result CSVs exist.
+- Hypothesis: using `mesh_time_fine` as a convergence reference lets operators avoid blindly picking the slowest setup while still bounding output drift.
+- Actions: added optional `analyze_ipmsm_quality_results.py --convergence-output`, reference profile selection, percent tolerance guard, per-profile baseline/reference coverage, metric drift, runtime ratios, and recommendation rank; added tests.
+- Candidates: rely on profile summaries only versus compute reference-relative convergence ranks; chose convergence ranks because profile summaries do not identify whether a cheaper profile is within tolerance of the refined run.
+- Metrics: quality analyzer tests ran 9 tests and passed; full unittest discovery ran 93 tests and passed; py_compile and scoped `git diff --check` passed.
+- Result: completed quality experiments can now recommend the fastest profile that meets the chosen reference-drift tolerance.
+- Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use convergence output on actual mesh/time replay results before choosing larger solve settings.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

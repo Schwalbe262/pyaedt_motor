@@ -43,6 +43,26 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
             },
         ]
 
+    def convergence_rows(self) -> list[dict[str, str]]:
+        rows = self.sample_rows()
+        rows.append(
+            {
+                "case_id": "quality_mesh_time_fine_beta_30p0",
+                "input_quality_profile": "mesh_time_fine",
+                "input_source_case_id": "source_a",
+                "input_base_rpm": "1200",
+                "input_i_peak_a": "137.8",
+                "input_beta_deg": "30",
+                "status": "ok",
+                "elapsed_s": "150",
+                "output_torque_all_avg_nm": "10.6",
+                "output_coreloss_all_avg_w": "18.1",
+                "output_solidloss_all_avg_w": "5.4",
+                "output_efficiency_all_pct": "91.2",
+            }
+        )
+        return rows
+
     def test_build_comparison_rows_adds_deltas_against_baseline(self) -> None:
         rows = quality_results.build_comparison_rows(
             self.sample_rows(),
@@ -148,15 +168,62 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
         self.assertEqual(summary_rows[0]["rows_without_baseline"], "1")
         self.assertEqual(summary_rows[0]["output_torque_all_avg_nm_avg_abs_pct_delta"], "")
 
+    def test_build_convergence_rows_ranks_fastest_profile_within_reference_tolerance(self) -> None:
+        rows = quality_results.build_convergence_rows(
+            self.convergence_rows(),
+            ("output_torque_all_avg_nm", "output_efficiency_all_pct"),
+            reference_profile="mesh_time_fine",
+            pct_tolerance=2.0,
+        )
+
+        rows_by_profile = {row["quality_profile"]: row for row in rows}
+        self.assertEqual(rows_by_profile["baseline"]["within_tolerance"], "no")
+        self.assertEqual(rows_by_profile["baseline"]["rows_outside_tolerance"], "1")
+        self.assertEqual(rows_by_profile["mesh_fine"]["within_tolerance"], "yes")
+        self.assertEqual(rows_by_profile["mesh_fine"]["recommended_rank"], "1")
+        self.assertEqual(rows_by_profile["mesh_fine"]["avg_elapsed_ratio_vs_reference"], "0.833333333333")
+        self.assertEqual(rows_by_profile["mesh_time_fine"]["recommended_rank"], "2")
+        self.assertEqual(rows_by_profile["mesh_time_fine"]["max_abs_pct_delta"], "0")
+
+    def test_build_convergence_rows_requires_valid_reference(self) -> None:
+        rows = quality_results.build_convergence_rows(
+            self.sample_rows(),
+            ("output_torque_all_avg_nm",),
+            reference_profile="mesh_time_fine",
+            pct_tolerance=2.0,
+        )
+
+        rows_by_profile = {row["quality_profile"]: row for row in rows}
+        self.assertEqual(rows_by_profile["baseline"]["rows_without_reference"], "1")
+        self.assertEqual(rows_by_profile["baseline"]["within_tolerance"], "no")
+        self.assertEqual(rows_by_profile["mesh_fine"]["recommended_rank"], "")
+
+    def test_cli_rejects_negative_convergence_tolerance(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                quality_results.main(
+                    [
+                        "--results",
+                        "unused.csv",
+                        "--output",
+                        "unused_out.csv",
+                        "--convergence-pct-tolerance",
+                        "-1",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+
     def test_cli_writes_filtered_comparison_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results_path = Path(tmp) / "results.csv"
             output_path = Path(tmp) / "comparison.csv"
             summary_path = Path(tmp) / "profile_summary.csv"
+            convergence_path = Path(tmp) / "convergence.csv"
             with results_path.open("w", encoding="utf-8-sig", newline="") as file:
-                writer = csv.DictWriter(file, fieldnames=list(self.sample_rows()[0]))
+                writer = csv.DictWriter(file, fieldnames=list(self.convergence_rows()[0]))
                 writer.writeheader()
-                writer.writerows(self.sample_rows())
+                writer.writerows(self.convergence_rows())
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
@@ -170,21 +237,32 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
                         "output_torque_all_avg_nm,output_efficiency_all_pct",
                         "--profile-summary-output",
                         str(summary_path),
+                        "--convergence-output",
+                        str(convergence_path),
+                        "--reference-profile",
+                        "mesh_time_fine",
+                        "--convergence-pct-tolerance",
+                        "2.0",
                     ]
                 )
 
             self.assertEqual(code, 0)
-            self.assertIn("rows=2 comparisons=2", stdout.getvalue())
+            self.assertIn("rows=3 comparisons=3", stdout.getvalue())
             self.assertIn("profile summary row(s)", stdout.getvalue())
+            self.assertIn("convergence row(s)", stdout.getvalue())
             with output_path.open("r", encoding="utf-8-sig", newline="") as file:
                 comparison_rows = list(csv.DictReader(file))
-            self.assertEqual(len(comparison_rows), 2)
+            self.assertEqual(len(comparison_rows), 3)
             self.assertEqual(comparison_rows[1]["quality_profile"], "mesh_fine")
             self.assertIn("output_torque_all_avg_nm_pct_delta", comparison_rows[1])
             with summary_path.open("r", encoding="utf-8-sig", newline="") as file:
                 summary_rows = list(csv.DictReader(file))
-            self.assertEqual(len(summary_rows), 2)
+            self.assertEqual(len(summary_rows), 3)
             self.assertIn("output_torque_all_avg_nm_avg_abs_pct_delta", summary_rows[0])
+            with convergence_path.open("r", encoding="utf-8-sig", newline="") as file:
+                convergence_rows = list(csv.DictReader(file))
+            self.assertEqual(len(convergence_rows), 3)
+            self.assertIn("recommended_rank", convergence_rows[0])
 
 
 if __name__ == "__main__":

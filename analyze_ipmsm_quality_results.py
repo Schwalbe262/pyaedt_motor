@@ -6,7 +6,7 @@ import argparse
 import csv
 import math
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, cast
 
 
 DEFAULT_METRICS = (
@@ -224,6 +224,140 @@ def build_profile_summary_rows(comparison_rows: Iterable[dict[str, str]], metric
     return summary_rows
 
 
+def convergence_fieldnames(metrics: tuple[str, ...]) -> list[str]:
+    fields = [
+        "quality_profile",
+        "recommended_rank",
+        "within_tolerance",
+        "rows",
+        "rows_with_reference",
+        "rows_without_reference",
+        "missing_required_rows",
+        "rows_within_tolerance",
+        "rows_outside_tolerance",
+        "avg_elapsed_ratio_vs_reference",
+        "max_elapsed_ratio_vs_reference",
+        "max_abs_pct_delta",
+    ]
+    for metric in metrics:
+        fields.extend([f"{metric}_avg_abs_pct_delta_vs_reference", f"{metric}_max_abs_pct_delta_vs_reference"])
+    return fields
+
+
+def build_convergence_rows(
+    rows: Iterable[dict[str, str]],
+    metrics: tuple[str, ...],
+    reference_profile: str,
+    pct_tolerance: float,
+) -> list[dict[str, str]]:
+    rows_by_group: dict[tuple[str, ...], list[dict[str, str]]] = {}
+    for row in rows:
+        rows_by_group.setdefault(group_key(row), []).append(row)
+
+    stats_by_profile: dict[str, dict[str, object]] = {}
+
+    def profile_stats(profile: str) -> dict[str, object]:
+        return stats_by_profile.setdefault(
+            profile,
+            {
+                "rows": 0,
+                "rows_with_reference": 0,
+                "rows_without_reference": 0,
+                "missing_required_rows": 0,
+                "rows_within_tolerance": 0,
+                "rows_outside_tolerance": 0,
+                "elapsed_ratios": [],
+                "metric_deltas": {metric: [] for metric in metrics},
+            },
+        )
+
+    for key in sorted(rows_by_group):
+        group_rows = rows_by_group[key]
+        reference_rows = [row for row in group_rows if infer_quality_profile(row) == reference_profile]
+        reference = reference_rows[0] if reference_rows else None
+        reference_valid = reference is not None and not missing_required_outputs(reference)
+        reference_elapsed = finite_float((reference or {}).get("elapsed_s", ""))
+
+        for row in group_rows:
+            profile = infer_quality_profile(row)
+            stats = profile_stats(profile)
+            stats["rows"] = int(stats["rows"]) + 1
+
+            row_missing = bool(missing_required_outputs(row))
+            if row_missing:
+                stats["missing_required_rows"] = int(stats["missing_required_rows"]) + 1
+
+            if not reference_valid:
+                stats["rows_without_reference"] = int(stats["rows_without_reference"]) + 1
+                continue
+
+            stats["rows_with_reference"] = int(stats["rows_with_reference"]) + 1
+            elapsed = finite_float(row.get("elapsed_s", ""))
+            if math.isfinite(elapsed) and math.isfinite(reference_elapsed) and reference_elapsed != 0:
+                elapsed_ratios = cast(list[float], stats["elapsed_ratios"])
+                elapsed_ratios.append(elapsed / reference_elapsed)
+
+            row_within_tolerance = not row_missing
+            for metric in metrics:
+                value = finite_float(row.get(metric, ""))
+                reference_value = finite_float((reference or {}).get(metric, ""))
+                delta = abs(pct_delta(value, reference_value))
+                if not math.isfinite(delta) or delta > pct_tolerance:
+                    row_within_tolerance = False
+                if math.isfinite(delta):
+                    metric_deltas = cast(dict[str, list[float]], stats["metric_deltas"])
+                    deltas = metric_deltas[metric]
+                    deltas.append(delta)
+
+            if row_within_tolerance:
+                stats["rows_within_tolerance"] = int(stats["rows_within_tolerance"]) + 1
+            else:
+                stats["rows_outside_tolerance"] = int(stats["rows_outside_tolerance"]) + 1
+
+    summary_rows: list[dict[str, str]] = []
+    for profile in sorted(stats_by_profile):
+        stats = stats_by_profile[profile]
+        elapsed_ratios = cast(list[float], stats["elapsed_ratios"])
+        metric_deltas = cast(dict[str, list[float]], stats["metric_deltas"])
+        max_abs_pct_delta = maximum([maximum(metric_deltas[metric]) for metric in metrics])
+        rows_count = int(stats["rows"])
+        within_tolerance = (
+            rows_count > 0
+            and int(stats["rows_with_reference"]) == rows_count
+            and int(stats["missing_required_rows"]) == 0
+            and int(stats["rows_outside_tolerance"]) == 0
+        )
+        out = {
+            "quality_profile": profile,
+            "recommended_rank": "",
+            "within_tolerance": "yes" if within_tolerance else "no",
+            "rows": str(rows_count),
+            "rows_with_reference": str(stats["rows_with_reference"]),
+            "rows_without_reference": str(stats["rows_without_reference"]),
+            "missing_required_rows": str(stats["missing_required_rows"]),
+            "rows_within_tolerance": str(stats["rows_within_tolerance"]),
+            "rows_outside_tolerance": str(stats["rows_outside_tolerance"]),
+            "avg_elapsed_ratio_vs_reference": format_number(average(elapsed_ratios)),
+            "max_elapsed_ratio_vs_reference": format_number(maximum(elapsed_ratios)),
+            "max_abs_pct_delta": format_number(max_abs_pct_delta),
+        }
+        for metric in metrics:
+            deltas = metric_deltas[metric]
+            out[f"{metric}_avg_abs_pct_delta_vs_reference"] = format_number(average(deltas))
+            out[f"{metric}_max_abs_pct_delta_vs_reference"] = format_number(maximum(deltas))
+        summary_rows.append(out)
+
+    ranked = [
+        row
+        for row in summary_rows
+        if row["within_tolerance"] == "yes" and math.isfinite(finite_float(row["avg_elapsed_ratio_vs_reference"]))
+    ]
+    ranked.sort(key=lambda row: (finite_float(row["avg_elapsed_ratio_vs_reference"]), finite_float(row["max_abs_pct_delta"])))
+    for rank, row in enumerate(ranked, start=1):
+        row["recommended_rank"] = str(rank)
+    return summary_rows
+
+
 def write_comparison(path: Path, rows: list[dict[str, str]], metrics: tuple[str, ...]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as file:
@@ -236,6 +370,14 @@ def write_profile_summary(path: Path, rows: list[dict[str, str]], metrics: tuple
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=profile_summary_fieldnames(metrics), extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_convergence(path: Path, rows: list[dict[str, str]], metrics: tuple[str, ...]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=convergence_fieldnames(metrics), extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -267,6 +409,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--baseline-profile", default="baseline")
     parser.add_argument("--metrics", default=",".join(DEFAULT_METRICS), help="Comma-separated output metrics to compare.")
     parser.add_argument("--profile-summary-output", type=Path, help="Optional per-quality-profile aggregate summary CSV.")
+    parser.add_argument("--convergence-output", type=Path, help="Optional convergence summary against --reference-profile.")
+    parser.add_argument("--reference-profile", default="mesh_time_fine", help="Quality profile used as the convergence reference.")
+    parser.add_argument("--convergence-pct-tolerance", type=float, default=2.0)
     return parser
 
 
@@ -277,6 +422,8 @@ def main(argv: list[str] | None = None) -> int:
         metrics = parse_metrics(args.metrics)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.convergence_pct_tolerance < 0:
+        parser.error("--convergence-pct-tolerance must be >= 0")
     rows = read_rows(args.results)
     comparison_rows = build_comparison_rows(rows, metrics, baseline_profile=args.baseline_profile)
     write_comparison(args.output, comparison_rows, metrics)
@@ -285,6 +432,15 @@ def main(argv: list[str] | None = None) -> int:
         profile_summary_rows = build_profile_summary_rows(comparison_rows, metrics)
         write_profile_summary(args.profile_summary_output, profile_summary_rows, metrics)
         print(f"Wrote {len(profile_summary_rows)} IPMSM quality profile summary row(s) to {args.profile_summary_output}")
+    if args.convergence_output:
+        convergence_rows = build_convergence_rows(
+            rows,
+            metrics,
+            reference_profile=args.reference_profile,
+            pct_tolerance=args.convergence_pct_tolerance,
+        )
+        write_convergence(args.convergence_output, convergence_rows, metrics)
+        print(f"Wrote {len(convergence_rows)} IPMSM quality convergence row(s) to {args.convergence_output}")
     print(summarize(rows, comparison_rows))
     return 0
 

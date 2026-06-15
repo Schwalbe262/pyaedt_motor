@@ -262,3 +262,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `--profile-summary-output` writes per-profile row counts, missing-output counts, baseline coverage, elapsed ratios, and absolute percent metric deltas.
 - Evidence: quality analyzer tests cover aggregate deltas, missing baselines, and CLI summary output; full unittest discovery ran 90 tests and passed.
 - Remaining risk: the summary is only as meaningful as the completed AEDT result CSVs; actual setup/solve data is still required before choosing a preferred simulation profile.
+
+## 2026-06-16 01:54:08 +09:00 - Insight 27
+
+- Source loop: `note.md` Loop 27.
+- Improvement: quality experiments can rank the fastest profile within tolerance of a refined reference.
+- Before: profile summaries showed aggregate drift/runtime but did not decide whether a cheaper setup had converged relative to `mesh_time_fine`.
+- After: `--convergence-output` writes reference-relative metric drift, runtime ratio, tolerance status, and recommendation rank.
+- Evidence: tests cover fastest-within-tolerance ranking, missing reference handling, negative tolerance rejection, and CLI convergence output; full unittest discovery ran 93 tests and passed.
+- Remaining risk: convergence ranking depends on representative completed AEDT result rows and an operator-chosen tolerance; it is not a substitute for solve/retraining evidence.
