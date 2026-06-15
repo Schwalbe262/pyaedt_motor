@@ -316,3 +316,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then use `packed_srun` dry-run values with the actual remote project path before setup-only submission.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 01:32:31 +09:00 - Loop 23
+
+- Part: scheduler case CSV bootstrap
+- Goal: remove the next setup-only scheduler blocker for small smoke plans by letting the job create its validated case CSV at startup.
+- Hypothesis: `packed_srun` can run from an existing remote working tree, but setup-only still fails if the case CSV is not already present remotely.
+- Actions: added opt-in `--bootstrap-remote-cases`, byte-size guard, normalized CSV heredoc generation, and env-setup append logic to `submit_ipmsm_scheduler_job.py`; added focused tests.
+- Candidates: require manual remote copy versus embed small validated CSVs in scheduler `env_setup`; chose opt-in bootstrap with a 50 KB default cap so smoke/setup-only plans are self-contained without bloating 200-row payloads.
+- Metrics: scheduler helper tests ran 13 tests and passed; bootstrap dry-run produced `submit=false`, `validated_cases=1`, `total_simulations=1`, no CR characters, and `env_setup_len=374`; full unittest discovery ran 82 tests and passed; py_compile and scoped `git diff --check` passed.
+- Result: small validated scheduler setup-only case files can now be created by the remote job startup script without any scheduler POST during dry-run.
+- Failure reason: no scheduler POST, AEDT setup, or solve was run; GitHub push remains blocked by remote HTTP 403 permissions.
+- Next action: commit locally, retry GitHub push, then use actual scheduler `remote_path` and a small bootstrap smoke case for setup-only validation after operator approval.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

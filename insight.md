@@ -226,3 +226,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `submit_ipmsm_scheduler_job.py` also supports `packed_srun` with `remote_path` and uses the validated case count for scheduler `total_simulations`.
 - Evidence: read-only scheduler job metadata showed existing `packed_srun` jobs; tests cover mode validation; 200-row dry-runs produced `total_simulations=200`.
 - Remaining risk: actual `remote_path` and case CSV visibility must still be confirmed before any setup-only POST.
+
+## 2026-06-16 01:32:31 +09:00 - Insight 23
+
+- Source loop: `note.md` Loop 23.
+- Improvement: small scheduler smoke jobs can bootstrap their validated case CSV in `env_setup`.
+- Before: `packed_srun` dry-runs still assumed the remote case CSV already existed.
+- After: `submit_ipmsm_scheduler_job.py --bootstrap-remote-cases` appends a size-limited heredoc that writes normalized validated rows before the entrypoint runs.
+- Evidence: tests cover heredoc generation, size guard, absolute-path guard, and no-post dry-run behavior; smoke dry-run produced a compact CR-free env setup.
+- Remaining risk: use this only for small smoke/setup-only plans; larger replay CSVs should be staged through a real remote file path.

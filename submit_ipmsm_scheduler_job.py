@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 from pathlib import Path
 import shlex
@@ -16,6 +18,7 @@ import subprocess_run
 
 DEFAULT_SCHEDULER_URL = "http://localhost:8000"
 DEFAULT_MAX_CASES = 200
+DEFAULT_BOOTSTRAP_MAX_BYTES = 50_000
 
 
 def git_value(args: list[str], default: str = "") -> str:
@@ -80,6 +83,42 @@ def build_subprocess_arguments(args: argparse.Namespace) -> str:
     return shlex.join(command)
 
 
+def build_cases_csv_text(rows: list[dict[str, Any]]) -> str:
+    fieldnames: list[str] = []
+    for row in rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
+def build_remote_cases_bootstrap(remote_cases: str, rows: list[dict[str, Any]], max_bytes: int) -> str:
+    csv_text = build_cases_csv_text(rows)
+    size = len(csv_text.encode("utf-8"))
+    if size > max_bytes:
+        raise RuntimeError(f"remote case CSV bootstrap is {size} bytes, exceeding --bootstrap-max-bytes={max_bytes}")
+    quoted_path = shlex.quote(remote_cases)
+    quoted_dir = shlex.quote(str(Path(remote_cases).parent))
+    return "\n".join(
+        [
+            f"mkdir -p {quoted_dir}",
+            f"cat > {quoted_path} <<'IPMSM_CASES_CSV'",
+            csv_text.rstrip("\n"),
+            "IPMSM_CASES_CSV",
+        ]
+    )
+
+
+def append_env_setup(existing: str, extra: str) -> str:
+    if not existing:
+        return extra
+    return existing.rstrip() + "\n" + extra
+
+
 def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "job_mode": args.job_mode,
@@ -121,6 +160,8 @@ def validate_scheduler_request(args: argparse.Namespace) -> None:
         raise RuntimeError("scheduler solve submission requires --confirm-analyze with --analyze")
     if args.submit and not args.remote_cases and args.cases.is_absolute():
         raise RuntimeError("absolute local --cases requires --remote-cases for scheduler submission")
+    if args.bootstrap_remote_cases and not (args.remote_cases or not args.cases.is_absolute()):
+        raise RuntimeError("--bootstrap-remote-cases with an absolute --cases path requires --remote-cases")
 
 
 def post_scheduler_job(scheduler_url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
@@ -155,6 +196,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--scheduler-url", default=DEFAULT_SCHEDULER_URL)
     parser.add_argument("--cases", type=Path, required=True, help="Local case CSV to validate before submission.")
     parser.add_argument("--remote-cases", default="", help="Case CSV path visible to the scheduler job; defaults to --cases.")
+    parser.add_argument("--bootstrap-remote-cases", action="store_true", help="Embed the validated case CSV into env_setup for remote job startup.")
+    parser.add_argument("--bootstrap-max-bytes", type=int, default=DEFAULT_BOOTSTRAP_MAX_BYTES)
     parser.add_argument("--repo-url", default=default_repo_url())
     parser.add_argument("--git-ref", default=default_git_ref())
     parser.add_argument("--job-mode", choices=("python_git", "packed_srun"), default="python_git")
@@ -206,6 +249,12 @@ def main(argv: list[str] | None = None) -> int:
     rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
     if args.total_simulations <= 0:
         args.total_simulations = len(rows)
+    if args.bootstrap_remote_cases:
+        remote_cases = args.remote_cases or str(args.cases)
+        args.env_setup = append_env_setup(
+            args.env_setup,
+            build_remote_cases_bootstrap(remote_cases, rows, args.bootstrap_max_bytes),
+        )
     payload = build_job_payload(args)
     output: dict[str, Any] = {
         "scheduler_url": args.scheduler_url,

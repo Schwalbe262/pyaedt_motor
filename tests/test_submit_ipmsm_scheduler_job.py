@@ -18,6 +18,8 @@ def scheduler_args(**overrides: object) -> Namespace:
         "scheduler_url": "http://localhost:8000",
         "cases": Path("cases.csv"),
         "remote_cases": "remote/cases.csv",
+        "bootstrap_remote_cases": False,
+        "bootstrap_max_bytes": 50000,
         "repo_url": "https://github.com/example/project.git",
         "git_ref": "main",
         "job_mode": "python_git",
@@ -107,6 +109,22 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "case plan row bad_mesh has invalid inputs"):
                 scheduler_job.load_and_validate_cases(path, max_cases=200, allow_over_budget=False)
 
+    def test_build_remote_cases_bootstrap_writes_validated_rows(self) -> None:
+        rows = [{"case_id": "case_0001", "beta_deg": "15"}]
+
+        script = scheduler_job.build_remote_cases_bootstrap("remote/cases.csv", rows, max_bytes=50000)
+
+        self.assertIn("mkdir -p remote", script)
+        self.assertIn("cat > remote/cases.csv <<'IPMSM_CASES_CSV'", script)
+        self.assertIn("case_id,beta_deg", script)
+        self.assertIn("case_0001,15", script)
+
+    def test_build_remote_cases_bootstrap_rejects_large_csv(self) -> None:
+        rows = [{"case_id": "case_0001", "beta_deg": "15"}]
+
+        with self.assertRaisesRegex(RuntimeError, "exceeding --bootstrap-max-bytes"):
+            scheduler_job.build_remote_cases_bootstrap("remote/cases.csv", rows, max_bytes=5)
+
     def test_validate_scheduler_request_requires_confirm_for_analyze_submit(self) -> None:
         args = scheduler_args(submit=True, analyze=True)
 
@@ -131,6 +149,12 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         args = scheduler_args(submit=True, cases=Path.cwd() / "cases.csv", remote_cases="")
 
         with self.assertRaisesRegex(RuntimeError, "requires --remote-cases"):
+            scheduler_job.validate_scheduler_request(args)
+
+    def test_validate_scheduler_request_requires_remote_cases_for_absolute_bootstrap_path(self) -> None:
+        args = scheduler_args(cases=Path.cwd() / "cases.csv", remote_cases="", bootstrap_remote_cases=True)
+
+        with self.assertRaisesRegex(RuntimeError, "--bootstrap-remote-cases"):
             scheduler_job.validate_scheduler_request(args)
 
     def test_main_dry_run_does_not_post(self) -> None:
@@ -163,6 +187,37 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertFalse(output["submit"])
         self.assertEqual(output["validated_cases"], 1)
         self.assertEqual(output["payload"]["total_simulations"], 1)
+
+    def test_main_bootstrap_remote_cases_appends_env_setup_without_posting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.csv"
+            with path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id", "beta_deg"])
+                writer.writeheader()
+                writer.writerow({"case_id": "", "beta_deg": "15"})
+
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "post_scheduler_job") as post:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = scheduler_job.main(
+                        [
+                            "--cases",
+                            str(path),
+                            "--remote-cases",
+                            "remote/cases.csv",
+                            "--repo-url",
+                            "https://github.com/example/project.git",
+                            "--git-ref",
+                            "main",
+                            "--bootstrap-remote-cases",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        post.assert_not_called()
+        output = json.loads(stdout.getvalue())
+        self.assertIn("cat > remote/cases.csv", output["payload"]["env_setup"])
+        self.assertIn("case_0001,15", output["payload"]["env_setup"])
 
 
 if __name__ == "__main__":

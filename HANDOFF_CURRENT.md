@@ -35,7 +35,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 75 tests and passed; py_compile and scoped `git diff --check` passed after scheduler dry-run helper.
+- 2026-06-16: `python -m unittest discover -s tests` ran 82 tests and passed; py_compile and scoped `git diff --check` passed after scheduler case bootstrap support.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
@@ -49,7 +49,7 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler endpoint is verified at `http://localhost:8000`; actual submission needs either a pushed Git ref or a scheduler-accessible `remote_path` plus case CSV path.
+- Scheduler endpoint is verified at `http://localhost:8000`; actual submission needs pushed Git ref or scheduler `remote_path`; helper can bootstrap small validated case CSVs.
 - GitHub push is blocked by remote HTTP 403 permissions for `Schwalbe262/pyaedt_motor.git`.
 
 ## Next steps
@@ -88,7 +88,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helper supports dry-run `python_git` and `packed_srun` payloads; all launch paths preflight case inputs before AEDT execution.
+- Scheduler helper supports dry-run `python_git`/`packed_srun` payloads and optional small case-CSV bootstrap; all launch paths preflight inputs.
 
 ## Risks and gotchas
 
