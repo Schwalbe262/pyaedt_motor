@@ -44,6 +44,7 @@
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
 - 2026-06-16: scheduler job 57 fixed-geometry 4-profile analyze completed 4/4 `ok` on `cpu2`/`n111`; generated filtered comparison reports under `simul_log_smoke/fixed4_*`.
 - 2026-06-16: job 58 fixed-geometry next chunk is running on Slurm job 680506; result CSV currently has 1/8 `ok` row as of 08:19 KST.
+- 2026-06-16: submitted setup-only dynamic packed probe; scheduler created child job 59 with `simulation_start=1`, `simulation_count=1`, queued on `cpu2`/`n112` as of 08:23 KST.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
@@ -64,7 +65,7 @@
 
 1. Verify/push the latest local commits and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
-3. Poll job 58 and fetch `ipmsm_scheduler_job_module_fixed8_next_analyze_results.csv`; then run `analyze_ipmsm_quality_results.py` on the result.
+3. Poll job 58 and job 59; fetch their result CSVs when available, then run `analyze_ipmsm_quality_results.py` on completed fixed-geometry analyze results.
 4. Update/restart the local scheduler service to latest `7d9ed52` before relying on `/tasks`; current live service likely still has the older `~/.../task.sh` expansion bug seen in task 33.
 5. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
 6. Run `python analyze_ipmsm_dataset_quality.py --results path/to/training_ready.csv --output path/to/dataset_quality.csv --fail-on-quality --max-missing-required-rows 0 --max-duplicate-case-ids 0 --max-failed-rows 0`, then retrain if it passes.

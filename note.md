@@ -576,3 +576,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: job 58 is still incomplete, so multi-geometry quality conclusions and R2 improvement remain unproven.
 - Next action: commit/push the dynamic dispatch checkpoint, then poll job 58 until the 8-row result CSV is complete and run `analyze_ipmsm_quality_results.py`.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 08:23:38 +09:00 - Loop 43
+
+- Part: dynamic packed scheduler probe
+- Goal: submit a small real job through the latest scheduler `dynamic_packed_srun` path without duplicating the in-flight analyze batch.
+- Hypothesis: a setup-only dynamic packed probe can validate scheduler-side `SIMULATION_ID` dispatch while using minimal cluster time.
+- Actions: dry-ran a dynamic packed setup payload with `total_simulations=2`, then submitted it through `/jobs` with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, `module load ansys-electronics/v252`, and remote branch checkout to `origin/chore/codex-context-budget`.
+- Candidates: submit another analyze batch versus a setup-only probe; wait for job 58 versus immediately validate the new dynamic path. Chose setup-only dynamic probe to avoid duplicate solves.
+- Metrics: dry-run payload contained `job_mode=dynamic_packed_srun`, `--processes 1`, and `--case-index-from-simulation-id`; scheduler accepted the request and created child job 59 as `packed_srun`, `simulation_start=1`, `simulation_count=1`, queued on `cpu2`/`n112`; job 58 remained running with 1/8 `ok` row.
+- Result: dynamic packed submission path is accepted by the live scheduler, but the child job has not started and has no Slurm id or result CSV yet.
+- Failure reason: no job 59 execution evidence yet; job 58 is still incomplete.
+- Next action: poll jobs 58 and 59; if job 59 starts, fetch stdout/stderr/result CSV and verify the selected case row matches `SIMULATION_ID=1`.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
