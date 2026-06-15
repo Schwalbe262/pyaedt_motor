@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import csv
+from pathlib import Path
+import tempfile
 import unittest
 
 import subprocess_run
@@ -23,6 +26,25 @@ class SubprocessRunTests(unittest.TestCase):
             subprocess_run.validate_explicit_case_plan(rows, max_cases=2, allow_over_budget=False)
 
         subprocess_run.validate_explicit_case_plan(rows, max_cases=2, allow_over_budget=True)
+
+    def test_read_cases_normalizes_blank_explicit_case_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.csv"
+            with cases_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id", "id", "beta_deg"])
+                writer.writeheader()
+                writer.writerows(
+                    [
+                        {"case_id": "", "id": "", "beta_deg": "10"},
+                        {"case_id": "", "id": "legacy_id", "beta_deg": "20"},
+                        {"case_id": "explicit_id", "id": "ignored", "beta_deg": "30"},
+                    ]
+                )
+
+            rows = subprocess_run.read_cases(cases_path)
+
+        self.assertEqual([row["case_id"] for row in rows], ["case_0001", "legacy_id", "explicit_id"])
+        subprocess_run.validate_explicit_case_plan(rows, max_cases=200, allow_over_budget=False)
 
     def test_split_cases_can_distribute_duplicates_across_chunks(self) -> None:
         rows = [

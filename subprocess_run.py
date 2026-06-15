@@ -73,7 +73,7 @@ def default_process_count(cores_per_process: int) -> int:
 
 def read_cases(path: Path) -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8-sig", newline="") as file:
-        return list(csv.DictReader(file))
+        return normalize_case_ids([dict(row) for row in csv.DictReader(file)])
 
 
 def case_value(case: dict[str, Any], *names: str, default: Any = None) -> Any:
@@ -82,6 +82,16 @@ def case_value(case: dict[str, Any], *names: str, default: Any = None) -> Any:
         if value not in (None, ""):
             return value
     return default
+
+
+def normalize_case_ids(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        case = dict(row)
+        if case.get("case_id") in (None, ""):
+            case["case_id"] = str(case_value(case, "id", default=f"case_{index:04d}"))
+        normalized.append(case)
+    return normalized
 
 
 def duplicate_case_ids(rows: list[dict[str, Any]]) -> list[str]:

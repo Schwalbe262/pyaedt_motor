@@ -251,3 +251,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT project creation was run locally because PyAEDT/Ansys packages are unavailable.
 - Next action: run full validation, commit locally, and retry push.
 - Token usage: unavailable; live Codex DB path is still unknown.
+
+## 2026-06-16 01:01:09 +09:00 - Loop 18
+
+- Part: explicit CSV case-id normalization
+- Goal: keep explicit case IDs identical across CSV loading, validation, subprocess splitting, and worker execution.
+- Hypothesis: blank or missing `case_id` values can pass duplicate validation with generated fallbacks but later execute as the literal default `case`, risking duplicate result rows and report artifact names.
+- Actions: normalized blank/missing explicit `case_id`s in `run_ipmsm_batch.load_cases` and `subprocess_run.read_cases`; preserved legacy `id` values; added focused reader tests.
+- Candidates: reject missing IDs versus generate deterministic IDs; chose deterministic IDs to preserve existing CSV compatibility while keeping runtime IDs unique and visible.
+- Metrics: targeted unit files ran 18 tests and passed; full unittest discovery ran 61 tests and passed; py_compile and scoped `git diff --check` passed.
+- Result: explicit CSV rows now carry deterministic `case_id`s before validation, splitting, and execution.
+- Failure reason: no AEDT setup or solve was run locally because PyAEDT/Ansys packages are unavailable; GitHub push failed with remote HTTP 403 permissions.
+- Next action: fix GitHub credentials/permissions, push the local branch, then continue toward AEDT setup-only validation once credentials/environment are available.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

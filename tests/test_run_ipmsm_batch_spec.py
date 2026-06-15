@@ -117,6 +117,25 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
 
         run_ipmsm_batch.validate_case_plan(cases, max_cases=2, allow_over_budget=True)
 
+    def test_load_cases_normalizes_blank_explicit_case_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.csv"
+            with cases_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id", "id", "beta_deg"])
+                writer.writeheader()
+                writer.writerows(
+                    [
+                        {"case_id": "", "id": "", "beta_deg": "10"},
+                        {"case_id": "", "id": "legacy_id", "beta_deg": "20"},
+                        {"case_id": "explicit_id", "id": "ignored", "beta_deg": "30"},
+                    ]
+                )
+
+            cases = run_ipmsm_batch.load_cases(str(cases_path), count=99)
+
+        self.assertEqual([case["case_id"] for case in cases], ["case_0001", "legacy_id", "explicit_id"])
+        run_ipmsm_batch.validate_case_plan(cases, max_cases=200)
+
     def test_create_simulation_name_ignores_stale_low_counter(self) -> None:
         original_base_dir = run_ipmsm_batch.BASE_DIR
         with tempfile.TemporaryDirectory() as tmp:

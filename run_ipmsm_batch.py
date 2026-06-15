@@ -526,8 +526,18 @@ def build_spec(case: dict[str, Any], default_symmetry_factor: int = 4) -> Any:
 def load_cases(path: str | None, count: int) -> list[dict[str, Any]]:
     if path:
         with Path(path).open("r", encoding="utf-8-sig", newline="") as file:
-            return [dict(row) for row in csv.DictReader(file)]
+            return normalize_case_ids([dict(row) for row in csv.DictReader(file)])
     return [{"case_id": f"case_{idx:04d}"} for idx in range(1, count + 1)]
+
+
+def normalize_case_ids(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for index, case in enumerate(cases, start=1):
+        row = dict(case)
+        if row.get("case_id") in (None, ""):
+            row["case_id"] = str(case_value(row, "id", default=f"case_{index:04d}"))
+        normalized.append(row)
+    return normalized
 
 
 def duplicate_case_ids(cases: list[dict[str, Any]]) -> list[str]:

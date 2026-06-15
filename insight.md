@@ -181,3 +181,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `subprocess_run.py` validates the full explicit plan before writing split CSVs or launching workers.
 - Evidence: 59 unit tests passed; focused test shows duplicates can split across chunks and the CLI guard rejects them with exit code 2.
 - Remaining risk: existing historical result CSVs still need downstream duplicate audits when merging new AEDT outputs.
+
+## 2026-06-16 01:01:09 +09:00 - Insight 18
+
+- Source loop: `note.md` Loop 18.
+- Improvement: explicit case identifiers are normalized before validation and worker fan-out.
+- Before: blank or missing CSV IDs could pass duplicate checks with generated fallback names but later execute with a different default identifier.
+- After: direct and subprocess CSV readers assign deterministic `case_id`s, preserving legacy `id` values before validation, splitting, and execution.
+- Evidence: focused reader tests cover blank, legacy, and explicit IDs; full unittest discovery ran 61 tests and passed.
+- Remaining risk: raw programmatic `run_one_case` calls still need caller-provided IDs when running more than one case outside the CLI loaders.

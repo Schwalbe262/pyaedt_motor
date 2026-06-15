@@ -34,7 +34,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 59 tests and passed; py_compile and `git diff --check` passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 61 tests and passed; py_compile and scoped `git diff --check` passed after explicit CSV case-id normalization.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-15: `train_ipmsm_lightgbm.py --help` works; training dependency probe fails cleanly because pandas/sklearn/lightgbm are unavailable locally.
@@ -49,6 +49,7 @@
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler URL from prompt used `localhhost`; verify the actual endpoint before integration.
+- GitHub push is blocked by remote HTTP 403 permissions for `Schwalbe262/pyaedt_motor.git`.
 
 ## Next steps
 
@@ -79,19 +80,14 @@
 
 - Created canonical root project-memory files plus read-only Codex thread token accounting CLI.
 - Ignored downloaded sidecars and generated local model/report artifacts.
-- Added deterministic IPMSM mesh/time-step quality case generator.
-- `run_ipmsm_batch.py` now accepts per-case mesh element override columns.
-- Added filtered quality-result comparison reporting, preserving `input_quality_profile` and replay `source_case_id`.
-- Added regression R2 verifier; current LightGBM artifact misses the 0.95 target on all test targets.
-- Added streaming dataset quality analyzer; existing result CSVs are complete for 13,550/13,748 rows.
-- Improved failed-row observability for missing required transient outputs.
-- Added deterministic LightGBM training CLI with stable target seeds, threshold verification, recovered width-ratio feature, and derived geometry repair.
-- Added fixed-geometry replay support, source-grouped replay comparison, and a deterministic geometry-spread 200-case replay selector.
-- Added a controller guard against accidentally duplicating explicit case CSVs across Slurm jobs or repeated submit cycles.
+- Added deterministic IPMSM quality cases, per-case mesh overrides, fixed-geometry replay selection, and filtered quality comparison.
+- Added dataset quality and regression R2 verifiers; current LightGBM artifact misses the 0.95 R2 gate.
+- Added deterministic LightGBM training CLI with stable target seeds, recovered width-ratio feature, and derived geometry repair.
+- `run_one_case` now writes structured failed rows for pre-AEDT import/setup errors and records missing required outputs.
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
-- `run_one_case` now writes failed rows for pre-AEDT import/setup errors.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
-- `subprocess_run.py` rejects duplicate explicit `case_id`s before splitting worker CSVs.
+- Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
+- Direct and subprocess CSV readers normalize blank/missing explicit `case_id`s before validation, splitting, and worker execution.
 
 ## Risks and gotchas
 
