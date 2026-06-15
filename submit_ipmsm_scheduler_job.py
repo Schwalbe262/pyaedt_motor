@@ -199,8 +199,8 @@ def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
 def validate_scheduler_request(args: argparse.Namespace) -> None:
     if args.job_mode == "python_git" and not args.repo_url:
         raise RuntimeError("--repo-url is required for --job-mode python_git")
-    if args.job_mode == "packed_srun" and not args.remote_path:
-        raise RuntimeError("--remote-path is required for --job-mode packed_srun")
+    if args.job_mode in {"packed_srun", "dynamic_packed_srun"} and not args.remote_path:
+        raise RuntimeError(f"--remote-path is required for --job-mode {args.job_mode}")
     if args.submit and args.analyze and not args.confirm_analyze:
         raise RuntimeError("scheduler solve submission requires --confirm-analyze with --analyze")
     if args.submit and not args.remote_cases and args.cases.is_absolute():
@@ -287,6 +287,7 @@ def selected_submit_job_fields(job: dict[str, Any]) -> dict[str, Any]:
         "job_name",
         "status",
         "job_mode",
+        "account_name",
         "repo_url",
         "git_ref",
         "entrypoint",
@@ -309,8 +310,28 @@ def find_submitted_job(
     previous_ids: set[int],
     args: argparse.Namespace,
 ) -> dict[str, Any] | None:
+    submitted_jobs = find_submitted_jobs(jobs, previous_ids, args)
+    return submitted_jobs[0] if submitted_jobs else None
+
+
+def find_submitted_jobs(
+    jobs: list[dict[str, Any]],
+    previous_ids: set[int],
+    args: argparse.Namespace,
+) -> list[dict[str, Any]]:
     new_jobs = [job for job in jobs if job_id(job) not in previous_ids]
     candidates = new_jobs or jobs
+    if args.job_mode == "dynamic_packed_srun":
+        prefix = f"{args.job_name}-"
+        matches = [
+            job
+            for job in candidates
+            if str(job.get("job_name") or "").startswith(prefix)
+            and job.get("job_mode") == "packed_srun"
+            and job.get("entrypoint") == args.entrypoint
+            and job.get("remote_path") == args.remote_path
+        ]
+        return sorted(matches, key=lambda job: job_id(job) or 0)
     for job in candidates:
         if (
             job.get("job_name") == args.job_name
@@ -318,8 +339,8 @@ def find_submitted_job(
             and job.get("entrypoint") == args.entrypoint
             and job.get("git_ref") == args.git_ref
         ):
-            return job
-    return candidates[0] if candidates else None
+            return [job]
+    return candidates[:1]
 
 
 def write_manifest(path: Path, output: dict[str, Any]) -> None:
@@ -359,7 +380,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--bootstrap-max-bytes", type=int, default=DEFAULT_BOOTSTRAP_MAX_BYTES)
     parser.add_argument("--repo-url", default=default_repo_url())
     parser.add_argument("--git-ref", default=default_git_ref())
-    parser.add_argument("--job-mode", choices=("python_git", "packed_srun"), default="python_git")
+    parser.add_argument("--job-mode", choices=("python_git", "packed_srun", "dynamic_packed_srun"), default="python_git")
     parser.add_argument("--remote-path", default="", help="Scheduler-accessible working directory for packed_srun mode.")
     parser.add_argument("--entrypoint", default="subprocess_run.py")
     parser.add_argument("--job-name", default="ipmsm-replay-setup")
@@ -443,13 +464,15 @@ def main(argv: list[str] | None = None) -> int:
             output["pre_submit_job_lookup_error"] = str(exc)
         output["response"] = post_scheduler_job(args.scheduler_url, payload, args.timeout)
         try:
-            submitted_job = find_submitted_job(
+            submitted_jobs = find_submitted_jobs(
                 get_scheduler_jobs(args.scheduler_url, args.timeout),
                 pre_submit_job_ids,
                 args,
             )
-            if submitted_job:
-                output["submitted_job"] = selected_submit_job_fields(submitted_job)
+            if submitted_jobs:
+                output["submitted_job"] = selected_submit_job_fields(submitted_jobs[0])
+                if len(submitted_jobs) > 1 or args.job_mode == "dynamic_packed_srun":
+                    output["submitted_jobs"] = [selected_submit_job_fields(job) for job in submitted_jobs]
         except Exception as exc:
             output["submitted_job_lookup_error"] = str(exc)
     if args.write_manifest:

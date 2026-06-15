@@ -111,6 +111,25 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(payload["remote_path"], "/home/user/pyaedt_motor")
         self.assertEqual(payload["account_name"], "r1jae262")
 
+    def test_build_job_payload_supports_dynamic_packed_srun_policy(self) -> None:
+        args = scheduler_args(
+            job_mode="dynamic_packed_srun",
+            repo_url="",
+            remote_path="/home/user/pyaedt_motor",
+            total_simulations=20,
+            max_new_jobs=4,
+            account_name="r1jae262",
+        )
+
+        scheduler_job.validate_scheduler_request(args)
+        payload = scheduler_job.build_job_payload(args)
+
+        self.assertEqual(payload["job_mode"], "dynamic_packed_srun")
+        self.assertEqual(payload["remote_path"], "/home/user/pyaedt_motor")
+        self.assertEqual(payload["total_simulations"], 20)
+        self.assertEqual(payload["max_new_jobs"], 4)
+        self.assertEqual(payload["account_name"], "r1jae262")
+
     def test_load_and_validate_cases_rejects_bad_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.csv"
@@ -201,6 +220,12 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
 
     def test_validate_scheduler_request_requires_remote_path_for_packed_srun(self) -> None:
         args = scheduler_args(job_mode="packed_srun", repo_url="", remote_path="")
+
+        with self.assertRaisesRegex(RuntimeError, "--remote-path is required"):
+            scheduler_job.validate_scheduler_request(args)
+
+    def test_validate_scheduler_request_requires_remote_path_for_dynamic_packed_srun(self) -> None:
+        args = scheduler_args(job_mode="dynamic_packed_srun", repo_url="", remote_path="")
 
         with self.assertRaisesRegex(RuntimeError, "--remote-path is required"):
             scheduler_job.validate_scheduler_request(args)
@@ -540,6 +565,35 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(output["response"]["response_format"], "html")
         self.assertEqual(output["submitted_job"]["id"], 11)
         self.assertNotIn("raw_response", output["response"])
+
+    def test_find_submitted_jobs_records_dynamic_packed_children(self) -> None:
+        args = scheduler_args(
+            job_mode="dynamic_packed_srun",
+            job_name="ipmsm-sweep",
+            entrypoint="subprocess_run.py",
+            remote_path="/home/user/pyaedt_motor",
+        )
+        jobs = [
+            {"id": 1, "job_name": "older", "job_mode": "packed_srun"},
+            {
+                "id": 3,
+                "job_name": "ipmsm-sweep-11-20",
+                "job_mode": "packed_srun",
+                "entrypoint": "subprocess_run.py",
+                "remote_path": "/home/user/pyaedt_motor",
+            },
+            {
+                "id": 2,
+                "job_name": "ipmsm-sweep-1-10",
+                "job_mode": "packed_srun",
+                "entrypoint": "subprocess_run.py",
+                "remote_path": "/home/user/pyaedt_motor",
+            },
+        ]
+
+        matches = scheduler_job.find_submitted_jobs(jobs, {1}, args)
+
+        self.assertEqual([job["id"] for job in matches], [2, 3])
 
 
 if __name__ == "__main__":
