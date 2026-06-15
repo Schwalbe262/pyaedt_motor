@@ -86,6 +86,7 @@
 - Subprocess splitting now rejects duplicate explicit `case_id`s before worker CSV generation.
 - Scheduler endpoint is verified at `http://localhost:8000`; dry-run-first scheduler job preparation is available for validated setup-only replay plans through Git or scheduler `remote_path` modes, with optional small case-CSV bootstrap.
 - Filtered scheduler job inspection is available for status and log evidence after setup-only submissions.
+- Setup-only scheduler smoke job 13 was submitted through `python_git` and failed before AEDT because the scheduler could not `cd` into the cloned `repo` path; no Ansys setup or solve evidence was produced.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
 - Next focus is AEDT setup-only validation, targeted solve selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
 
@@ -94,5 +95,5 @@
 - Run the selected fixed-geometry replay plan to compare mesh/time-step quality on representative existing designs.
 - Use filtered regression verification after every retraining run and promote only evidence-backed simulation changes.
 - Prefer `train_ipmsm_lightgbm.py` over ad hoc notebook reruns for regression retraining and R2 gate output.
-- Use the verified scheduler endpoint for setup-only replay submission after confirming the Git branch/ref or scheduler `remote_path`; bootstrap only small validated case CSVs.
+- Use the verified scheduler endpoint for setup-only replay submission after fixing the `python_git` job-dir issue or confirming a scheduler `remote_path`; bootstrap only small validated case CSVs.
 - Build a repeatable before/after workflow that links simulation setup changes to regression `R^2` changes.

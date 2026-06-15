@@ -343,3 +343,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: stdout redacts `payload.env_setup` by default with byte/line/hash evidence, `--show-env-setup` restores full output, and `--validate-remote-entrypoint` checks project files in the scheduler working tree.
 - Evidence: tests cover redacted stdout, full-manifest preservation, opt-in full stdout, and remote entrypoint checks; packed-srun smoke manifest kept full env setup while stdout remained compact.
 - Remaining risk: this improves submission evidence quality but does not confirm the correct scheduler `remote_path`, AEDT setup success, solve quality, or R2 target.
+
+## 2026-06-16 02:42:18 +09:00 - Insight 36
+
+- Source loop: `note.md` Loop 36.
+- Improvement: scheduler submissions now preserve created-job evidence even when the POST returns an HTML page.
+- Before: a successful scheduler POST could print the full HTML UI as `raw_response`, making logs noisy and leaving the created job id implicit.
+- After: non-JSON responses are summarized by type, size, title, and hash, and `/api/jobs` lookup records the submitted job fields for follow-up inspection.
+- Evidence: real setup-only job 13 was created and then failed before AEDT; tests cover HTML compaction and submitted-job lookup; full unittest discovery ran 119 tests and passed.
+- Remaining risk: this improves observability only; scheduler `python_git` still fails before repo entry, and AEDT setup/solve plus R2 evidence remain missing.

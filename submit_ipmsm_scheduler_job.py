@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -20,6 +21,7 @@ import subprocess_run
 DEFAULT_SCHEDULER_URL = "http://localhost:8000"
 DEFAULT_MAX_CASES = 200
 DEFAULT_BOOTSTRAP_MAX_BYTES = 50_000
+HTML_TITLE_PATTERN = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
 def git_value(args: list[str], default: str = "") -> str:
@@ -177,6 +179,24 @@ def validate_scheduler_request(args: argparse.Namespace) -> None:
         raise RuntimeError("--bootstrap-remote-cases with an absolute --cases path requires --remote-cases")
 
 
+def compact_non_json_response(body: str) -> dict[str, Any]:
+    stripped = body.strip()
+    prefix = stripped[:300].lower()
+    response_format = "html" if prefix.startswith("<!doctype") or "<html" in prefix else "text"
+    summary: dict[str, Any] = {
+        "response_format": response_format,
+        "response_chars": len(body),
+        "response_bytes": len(body.encode("utf-8")),
+        "body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest()[:16],
+    }
+    title_match = HTML_TITLE_PATTERN.search(body)
+    if title_match:
+        summary["title"] = " ".join(title_match.group(1).split())
+    if response_format != "html" and stripped:
+        summary["snippet"] = " ".join(stripped.split())[:240]
+    return summary
+
+
 def post_scheduler_job(scheduler_url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     url = scheduler_url.rstrip("/") + "/jobs"
     encoded = parse.urlencode(payload).encode("utf-8")
@@ -191,7 +211,7 @@ def post_scheduler_job(scheduler_url: str, payload: dict[str, Any], timeout: flo
     try:
         return json.loads(body)
     except json.JSONDecodeError:
-        return {"raw_response": body}
+        return compact_non_json_response(body)
 
 
 def get_scheduler_health(scheduler_url: str, timeout: float) -> dict[str, Any]:
@@ -202,6 +222,74 @@ def get_scheduler_health(scheduler_url: str, timeout: float) -> dict[str, Any]:
         return json.loads(body)
     except json.JSONDecodeError:
         return {"raw_response": body}
+
+
+def get_scheduler_jobs(scheduler_url: str, timeout: float) -> list[dict[str, Any]]:
+    url = scheduler_url.rstrip("/") + "/api/jobs"
+    with request.urlopen(url, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
+    data = json.loads(body)
+    if not isinstance(data, list):
+        raise RuntimeError("/api/jobs did not return a JSON list")
+    return [job for job in data if isinstance(job, dict)]
+
+
+def job_id_set(jobs: list[dict[str, Any]]) -> set[int]:
+    ids: set[int] = set()
+    for job in jobs:
+        try:
+            ids.add(int(job["id"]))
+        except Exception:
+            continue
+    return ids
+
+
+def job_id(job: dict[str, Any]) -> int | None:
+    try:
+        return int(job["id"])
+    except Exception:
+        return None
+
+
+def selected_submit_job_fields(job: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "id",
+        "job_name",
+        "status",
+        "job_mode",
+        "repo_url",
+        "git_ref",
+        "entrypoint",
+        "arguments",
+        "remote_path",
+        "remote_job_dir",
+        "stdout_path",
+        "stderr_path",
+        "failure_message",
+        "created_at",
+        "submitted_at",
+        "updated_at",
+        "finished_at",
+    )
+    return {key: job.get(key) for key in keys if key in job}
+
+
+def find_submitted_job(
+    jobs: list[dict[str, Any]],
+    previous_ids: set[int],
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    new_jobs = [job for job in jobs if job_id(job) not in previous_ids]
+    candidates = new_jobs or jobs
+    for job in candidates:
+        if (
+            job.get("job_name") == args.job_name
+            and job.get("job_mode") == args.job_mode
+            and job.get("entrypoint") == args.entrypoint
+            and job.get("git_ref") == args.git_ref
+        ):
+            return job
+    return candidates[0] if candidates else None
 
 
 def write_manifest(path: Path, output: dict[str, Any]) -> None:
@@ -311,7 +399,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_health:
         output["health"] = get_scheduler_health(args.scheduler_url, args.timeout)
     if args.submit:
+        pre_submit_job_ids: set[int] = set()
+        try:
+            pre_submit_job_ids = job_id_set(get_scheduler_jobs(args.scheduler_url, args.timeout))
+        except Exception as exc:
+            output["pre_submit_job_lookup_error"] = str(exc)
         output["response"] = post_scheduler_job(args.scheduler_url, payload, args.timeout)
+        try:
+            submitted_job = find_submitted_job(
+                get_scheduler_jobs(args.scheduler_url, args.timeout),
+                pre_submit_job_ids,
+                args,
+            )
+            if submitted_job:
+                output["submitted_job"] = selected_submit_job_fields(submitted_job)
+        except Exception as exc:
+            output["submitted_job_lookup_error"] = str(exc)
     if args.write_manifest:
         output["manifest_path"] = str(args.write_manifest)
         write_manifest(args.write_manifest, output)

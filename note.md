@@ -485,3 +485,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no AEDT setup, solve, scheduler POST, or regression retraining was run; scheduler `remote_path` for this project is still unconfirmed and GitHub push remains blocked by remote HTTP 403 permissions.
 - Next action: commit locally, retry GitHub push, then confirm the scheduler-visible project path or fixed Git permission before setup-only POST.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.
+
+## 2026-06-16 02:42:18 +09:00 - Loop 36
+
+- Part: setup-only scheduler smoke and submit evidence handling
+- Goal: move from dry-run scheduler evidence toward actual setup-only validation while keeping submission output compact and monitorable.
+- Hypothesis: `git ls-remote` could prove the branch is available despite the previous push error, allowing a safe 4-case setup-only `python_git` scheduler smoke.
+- Actions: confirmed remote branch `chore/codex-context-budget` at `e91fec4`; submitted setup-only scheduler job 13 with bootstrap cases and remote entrypoint validation; inspected filtered job evidence; compacted non-JSON/HTML submit responses and added submitted-job lookup; added tests.
+- Candidates: submit full 200-case replay versus first submit 4-case setup-only smoke; retry packed mode with an unconfirmed remote path versus use verified Git ref; chose 4-case `python_git` smoke because it avoids solves and uses the confirmed branch.
+- Metrics: scheduler job 13 reached `failed` before AEDT with `cd: slurm_scheduler/job-13-1781545159/repo: No such file or directory`; focused submit tests ran 20 tests and passed; full unittest discovery ran 119 tests and passed; py_compile and diff check passed.
+- Result: scheduler POST path is now tested with real evidence, and future submit output will report compact response metadata plus the created job fields instead of dumping HTML.
+- Failure reason: no AEDT setup, solve, or regression retraining was run; scheduler `python_git` currently fails before entering the cloned repo; local ML dependencies are still unavailable.
+- Next action: commit locally, verify remote sync with `ls-remote`, then either fix scheduler `python_git` job-dir behavior or use a confirmed scheduler `remote_path` for setup-only replay.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage` could not find a local Codex SQLite database.

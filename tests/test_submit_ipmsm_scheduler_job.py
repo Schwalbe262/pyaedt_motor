@@ -135,6 +135,18 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertIn("test -f run_ipmsm_batch.py", script)
         self.assertIn("required scheduler file missing", script)
 
+    def test_compact_non_json_response_summarizes_html_without_body(self) -> None:
+        body = "<!doctype html><html><head><title>Slurm Scheduler</title></head><body>" + ("x" * 1000)
+
+        summary = scheduler_job.compact_non_json_response(body)
+
+        self.assertEqual(summary["response_format"], "html")
+        self.assertEqual(summary["title"], "Slurm Scheduler")
+        self.assertEqual(summary["response_chars"], len(body))
+        self.assertIn("body_sha256", summary)
+        self.assertNotIn("raw_response", summary)
+        self.assertNotIn("snippet", summary)
+
     def test_validate_scheduler_request_requires_confirm_for_analyze_submit(self) -> None:
         args = scheduler_args(submit=True, analyze=True)
 
@@ -365,6 +377,60 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
             self.assertIn("<redacted env_setup bytes=", output["payload"]["env_setup"])
             self.assertIn("cat > remote/cases.csv", manifest["payload"]["env_setup"])
             self.assertIn("case_0001,15", manifest["payload"]["env_setup"])
+
+    def test_main_submit_compacts_response_and_records_submitted_job(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.csv"
+            with cases_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001"})
+
+            before_jobs = [{"id": 10, "job_name": "older"}]
+            submitted = {
+                "id": 11,
+                "job_name": "ipmsm-replay-setup",
+                "status": "queued",
+                "job_mode": "python_git",
+                "repo_url": "https://github.com/example/project.git",
+                "git_ref": "main",
+                "entrypoint": "subprocess_run.py",
+                "arguments": "--cases remote/cases.csv --setup-only",
+            }
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "get_scheduler_jobs", side_effect=[before_jobs, [submitted, *before_jobs]]):
+                with mock.patch.object(
+                    scheduler_job,
+                    "post_scheduler_job",
+                    return_value={
+                        "response_format": "html",
+                        "response_chars": 1234,
+                        "response_bytes": 1234,
+                        "body_sha256": "abcdef",
+                        "title": "Slurm Scheduler",
+                    },
+                ) as post:
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = scheduler_job.main(
+                            [
+                                "--cases",
+                                str(cases_path),
+                                "--remote-cases",
+                                "remote/cases.csv",
+                                "--repo-url",
+                                "https://github.com/example/project.git",
+                                "--git-ref",
+                                "main",
+                                "--submit",
+                            ]
+                        )
+
+        self.assertEqual(exit_code, 0)
+        post.assert_called_once()
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["response"]["response_format"], "html")
+        self.assertEqual(output["submitted_job"]["id"], 11)
+        self.assertNotIn("raw_response", output["response"])
 
 
 if __name__ == "__main__":

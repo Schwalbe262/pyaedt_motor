@@ -38,7 +38,8 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 117 tests and passed; py_compile and packed-srun multi-result workflow smoke with compact scheduler stdout passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 119 tests and passed; py_compile and scheduler submit response compaction tests passed.
+- 2026-06-16: `git ls-remote` confirms `origin/chore/codex-context-budget` at `e91fec4`; setup-only scheduler job 13 was submitted but failed before AEDT with `cd: slurm_scheduler/job-13-.../repo: No such file or directory`.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
 - 2026-06-16: `train_ipmsm_lightgbm.py --check-dependencies --dependency-report ...` reports numpy ok and pandas/sklearn/lightgbm missing locally.
@@ -52,14 +53,14 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler endpoint is verified at `http://localhost:8000`; actual submission needs pushed Git ref or confirmed scheduler `remote_path`; helper can write full review manifests while redacting large `env_setup` from stdout.
+- Scheduler endpoint is verified at `http://localhost:8000`; `python_git` job 13 failed before AEDT on scheduler job-dir handling, so next submission needs scheduler fix or confirmed `remote_path`.
 - GitHub push is blocked by remote HTTP 403 permissions for `Schwalbe262/pyaedt_motor.git`.
 
 ## Next steps
 
-1. Fix GitHub credentials/permissions and push `chore/codex-context-budget`.
+1. Verify/push the latest local commit and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
 2. Generate a command plan with `python plan_ipmsm_quality_workflow.py --cases path/to/cases.csv --results path/to/results1.csv [path/to/results2.csv ...] --output path/to/quality_workflow_plan.json`; use `--job-mode packed_srun --remote-path ...` if GitHub push is still blocked.
-3. Review the saved scheduler dry-run manifest for the actual Git ref or scheduler `remote_path`; keep `--validate-remote-entrypoint` on before any POST.
+3. Do not retry `python_git` setup-only until the scheduler job-dir failure from job 13 is addressed; use confirmed `remote_path`/packed mode if available.
 4. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
 5. Run `python analyze_ipmsm_dataset_quality.py --results path/to/training_ready.csv --output path/to/dataset_quality.csv --fail-on-quality --max-missing-required-rows 0 --max-duplicate-case-ids 0 --max-failed-rows 0`, then retrain if it passes.
 6. In the ML environment, run `python train_ipmsm_lightgbm.py --check-dependencies --dependency-report path/to/training_dependencies.json`, then retrain with `--data path/to/training_ready.csv --verification-output path/to/r2_check.csv --fail-on-threshold --max-invalid-training-rows 0`.
