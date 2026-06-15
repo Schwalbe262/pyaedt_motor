@@ -106,7 +106,7 @@ def build_remote_cases_bootstrap(remote_cases: str, rows: list[dict[str, Any]], 
     if size > max_bytes:
         raise RuntimeError(f"remote case CSV bootstrap is {size} bytes, exceeding --bootstrap-max-bytes={max_bytes}")
     quoted_path = shlex.quote(remote_cases)
-    quoted_dir = shlex.quote(str(Path(remote_cases).parent))
+    quoted_dir = shlex.quote(posixpath.dirname(remote_cases) or ".")
     return "\n".join(
         [
             f"mkdir -p {quoted_dir}",
@@ -121,6 +121,10 @@ def append_env_setup(existing: str, extra: str) -> str:
     if not existing:
         return extra
     return existing.rstrip() + "\n" + extra
+
+
+def read_env_setup_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8-sig")
 
 
 def build_remote_entrypoint_validation(entrypoint: str) -> str:
@@ -372,6 +376,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--periodic-boundary", action="store_true")
     parser.add_argument("--keep-projects", action="store_true")
     parser.add_argument("--env-setup", default="")
+    parser.add_argument("--env-setup-file", type=Path, default=None, help="Read additional scheduler env setup shell from a local file.")
     parser.add_argument("--remote-probe-output", default="", help="Write scheduler working-tree diagnostics to this remote file before validation.")
     parser.add_argument("--validate-remote-entrypoint", action="store_true", help="Check expected project files in the scheduler working tree before running.")
     parser.add_argument("--required-capability", default="")
@@ -407,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
     rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
     if args.total_simulations <= 0:
         args.total_simulations = len(rows)
+    if args.env_setup_file is not None:
+        args.env_setup = append_env_setup(args.env_setup, read_env_setup_file(args.env_setup_file))
     if args.remote_probe_output:
         args.env_setup = append_env_setup(args.env_setup, build_remote_probe(args.remote_probe_output, args.entrypoint))
     if args.validate_remote_entrypoint:

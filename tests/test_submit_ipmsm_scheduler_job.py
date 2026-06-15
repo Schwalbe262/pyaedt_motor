@@ -40,6 +40,7 @@ def scheduler_args(**overrides: object) -> Namespace:
         "periodic_boundary": False,
         "keep_projects": False,
         "env_setup": "",
+        "env_setup_file": None,
         "remote_probe_output": "",
         "validate_remote_entrypoint": False,
         "required_capability": "ansys",
@@ -123,6 +124,18 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertIn("case_id,beta_deg", script)
         self.assertIn("case_0001,15", script)
 
+    def test_build_remote_cases_bootstrap_uses_posix_parent_for_absolute_remote_path(self) -> None:
+        rows = [{"case_id": "case_0001"}]
+
+        script = scheduler_job.build_remote_cases_bootstrap(
+            "/home1/r1jae262/ipmsm_pyaedt_motor_work/remote/cases.csv",
+            rows,
+            max_bytes=50000,
+        )
+
+        self.assertIn("mkdir -p /home1/r1jae262/ipmsm_pyaedt_motor_work/remote", script)
+        self.assertIn("cat > /home1/r1jae262/ipmsm_pyaedt_motor_work/remote/cases.csv", script)
+
     def test_build_remote_cases_bootstrap_rejects_large_csv(self) -> None:
         rows = [{"case_id": "case_0001", "beta_deg": "15"}]
 
@@ -144,6 +157,13 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertIn("python --version", script)
         self.assertIn("entrypoint_ok=subprocess_run.py", script)
         self.assertIn("> diagnostics/scheduler_probe.txt 2>&1", script)
+
+    def test_read_env_setup_file_strips_utf8_bom(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "env_setup.sh"
+            path.write_bytes(b"\xef\xbb\xbfecho HELLO=1\n")
+
+            self.assertEqual(scheduler_job.read_env_setup_file(path), "echo HELLO=1\n")
 
     def test_compact_non_json_response_summarizes_html_without_body(self) -> None:
         body = "<!doctype html><html><head><title>Slurm Scheduler</title></head><body>" + ("x" * 1000)
@@ -348,6 +368,44 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         post.assert_not_called()
         env_setup = json.loads(stdout.getvalue())["payload"]["env_setup"]
         self.assertLess(env_setup.index("SCHEDULER_REMOTE_PROBE=1"), env_setup.index("required scheduler file missing"))
+
+    def test_main_reads_env_setup_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.csv"
+            env_setup_path = Path(tmp) / "env_setup.sh"
+            with path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001"})
+            env_setup_path.write_text("echo FROM_ENV_SETUP_FILE=1\n", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_job, "post_scheduler_job") as post:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = scheduler_job.main(
+                        [
+                            "--cases",
+                            str(path),
+                            "--remote-cases",
+                            "remote/cases.csv",
+                            "--repo-url",
+                            "https://github.com/example/project.git",
+                            "--git-ref",
+                            "main",
+                            "--env-setup",
+                            "echo FROM_ENV_SETUP_ARG=1",
+                            "--env-setup-file",
+                            str(env_setup_path),
+                            "--show-env-setup",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        post.assert_not_called()
+        env_setup = json.loads(stdout.getvalue())["payload"]["env_setup"]
+        self.assertIn("FROM_ENV_SETUP_ARG=1", env_setup)
+        self.assertIn("FROM_ENV_SETUP_FILE=1", env_setup)
+        self.assertLess(env_setup.index("FROM_ENV_SETUP_ARG=1"), env_setup.index("FROM_ENV_SETUP_FILE=1"))
 
     def test_main_writes_review_manifest_without_posting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

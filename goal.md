@@ -86,7 +86,8 @@
 - Subprocess splitting now rejects duplicate explicit `case_id`s before worker CSV generation.
 - Scheduler endpoint is verified at `http://localhost:8000`; dry-run-first scheduler job preparation is available for validated setup-only replay plans through Git or scheduler `remote_path` modes, with optional small case-CSV bootstrap.
 - Scheduler job 13 showed `python_git` left the working tree on `main` and the wrapper failed before AEDT; packed diagnostics against the inferred remote repo reached Python execution.
-- Scheduler job 20 validated imports and explicit case-plan checks after forced branch checkout; job 21 reached `run_ipmsm_batch.py` and wrote a structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
+- Scheduler job 29 proved `env_profile=pyaedt2026v1` imports `ansys.aedt.core` and `pyaedt` under account `r1jae262`; job 35 reached `run_ipmsm_batch.py` through a packed repo wrapper and wrote structured setup-only failed rows.
+- Current AEDT blocker is desktop startup: `pyDesktop` fails before project creation with no usable desktop instance, even after using the `pyaedt2026v1` environment and local `pyaedt_module` copy.
 - No successful AEDT setup, Ansys solve, or R2-improving retraining evidence exists yet.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
 - Next focus is AEDT setup-only validation, targeted solve selection, and retraining in the proper ML environment after higher-quality simulation data is produced.

@@ -379,3 +379,30 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `safe_path_exists()` catches `OSError` and `add_local_library_paths()` skips inaccessible paths.
 - Evidence: scheduler job 20 imported `run_ipmsm_batch` successfully after applying the path check, and unit tests cover `PermissionError` as a missing path.
 - Remaining risk: this does not install or load PyAEDT/Ansys; job 21 still failed with `ModuleNotFoundError("No module named 'ansys'")`.
+
+## 2026-06-16 04:06:01 +09:00 - Insight 40
+
+- Source loop: `note.md` Loop 38.
+- Improvement: complex scheduler env setup should be read from a file and decoded with `utf-8-sig`.
+- Before: multiline `--env-setup` broke PowerShell argument parsing, and BOM-prefixed setup files produced remote shell errors such as `cat: command not found`.
+- After: `submit_ipmsm_scheduler_job.py --env-setup-file ...` appends local setup scripts and strips a UTF-8 BOM before submission.
+- Evidence: tests cover env setup file ordering and BOM stripping; job 27 exposed the BOM failure, and later file-based jobs ran setup scripts successfully.
+- Remaining risk: script contents still need review through manifests; this only fixes transport/encoding.
+
+## 2026-06-16 04:06:01 +09:00 - Insight 41
+
+- Source loop: `note.md` Loop 38.
+- Improvement: remote case bootstrap paths must use POSIX path rules even when the helper runs on Windows.
+- Before: `Path(remote_cases).parent` treated `/home1/.../cases.csv` incorrectly on Windows, so scheduler job 31 failed creating the absolute remote case CSV.
+- After: bootstrap directory generation uses `posixpath.dirname()`.
+- Evidence: tests cover absolute POSIX remote paths, and job 35 later confirmed `remote/quality_case_single.csv` existed inside the packed repo.
+- Remaining risk: operators still need to choose a remote path writable by the selected scheduler account.
+
+## 2026-06-16 04:06:01 +09:00 - Insight 42
+
+- Source loop: `note.md` Loop 38.
+- Improvement: AEDT desktop startup failures should be reported at the `pyDesktop` boundary.
+- Before: setup-only rows showed `AttributeError("'NoneType' object has no attribute 'EnableAutoSave'")`, hiding that Desktop startup itself failed.
+- After: `run_ipmsm_batch.py` converts that startup failure into a clear RuntimeError before project creation.
+- Evidence: tests cover the clearer failed row, and scheduler jobs 38/43 wrote the clearer error after reaching `run_ipmsm_batch.py`.
+- Remaining risk: this improves diagnosis but does not fix AEDT desktop startup, solve quality, or R2 metrics.

@@ -1548,12 +1548,20 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         except Exception:
             pass
 
-        desktop = pyDesktop(
-            version=None,
-            non_graphical=options.non_graphical,
-            close_on_exit=True,
-            new_desktop=True,
-        )
+        try:
+            desktop = pyDesktop(
+                version=None,
+                non_graphical=options.non_graphical,
+                close_on_exit=True,
+                new_desktop=True,
+            )
+        except AttributeError as exc:
+            if "EnableAutoSave" in str(exc):
+                raise RuntimeError(
+                    "AEDT desktop startup failed before project creation; "
+                    "pyDesktop did not expose a usable desktop instance."
+                ) from exc
+            raise
         sim = Simulation(desktop=desktop, cores=options.cores)
         sim.fixed_geometry = fixed_geometry
         sim.create_simulation_name(simulation_dir)

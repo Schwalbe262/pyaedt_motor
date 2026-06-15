@@ -40,6 +40,7 @@
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
 - 2026-06-16: `python -m unittest discover -s tests` ran 124 tests and passed; focused scheduler/run-batch tests, py_compile, and `git diff --check` passed.
 - 2026-06-16: scheduler job 20 validated branch checkout/imports/case-plan checks; job 21 reached `run_ipmsm_batch.py` and wrote one structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
+- 2026-06-16: scheduler job 29 proved `pyaedt2026v1` imports `ansys.aedt.core`/`pyaedt`; packed repo jobs 35/38/43 reached `run_ipmsm_batch.py` and now fail clearly at AEDT desktop startup.
 - 2026-06-16: `git ls-remote` still shows `origin/chore/codex-context-budget` at `e91fec4`; local branch has later commits because GitHub push returns HTTP 403.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
@@ -54,13 +55,13 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler reached the project runner, but the remote job environment used so far lacks the `ansys` Python package; one env-profile retry landed on an account without permission to the confirmed remote path.
+- Scheduler now reaches the project runner under `pyaedt2026v1`; current blocker is `pyDesktop` returning no usable AEDT desktop before project creation.
 - GitHub push is blocked by remote HTTP 403 permissions for `Schwalbe262/pyaedt_motor.git`.
 
 ## Next steps
 
 1. Verify/push the latest local commits and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
-2. Retry setup-only only with an accessible scheduler path/account and an env profile that imports `ansys`; keep remote probe output enabled.
+2. Retry setup-only only after fixing/confirming AEDT desktop startup for `pyaedt2026v1`; keep packed repo wrapper and remote probe output enabled.
 3. Do not rely on `python_git` checkout until the scheduler honors `git_ref` or env setup forces the branch checkout.
 4. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
 5. Run `python analyze_ipmsm_dataset_quality.py --results path/to/training_ready.csv --output path/to/dataset_quality.csv --fail-on-quality --max-missing-required-rows 0 --max-duplicate-case-ids 0 --max-failed-rows 0`, then retrain if it passes.

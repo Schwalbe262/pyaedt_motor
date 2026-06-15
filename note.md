@@ -511,3 +511,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no successful AEDT setup, solve, or regression retraining was run; one env-profile retry landed on an account without permission to the confirmed remote path; GitHub push still returns HTTP 403.
 - Next action: commit locally, retry GitHub push, then run a setup-only retry on an accessible scheduler path/account with an env profile that imports `ansys`.
 - Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage --label "loop37 scheduler setup evidence"` could not find a local Codex SQLite database.
+
+## 2026-06-16 04:06:01 +09:00 - Loop 38
+
+- Part: scheduler PyAEDT profile and packed repo setup validation
+- Goal: get past the missing-`ansys` blocker and determine whether setup-only can start AEDT under the scheduler.
+- Hypothesis: `env_profile=pyaedt2026v1` on account `r1jae262` has PyAEDT installed, and a packed repo wrapper can avoid the scheduler `python_git` checkout/job-dir bug.
+- Actions: added `--env-setup-file`; stripped UTF-8 BOM from env setup files; fixed POSIX absolute remote-case bootstrap paths; submitted env/profile probes and packed repo setup-only jobs; added a clear desktop-startup RuntimeError for `pyDesktop` `EnableAutoSave` failures.
+- Candidates: continue `python_git` versus packed repo wrapper; use `required_capability=ansys` versus env-profile-only scheduling; modify external `pyaedt_library` directly versus copy it into the repo working tree for one job; chose packed wrapper, env-profile-only, and local copy patching.
+- Metrics: job 29 completed and proved `ansys.aedt.core`/`pyaedt` import under `/home1/r1jae262/miniconda3/envs/pyaedt2026v1/bin/python`; job 35 reached `run_ipmsm_batch.py` and wrote a failed row; job 38/43 wrote clearer failed rows with `RuntimeError('AEDT desktop startup failed before project creation; pyDesktop did not expose a usable desktop instance.')`; focused tests ran 51 tests and passed.
+- Result: the blocker moved from Python package availability to AEDT desktop startup; scheduler path/account/env profile and project runner are now confirmed for setup-only attempts.
+- Failure reason: no successful AEDT setup, solve, or regression retraining was run; `pyDesktop` still fails before project creation in `pyaedt2026v1`; GitHub push remains blocked by HTTP 403.
+- Next action: commit local helper/error-reporting fixes, retry push, then investigate AEDT desktop startup configuration or scheduler node/license requirements before running the 200-case replay.
+- Token usage: unavailable; `codex_ops.py record-current-codex-thread-usage --label "loop38 scheduler pyaedt profile setup"` could not find a local Codex SQLite database.
