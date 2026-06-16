@@ -6,6 +6,7 @@ import argparse
 import csv
 import hashlib
 import math
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -70,6 +71,11 @@ FIELDNAMES = (
     *(f"mesh_{key}_elements" for key in MESH_ELEMENT_KEYS),
     *GEOMETRY_OUTPUT_KEYS,
 )
+EXCLUSION_CONDITION_PATTERN = re.compile(
+    r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(<=|>=|==|!=|<|>)\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*$"
+)
+ExclusionCondition = tuple[str, str, float]
+ExclusionRule = tuple[ExclusionCondition, ...]
 
 
 def finite_float(value: object) -> float:
@@ -107,6 +113,46 @@ def parse_selection_features(text: str) -> tuple[str, ...]:
     return features
 
 
+def parse_exclusion_rule(text: str) -> ExclusionRule:
+    conditions: list[ExclusionCondition] = []
+    for part in text.split(","):
+        stripped = part.strip()
+        if not stripped:
+            continue
+        match = EXCLUSION_CONDITION_PATTERN.match(stripped)
+        if not match:
+            raise ValueError(f"invalid --exclude-where condition: {stripped}")
+        feature, operator, value = match.groups()
+        conditions.append((feature, operator, float(value)))
+    if not conditions:
+        raise ValueError("--exclude-where requires at least one condition")
+    return tuple(conditions)
+
+
+def load_excluded_source_case_ids(paths: Iterable[Path]) -> set[str]:
+    excluded: set[str] = set()
+    for path in paths:
+        loaded_csv = False
+        with Path(path).open("r", encoding="utf-8-sig", newline="") as file:
+            reader = csv.DictReader(file)
+            columns = [column for column in ("source_case_id", "case_id") if column in (reader.fieldnames or [])]
+            if columns:
+                loaded_csv = True
+                for row in reader:
+                    for column in columns:
+                        value = str(row.get(column, "")).strip()
+                        if value:
+                            excluded.add(value)
+        if loaded_csv:
+            continue
+        with Path(path).open("r", encoding="utf-8-sig") as file:
+            for line in file:
+                value = line.strip()
+                if value and not value.startswith("#"):
+                    excluded.add(value.split(",", 1)[0].strip())
+    return excluded
+
+
 def row_has_required_outputs(row: dict[str, str], required_outputs: Iterable[str]) -> bool:
     return all(math.isfinite(finite_float(row.get(column, ""))) for column in required_outputs)
 
@@ -122,6 +168,28 @@ def physical_sanity_violations(row: dict[str, str]) -> list[str]:
     return violations
 
 
+def compare_numeric(value: float, operator: str, threshold: float) -> bool:
+    if not math.isfinite(value):
+        return False
+    if operator == "<":
+        return value < threshold
+    if operator == "<=":
+        return value <= threshold
+    if operator == ">":
+        return value > threshold
+    if operator == ">=":
+        return value >= threshold
+    if operator == "==":
+        return value == threshold
+    if operator == "!=":
+        return value != threshold
+    raise ValueError(f"unknown exclusion operator: {operator}")
+
+
+def candidate_matches_exclusion_rule(candidate: dict[str, Any], rule: ExclusionRule) -> bool:
+    return all(compare_numeric(candidate_feature(candidate, feature), operator, threshold) for feature, operator, threshold in rule)
+
+
 def candidate_sort_key(row: dict[str, Any], seed: int) -> str:
     source_case_id = row.get("source_case_id", "")
     source_result_path = row.get("source_result_path", "")
@@ -133,14 +201,19 @@ def load_candidates(
     paths: Iterable[Path],
     required_outputs: tuple[str, ...],
     status: str,
+    excluded_source_case_ids: set[str] | None = None,
+    exclusion_rules: tuple[ExclusionRule, ...] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     candidates: list[dict[str, Any]] = []
+    excluded_source_case_ids = excluded_source_case_ids or set()
     metrics = {
         "rows": 0,
         "status_rejected": 0,
         "required_output_rejected": 0,
         "physical_sanity_rejected": 0,
         "geometry_rejected": 0,
+        "source_case_excluded": 0,
+        "rule_excluded": 0,
     }
     for path in paths:
         with Path(path).open("r", encoding="utf-8-sig", newline="") as file:
@@ -149,6 +222,10 @@ def load_candidates(
                 metrics["rows"] += 1
                 if status and row.get("status", "").strip().lower() != status.lower():
                     metrics["status_rejected"] += 1
+                    continue
+                source_case_id = row.get("case_id", "")
+                if source_case_id in excluded_source_case_ids:
+                    metrics["source_case_excluded"] += 1
                     continue
                 if not row_has_required_outputs(row, required_outputs):
                     metrics["required_output_rejected"] += 1
@@ -164,22 +241,21 @@ def load_candidates(
                 if not geometry:
                     metrics["geometry_rejected"] += 1
                     continue
-                candidates.append(
-                    {
-                        "source_case_id": row.get("case_id", ""),
-                        "source_result_path": str(path),
-                        "base_rpm": finite_float(case_value(row, "input_base_rpm", "base_rpm", "rpm", default="1200")),
-                        "i_peak_a": finite_float(case_value(row, "input_i_peak_a", "i_peak_a", "i_peak", default="137.8")),
-                        "beta_deg": finite_float(case_value(row, "input_beta_deg", "beta_deg", "beta", default="30")),
-                        "operation": case_value(row, "input_operation", "operation", default="sin_current"),
-                        "use_periodic_boundary": case_value(row, "input_use_periodic_boundary", "use_periodic_boundary", default=""),
-                        "geometry": geometry,
-                        "source_outputs": {
-                            column: finite_float(row.get(column, ""))
-                            for column in required_outputs
-                        },
-                    }
-                )
+                candidate = {
+                    "source_case_id": source_case_id,
+                    "source_result_path": str(path),
+                    "base_rpm": finite_float(case_value(row, "input_base_rpm", "base_rpm", "rpm", default="1200")),
+                    "i_peak_a": finite_float(case_value(row, "input_i_peak_a", "i_peak_a", "i_peak", default="137.8")),
+                    "beta_deg": finite_float(case_value(row, "input_beta_deg", "beta_deg", "beta", default="30")),
+                    "operation": case_value(row, "input_operation", "operation", default="sin_current"),
+                    "use_periodic_boundary": case_value(row, "input_use_periodic_boundary", "use_periodic_boundary", default=""),
+                    "geometry": geometry,
+                    "source_outputs": {column: finite_float(row.get(column, "")) for column in required_outputs},
+                }
+                if any(candidate_matches_exclusion_rule(candidate, rule) for rule in exclusion_rules):
+                    metrics["rule_excluded"] += 1
+                    continue
+                candidates.append(candidate)
     return candidates, metrics
 
 
@@ -337,6 +413,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--selection-features", default=",".join(DEFAULT_SELECTION_FEATURES))
     parser.add_argument("--status", default="ok", help="Required source row status; empty string disables status filtering.")
     parser.add_argument("--required-outputs", default=",".join(DEFAULT_REQUIRED_OUTPUTS))
+    parser.add_argument(
+        "--exclude-source-case-ids",
+        action="append",
+        type=Path,
+        default=[],
+        help="CSV or text file containing source_case_id or case_id values to skip.",
+    )
+    parser.add_argument(
+        "--exclude-where",
+        action="append",
+        default=[],
+        help="Comma-separated AND conditions such as 'magnet_height_ratio>0.94,magnet_setback_ratio>0.119'. Repeat for OR.",
+    )
     parser.add_argument("--case-prefix", default="replay")
     return parser
 
@@ -348,10 +437,18 @@ def main(argv: list[str] | None = None) -> int:
         profiles = parse_profiles(args.profiles)
         required_outputs = parse_required_outputs(args.required_outputs)
         selection_features = parse_selection_features(args.selection_features)
+        excluded_source_case_ids = load_excluded_source_case_ids(args.exclude_source_case_ids)
+        exclusion_rules = tuple(parse_exclusion_rule(rule) for rule in args.exclude_where)
         expanded_count = args.source_cases * len(profiles)
         if expanded_count > args.max_cases:
             parser.error(f"requested {expanded_count} replay rows, exceeding --max-cases={args.max_cases}")
-        candidates, metrics = load_candidates(args.results, required_outputs, args.status)
+        candidates, metrics = load_candidates(
+            args.results,
+            required_outputs,
+            args.status,
+            excluded_source_case_ids=excluded_source_case_ids,
+            exclusion_rules=exclusion_rules,
+        )
         if len(candidates) < args.source_cases:
             parser.error(f"only {len(candidates)} eligible source case(s), fewer than --source-cases={args.source_cases}")
         selected = select_candidates(candidates, args.source_cases, args.seed, args.selection_mode, selection_features)
@@ -368,6 +465,8 @@ def main(argv: list[str] | None = None) -> int:
         f"required_output_rejected={metrics['required_output_rejected']} "
         f"physical_sanity_rejected={metrics['physical_sanity_rejected']} "
         f"geometry_rejected={metrics['geometry_rejected']} "
+        f"source_case_excluded={metrics['source_case_excluded']} "
+        f"rule_excluded={metrics['rule_excluded']} "
         f"output={args.output}"
     )
     return 0

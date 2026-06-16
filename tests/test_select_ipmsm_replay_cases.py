@@ -110,6 +110,35 @@ class SelectIpmsmReplayCasesTests(unittest.TestCase):
             self.assertEqual(metrics["physical_sanity_rejected"], 2)
             self.assertEqual({row["source_case_id"] for row in candidates}, {"source_1", "source_2", "source_3"})
 
+    def test_load_candidates_excludes_source_ids_and_matching_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp) / "results.csv"
+            excluded_path = Path(tmp) / "excluded.csv"
+            self.write_results(results)
+            with excluded_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["source_case_id"])
+                writer.writeheader()
+                writer.writerow({"source_case_id": "source_1"})
+
+            excluded = replay_cases.load_excluded_source_case_ids([excluded_path])
+            rule = replay_cases.parse_exclusion_rule("magnet_height_ratio>=0.99,magnet_setback_ratio>0.15")
+            candidates, metrics = replay_cases.load_candidates(
+                [results],
+                replay_cases.DEFAULT_REQUIRED_OUTPUTS,
+                status="ok",
+                excluded_source_case_ids=excluded,
+                exclusion_rules=(rule,),
+            )
+
+            self.assertEqual(excluded, {"source_1"})
+            self.assertEqual(candidates, [])
+            self.assertEqual(metrics["source_case_excluded"], 1)
+            self.assertEqual(metrics["rule_excluded"], 2)
+
+    def test_parse_exclusion_rule_rejects_invalid_condition(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid --exclude-where condition"):
+            replay_cases.parse_exclusion_rule("magnet_height_ratio~~0.99")
+
     def test_spread_selection_prefers_feature_extremes(self) -> None:
         candidates = [
             {
