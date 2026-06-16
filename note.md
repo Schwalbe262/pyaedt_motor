@@ -784,3 +784,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 remains far below 0.95 and scheduler replay has not produced new valid multi-geometry solve rows yet.
 - Next action: commit/push the training gate and evidence notes, then continue polling scheduler jobs 60/61 and task 6032.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 10:09:42 +09:00 - Loop 59
+
+- Part: updated scheduler policy and task slicing
+- Goal: align live scheduler submissions with the latest `slurm_scheduler` policy and avoid wasting solves on invalid or oversized replay chunks.
+- Hypothesis: the queued `/tasks/git` task 6032 is incompatible with current placement because it used `required_capability=ansys` on `wjddn5916`; for the confirmed remote checkout, `/tasks` with `r1jae262`, `required_capability=conda:pyaedt2026v1`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` should be the safer path.
+- Actions: checked upstream scheduler HEAD `7d9ed52`, README/API/source ranges for `/tasks`, `/tasks/git`, `/api/task-capacity`, and `dynamic_packed_srun`; added `--case-start-index`/`--case-limit` to `submit_ipmsm_scheduler_task.py`; cancelled task 6032; submitted valid-source physical-sanity rows 5-8 as `/tasks` task 6106 against `/home1/r1jae262/ipmsm_pyaedt_motor_work`.
+- Candidates: keep waiting on 6032, resubmit via `/tasks/git`, submit another `dynamic_packed_srun`, or use existing remote-cwd `/tasks`. Chose `/tasks` because current policy prefers it for existing remote directories, `/tasks/git` bootstrap writes before clone and can misplace relative case CSVs, and `r1jae262` still has attached-task fit slots while packed Slurm job slots are full.
+- Metrics: `/api/task-capacity` for the submitted 4 CPU/16 GB task shape reported fit slots; dry-run showed 4 selected rows, redacted 11-line env setup, and `/tasks` endpoint; `python -m unittest tests.test_submit_ipmsm_scheduler_task` ran 8 tests and passed; `python -m unittest discover -s tests` ran 163 tests and passed; `git diff --check` passed with only line-ending warnings.
+- Result: task helper can now slice explicit case plans for `/tasks`; task 6032 is cancelled; task 6106 is queued on `r1jae262` with result path `simul_log_scheduler/ps_task_0003_results.csv`.
+- Failure reason: task 6106 had not attached to an allocation by 10:09 KST, and jobs 60/61 still had no fetched result CSV.
+- Next action: commit/push this scheduler-helper checkpoint, continue polling task 6106 and jobs 60/61, and use `dynamic_packed_srun` only when r1jae262 Slurm job capacity frees or a confirmed remote path exists on another account.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

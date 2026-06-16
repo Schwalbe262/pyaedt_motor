@@ -20,6 +20,8 @@ def task_args(**overrides: object) -> Namespace:
         "remote_cases": "remote/cases.csv",
         "bootstrap_remote_cases": False,
         "bootstrap_max_bytes": 50000,
+        "case_start_index": 1,
+        "case_limit": 0,
         "remote_cwd": "/home/user/project",
         "entrypoint": "subprocess_run.py",
         "task_name": "ipmsm-task",
@@ -84,6 +86,12 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "requires --confirm-analyze"):
             scheduler_task.validate_task_request(task_args(submit=True, analyze=True))
 
+    def test_validate_task_request_rejects_invalid_case_slice(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "--case-start-index"):
+            scheduler_task.validate_task_request(task_args(case_start_index=0))
+        with self.assertRaisesRegex(RuntimeError, "--case-limit"):
+            scheduler_task.validate_task_request(task_args(case_limit=-1))
+
     def test_main_bootstraps_cases_and_reads_env_setup_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases_path = Path(tmp) / "cases.csv"
@@ -122,6 +130,52 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         self.assertEqual(output["payload"]["account_name"], "r1jae262")
         self.assertIn("module load ansys-electronics/v252", output["payload"]["env_setup"])
         self.assertIn("cat > remote/cases.csv", output["payload"]["env_setup"])
+
+    def test_main_bootstrap_uses_selected_case_slice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.csv"
+            with cases_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerows(
+                    [
+                        {"case_id": "case_0001"},
+                        {"case_id": "case_0002"},
+                        {"case_id": "case_0003"},
+                        {"case_id": "case_0004"},
+                        {"case_id": "case_0005"},
+                    ]
+                )
+
+            stdout = io.StringIO()
+            with mock.patch.object(scheduler_task, "post_scheduler_task") as post:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = scheduler_task.main(
+                        [
+                            "--cases",
+                            str(cases_path),
+                            "--remote-cwd",
+                            "/home/user/project",
+                            "--remote-cases",
+                            "remote/cases.csv",
+                            "--case-start-index",
+                            "2",
+                            "--case-limit",
+                            "3",
+                            "--bootstrap-remote-cases",
+                            "--show-env-setup",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        post.assert_not_called()
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["validated_cases"], 5)
+        self.assertEqual(output["case_count"], 3)
+        self.assertNotIn("case_0001", output["payload"]["env_setup"])
+        self.assertIn("case_0002", output["payload"]["env_setup"])
+        self.assertIn("case_0004", output["payload"]["env_setup"])
+        self.assertNotIn("case_0005", output["payload"]["env_setup"])
 
     def test_main_records_submitted_task_lookup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

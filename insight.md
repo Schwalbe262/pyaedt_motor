@@ -496,3 +496,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `train_ipmsm_lightgbm.py` applies an efficiency physical sanity mask during `prepare_training_data()` and records `physical_sanity_rejected_rows` in metadata.
 - Evidence: raw CSV prepare now reports 345 physical sanity rejects and 13,204 valid rows before outliers, matching the separate training-ready filter; full tests ran 161/161 passing.
 - Remaining risk: this prevents invalid targets from entering training, but current filtered data still fails the R2 target and needs better simulation evidence.
+
+## 2026-06-16 10:09:42 +09:00 - Insight 53
+
+- Source loop: `note.md` Loop 59.
+- Improvement: existing-remote `/tasks` scheduler submissions need the same explicit case slicing as packed and Git-backed submissions.
+- Before: `submit_ipmsm_scheduler_task.py --bootstrap-remote-cases` always embedded every validated row, which made a 4-row validation task risk submitting the full 200-row replay plan.
+- After: `submit_ipmsm_scheduler_task.py` supports `--case-start-index` and `--case-limit`, applies the validated slice before bootstrap, and reports both validated and selected counts.
+- Evidence: task helper dry-run selected 4/200 physical-sanity replay rows; task 6106 was submitted with the sliced CSV; full tests ran 163/163 passing.
+- Remaining risk: live attached-task scheduling still needs result evidence because task 6106 remained queued at the end of the loop.

@@ -21,6 +21,7 @@ from submit_ipmsm_scheduler_job import (
     get_scheduler_health,
     load_and_validate_cases,
     read_env_setup_file,
+    select_case_rows,
     write_manifest,
 )
 
@@ -53,6 +54,10 @@ def validate_task_request(args: argparse.Namespace) -> None:
         raise RuntimeError("scheduler analyze task submission requires --confirm-analyze with --analyze")
     if not args.remote_cwd:
         raise RuntimeError("--remote-cwd is required for scheduler task submission")
+    if args.case_start_index < 1:
+        raise RuntimeError("--case-start-index must be >= 1")
+    if args.case_limit < 0:
+        raise RuntimeError("--case-limit must be >= 0")
 
 
 def post_scheduler_task(scheduler_url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
@@ -140,6 +145,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--remote-cases", default="remote/cases.csv", help="Case CSV path visible from --remote-cwd.")
     parser.add_argument("--bootstrap-remote-cases", action="store_true", help="Embed the validated case CSV into env_setup.")
     parser.add_argument("--bootstrap-max-bytes", type=int, default=DEFAULT_BOOTSTRAP_MAX_BYTES)
+    parser.add_argument("--case-start-index", type=int, default=1, help="1-based first validated case row to submit.")
+    parser.add_argument("--case-limit", type=int, default=0, help="Maximum selected case rows to submit; 0 means all rows from --case-start-index.")
     parser.add_argument("--remote-cwd", required=True, help="Existing scheduler-accessible project directory.")
     parser.add_argument("--entrypoint", default="subprocess_run.py")
     parser.add_argument("--task-name", default="ipmsm-replay-setup-task")
@@ -179,7 +186,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     validate_task_request(args)
-    rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
+    validated_rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
+    rows = select_case_rows(validated_rows, args.case_start_index, args.case_limit)
     if args.env_setup_file is not None:
         args.env_setup = append_env_setup(args.env_setup, read_env_setup_file(args.env_setup_file))
     if args.bootstrap_remote_cases:
@@ -190,7 +198,10 @@ def main(argv: list[str] | None = None) -> int:
         "submitted": False,
         "task_endpoint": "/tasks",
         "task_name": args.task_name,
+        "validated_cases": len(validated_rows),
         "case_count": len(rows),
+        "case_start_index": args.case_start_index,
+        "case_limit": args.case_limit,
         "payload": payload,
     }
     if args.check_health:
