@@ -836,3 +836,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: monitoring improved, but no completed replay rows are available yet.
 - Next action: poll task result summaries until complete fixed-geometry groups exist, then run guarded quality analysis.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 10:31:06 +09:00 - Loop 63
+
+- Part: replay solve progress polling
+- Goal: determine whether the running `/tasks` replay jobs have produced usable fixed-profile result rows.
+- Hypothesis: result rows may appear after the first AEDT solve finishes; until then process logs should show whether tasks reached Maxwell.
+- Actions: polled tasks 6106, 6205, 6207, 6208, and 6209; fetched filtered process-log tails and per-process case CSV summaries; checked result CSV summaries.
+- Candidates: cancel/retry long-running solves versus continue waiting. Chose to wait because all five workers reached `Solving design setup PPT_Transient`, and prior single-case analyze evidence took about 936 seconds.
+- Metrics: all five tasks are `running`; task case CSVs contain exactly 4 rows each for source groups 0001-0005; process logs show Maxwell `PPT_Transient` solve start; result CSV summaries still report 0 rows.
+- Result: replay execution is active and correctly scoped, but no complete quality groups are available yet.
+- Failure reason: AEDT solves have not completed enough rows for analysis.
+- Next action: continue polling filtered result summaries; do not resubmit source groups 0001-0005 while these tasks remain running.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

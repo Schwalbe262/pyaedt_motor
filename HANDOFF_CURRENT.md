@@ -48,6 +48,7 @@
 - 2026-06-16: submitted next fixed replay window rows 13-20 via `dynamic_packed_srun`; scheduler created partial child coverage jobs 60/61 for 2/8 rows on `cpu2` nodes `n115`/`n110`, still queued without Slurm ids as of 09:02 KST.
 - 2026-06-16: latest scheduler policy check confirmed `/tasks` for existing remote dirs, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case FEA; cancelled incompatible task 6032 and submitted rows 5-8 as `/tasks` task 6106 on `r1jae262`; task 6106 attached to allocation 66 / Slurm job 680574 and is running as of 10:11 KST.
 - 2026-06-16: submitted additional non-overlapping `/tasks` replay groups: 6205 rows 1-4, 6207 rows 13-16, 6208 rows 17-20, and 6209 rows 9-12; cancelled 6206 before start because it reused task 6106 result paths.
+- 2026-06-16: tasks 6106/6205/6207/6208/6209 are all running and reached Maxwell `PPT_Transient` solve; result CSV summaries still show 0 rows as of 10:31 KST, so do not resubmit these groups.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
