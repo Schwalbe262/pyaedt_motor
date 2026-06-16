@@ -875,3 +875,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no complete four-profile source group is available yet.
 - Next action: continue polling; once any group has all four `ok` profiles, fetch result CSVs and run guarded quality analysis.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 12:08:00 +09:00 - Loop 66
+
+- Part: scheduler API recovery and partial complete-group analysis
+- Goal: recover scheduler visibility after the local API stopped responding and analyze any completed valid-source fixed-profile groups without dumping raw logs.
+- Hypothesis: the running Slurm/attached tasks were still writing remote result CSVs even though the local scheduler HTTP API was hung.
+- Actions: verified latest `slurm_scheduler` upstream/local HEAD `7d9ed52`; read scheduler SQLite read-only for selected task/job ids; restarted the hung local scheduler web process; fetched only two complete remote result CSVs into ignored `simul_log_smoke` artifacts; ran guarded complete-group quality comparison; inspected remaining task summaries and filtered process-log tails.
+- Candidates: wait on the dead API, restart the local scheduler, or bypass the scheduler entirely with direct SSH. Chose a local scheduler restart after WSL-local health also timed out; used Paramiko only for narrow result summaries during the outage.
+- Metrics: `/api/health` recovered after restart; tasks 6208 and 6209 each have 4/4 `ok` profiles and complete-group count 1; tasks 6106/6205/6207 each have 3/4 `ok` profiles and lack `mesh_time_fine`; complete-group analysis filtered 8 rows to 8 rows across 2 groups with 0 missing required outputs and 0 physical sanity violations; convergence summary ranked `mesh_time_fine` as the only profile within tolerance; a broad `/api/tasks?limit=10` call unexpectedly returned 200 task objects and should not be repeated.
+- Result: scheduler visibility is restored and two valid-source complete groups provide interim quality evidence, but the sample is too small and favors the slowest profile so far.
+- Failure reason: three source groups are still incomplete or stuck before `mesh_time_fine`, and no retraining evidence has improved the R2 gate.
+- Next action: poll or resubmit only the missing `mesh_time_fine` rows for groups 0001, 0002, and 0004 with unique result paths; after five complete groups, rerun quality analysis across all completed CSVs before any 200-case replay.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
