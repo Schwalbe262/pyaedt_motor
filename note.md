@@ -1018,3 +1018,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: most of the 200-row replay is still running, and two failed rows remain retry candidates after the guardrail review.
 - Next action: continue polling until the ten tasks finish or materially advance, then rerun full quality/filter/retraining gates.
 - Token usage: active goal counter reported 10,796,565 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 15:47:08 +09:00 - Loop 77
+
+- Part: production replay partial38 gate
+- Goal: keep replay quality and retraining evidence current as more `mesh_time_fine` rows finish.
+- Hypothesis: additional ok rows should continue to pass the physical-sanity and training-row gates, but a small partial increment is unlikely to close the R2 gap.
+- Actions: confirmed the branch checkpoint, polled tasks 8152-8159, 8161, and 8163, refreshed only the ten remote result CSVs, ran partial38 result quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: skip retraining until all rows finish versus rerun smoke on each material row-count advance. Chose smoke retraining because the previous work fixed combine/training row-loss bugs and each new partial confirms the path remains stable.
+- Metrics: raw snapshots rows=38, ok=36, failed=2, duplicate retry rows=3, physical sanity violations=0; filtered combined dataset rows=13,237, rejected rows=2, blank case IDs=0, duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,937, min R2=0.713860783216, avg R2=0.814834488216.
+- Result: partial38 is training-ready and preserves row integrity, but R2 remains far below the 0.95 target.
+- Failure reason: the production replay is still incomplete, and current partial data is too small to prove a simulation-quality improvement in regression metrics.
+- Next action: continue polling the running tasks; once rows materially advance or tasks finish, rerun the quality/filter/retraining gates and review failed rows 63 and 123 for retry after the guardrail decision.
+- Token usage: active goal counter reported 10,860,156 tokens used; Codex SQLite token sampler remains unavailable.
