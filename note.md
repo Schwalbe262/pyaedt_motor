@@ -2058,3 +2058,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so retraining remains premature.
 - Next action: poll tasks 8591, 8603, 8606-8607, 8625-8628, and 8595-8602; update explicit partial summaries as rows complete.
 - Token usage: active goal counter reported 19,044,369 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 03:31:00 +09:00 - Loop 157
+
+- Part: balanced n107/n114 one-case backfills.
+- Goal: keep both active nodes near eight concurrent solver tasks after fresh ok completions.
+- Hypothesis: one n107 and one n114 backfill are appropriate because case 055 and case 056 completed ok.
+- Actions: polled active tasks, fetched result probes for cases 055 and 056, recomputed explicit partial gates, submitted case 071 to n107 as task 8629 and case 072 to n114 as task 8630, then confirmed 8629 attached while 8630 remained queued.
+- Candidates: wait for more completions versus backfill one slot on each node. Chose one-slot backfill because both nodes had just freed one solve slot.
+- Metrics: case 055 completed `ok` in 4315.348s; case 056 completed `ok` in 3301.227s; explicit partial summary reached result_rows=56, ok=52, failed=4, duplicates=0, physical_sanity_violations=0.
+- Result: active/queued work is n107 cases 064-071 and n114 cases 057-063 plus queued case 072.
+- Failure reason: active rows are still solving, so retraining remains premature.
+- Next action: poll tasks 8603, 8606-8607, 8625-8629, 8596-8602, and 8630; update explicit partial summaries as rows complete.
+- Token usage: active goal counter reported 19,061,807 tokens used; Codex SQLite token sampler remains unavailable.
