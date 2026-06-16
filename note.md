@@ -1707,3 +1707,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: scheduler tasks 8163, 8152, 8153, 8155, 8157, 8159, and 8161 still report `running`, and the current de-duplicated data does not close the model-performance gap.
 - Next action: commit/push this checkpoint, keep polling until task statuses settle, then run final replay gate and retry triage without exceeding the approved 200-simulation guardrail.
 - Token usage: active goal counter reported 16,046,777 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 21:09:48 +09:00 - Loop 130
+
+- Part: post-200 partial207 de-dup gate and scheduler recovery
+- Goal: checkpoint the next replay snapshot, recover scheduler API status sampling, and continue toward final replay settlement.
+- Hypothesis: the added rows should remain safe after de-dup/filtering, and scheduler web recovery should not affect Slurm task execution.
+- Actions: confirmed current handoff/goal state and scheduler health, polled known result CSVs, saved all ten result CSVs as partial207, ran replay summarizer, raw quality, combined filter, filtered quality, deterministic LightGBM smoke retraining, exact failed-row extraction, observed scheduler API timeout during status sampling, restarted only the WSL scheduler web process, confirmed `/api/health`, and re-sampled task statuses.
+- Candidates: stop after the status timeout versus recover and document partial207. Chose recovery plus checkpoint because gates had already completed and task 8155 changed to completed.
+- Metrics: raw snapshots rows=207, ok=187, failed=20, duplicate retry rows=19, physical sanity violations=0; summarizer reported combined_kept=13374, combined_rejected=18, new_kept=170; filtered combined dataset rows=13,374 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=10,023, min R2=0.703540619549, avg R2=0.816294706022.
+- Result: scheduler API recovered without Slurm task changes; partial207 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`; failed replay row indexes remain 12, 19, 35, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198.
+- Failure reason: scheduler tasks 8163, 8152, 8153, 8157, 8159, and 8161 still report `running`, and the current de-duplicated data does not close the model-performance gap.
+- Next action: commit/push this checkpoint, keep polling until task statuses settle, then run final replay gate and retry triage without exceeding the approved 200-simulation guardrail.
+- Token usage: active goal counter reported 16,289,747 tokens used; Codex SQLite token sampler remains unavailable.
