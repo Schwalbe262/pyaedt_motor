@@ -2279,3 +2279,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8722-8723, 8729-8733, and 8738; when a slot opens, submit case 097.
 - Token usage: active goal counter reported 20,063,710 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 07:55:00 +09:00 - Loop 174
+
+- Part: cases 090 and 093 completion, cases 097-098 backfill.
+- Goal: keep n107 saturated and avoid duplicate tasks after a local command typo.
+- Hypothesis: completed out-of-order cases can be safely added to explicit partial accounting, and the open slots can advance to the next unused cases.
+- Actions: polled active tasks, fetched case 093 and case 090 result probes, recomputed explicit partial gates, submitted case 097 as task 8742, attempted case 098 with a typoed helper name, verified no case 098 task row was created, resubmitted case 098 correctly as task 8744, and confirmed both attached to allocation 64 / Slurm 680569.
+- Candidates: continue after the typo versus verify DB first. Chose DB verification before retrying to avoid duplicate scheduler tasks.
+- Metrics: case 093 completed `ok` in 4364.053s; case 090 completed `ok` in 4731.983s; explicit partial summary reached result_rows=90, ok=86, failed=4, duplicates=0, physical_sanity_violations=0.
+- Result: active n107 work is cases 089, 091-092, 094-098 on allocation 64 / Slurm 680569.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8722, 8729-8730, 8732-8733, 8738, 8742, and 8744; when a slot opens, submit case 099.
+- Token usage: active goal counter reported 20,094,067 tokens used; Codex SQLite token sampler remains unavailable.
