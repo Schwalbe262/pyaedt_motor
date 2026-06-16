@@ -901,3 +901,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: not enough complete groups yet to commit to a 200-case replay setting or retraining decision.
 - Next action: poll 6205/6207 near 12:17 KST; retry only their missing `mesh_time_fine` rows if they remain unchanged.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 12:24:00 +09:00 - Loop 68
+
+- Part: missing-profile retry submission
+- Goal: recover the two fixed-geometry groups that stalled after `time_fine` without repeating already completed profiles.
+- Hypothesis: tasks 6205 and 6207 were stuck because their result/log files had not changed since 11:40 KST, so row-only `mesh_time_fine` retry tasks with unique result paths would preserve the existing 3/4 evidence and avoid duplicate CSV rows.
+- Actions: checked remote file mtimes; cancelled tasks 6205 and 6207 through `/api/tasks/{id}/cancel`; dry-ran row 4 and row 16 retry payloads; submitted low-priority form tasks 8134/8135, cancelled them when they stayed queued; regenerated manifests and submitted high-priority JSON `/api/tasks` 8136/8137; ran one-off `assign_queued_tasks()` to bypass the busy background refresh and then terminated only the one-off process.
+- Candidates: keep waiting on stalled wrappers, resubmit all four profiles, or retry only missing `mesh_time_fine` rows. Chose missing-row retries because three profiles per group were already valid `ok` rows and result paths can remain separate for guarded analysis.
+- Metrics: task 6205 and 6207 cancel responses were `ok`; row 4 and row 16 dry-runs selected 1/200 validated cases each; tasks 8136 and 8137 have priority 10000 and are now `running` on allocations 60 and 66 respectively; initial retry result CSV summaries have 0 rows.
+- Result: all five original source groups now have a path to complete evidence: three complete groups are available, and two missing final-profile retries are running.
+- Failure reason: retry tasks have not yet written `mesh_time_fine` rows, so the five-group quality comparison and 200-case decision remain pending.
+- Next action: poll 8136/8137 result summaries; after both write one `ok` row, combine original 3/4 CSVs with retry CSVs carefully so each source/profile appears once before rerunning guarded quality analysis.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
