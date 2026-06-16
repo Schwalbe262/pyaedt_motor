@@ -1902,3 +1902,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: the earlier retry omitted the required Ansys module env setup.
 - Next action: poll tasks 8524-8531 and aggregate only corrected module retry rows with the 15 ok rows from tasks 8448-8463.
 - Token usage: active goal counter reported 18,323,442 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 00:35:53 +09:00 - Loop 145
+
+- Part: submit helper Ansys module guard.
+- Goal: prevent future `/tasks` PyAEDT submissions from repeating the missing Ansys module failure.
+- Hypothesis: a deterministic validation guard in `submit_ipmsm_scheduler_task.py` can catch missing module setup before expensive or misleading scheduler submissions.
+- Actions: added `ANSYS_ELECTRONICS_MODULE` validation for PyAEDT analyze or submit requests, moved `--env-setup-file` loading before validation, added targeted tests for missing module failures and env setup file validation, ran targeted and full tests, committed and pushed the fix.
+- Candidates: rely on handoff instructions versus enforce in the submit helper. Chose enforcement because tasks 8513-8520 proved the omission is easy to repeat and produces misleading infrastructure result rows.
+- Metrics: `tests.test_submit_ipmsm_scheduler_task` passed 10/10; full `python -m unittest discover -s tests` passed 183/183; commit `89c54a8` pushed to `origin/chore/codex-context-budget`; tasks 8524-8531 remained 8/8 running with no result rows at 00:35:53 KST.
+- Result: future PyAEDT `/tasks` analyze/submit calls fail locally unless `module load ansys-electronics/v252` is present in env setup.
+- Failure reason: corrected retry solves are still pending, so this loop improves submission safety but does not yet add usable simulation rows.
+- Next action: keep polling tasks 8524-8531 and aggregate only corrected module retry rows after completion.
+- Token usage: active goal counter reported 18,364,218 tokens used; Codex SQLite token sampler remains unavailable.

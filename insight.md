@@ -592,6 +592,6 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Source loop: `note.md` Loop 144.
 - Improvement: every fresh `/tasks` AEDT submission must carry explicit `module load ansys-electronics/v252` in `env_setup`; do not rely on `env_profile` or allocation history.
 - Before: retry tasks 8513-8520 used `env_profile=pyaedt2026v1` but omitted the Ansys module, causing fast AEDT discovery failures even on n107.
-- After: task 8522 setup-only smoke included the module and passed, and corrected analyze tasks 8524-8531 were submitted with the same module setup.
-- Evidence: first-wave manifest included the module and produced 15 `ok` analyze rows; module-missing retry tasks failed 8/8 with `AEDT is not installed`; module smoke task 8522 passed 1/1 `ok` in 20.346s.
+- After: task 8522 setup-only smoke included the module and passed, corrected analyze tasks 8524-8531 were submitted with the same module setup, and `submit_ipmsm_scheduler_task.py` now rejects PyAEDT submit/analyze requests missing the module.
+- Evidence: first-wave manifest included the module and produced 15 `ok` analyze rows; module-missing retry tasks failed 8/8 with `AEDT is not installed`; module smoke task 8522 passed 1/1 `ok` in 20.346s; full tests passed 183/183 after adding the guard.
 - Remaining risk: corrected analyze tasks 8524-8531 are still running, so their solve quality and elapsed distribution remain pending.
