@@ -2240,3 +2240,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8692, 8716, 8722-8723, and 8729-8732; when a slot opens, submit case 095.
 - Token usage: active goal counter reported 19,675,665 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 06:48:00 +09:00 - Loop 171
+
+- Part: case 087 completion and case 095 backfill.
+- Goal: keep n107 saturated while advancing batch2 after the 081-086 completion wave.
+- Hypothesis: case 095 can fill the single open n107 slot after case 087 completed ok.
+- Actions: polled active tasks, fetched the case 087 result probe, recomputed explicit partial gates, dry-ran and submitted case 095 as task 8733, and confirmed it attached to allocation 64 / Slurm 680569.
+- Candidates: wait for 088-094 versus submit 095. Chose submit 095 because 088-094 are active and there was one open n107 slot.
+- Metrics: case 087 completed `ok` in 3797.993s; explicit partial summary reached result_rows=87, ok=83, failed=4, duplicates=0, physical_sanity_violations=0; n107 returned to 8 running tasks.
+- Result: active n107 work is cases 088-095 on allocation 64 / Slurm 680569.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8716, 8722-8723, and 8729-8733; when a slot opens, submit case 096.
+- Token usage: active goal counter reported 19,694,135 tokens used; Codex SQLite token sampler remains unavailable.
