@@ -29,6 +29,13 @@ FINE_MESH_ELEMENTS = {
     "winding": 75,
     "band": 1500,
 }
+MID_MESH_ELEMENTS = {
+    "magnet": 62,
+    "rotor": 625,
+    "stator": 625,
+    "winding": 62,
+    "band": 1250,
+}
 
 
 @dataclass(frozen=True)
@@ -44,6 +51,7 @@ QUALITY_PROFILES = {
     "mesh_fine": QualityProfile("mesh_fine", transient_periods=10, steps_per_period=90, mesh_elements=FINE_MESH_ELEMENTS),
     "time_fine": QualityProfile("time_fine", transient_periods=10, steps_per_period=120, mesh_elements=BASELINE_MESH_ELEMENTS),
     "mesh_time_fine": QualityProfile("mesh_time_fine", transient_periods=10, steps_per_period=120, mesh_elements=FINE_MESH_ELEMENTS),
+    "mesh_time_mid": QualityProfile("mesh_time_mid", transient_periods=10, steps_per_period=105, mesh_elements=MID_MESH_ELEMENTS),
 }
 
 
@@ -124,7 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--profiles",
         default="baseline,mesh_fine,time_fine,mesh_time_fine",
-        help="Comma-separated profiles: baseline, mesh_fine, time_fine, mesh_time_fine.",
+        help="Comma-separated profiles: baseline, mesh_fine, time_fine, mesh_time_fine, mesh_time_mid.",
     )
     parser.add_argument("--beta-deg-values", default="30", help="Comma-separated beta angle values.")
     parser.add_argument("--base-rpm", type=float, default=1200.0)

@@ -54,6 +54,14 @@ class GenerateIpmsmQualityCasesTests(unittest.TestCase):
             self.assertEqual(rows[1]["quality_profile"], "time_fine")
             self.assertEqual(rows[1]["steps_per_period"], "120")
 
+    def test_mesh_time_mid_profile_is_between_baseline_and_fine(self) -> None:
+        profile = quality_cases.parse_profiles("mesh_time_mid")[0]
+
+        self.assertEqual(profile.steps_per_period, 105)
+        self.assertEqual(profile.mesh_elements["magnet"], 62)
+        self.assertEqual(profile.mesh_elements["rotor"], 625)
+        self.assertEqual(profile.mesh_elements["band"], 1250)
+
     def test_cli_rejects_batches_above_max_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "too_many.csv"

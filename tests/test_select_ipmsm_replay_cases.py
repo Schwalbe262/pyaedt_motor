@@ -73,7 +73,7 @@ class SelectIpmsmReplayCasesTests(unittest.TestCase):
                         "--output",
                         str(output),
                         "--profiles",
-                        "baseline,mesh_time_fine",
+                        "baseline,mesh_time_mid",
                         "--source-cases",
                         "2",
                         "--max-cases",
@@ -90,8 +90,9 @@ class SelectIpmsmReplayCasesTests(unittest.TestCase):
             self.assertEqual(reader.fieldnames, list(replay_cases.FIELDNAMES))
             self.assertEqual(len(rows), 4)
             self.assertEqual(rows[0]["quality_profile"], "baseline")
-            self.assertEqual(rows[1]["quality_profile"], "mesh_time_fine")
-            self.assertEqual(rows[1]["mesh_band_elements"], "1500")
+            self.assertEqual(rows[1]["quality_profile"], "mesh_time_mid")
+            self.assertEqual(rows[1]["steps_per_period"], "105")
+            self.assertEqual(rows[1]["mesh_band_elements"], "1250")
             self.assertEqual(rows[0]["slot_opening_ratio"], "0.09")
             self.assertEqual(rows[0]["magnet_space_height_ratio"], "1.0")
 
