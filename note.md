@@ -1031,3 +1031,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: the production replay is still incomplete, and current partial data is too small to prove a simulation-quality improvement in regression metrics.
 - Next action: continue polling the running tasks; once rows materially advance or tasks finish, rerun the quality/filter/retraining gates and review failed rows 63 and 123 for retry after the guardrail decision.
 - Token usage: active goal counter reported 10,860,156 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 15:50:53 +09:00 - Loop 78
+
+- Part: production replay partial42 gate
+- Goal: validate the next material batch of `mesh_time_fine` production rows and keep regression evidence current.
+- Hypothesis: the newer rows should remain physically sane and training-ready after retry de-duplication, but the partial dataset is still too small to meet the R2 goal.
+- Actions: confirmed the pushed checkpoint and known dirty local artifacts; polled tasks 8152-8159, 8161, and 8163; refreshed only the ten remote result CSVs; ran raw partial quality, combined training filter, filtered-dataset quality, corrected the expected kept-row threshold for 4 retry duplicates, and ran deterministic LightGBM smoke retraining.
+- Candidates: treat the initial kept-row threshold miss as data failure versus recompute from exact duplicate/failed counts. Chose recomputation because raw quality proved 4 duplicate retry rows and 2 failed rows, making 13,240 kept rows the correct gate.
+- Metrics: raw snapshots rows=42, ok=40, failed=2, duplicate retry rows=4, physical sanity violations=0; filtered combined dataset rows=13,240, rejected rows=2, blank case IDs=0, duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,939, min R2=0.708679096853, avg R2=0.820387200541.
+- Result: partial42 is training-ready and the pipeline remains stable, but all 8 regression targets still miss `R^2 >= 0.95`.
+- Failure reason: most of the 200-row replay is still running, and current partial data does not yet prove the required regression improvement.
+- Next action: continue polling running tasks; when row count materially advances, rerun the gates, and after completion decide retry handling for failed rows 63 and 123 under the 200-run guardrail.
+- Token usage: active goal counter reported 10,912,223 tokens used; Codex SQLite token sampler remains unavailable.
