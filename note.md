@@ -2071,3 +2071,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so retraining remains premature.
 - Next action: poll tasks 8603, 8606-8607, 8625-8629, 8596-8602, and 8630; update explicit partial summaries as rows complete.
 - Token usage: active goal counter reported 19,061,807 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 03:41:00 +09:00 - Loop 158
+
+- Part: n114 partial advance and soft-blocked queue.
+- Goal: update current evidence and avoid over-submitting while n114 is load/memory blocked.
+- Hypothesis: queued n114 tasks should be left queued, not expanded, when `fea_bursty` reports soft pressure.
+- Actions: polled n114/n107 tasks, fetched n114 result probes, recomputed explicit partial gates, checked n114 task capacity, and paused further n114 submissions.
+- Candidates: add more n114 tasks versus wait for the queued 072-074 tasks to attach. Chose wait because capacity reported `fit_slots=0` and `memory_pressure_state=soft_blocked`.
+- Metrics: n114 cases 057-059/061/063 are ok; explicit partial summary reached result_rows=61, ok=57, failed=4, duplicates=0, physical_sanity_violations=0; n114 capacity returned fit_slots=0 and soft_blocked.
+- Result: n107 continues with cases 064-071, n114 has running tasks for cases 060/062 plus status-lag rows and queued cases 072-074.
+- Failure reason: active and queued rows are incomplete, so no retraining run yet.
+- Next action: poll tasks 8603, 8606-8607, 8625-8629, 8598-8599, 8601, 8630, and 8632-8633; submit no more n114 work until soft pressure clears.
+- Token usage: active goal counter reported 19,086,888 tokens used; Codex SQLite token sampler remains unavailable.
