@@ -42,14 +42,14 @@
 - 2026-06-16: `python -m unittest discover -s tests` ran 161 tests and passed; touched-file py_compile and `git diff --check` passed for latest training gate changes.
 - 2026-06-16: scheduler job 20 validated branch checkout/imports/case-plan checks; job 21 reached `run_ipmsm_batch.py` and wrote one structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
-- 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
+- 2026-06-16: latest `slurm_scheduler` main is `91a7833`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
 - 2026-06-16: scheduler job 57 fixed-geometry 4-profile analyze completed 4/4 `ok` on `cpu2`/`n111`; generated filtered comparison reports under `simul_log_smoke/fixed4_*`.
 - 2026-06-16: job 58 was cancelled after producing only invalid-source partial rows with out-of-range efficiency; jobs 60/61 remain queued on valid old-plan sources.
 - 2026-06-16: setup-only dynamic packed probe job 59 selected the expected one-row `SIMULATION_ID=1` CSV and wrote 1/1 `ok` row for baseline setup in 49.888s; scheduler status is now `completed`.
 - 2026-06-16: submitted next fixed replay window rows 13-20 via `dynamic_packed_srun`; scheduler created partial child coverage jobs 60/61 for 2/8 rows on `cpu2` nodes `n115`/`n110`, still queued without Slurm ids as of 09:02 KST.
 - 2026-06-16: latest scheduler policy check confirmed `/tasks` for existing remote dirs, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case FEA; cancelled incompatible task 6032 and submitted rows 5-8 as `/tasks` task 6106 on `r1jae262`; task 6106 attached to allocation 66 / Slurm job 680574 and is running as of 10:11 KST.
 - 2026-06-16: submitted additional non-overlapping `/tasks` replay groups: 6205 rows 1-4, 6207 rows 13-16, 6208 rows 17-20, and 6209 rows 9-12; cancelled 6206 before start because it reused task 6106 result paths.
-- 2026-06-16: latest upstream `slurm_scheduler` and local checkout are `7d9ed52`; use `/tasks` for existing remote dirs, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case FEA batches.
+- 2026-06-16: latest upstream `slurm_scheduler` and local checkout are `91a7833`; use `/tasks` for existing remote dirs, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case FEA batches.
 - 2026-06-16: scheduler API hung, was restarted locally, and `/api/health` recovered; avoid broad `/api/tasks` dumps because it returned 200 records despite a `limit` query.
 - 2026-06-16: tasks 6106/6208/6209 have complete 4/4 `ok` profile groups; tasks 6205/6207 were cancelled after their result/log files stopped at 3/4 since 11:40 KST.
 - 2026-06-16: high-priority retry task 8136 produced source 0001 `mesh_time_fine` `ok`; source 0004 original task 6207 later produced its own `mesh_time_fine` `ok`, so retry task 8137 output is not needed for analysis.
@@ -57,11 +57,11 @@
 - 2026-06-16: `mesh_time_mid` profile completed on the same 5 source geometries via tasks 8144-8148; analysis wrote `simul_log_smoke/remote_ps_task_mid5_*`.
 - 2026-06-16: `mesh_time_mid` is rejected for now: it was not within tolerance, had max delta 11.8041% versus `mesh_time_fine`, and was not meaningfully faster (avg elapsed ratio vs reference 1.0033).
 - 2026-06-16: submitted 200-row `mesh_time_fine` production replay as `/tasks` chunks: 8152-8159, 8161, and retry 8163 are running; duplicate 8160 was cancelled and stale-allocation task 8151 failed before solving.
-- 2026-06-16: running scheduler checkout is latest `slurm_scheduler` main `7d9ed52`; remote bootstrap for chunk 021-040 verified the expected 20-case CSV header/range.
+- 2026-06-16: running scheduler checkout is latest `slurm_scheduler` main `91a7833`; remote bootstrap for chunk 021-040 verified the expected 20-case CSV header/range.
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
-- 2026-06-16: production replay snapshots now have 73 fetched rows; raw partial has 65 `ok`, 8 failed, and 6 retry duplicates, while `partial73_bomfix` keeps 13,263 rows with no blank/duplicate case IDs and no physical-sanity violations.
-- 2026-06-16: `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial73_bomfix.csv --disable-tuning` passed row gates with 0 invalid rows and 0 duplicate drops; R2 remains below target with min 0.705558892098, avg 0.817959876066.
+- 2026-06-16: production replay snapshots now have 77 fetched rows; raw partial has 69 `ok`, 8 failed, and 6 retry duplicates, while `partial77_bomfix` keeps 13,267 rows with no blank/duplicate case IDs and no physical-sanity violations.
+- 2026-06-16: `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial77_bomfix.csv --disable-tuning` passed row gates with 0 invalid rows and 0 duplicate drops; R2 remains below target with min 0.699768377805, avg 0.812363871345.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -92,7 +92,7 @@
 4. Fetch only the ten `simul_log_scheduler/mtf200_task_*_results.csv` files through `/api/tasks/{id}/remote-file`; the local `001_020` retry snapshot currently contains duplicate rows, so rely on `filter_ipmsm_training_dataset.py` de-dup evidence before retraining.
 5. For Git-backed scheduler work use `submit_ipmsm_scheduler_job.py` default `python_git`, which now posts to `/tasks/git`; use `/jobs` only for packed simulation modes.
 6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`, then use `.venv\Scripts\python.exe train_ipmsm_lightgbm.py`.
-7. Run dataset quality gates and LightGBM retraining only after completed fixed-geometry quality results exist.
+7. For material production-replay increments, run `summarize_ipmsm_partial_replay.py` first, then raw quality, filter, filtered quality, and LightGBM smoke gates.
 
 ## Token/context policy
 

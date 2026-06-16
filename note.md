@@ -1174,3 +1174,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay is incomplete and the current data increment does not improve the regression metric.
 - Next action: continue polling running tasks, use the summarizer before each gate run, and after completion decide retry handling for failed row indexes 63, 67, 106, 107, 108, 109, 123, and 146.
 - Token usage: active goal counter reported 11,726,190 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 16:49:01 +09:00 - Loop 89
+
+- Part: production replay partial77 gate and scheduler policy refresh
+- Goal: confirm the updated `slurm_scheduler` policy/checkout and validate the next replay increment.
+- Hypothesis: the `/tasks` replay path should still match the latest scheduler policy, and the new rows should preserve filtered dataset integrity while R2 remains below target.
+- Actions: checked GitHub and local WSL scheduler HEAD, confirmed scheduler health/task statuses, refreshed ten result CSVs through `/api/tasks/{id}/remote-file`, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: switch submission path versus continue current `/tasks` replay. Chose continuing `/tasks` because latest upstream and local checkout are both `91a7833`, and README policy still assigns existing remote working-tree commands to `/tasks`.
+- Metrics: raw snapshots rows=77, ok=69, failed=8, duplicate retry rows=6, physical sanity violations=0; summarizer reported combined_kept=13267, combined_rejected=8, new_kept=63; filtered combined dataset rows=13,267 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,954, min R2=0.699768377805, avg R2=0.812363871345.
+- Result: partial77 remains training-ready after filtering; regression smoke still misses `R^2 >= 0.95`, and the latest scheduler policy is compatible with the current production replay path.
+- Failure reason: production replay is incomplete and current partial data does not yet improve the regression metric enough.
+- Next action: continue polling running tasks 8152-8159, 8161, and 8163; after completion decide retry handling for failed row indexes 63, 67, 106, 107, 108, 109, 123, and 146.
+- Token usage: active goal counter reported 11,833,667 tokens used; Codex SQLite token sampler remains unavailable.
