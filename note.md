@@ -862,3 +862,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: only baseline profiles are complete; mesh_fine, time_fine, and mesh_time_fine profiles are still running.
 - Next action: keep polling result summaries until at least one source group has all four required `ok` profiles, then run `analyze_ipmsm_quality_results.py --complete-groups-only`.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 11:16:16 +09:00 - Loop 65
+
+- Part: mesh_fine replay result checkpoint
+- Goal: check whether valid-source replay has reached complete fixed-profile groups.
+- Hypothesis: `mesh_fine` profiles should finish before the longer remaining `time_fine` and `mesh_time_fine` profiles.
+- Actions: polled result summaries and selected process-log tails for tasks 6106, 6205, 6207, 6208, and 6209.
+- Candidates: run partial baseline-vs-mesh analysis versus wait for all required profiles. Chose to wait because time-step settings are part of the current sprint and quality analysis should compare complete groups.
+- Metrics: all five tasks remain `running`; source groups 0001-0005 now each have two `ok` rows: `baseline` and `mesh_fine`; complete-group count remains 0; task logs show next `PPT_Transient` solves in progress.
+- Result: fixed-geometry replay is progressing, but still lacks `time_fine` and `mesh_time_fine` rows needed for conclusions.
+- Failure reason: no complete four-profile source group is available yet.
+- Next action: continue polling; once any group has all four `ok` profiles, fetch result CSVs and run guarded quality analysis.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
