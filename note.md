@@ -797,3 +797,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: task 6106 had not attached to an allocation by 10:09 KST, and jobs 60/61 still had no fetched result CSV.
 - Next action: commit/push this scheduler-helper checkpoint, continue polling task 6106 and jobs 60/61, and use `dynamic_packed_srun` only when r1jae262 Slurm job capacity frees or a confirmed remote path exists on another account.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 10:11:30 +09:00 - Loop 60
+
+- Part: scheduler task attach follow-up
+- Goal: verify that replacement task 6106 can actually attach under the updated `/tasks` policy.
+- Hypothesis: 6106 remained queued only until the scheduler worker tick processed it.
+- Actions: polled task 6106 and jobs 60/61 through filtered API fields.
+- Candidates: cancel 6106 and fall back to packed jobs versus wait one scheduler tick. Chose one more poll because `/api/task-capacity` showed fit slots and r1jae262 packed Slurm slots were already full.
+- Metrics: task 6106 status became `running`, allocation_id 66, Slurm job 680574; jobs 60/61 still have no fetched result CSV.
+- Result: replacement `/tasks` submission is now attached and running.
+- Failure reason: no completed new replay result rows are available yet.
+- Next action: poll task 6106 result CSV `simul_log_scheduler/ps_task_0003_results.csv`; when complete profile groups exist, run guarded quality analysis.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
