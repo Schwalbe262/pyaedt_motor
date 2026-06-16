@@ -46,6 +46,7 @@
 - 2026-06-16: job 58 was cancelled after producing only invalid-source partial rows with out-of-range efficiency; jobs 60/61 remain queued on valid old-plan sources.
 - 2026-06-16: setup-only dynamic packed probe job 59 selected the expected one-row `SIMULATION_ID=1` CSV and wrote 1/1 `ok` row for baseline setup in 49.888s; scheduler status is now `completed`.
 - 2026-06-16: submitted next fixed replay window rows 13-20 via `dynamic_packed_srun`; scheduler created partial child coverage jobs 60/61 for 2/8 rows on `cpu2` nodes `n115`/`n110`, still queued without Slurm ids as of 09:02 KST.
+- 2026-06-16: submitted valid-source physical-sanity replay rows 5-8 through updated `/tasks/git`; task 6032 is queued on `wjddn5916` with no allocation yet.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
@@ -68,7 +69,7 @@
 
 1. Verify/push the latest local commits and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
-3. Poll queued jobs 60/61; fetch result CSVs only after enough fixed-geometry profile groups complete, then run `analyze_ipmsm_quality_results.py` with the incomplete-group guard.
+3. Poll jobs 60/61 and task 6032; fetch result CSVs only after enough fixed-geometry profile groups complete, then run `analyze_ipmsm_quality_results.py` with the incomplete-group guard.
 4. For further dynamic packed submissions, use the physical-sanity replay plan and `--case-start-index` / `--case-limit` to send only remaining validated replay rows.
 5. For Git-backed scheduler work use `submit_ipmsm_scheduler_job.py` default `python_git`, which now posts to `/tasks/git`; use `/jobs` only for packed simulation modes.
 6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.

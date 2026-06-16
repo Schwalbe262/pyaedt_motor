@@ -732,3 +732,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: valid multi-geometry quality evidence is still incomplete, and no retraining/R2 evidence exists yet.
 - Next action: commit/push the selector checkpoint, then submit/poll valid-source dynamic packed replay jobs according to scheduler capacity.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:36:49 +09:00 - Loop 55
+
+- Part: updated scheduler Git-task dispatch
+- Goal: submit a valid-source physical-sanity replay group through the current `slurm_scheduler` policy without overfilling r1jae262 dynamic packed capacity.
+- Hypothesis: when `dynamic_packed_srun` capacity is full, a small bootstrapped `/tasks/git` analyze task can still queue one valid fixed-geometry group on another account.
+- Actions: checked account status and task capacity; dry-ran `/tasks/git` for rows 5-8 of `replay_quality_cases_200_physical_sanity.csv`; submitted the same payload after the selector checkpoint was pushed.
+- Candidates: submit another `dynamic_packed_srun` request on r1jae262 versus queue a small Git-backed task on `wjddn5916`. Chose `/tasks/git` because r1jae262/cpu2 task capacity returned `fit_slots=0` and the scheduler README now documents `/tasks/git` for Git work.
+- Metrics: dry-run endpoint was `/tasks/git`, selected 4/200 valid-source rows, env setup was 22 lines with `module load ansys-electronics/v252`, and live submit created task 6032 named `ipmsm-ps-git-analyze-0002`; task 6032 is queued on `wjddn5916` with no allocation yet; jobs 60/61 are submitted/queued respectively.
+- Result: one new physical-sanity replay group is queued without duplicating rows already covered by job 57 or jobs 60/61.
+- Failure reason: task 6032 has not started and no new valid solve rows are available yet.
+- Next action: poll task 6032 and jobs 60/61; once result CSVs exist, run guarded complete-group quality analysis.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
