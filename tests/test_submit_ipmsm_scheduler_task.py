@@ -98,6 +98,20 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "requires --confirm-analyze"):
             scheduler_task.validate_task_request(task_args(submit=True, analyze=True))
 
+    def test_validate_task_request_requires_ansys_module_for_pyaedt_submit_or_analyze(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "module load ansys-electronics/v252"):
+            scheduler_task.validate_task_request(task_args(analyze=True, confirm_analyze=True))
+        with self.assertRaisesRegex(RuntimeError, "module load ansys-electronics/v252"):
+            scheduler_task.validate_task_request(task_args(submit=True))
+
+        scheduler_task.validate_task_request(
+            task_args(
+                analyze=True,
+                confirm_analyze=True,
+                env_setup="module load ansys-electronics/v252",
+            )
+        )
+
     def test_validate_task_request_rejects_invalid_case_slice(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "--case-start-index"):
             scheduler_task.validate_task_request(task_args(case_start_index=0))
@@ -132,6 +146,8 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
                             "r1jae262",
                             "--env-profile",
                             "pyaedt2026v1",
+                            "--analyze",
+                            "--confirm-analyze",
                             "--show-env-setup",
                         ]
                     )
@@ -140,6 +156,7 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         post.assert_not_called()
         output = json.loads(stdout.getvalue())
         self.assertEqual(output["payload"]["account_name"], "r1jae262")
+        self.assertIn("--analyze", output["payload"]["command"])
         self.assertIn("module load ansys-electronics/v252", output["payload"]["env_setup"])
         self.assertIn("cat > remote/cases.csv", output["payload"]["env_setup"])
 
@@ -218,6 +235,8 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
                                 "ipmsm-task",
                                 "--account-name",
                                 "r1jae262",
+                                "--env-setup",
+                                "module load ansys-electronics/v252",
                                 "--submit",
                             ]
                         )

@@ -25,6 +25,8 @@ from submit_ipmsm_scheduler_job import (
     write_manifest,
 )
 
+ANSYS_ELECTRONICS_MODULE = "module load ansys-electronics/v252"
+
 
 def build_task_command(args: argparse.Namespace) -> str:
     return shlex.join(["python", args.entrypoint]) + " " + build_subprocess_arguments(args)
@@ -54,6 +56,12 @@ def build_task_payload(args: argparse.Namespace) -> dict[str, Any]:
 def validate_task_request(args: argparse.Namespace) -> None:
     if args.submit and args.analyze and not args.confirm_analyze:
         raise RuntimeError("scheduler analyze task submission requires --confirm-analyze with --analyze")
+    if (args.submit or args.analyze) and "pyaedt" in (args.env_profile + " " + args.required_capability).lower():
+        if ANSYS_ELECTRONICS_MODULE not in args.env_setup:
+            raise RuntimeError(
+                "scheduler PyAEDT task requires explicit env setup: "
+                f'--env-setup "{ANSYS_ELECTRONICS_MODULE}"'
+            )
     if not args.remote_cwd:
         raise RuntimeError("--remote-cwd is required for scheduler task submission")
     if args.case_start_index < 1:
@@ -191,11 +199,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.env_setup_file is not None:
+        args.env_setup = append_env_setup(args.env_setup, read_env_setup_file(args.env_setup_file))
     validate_task_request(args)
     validated_rows = load_and_validate_cases(args.cases, args.max_cases, args.allow_over_budget)
     rows = select_case_rows(validated_rows, args.case_start_index, args.case_limit)
-    if args.env_setup_file is not None:
-        args.env_setup = append_env_setup(args.env_setup, read_env_setup_file(args.env_setup_file))
     if args.bootstrap_remote_cases:
         args.env_setup = append_env_setup(args.env_setup, build_remote_cases_bootstrap(args.remote_cases, rows, args.bootstrap_max_bytes))
 
