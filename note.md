@@ -849,3 +849,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: AEDT solves have not completed enough rows for analysis.
 - Next action: continue polling filtered result summaries; do not resubmit source groups 0001-0005 while these tasks remain running.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 10:46:39 +09:00 - Loop 64
+
+- Part: baseline replay result checkpoint
+- Goal: determine whether any valid-source fixed-profile replay groups are complete enough for mesh/time quality analysis.
+- Hypothesis: the first result rows should appear as each task completes its baseline profile.
+- Actions: polled filtered result summaries for tasks 6106, 6205, 6207, 6208, and 6209; inspected task 6106 process log after its first result row.
+- Candidates: run partial analysis on baseline-only rows versus wait for complete profile groups. Chose to wait because the quality analyzer requires complete fixed-geometry profile groups for mesh/time conclusions.
+- Metrics: tasks 6106/6205/6207/6208/6209 remain `running`; each source group 0001-0005 has one `baseline` row with status `ok`; complete-group count remains 0; task 6106 advanced to the next profile solve after writing the baseline result.
+- Result: scheduler replay is producing valid rows, but no mesh/time comparison group is complete yet.
+- Failure reason: only baseline profiles are complete; mesh_fine, time_fine, and mesh_time_fine profiles are still running.
+- Next action: keep polling result summaries until at least one source group has all four required `ok` profiles, then run `analyze_ipmsm_quality_results.py --complete-groups-only`.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
