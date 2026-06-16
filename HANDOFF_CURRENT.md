@@ -49,7 +49,7 @@
 - 2026-06-16: submitted next fixed replay window rows 13-20 via `dynamic_packed_srun`; scheduler created partial child coverage jobs 60/61 for 2/8 rows on `cpu2` nodes `n115`/`n110`, still queued without Slurm ids as of 09:02 KST.
 - 2026-06-16: latest scheduler policy check confirmed `/tasks` for existing remote dirs, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case FEA; cancelled incompatible task 6032 and submitted rows 5-8 as `/tasks` task 6106 on `r1jae262`; task 6106 attached to allocation 66 / Slurm job 680574 and is running as of 10:11 KST.
 - 2026-06-16: submitted additional non-overlapping `/tasks` replay groups: 6205 rows 1-4, 6207 rows 13-16, 6208 rows 17-20, and 6209 rows 9-12; cancelled 6206 before start because it reused task 6106 result paths.
-- 2026-06-16: latest upstream `slurm_scheduler` and local checkout are `91a7833`; use `/tasks` for existing remote dirs, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case FEA batches.
+- 2026-06-16: latest upstream `slurm_scheduler` and local checkout HEAD are `91a7833`; WSL checkout has local dirty scheduler files, so verify live API health and README policy before submissions.
 - 2026-06-16: scheduler API hung, was restarted locally, and `/api/health` recovered; avoid broad `/api/tasks` dumps because it returned 200 records despite a `limit` query.
 - 2026-06-16: tasks 6106/6208/6209 have complete 4/4 `ok` profile groups; tasks 6205/6207 were cancelled after their result/log files stopped at 3/4 since 11:40 KST.
 - 2026-06-16: high-priority retry task 8136 produced source 0001 `mesh_time_fine` `ok`; source 0004 original task 6207 later produced its own `mesh_time_fine` `ok`, so retry task 8137 output is not needed for analysis.
@@ -60,8 +60,9 @@
 - 2026-06-16: running scheduler checkout is latest `slurm_scheduler` main `91a7833`; remote bootstrap for chunk 021-040 verified the expected 20-case CSV header/range.
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
-- 2026-06-16: production replay snapshots now have 124 fetched rows; raw partial has 114 `ok`, 10 failed, and 10 retry duplicates, while `partial124_bomfix` keeps 13,308 rows with no blank/duplicate case IDs and no physical-sanity violations.
-- 2026-06-16: `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial124_bomfix.csv --disable-tuning` passed row gates with 0 invalid rows and 0 duplicate drops; R2 remains below target with min 0.723483380439, avg 0.821460739012.
+- 2026-06-16: scheduler API refused one fetch after task 8159; local WSL scheduler web process was restarted, `/api/health` recovered, and no Slurm task was cancelled or modified.
+- 2026-06-16: production replay snapshots now have 126 fetched rows; raw partial has 115 `ok`, 11 failed, and 10 retry duplicates, while `partial126_bomfix` keeps 13,309 rows with no blank/duplicate case IDs and no physical-sanity violations.
+- 2026-06-16: `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial126_bomfix.csv --disable-tuning` passed row gates with 0 invalid rows and 0 duplicate drops; R2 remains below target with min 0.715541993067, avg 0.821219566217.
 - 2026-06-16: `run_ipmsm_batch.py` now fails future `analysis=False` rows with an explicit AEDT analysis-returned-false error before report export; `python -m unittest discover -s tests` passed 174 tests.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
@@ -83,7 +84,7 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler reaches AEDT; current blocker is waiting for the remaining production replay rows, then filtering and retraining; failed row indexes 63, 67, 92, 106, 107, 108, 109, 115, 123, and 146 are retry candidates after the 200-run guardrail is reviewed.
+- Scheduler reaches AEDT; current blocker is waiting for the remaining production replay rows, then filtering and retraining; failed row indexes 63, 67, 92, 106, 107, 108, 109, 115, 123, 146, and 153 are retry candidates after the 200-run guardrail is reviewed.
 
 ## Next steps
 
