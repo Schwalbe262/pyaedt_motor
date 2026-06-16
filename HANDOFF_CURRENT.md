@@ -50,8 +50,8 @@
 - 2026-06-16: submitted additional non-overlapping `/tasks` replay groups: 6205 rows 1-4, 6207 rows 13-16, 6208 rows 17-20, and 6209 rows 9-12; cancelled 6206 before start because it reused task 6106 result paths.
 - 2026-06-16: latest upstream `slurm_scheduler` and local checkout are `7d9ed52`; use `/tasks` for existing remote dirs, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case FEA batches.
 - 2026-06-16: scheduler API hung, was restarted locally, and `/api/health` recovered; avoid broad `/api/tasks` dumps because it returned 200 records despite a `limit` query.
-- 2026-06-16: tasks 6208 and 6209 have complete 4/4 `ok` profile groups; tasks 6106/6205/6207 have baseline+mesh_fine+time_fine `ok` but no `mesh_time_fine` row as of 12:06 KST.
-- 2026-06-16: complete-group-only analysis of tasks 6208/6209 wrote ignored reports under `simul_log_smoke/remote_ps_task_complete_*`; 2 groups / 8 rows passed required outputs and physical sanity, but only `mesh_time_fine` was within the current convergence tolerance.
+- 2026-06-16: tasks 6106/6208/6209 have complete 4/4 `ok` profile groups; tasks 6205/6207 have baseline+mesh_fine+time_fine `ok` but no `mesh_time_fine` row as of 12:09 KST.
+- 2026-06-16: complete-group-only analysis of tasks 6106/6208/6209 wrote ignored reports under `simul_log_smoke/remote_ps_task_complete3_*`; 3 groups / 12 rows passed required outputs and physical sanity, but only `mesh_time_fine` was within the current convergence tolerance.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
@@ -71,13 +71,13 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler reaches AEDT; current blocker is finishing or replacing the remaining three 3/4 profile groups and then choosing a mesh/time setting before the 200-case replay and retraining.
+- Scheduler reaches AEDT; current blocker is finishing or replacing the remaining two 3/4 profile groups and then choosing a mesh/time setting before the 200-case replay and retraining.
 
 ## Next steps
 
 1. Verify/push the latest local commits and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
-3. Poll tasks 6106/6205/6207 for `mesh_time_fine`; if they remain stuck after the wrapper/process evidence is clear, cancel/resubmit only those missing profile rows with unique result paths.
+3. Poll tasks 6205/6207 for `mesh_time_fine`; if they remain stuck after the wrapper/process evidence is clear, cancel/resubmit only those missing profile rows with unique result paths.
 4. For further dynamic packed submissions, use the physical-sanity replay plan and `--case-start-index` / `--case-limit` to send only remaining validated replay rows.
 5. For Git-backed scheduler work use `submit_ipmsm_scheduler_job.py` default `python_git`, which now posts to `/tasks/git`; use `/jobs` only for packed simulation modes.
 6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.

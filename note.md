@@ -888,3 +888,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: three source groups are still incomplete or stuck before `mesh_time_fine`, and no retraining evidence has improved the R2 gate.
 - Next action: poll or resubmit only the missing `mesh_time_fine` rows for groups 0001, 0002, and 0004 with unique result paths; after five complete groups, rerun quality analysis across all completed CSVs before any 200-case replay.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 12:12:00 +09:00 - Loop 67
+
+- Part: third complete replay group checkpoint
+- Goal: incorporate task 6106 after it wrote the missing `mesh_time_fine` result row.
+- Hypothesis: one of the previously incomplete groups would finish naturally after the scheduler API restart, so only still-missing groups should be considered for retry.
+- Actions: polled tasks 6106, 6205, and 6207 through the filtered inspector; fetched only task 6106's completed result CSV into ignored artifacts; reran complete-group-only quality comparison across tasks 6106, 6208, and 6209.
+- Candidates: cancel/resubmit all incomplete-looking tasks immediately versus wait for natural `mesh_time_fine` completion. Chose to wait on 6205/6207 because 6106 showed the final profile can take about 38 minutes after `time_fine`.
+- Metrics: task 6106 result CSV is 4/4 `ok`; tasks 6205 and 6207 remain 3/4 `ok`; 3-group analysis kept 12/12 rows, found 0 missing required outputs and 0 physical sanity violations, and still ranked only `mesh_time_fine` within convergence tolerance.
+- Result: valid-source replay evidence increased from two to three complete groups; the current best-supported quality profile remains `mesh_time_fine`, but two groups are still pending.
+- Failure reason: not enough complete groups yet to commit to a 200-case replay setting or retraining decision.
+- Next action: poll 6205/6207 near 12:17 KST; retry only their missing `mesh_time_fine` rows if they remain unchanged.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
