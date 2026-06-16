@@ -1863,3 +1863,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: one early case still hit AEDT `analysis=False`, and most wave-1 task results are pending.
 - Next action: poll tasks 8448-8463, fetch per-task result summaries, then submit additional `fea_bursty` waves only after current capacity and failure rate are clear.
 - Token usage: active goal counter reported 17,816,317 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 23:10:44 +09:00 - Loop 142
+
+- Part: n114 bursty task probe.
+- Goal: use the user's clarified 200-concurrent budget without overloading n107 by testing whether the second warm allocation could safely run more batch2 cases.
+- Hypothesis: pinning the next 8 single-case `/tasks` submissions to n114/allocation 42 would use idle capacity while preserving the per-node `max_workers_per_node=8` guard.
+- Actions: verified live `slurm_scheduler` HEAD `1c493ad8`, checked latest docs for `/tasks` `scheduling_profile=fea_bursty`, dry-ran manifests for batch2 cases 17-24 with `--node-name n114`, submitted tasks 8472-8479, and fetched filtered result/log evidence.
+- Candidates: wait only on n107 tasks versus pin a small second wave to n114. Chose the n114 probe because `/api/task-capacity` reported n114 fit_slots=8 and memory_pressure=ok.
+- Metrics: tasks 8472-8479 attached to allocation 42 / Slurm 680403 and completed; each wrote one failed row in about 1.35-1.41s with `AEDTRuntimeError('AEDT is not installed on your system. Install AEDT version 2022 R2 or higher.')`; tasks 8448-8463 still had 15 running and one `analysis_returned_false=True` failure at last poll.
+- Result: n114 capacity is not usable for AEDT analyze work until setup-only smoke proves the Ansys environment there; the eight rows are infrastructure failures, not simulation-quality evidence.
+- Failure reason: node-specific AEDT availability did not match the scheduler account/env capability.
+- Next action: keep polling n107 tasks 8448-8463, exclude n114 probe rows from training/quality aggregation, and require setup-only smoke before sending analyze work to a new node.
+- Token usage: active goal counter reported 17,974,328 tokens used; Codex SQLite token sampler remains unavailable.

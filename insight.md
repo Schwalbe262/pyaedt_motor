@@ -577,3 +577,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: queued packed jobs were cancelled before Slurm submission, and single-case tasks 8448-8463 were submitted with `fea_bursty`; all attached to allocation 64 / Slurm 680569.
 - Evidence: `/api/task-capacity` reported 16 fit slots with memory pressure ok; task helper tests passed 9/9 and full tests passed 182/182; task 8451 completed and wrote the first batch2 result row while 15 peers were running.
 - Remaining risk: `fea_bursty` improves scheduling throughput, but it does not fix AEDT `analysis=False`; wave size should follow observed memory pressure and failure rate.
+
+## 2026-06-16 23:10:44 +09:00 - Insight 62
+
+- Source loop: `note.md` Loop 142.
+- Improvement: require node-specific AEDT smoke evidence before scaling `fea_bursty` analyze tasks onto a newly selected node.
+- Before: scheduler capability and env profile were treated as sufficient evidence that any warm allocation on the account could run AEDT.
+- After: n114/allocation 42 is excluded from analyze submissions until setup-only smoke passes there, and its failed batch2 rows are classified as infrastructure-only evidence.
+- Evidence: node-pinned tasks 8472-8479 all attached to allocation 42 / Slurm 680403 and completed with `AEDT is not installed on your system` result-row failures in about 1.35-1.41s.
+- Remaining risk: other nodes may also differ in Ansys visibility; future node expansion should start with one setup-only or one low-risk analyze smoke before an 8+ task wave.

@@ -74,6 +74,7 @@
 - 2026-06-16: `analyze_ipmsm_failure_patterns.py` reproduced retry1 failure evidence: top feature `magnet_height_ratio` score 0.397472222222 and the two-rule OR matched 20/20 failed rows plus 14 ok rows; full tests passed 181 tests.
 - 2026-06-16: dry-run manifest for remaining batch2 rows 170-200 is ready at `simul_log_smoke/batch2_mtf200_tail170_200_dynamic_dryrun_manifest.json`; verified 31 embedded rows and separate result CSV path, not submitted.
 - 2026-06-16: cancelled queued packed jobs 62-71 before Slurm submission and switched first 16 batch2 cases to `/tasks` with `scheduling_profile=fea_bursty`; tasks 8448-8463 attached to allocation 64 / Slurm 680569, with case 004 failed `analysis_returned_false=True` and the other 15 still running at last poll.
+- 2026-06-16: submitted node-pinned n114 probe wave tasks 8472-8479 for batch2 cases 17-24; all completed with result-row failures `AEDT is not installed on your system`, so n114/allocation 42 evidence is infrastructure-only and must be excluded from model-quality evidence.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -96,14 +97,15 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is a per-batch/concurrency cap, so more batches may be submitted, but each batch still needs dry-run manifests, filtered result evidence, and no accidental duplicate case plans.
-- Batch2 is now running through attached `fea_bursty` tasks after packed jobs 62-71 were cancelled before Slurm submission; current blocker is waiting for tasks 8448-8463 to finish and reveal result quality.
+- Batch2 is now running through attached `fea_bursty` tasks after packed jobs 62-71 were cancelled before Slurm submission; current blocker is waiting for tasks 8448-8463 on n107 to finish and reveal result quality.
+- n114/allocation 42 failed an AEDT availability probe (`AEDT is not installed on your system`) and should not receive analyze work until a setup-only smoke proves the Ansys environment is available there.
 
 ## Next steps
 
 1. Poll `/api/tasks/8448`-`/api/tasks/8463` with filtered fields; fetch only per-task `batch2_fea_task_###_results.csv` row/status summaries.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
-4. Submit more batch2 cases as `/tasks` with `scheduling_profile=fea_bursty` only after the current 16-task wave finishes or capacity clearly remains safe; keep the reviewed tail manifest for rows 170-200 as a fallback reference, not the immediate path.
+4. Submit more batch2 cases as `/tasks` with `scheduling_profile=fea_bursty` only on AEDT-verified nodes; run setup-only smoke before using a new node, and keep the reviewed tail manifest for rows 170-200 as a fallback reference, not the immediate path.
 5. Fetch scheduler results through safe relative `/api/jobs/{id}/remote-file` or `/api/tasks/{id}/remote-file` paths and summarize rows/statuses only; do not dump full CSVs.
 6. Before retraining, run `filter_ipmsm_training_dataset.py`, filtered quality checks, and `.venv\Scripts\python.exe train_ipmsm_lightgbm.py` with the current combined CSV.
 7. Next simulation-quality work should diagnose or avoid the repeated `analysis=False` geometry set, then plan the next <=200-concurrent batch.
@@ -135,10 +137,11 @@
 - CSV readers tolerate double-BOM headers; partial replay summarizer computes exact duplicate/reject gate thresholds.
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
-- Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions.
+- Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating.
 
 ## Risks and gotchas
 
 - Many local untracked artifacts exist; do not stage them by accident.
 - `pyaedt_test.ipynb` was already modified before this part; leave it untouched.
 - AEDT/Slurm validation is environment-dependent; record account, remote path, env profile, Ansys module, task id, and filtered result-row evidence.
+- Scheduler capability/env profile is not proof that every node sees AEDT; n114/allocation 42 produced 8/8 `AEDT is not installed` infrastructure failures.
