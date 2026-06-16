@@ -18,6 +18,7 @@ DEFAULT_REQUIRED_OUTPUTS = (
     "output_coreloss_all_avg_w",
     "output_solidloss_all_avg_w",
 )
+EFFICIENCY_COLUMNS = ("output_efficiency_all_pct", "output_efficiency_last_pct", "output_efficiency_last_pc")
 DEFAULT_SELECTION_FEATURES = (
     "stator_outer_radius",
     "stator_back_yoke_thick_ratio",
@@ -110,6 +111,17 @@ def row_has_required_outputs(row: dict[str, str], required_outputs: Iterable[str
     return all(math.isfinite(finite_float(row.get(column, ""))) for column in required_outputs)
 
 
+def physical_sanity_violations(row: dict[str, str]) -> list[str]:
+    violations = []
+    for column in EFFICIENCY_COLUMNS:
+        if column not in row:
+            continue
+        value = finite_float(row.get(column, ""))
+        if math.isfinite(value) and not 0.0 <= value <= 100.0:
+            violations.append(column)
+    return violations
+
+
 def candidate_sort_key(row: dict[str, Any], seed: int) -> str:
     source_case_id = row.get("source_case_id", "")
     source_result_path = row.get("source_result_path", "")
@@ -127,6 +139,7 @@ def load_candidates(
         "rows": 0,
         "status_rejected": 0,
         "required_output_rejected": 0,
+        "physical_sanity_rejected": 0,
         "geometry_rejected": 0,
     }
     for path in paths:
@@ -139,6 +152,9 @@ def load_candidates(
                     continue
                 if not row_has_required_outputs(row, required_outputs):
                     metrics["required_output_rejected"] += 1
+                    continue
+                if physical_sanity_violations(row):
+                    metrics["physical_sanity_rejected"] += 1
                     continue
                 try:
                     geometry = run_ipmsm_batch.extract_fixed_geometry(row)
@@ -349,7 +365,9 @@ def main(argv: list[str] | None = None) -> int:
         f"rows={len(rows)} source_cases={len(selected)} candidates={len(candidates)} "
         f"selection_mode={args.selection_mode} "
         f"scanned_rows={metrics['rows']} status_rejected={metrics['status_rejected']} "
-        f"required_output_rejected={metrics['required_output_rejected']} geometry_rejected={metrics['geometry_rejected']} "
+        f"required_output_rejected={metrics['required_output_rejected']} "
+        f"physical_sanity_rejected={metrics['physical_sanity_rejected']} "
+        f"geometry_rejected={metrics['geometry_rejected']} "
         f"output={args.output}"
     )
     return 0

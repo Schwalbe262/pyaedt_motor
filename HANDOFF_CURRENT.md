@@ -38,18 +38,18 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 157 tests and passed; touched-file py_compile with temp pycache and `git diff --check` passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 158 tests and passed; touched-file py_compile with temp pycache and `git diff --check` passed for latest selector changes.
 - 2026-06-16: scheduler job 20 validated branch checkout/imports/case-plan checks; job 21 reached `run_ipmsm_batch.py` and wrote one structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
 - 2026-06-16: scheduler job 57 fixed-geometry 4-profile analyze completed 4/4 `ok` on `cpu2`/`n111`; generated filtered comparison reports under `simul_log_smoke/fixed4_*`.
-- 2026-06-16: job 58 fixed-geometry next chunk is running on Slurm job 680506; result CSV still has 2/8 `ok` rows as of 08:57 KST: baseline and mesh_fine for `submit7_job664260_p009_case_0021`; `time_fine` is solving.
+- 2026-06-16: job 58 was cancelled after producing only invalid-source partial rows with out-of-range efficiency; jobs 60/61 remain queued on valid old-plan sources.
 - 2026-06-16: setup-only dynamic packed probe job 59 selected the expected one-row `SIMULATION_ID=1` CSV and wrote 1/1 `ok` row for baseline setup in 49.888s; scheduler status is now `completed`.
 - 2026-06-16: submitted next fixed replay window rows 13-20 via `dynamic_packed_srun`; scheduler created partial child coverage jobs 60/61 for 2/8 rows on `cpu2` nodes `n115`/`n110`, still queued without Slurm ids as of 09:02 KST.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
-- 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
+- 2026-06-16: physical-sanity replay selection now rejects 345 out-of-range efficiency source rows and writes a 200-row valid-source plan at `simul_log_smoke/replay_quality_cases_200_physical_sanity.csv`.
 - 2026-06-16: `train_ipmsm_lightgbm.py --check-dependencies --dependency-report ...` reports numpy ok and pandas/sklearn/lightgbm missing locally.
 - 2026-06-16: physical sanity filter on existing CSVs rejects 345 out-of-range efficiency rows; training-ready CSV now keeps 13,204/13,748 rows and passes strict dataset gate with zero physical sanity violations.
 - 2026-06-16: quality comparison now marks out-of-range efficiency rows as physical sanity violations and excludes them from complete-profile group eligibility.
@@ -57,7 +57,7 @@
 - 2026-06-15: import probe found `pyaedt_module=False` and no `ansys` package.
 - 2026-06-15: generated 4-row ignored smoke CSV at `simul_log_smoke/quality_cases_smoke.csv`.
 - Token command ran at closeout; default Codex SQLite DB was not found, so no live token sample was available.
-- First successful AEDT setup, solve, fixed-geometry 4-profile comparison, and dynamic packed row-dispatch evidence exists; multi-geometry job 58 is still partial and correctly fails the incomplete-profile guard; no R2-improving retraining evidence exists yet.
+- First successful AEDT setup, solve, fixed-geometry 4-profile comparison, and dynamic packed row-dispatch evidence exists; multi-geometry valid-source replay is still incomplete; no R2-improving retraining evidence exists yet.
 
 ## Current blocker
 
@@ -68,8 +68,8 @@
 
 1. Verify/push the latest local commits and check `git ls-remote origin refs/heads/chore/codex-context-budget` after any reported push error.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
-3. Poll job 58 and queued jobs 60/61; fetch result CSVs only after enough fixed-geometry profile groups complete, then run `analyze_ipmsm_quality_results.py` with the incomplete-group guard.
-4. For further dynamic packed submissions after partial child coverage, use `--case-start-index` / `--case-limit` to send only remaining validated replay rows.
+3. Poll queued jobs 60/61; fetch result CSVs only after enough fixed-geometry profile groups complete, then run `analyze_ipmsm_quality_results.py` with the incomplete-group guard.
+4. For further dynamic packed submissions, use the physical-sanity replay plan and `--case-start-index` / `--case-limit` to send only remaining validated replay rows.
 5. For Git-backed scheduler work use `submit_ipmsm_scheduler_job.py` default `python_git`, which now posts to `/tasks/git`; use `/jobs` only for packed simulation modes.
 6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
 7. Run dataset quality gates and LightGBM retraining only after completed fixed-geometry quality results exist.
@@ -101,7 +101,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helpers, workflow plans, quality analysis, and dataset filters now support `/tasks/git` Git submissions, selected-row slicing, physical sanity gates, incomplete/complete profile-group gates, and filtered Slurm log inspection.
+- Scheduler helpers, workflow plans, quality analysis, replay selection, and dataset filters now support `/tasks/git` Git submissions, selected-row slicing, physical sanity gates, incomplete/complete profile-group gates, and filtered Slurm log inspection.
 
 ## Risks and gotchas
 

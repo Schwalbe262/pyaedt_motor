@@ -76,7 +76,7 @@
 - Existing simulation result CSVs contain 13,748 rows; audited training filtering now rejects 199 failed/nonfinite rows plus 345 out-of-range efficiency rows, keeps 13,204 training-ready rows, and passes the strict dataset quality gate with zero physical sanity violations.
 - Future failed rows now preserve missing required output names, validation, analysis flags, and effective setup metadata for faster diagnosis.
 - Deterministic LightGBM retraining is now available as `train_ipmsm_lightgbm.py` with input quality gates; local runtime still lacks pandas, scikit-learn, and LightGBM.
-- Existing result geometries can now be replayed as fixed AEDT case rows; a geometry-spread 200-row mesh/time replay plan is available under `simul_log_smoke/`.
+- Existing result geometries can now be replayed as fixed AEDT case rows; the current 200-row mesh/time replay plan rejects out-of-range efficiency source rows and is available under `simul_log_smoke/`.
 - Quality comparison now preserves replay source identity so mesh/time deltas are compared against the matching source geometry baseline.
 - Future result rows and retraining now use geometry inputs consistent with AEDT design expressions; existing CSVs can recover `input_stator_teeth_width_ratio` and repair 13,748 stale rotor/shaft radius rows.
 - Slurm submission now guards explicit case CSVs from accidental multi-job or repeated-cycle duplication unless the operator opts in.
@@ -91,7 +91,7 @@
 - Task 22 completed the first full analyze solve: baseline 1/1 `ok`, elapsed 936.238s, torque_last_avg 11.0863 Nm, efficiency_last 74.8655%, back-EMF phase-A THD 13.1410%, and no missing required outputs.
 - Job 57 completed a fixed-geometry 4-profile analyze comparison 4/4 `ok`: `time_fine` was close to `mesh_time_fine` on torque/efficiency at about 0.68x reference runtime, but this is only one source geometry.
 - Job 59 validated dynamic packed row dispatch for setup-only work: `SIMULATION_ID=1` selected the expected single replay row and produced 1/1 `ok` baseline setup in 49.888s.
-- Multi-geometry quality replay job 58 is running and has only partial evidence so far; no R2-improving retraining evidence exists yet.
+- Multi-geometry quality replay is still incomplete; job 58 was cancelled after partial invalid-source rows, jobs 60/61 remain queued on valid sources, and no R2-improving retraining evidence exists yet.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
 - Next focus is multi-geometry quality validation, targeted 200-case quality replay selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
 

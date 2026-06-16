@@ -719,3 +719,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: job 58 still lacks a physically valid complete group, jobs 60/61 remain queued, and no retraining evidence exists yet.
 - Next action: commit/push the quality-analysis guard, then continue polling scheduler replay jobs.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:33:04 +09:00 - Loop 54
+
+- Part: physical-sanity replay source selection and scheduler policy check
+- Goal: align with the latest `Schwalbe262/slurm_scheduler` policy and stop spending Ansys solves on invalid replay source rows.
+- Hypothesis: the old fixed-geometry replay plan still includes source rows with physically invalid efficiency, and the selector should reject those before scheduler submission.
+- Actions: checked latest scheduler main `7d9ed52` and local OpenAPI paths; added efficiency physical-sanity rejection to `select_ipmsm_replay_cases.py`; added selector tests; regenerated an ignored physical-sanity replay plan; checked jobs 58/60/61; cancelled job 58 after it had only invalid-source partial rows.
+- Candidates: keep using the old 200-row plan versus regenerate the plan after applying the same physical sanity gate used by training and quality analysis. Chose regeneration to protect the 200-solve budget.
+- Metrics: old replay plan had 4/50 selected source geometries with out-of-range `output_efficiency_all_pct`; new selector scanned 13,748 rows, rejected 198 by status and 345 by physical sanity, selected 50 valid sources / 200 replay rows, and verified 0 invalid selected sources; `python -m unittest tests.test_select_ipmsm_replay_cases` ran 5 tests and passed; full `python -m unittest discover -s tests` ran 158 tests and passed.
+- Result: future fixed-geometry replay submissions can use `simul_log_smoke/replay_quality_cases_200_physical_sanity.csv` instead of the old plan; job 58 is cancelled, and queued jobs 60/61 use valid sources but still have no Slurm ids.
+- Failure reason: valid multi-geometry quality evidence is still incomplete, and no retraining/R2 evidence exists yet.
+- Next action: commit/push the selector checkpoint, then submit/poll valid-source dynamic packed replay jobs according to scheduler capacity.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
