@@ -505,3 +505,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `submit_ipmsm_scheduler_task.py` supports `--case-start-index` and `--case-limit`, applies the validated slice before bootstrap, and reports both validated and selected counts.
 - Evidence: task helper dry-run selected 4/200 physical-sanity replay rows; task 6106 was submitted with the sliced CSV; full tests ran 163/163 passing.
 - Remaining risk: live attached-task scheduling still needs result evidence because task 6106 remained queued at the end of the loop.
+
+## 2026-06-16 10:22:10 +09:00 - Insight 54
+
+- Source loop: `note.md` Loop 62.
+- Improvement: scheduler task validation should use filtered status/log/result summaries instead of ad hoc API calls or raw CSV/log dumps.
+- Before: `inspect_ipmsm_scheduler_job.py` only handled `/api/jobs`, so `/tasks` runs required manual polling and risked pasting large output.
+- After: the inspector supports `--task` and `--result-csv`, returning selected task fields, filtered stdout/stderr summaries, row/status counts, and complete quality group counts.
+- Evidence: live task 6106 inspection returned compact running-state and 0-row result summary; full tests ran 166/166 passing.
+- Remaining risk: the summary reports availability and grouping only; final quality decisions still require `analyze_ipmsm_quality_results.py` once result rows exist.

@@ -823,3 +823,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no completed new replay rows are available yet, so quality analysis and retraining remain blocked on scheduler output.
 - Next action: poll tasks 6106/6205/6207/6208/6209 and jobs 60/61; run guarded complete-group quality analysis once result CSVs contain complete source groups.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 10:22:10 +09:00 - Loop 62
+
+- Part: filtered scheduler task inspection
+- Goal: avoid manual API polling and raw output dumps for the new `/tasks` scheduler path.
+- Hypothesis: extending the existing scheduler inspector to support attached tasks and result CSV summaries will make future validation cheaper and less error-prone.
+- Actions: added task inspection to `inspect_ipmsm_scheduler_job.py`, plus result CSV row/status/complete-group summaries for jobs and tasks; validated it against live task 6106.
+- Candidates: keep using ad hoc PowerShell API calls versus add task support to the existing inspector. Chose the inspector extension to preserve filtered evidence and reuse existing log-summary behavior.
+- Metrics: `python -m unittest tests.test_inspect_ipmsm_scheduler_job` ran 11 tests and passed; `python -m unittest discover -s tests` ran 166 tests and passed; live task 6106 inspection reported status `running`, allocation 66, Slurm job 680574, and 0 result rows so far without dumping logs.
+- Result: future task polling can use `python inspect_ipmsm_scheduler_job.py <task_id> --task --stderr --base remote_cwd --result-csv <path>`.
+- Failure reason: monitoring improved, but no completed replay rows are available yet.
+- Next action: poll task result summaries until complete fixed-geometry groups exist, then run guarded quality analysis.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

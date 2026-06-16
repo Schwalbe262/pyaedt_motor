@@ -31,7 +31,7 @@
 - `train_ipmsm_lightgbm.py`: deterministic LightGBM training CLI with derived geometry input repair and recovered width-ratio feature.
 - `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the 200-solve guardrail.
 - `submit_ipmsm_scheduler_job.py` / `submit_ipmsm_scheduler_task.py`: dry-run-first Slurm Scheduler helpers for `/tasks/git`, `/tasks`, and `dynamic_packed_srun`.
-- `inspect_ipmsm_scheduler_job.py`: filtered scheduler job/status/log inspector.
+- `inspect_ipmsm_scheduler_job.py`: filtered scheduler job/task/status/log/result inspector.
 - `run_ipmsm_batch.py`: batch execution and result CSV writer.
 - `module/ipmsm_ppt_setup.py`: mesh, transient setup, validation, and analysis.
 
@@ -106,7 +106,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helpers, workflow plans, run output metrics, training CLI, quality analysis, replay selection, and dataset filters now support `/tasks`, `/tasks/git`, selected-row slicing, physical sanity gates, incomplete/complete profile-group gates, and filtered Slurm log inspection.
+- Scheduler helpers, workflow plans, run output metrics, training CLI, quality analysis, replay selection, dataset filters, and filtered inspection now support `/tasks`, `/tasks/git`, selected-row slicing, physical sanity gates, incomplete/complete profile-group gates, and result-summary-only Slurm evidence.
 
 ## Risks and gotchas
 
