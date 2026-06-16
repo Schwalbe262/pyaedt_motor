@@ -101,14 +101,14 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is a per-batch/concurrency cap, so more batches may be submitted, but each batch still needs dry-run manifests, filtered result evidence, and no accidental duplicate case plans.
-- Batch2 is running through attached `fea_bursty` tasks after packed jobs 62-71 were cancelled before Slurm submission; current blocker is waiting for remaining module tasks 8546-8551/8553 on n114 and 8559-8565 on n107 after quick `analysis=False` rows 8552 and 8566.
+- Batch2 is running through attached `fea_bursty` tasks after packed jobs 62-71 were cancelled before Slurm submission; current blocker is waiting for n107 tasks 8559-8565 and n114 module2 tasks 8573-8574/8576-8579 after quick `analysis=False` rows 8566 and 8575.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
 - n114/allocation 42 failed earlier without the Ansys module, but module setup-only smoke task 8545 passed; use n114 only with explicit module env setup and filtered result evidence.
 - `/tasks` analyze submissions must include explicit `--env-setup "module load ansys-electronics/v252"`; `env_profile=pyaedt2026v1` alone caused tasks 8513-8520 to fail before AEDT discovery.
 
 ## Next steps
 
-1. Poll remaining `/api/tasks/8546`-`/api/tasks/8551`,`8553` and `/api/tasks/8559`-`/api/tasks/8565` with filtered fields; fetch only per-task module result CSV row/status summaries.
+1. Poll remaining `/api/tasks/8559`-`/api/tasks/8565` and `/api/tasks/8573`-`/api/tasks/8574`,`8576`-`/api/tasks/8579` with filtered fields; fetch only per-task module result CSV row/status summaries.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
 4. Submit more batch2 cases as `/tasks` only with explicit Ansys module env setup and after the current n107/n114 module waves give runtime/failure evidence; run setup-only smoke before using any new node.
@@ -144,6 +144,7 @@
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
 - Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating, Ansys module guards, and per-wave filtered result probes.
+- n114 module wave cases 025-032 finished 7/8 `ok` and one AEDT `analysis=False`; follow-on cases 041-047 are submitted as tasks 8573-8579.
 
 ## Risks and gotchas
 
@@ -152,3 +153,4 @@
 - AEDT/Slurm validation is environment-dependent; record account, remote path, env profile, Ansys module, task id, and filtered result-row evidence.
 - Scheduler capability/env profile is not proof that every node sees AEDT; n114/allocation 42 produced 8/8 `AEDT is not installed` failures without the module but passed module smoke task 8545.
 - Even on n107, `env_profile=pyaedt2026v1` is not enough for fresh `/tasks`; include `module load ansys-electronics/v252` in `env_setup`.
+- For partial replay summaries, pass explicit expected result files; broad globs over `simul_log_smoke` can include stale probes and create duplicate counts.

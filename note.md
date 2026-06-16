@@ -1954,3 +1954,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: current wave quality evidence is incomplete and not enough to choose the next wave size.
 - Next action: keep polling tasks 8546-8551, 8553, and 8559-8565; aggregate only completed module-corrected result rows, then submit the next <=200-concurrent wave only after runtime/failure evidence is clear.
 - Token usage: active goal counter reported 18,638,088 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 01:46:00 +09:00 - Loop 149
+
+- Part: n114 wave completion and follow-on submission.
+- Goal: keep batch2 simulation throughput moving under the corrected 200-concurrent/batch interpretation while avoiding duplicate or stale quality evidence.
+- Hypothesis: n114 is usable for module-corrected `fea_bursty` analyze work because the first module analyze wave completed mostly ok with acceptable elapsed times.
+- Actions: polled task status, fetched n114/n107 result probes by explicit expected filename, recomputed partial replay gates, submitted n114 follow-on cases 041-047 as tasks 8573-8579, and verified they attached to allocation 42 / Slurm 680403.
+- Candidates: wait for all n107 tasks before submitting more work versus fill available n114 capacity. Chose a 7-case n114 wave because case 032 was still finishing when the dry-run started and the first n114 module wave had 7/8 ok rows.
+- Metrics: n114 cases 025-032 finished 7/8 ok with one `analysis_returned_false=True`; ok elapsed range was 2280.785-2737.714s; explicit partial summary after cases 001-032 plus case 040 had result_rows=33, ok=30, failed=3, duplicates=0, physical_sanity_violations=0; task 8575/case 043 failed quickly with `analysis_returned_false=True`.
+- Result: follow-on n114 wave is running, and stale broad-glob aggregation was identified and discarded in favor of explicit file lists.
+- Failure reason: n107 cases 033-039 and n114 follow-on cases 041-042/044-047 are still pending or running, so retraining is not ready.
+- Next action: poll tasks 8559-8565 and 8573-8574/8576-8579, aggregate only explicit module-corrected result files, then decide whether to submit case 048 and/or more n114/n107 waves.
+- Token usage: active goal counter reported 18,781,161 tokens used; Codex SQLite token sampler remains unavailable.

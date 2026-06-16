@@ -602,5 +602,14 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Improvement: requalify a node that failed AEDT discovery with an explicit-module setup-only smoke before permanently excluding it.
 - Before: n114/allocation 42 was treated as unusable after 8 fast AEDT discovery failures from module-missing tasks.
 - After: n114 module smoke task 8545 passed 1/1 `ok`, and module-corrected analyze tasks 8546-8553 were allowed to run on the same allocation.
-- Evidence: task 8545 passed setup-only in 20.377s on allocation 42 / Slurm 680403 after including `module load ansys-electronics/v252`; tasks 8546-8553 then attached to the same allocation.
-- Remaining risk: n114 full analyze success and elapsed distribution are still pending, so only setup readiness is confirmed.
+- Evidence: task 8545 passed setup-only in 20.377s on allocation 42 / Slurm 680403 after including `module load ansys-electronics/v252`; analyze tasks 8546-8553 then finished 7/8 ok with one AEDT `analysis=False` row.
+- Remaining risk: node readiness is confirmed, but individual geometries can still hit AEDT `analysis=False`.
+
+## 2026-06-17 01:46:00 +09:00 - Insight 65
+
+- Source loop: Loop 149, batch2 module partial aggregation.
+- Improvement: build live partial replay summaries from explicit expected result-file lists instead of broad globs over generated probe directories.
+- Before: a broad `simul_log_smoke` glob included stale probe files and produced duplicate counts unrelated to the current quality evidence.
+- After: aggregation enumerates the active case ranges and exact per-wave filename patterns, producing result_rows=33, ok=30, failed=3, duplicates=0, and physical_sanity_violations=0 for the current evidence set.
+- Evidence: the stale glob run reported duplicate rows; the explicit rerun immediately removed duplicates and matched the intended current case set.
+- Remaining risk: future wave tags must still be added deliberately to the explicit list before summarizing.
