@@ -57,6 +57,7 @@
 - 2026-06-16: `mesh_time_mid` is rejected for now: it was not within tolerance, had max delta 11.8041% versus `mesh_time_fine`, and was not meaningfully faster (avg elapsed ratio vs reference 1.0033).
 - 2026-06-16: submitted 200-row `mesh_time_fine` production replay as `/tasks` chunks: 8152-8159, 8161, and retry 8163 are running; duplicate 8160 was cancelled and stale-allocation task 8151 failed before solving.
 - 2026-06-16: running scheduler checkout is latest `slurm_scheduler` main `7d9ed52`; remote bootstrap for chunk 021-040 verified the expected 20-case CSV header/range.
+- 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
