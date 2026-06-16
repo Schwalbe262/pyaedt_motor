@@ -2331,3 +2331,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: most active rows are still solving, and case113 adds one more AEDT `analysis=False` geometry failure.
 - Next action: poll the active production task set, fetch completed row summaries, and backfill case122 when the next production slot opens.
 - Token usage: active goal counter reported 20,366,288 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 08:41:06 +09:00 - Loop 178
+
+- Part: case096 completion and case122 backfill.
+- Goal: keep the expanded batch2 production pool saturated while preserving exact result-file accounting.
+- Hypothesis: n107 can accept one more backfill after case096 completed ok, without changing the validated extra-node production wave.
+- Actions: polled active production tasks, fetched case096 result evidence, submitted case122 as task 8792 on n107, confirmed task 8792 attached and started, and recomputed an explicit completed-file summary using rows 001-096 plus case113.
+- Candidates: wait for more completions versus immediately refill n107. Chose immediate refill because the open slot was on the already-validated n107 allocation.
+- Metrics: case096 completed `ok` in 3908.615s; explicit partial summary reached result_rows=97, ok=92, failed=5, duplicates=0, physical_sanity_violations=0; active production concurrency returned to 25 running tasks.
+- Result: active production tasks are 8742/8744/8749/8750/8757/8758/8760, 8764, 8771-8778, 8780-8786, 8788, and 8792.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll active production tasks, fetch completed row summaries, and backfill case123 when the next slot opens.
+- Token usage: active goal counter reported 20,392,097 tokens used; Codex SQLite token sampler remains unavailable.
