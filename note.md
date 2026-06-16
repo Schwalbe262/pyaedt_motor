@@ -1668,3 +1668,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay remains incomplete and the current partial data does not close the model-performance gap.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8155, 8157-8159, 8161, and 8163 while task 8156 is complete.
 - Token usage: active goal counter reported 15,496,390 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 20:49:29 +09:00 - Loop 127
+
+- Part: production replay partial199 gate
+- Goal: checkpoint the near-complete replay snapshot and refresh retry triage.
+- Hypothesis: the near-complete replay should still pass strict quality/filter gates after de-duplication, but additional retry duplicates may reveal repeated failures.
+- Actions: confirmed current handoff/goal state and scheduler health, narrowly polled known result CSVs, fetched and saved all ten result CSVs as partial199 through `/api/tasks/{id}/remote-file`, ran replay summarizer, raw quality, combined filter, filtered quality, deterministic LightGBM smoke retraining, and exact failed-row extraction.
+- Candidates: gate count-only partial198 versus saved partial199. Chose partial199 because one retry row arrived during fetch and saved CSVs are authoritative.
+- Metrics: raw snapshots rows=199, ok=179, failed=20, duplicate retry rows=19, physical sanity violations=0; summarizer reported combined_kept=13366, combined_rejected=18, new_kept=162; filtered combined dataset rows=13,366 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=10,017, min R2=0.702146619453, avg R2=0.814444106862.
+- Result: partial199 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`; failed replay row 19 joins retry candidates and row 12/19 failures are duplicated by retry artifacts.
+- Failure reason: production replay remains one saved row short of the 200-row submission target and the current partial data does not close the model-performance gap.
+- Next action: commit/push this checkpoint, poll for the final replay row, then run final 200-row gate and retry triage without exceeding the approved 200-simulation guardrail.
+- Token usage: active goal counter reported 15,905,269 tokens used; Codex SQLite token sampler remains unavailable.
