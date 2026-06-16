@@ -1123,6 +1123,14 @@ def safe_divide(numerator: float, denominator: float) -> float:
     return numerator / denominator
 
 
+def motor_efficiency_pct(mech_power: float, total_loss: float) -> float:
+    if not math.isfinite(mech_power) or not math.isfinite(total_loss):
+        return math.nan
+    if mech_power <= 0.0 or total_loss < 0.0:
+        return math.nan
+    return safe_divide(mech_power, mech_power + total_loss) * 100.0
+
+
 def summarize_phase_envelope(
     output_summary: dict[str, Any],
     phase_prefixes: tuple[str, ...],
@@ -1205,9 +1213,7 @@ def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None
 
         mech_power = torque_avg * omega_mech_rad_s
         output_summary[f"output_mech_power_{window}_w"] = mech_power if math.isfinite(mech_power) else math.nan
-        output_summary[f"output_efficiency_{window}_pct"] = (
-            safe_divide(mech_power, mech_power + total_loss) * 100.0
-        )
+        output_summary[f"output_efficiency_{window}_pct"] = motor_efficiency_pct(mech_power, total_loss)
 
         voltage_peak = finite_float(output_summary.get(f"output_phase_voltage_{window}_peak_abs_v"))
         output_summary[f"output_voltage_spwm_margin_{window}_v"] = (

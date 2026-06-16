@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import csv
+import math
 from pathlib import Path
 import sys
 import tempfile
@@ -167,6 +168,43 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
             missing,
             ["output_torque_all_avg_nm", "output_solidloss_all_avg_w"],
         )
+
+    def test_derived_motor_efficiency_is_nan_for_negative_mechanical_power(self) -> None:
+        spec = types.SimpleNamespace(base_rpm=1200.0, phase_resistance_ohm=0.01, vdc_v=200.0)
+        output_summary = {
+            "output_torque_first_avg_nm": -10.0,
+            "output_torque_first_min_nm": -11.0,
+            "output_torque_first_max_nm": -9.0,
+            "output_phase_current_first_rms_a": 10.0,
+            "output_coreloss_first_avg_w": 20.0,
+            "output_solidloss_first_avg_w": 30.0,
+            "output_phase_voltage_first_peak_abs_v": 100.0,
+            "output_torque_last_avg_nm": 10.0,
+            "output_torque_last_min_nm": 9.0,
+            "output_torque_last_max_nm": 11.0,
+            "output_phase_current_last_rms_a": 10.0,
+            "output_coreloss_last_avg_w": 20.0,
+            "output_solidloss_last_avg_w": 30.0,
+            "output_phase_voltage_last_peak_abs_v": 100.0,
+            "output_torque_all_avg_nm": 10.0,
+            "output_torque_all_min_nm": 9.0,
+            "output_torque_all_max_nm": 11.0,
+            "output_phase_current_all_rms_a": 10.0,
+            "output_coreloss_all_avg_w": 20.0,
+            "output_solidloss_all_avg_w": 30.0,
+            "output_phase_voltage_all_peak_abs_v": 100.0,
+        }
+
+        run_ipmsm_batch.add_derived_motor_metrics(output_summary, spec)
+
+        self.assertLess(output_summary["output_mech_power_first_w"], 0.0)
+        self.assertTrue(math.isnan(output_summary["output_efficiency_first_pct"]))
+        self.assertGreaterEqual(output_summary["output_efficiency_last_pct"], 0.0)
+        self.assertLessEqual(output_summary["output_efficiency_last_pct"], 100.0)
+
+    def test_motor_efficiency_rejects_negative_loss_inputs(self) -> None:
+        self.assertTrue(math.isnan(run_ipmsm_batch.motor_efficiency_pct(100.0, -1.0)))
+        self.assertAlmostEqual(run_ipmsm_batch.motor_efficiency_pct(100.0, 25.0), 80.0)
 
     def test_validate_case_plan_rejects_duplicate_case_ids(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "duplicate case_id"):

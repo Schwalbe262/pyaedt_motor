@@ -478,3 +478,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `select_ipmsm_replay_cases.py` rejects out-of-range efficiency source rows, reports `physical_sanity_rejected`, and generated `replay_quality_cases_200_physical_sanity.csv` with 0 invalid selected sources.
 - Evidence: selector dry-run scanned 13,748 rows, rejected 345 physical sanity violations, selected 50 valid sources / 200 replay rows, and full tests ran 158/158 passing.
 - Remaining risk: this protects source selection only; completed valid-source replay rows are still required before mesh/time settings or R2 claims can change.
+
+## 2026-06-16 09:41:44 +09:00 - Insight 51
+
+- Source loop: `note.md` Loop 56.
+- Improvement: derived motor efficiency should become nonfinite when the operating point has nonpositive mechanical power or negative total loss.
+- Before: `mech_power / (mech_power + total_loss)` could write plausible-looking but physically invalid efficiency values above 100% for negative-torque cases.
+- After: `run_ipmsm_batch.py` uses `motor_efficiency_pct()` so future invalid motor operating points produce `nan` efficiency and are rejected by existing output-quality gates instead of becoming training targets.
+- Evidence: unit tests cover negative mechanical power and negative loss inputs; full tests ran 160/160 passing.
+- Remaining risk: historical CSVs still contain old invalid efficiency values and must continue to pass through the physical sanity filter before retraining.

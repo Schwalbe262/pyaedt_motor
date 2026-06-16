@@ -745,3 +745,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: task 6032 has not started and no new valid solve rows are available yet.
 - Next action: poll task 6032 and jobs 60/61; once result CSVs exist, run guarded complete-group quality analysis.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:41:44 +09:00 - Loop 56
+
+- Part: future efficiency-output sanity
+- Goal: prevent future solved rows from writing physically invalid efficiency percentages when the case is not operating as a motor.
+- Hypothesis: the current formula `mech_power / (mech_power + total_loss)` can emit efficiency above 100% when torque/mechanical power is negative, causing bad targets before downstream filters reject them.
+- Actions: added `motor_efficiency_pct()` to return `nan` for nonpositive mechanical power, nonfinite inputs, or negative total loss; updated derived metric generation to use it; added AEDT-free unit tests.
+- Candidates: clamp efficiency into 0-100 versus mark invalid operating points nonfinite. Chose nonfinite because clamping would hide generator/braking behavior as plausible training data.
+- Metrics: `python -m unittest tests.test_run_ipmsm_batch_spec` ran 28 tests and passed; `python -m unittest discover -s tests` ran 160 tests and passed; `py_compile` and `git diff --check` passed for touched files; jobs 60/61 and task 6032 still have no completed result rows.
+- Result: future invalid motor operating points no longer produce physically plausible-looking efficiency percentages; downstream dataset and quality gates can reject them as nonfinite.
+- Failure reason: this improves future data quality but does not yet provide completed multi-geometry replay evidence or R2 improvement.
+- Next action: commit/push the metric fix, then continue polling scheduler outputs.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
