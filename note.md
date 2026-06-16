@@ -1876,3 +1876,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: node-specific AEDT availability did not match the scheduler account/env capability.
 - Next action: keep polling n107 tasks 8448-8463, exclude n114 probe rows from training/quality aggregation, and require setup-only smoke before sending analyze work to a new node.
 - Token usage: active goal counter reported 17,974,328 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 23:45:34 +09:00 - Loop 143
+
+- Part: n107 long-running solver monitoring.
+- Goal: decide whether the first valid `fea_bursty` wave is hung or still computing before taking destructive action.
+- Hypothesis: because previous successful `mesh_time_fine` rows had elapsed values up to about 2005s, a longer 15-way attached task wave might still be valid if Maxwell solver processes are active.
+- Actions: repeatedly polled tasks 8448-8463 and per-task result CSVs, summarized previous first-batch elapsed distributions, fetched representative process logs, and submitted diagnostic tasks 8489/8491 on n107 to inspect filtered process state.
+- Candidates: cancel long-running tasks versus keep waiting. Chose keep waiting because diagnostic output showed active `solver2d` processes for the n107 wave, not dead wrapper processes.
+- Metrics: previous local first-batch result files had ok elapsed p50=1375.767s, p90=1617.529s, max=2005.219s; at 23:45 KST tasks 8448-8463 were still 15 running and 1 completed; case 004 remained the only nonzero n107 result with `analysis_returned_false=True`; diagnostic task 8491 showed active `solver2d` processes on host n107.
+- Result: the n107 wave remains in progress and should continue to be polled; no additional analyze tasks should be submitted until this wave resolves or a clearer capacity policy is chosen.
+- Failure reason: no new result rows have completed yet, and wall time is now above prior first-batch max elapsed.
+- Next action: keep polling 8448-8463, aggregate only completed n107 result rows, and decide next wave size from actual elapsed/failure outcomes.
+- Token usage: active goal counter reported 18,144,136 tokens used; Codex SQLite token sampler remains unavailable.
