@@ -2006,3 +2006,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: current batch2 rows are still incomplete, so no retraining run is justified yet.
 - Next action: poll n107 tasks 8582-8584/8587-8591 and n114 tasks 8573/8576-8579/8595-8597; update explicit partial summaries as rows complete.
 - Token usage: active goal counter reported 18,897,479 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 02:41:00 +09:00 - Loop 153
+
+- Part: n114 follow-on completion and fourth n114 wave.
+- Goal: keep both active nodes loaded with controlled single-case waves.
+- Hypothesis: n114 can accept another five cases because the 041-047 wave is row-wise complete except for status lag and produced 6/7 ok rows.
+- Actions: polled n114 tasks, fetched follow-on result rows, recomputed explicit partial gates, dry-ran cases 059-063 with unique result/log paths, submitted them as tasks 8598-8602, and confirmed all five attached to allocation 42 / Slurm 680403.
+- Candidates: wait for task status 8576 to flip versus use result rows as completion evidence. Chose result-row evidence because case 044 had already written an ok row and later status caught up.
+- Metrics: n114 cases 041-047 produced 6 ok rows and one `analysis_returned_false=True`; ok elapsed range was 2650.155-3294.189s; explicit partial summary reached result_rows=47, ok=43, failed=4, duplicates=0, physical_sanity_violations=0.
+- Result: active work is now n107 cases 048-055 and n114 cases 056-063, 16 tasks total.
+- Failure reason: no new training run yet because the current active rows are still solving.
+- Next action: poll tasks 8582-8584, 8587-8591, and 8595-8602; keep explicit partial summaries current as rows complete.
+- Token usage: active goal counter reported 18,920,254 tokens used; Codex SQLite token sampler remains unavailable.
