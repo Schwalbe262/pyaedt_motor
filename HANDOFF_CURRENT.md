@@ -48,7 +48,7 @@
 - 2026-06-16: job 58 was cancelled after producing only invalid-source partial rows with out-of-range efficiency; jobs 60/61 remain queued on valid old-plan sources.
 - 2026-06-16: setup-only dynamic packed probe job 59 selected the expected one-row `SIMULATION_ID=1` CSV and wrote 1/1 `ok` row for baseline setup in 49.888s; scheduler status is now `completed`.
 - 2026-06-16: submitted next fixed replay window rows 13-20 via `dynamic_packed_srun`; scheduler created partial child coverage jobs 60/61 for 2/8 rows on `cpu2` nodes `n115`/`n110`, still queued without Slurm ids as of 09:02 KST.
-- 2026-06-16: latest `slurm_scheduler` main is `1c493ad8`; current policy is `/tasks` for existing remote dirs, `/tasks/git` or `/api/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for packed many-case FEA; `/jobs python_git` is compatibility-only.
+- 2026-06-17: latest `slurm_scheduler` main is still `1c493ad8`; current policy is `/tasks` with `fea_bursty` for existing remote FEA work, `/tasks/git` or `/api/tasks/git` for Git work, and `/jobs dynamic_packed_srun` for packed many-case FEA.
 - 2026-06-16: submitted additional non-overlapping `/tasks` replay groups: 6205 rows 1-4, 6207 rows 13-16, 6208 rows 17-20, and 6209 rows 9-12; cancelled 6206 before start because it reused task 6106 result paths.
 - 2026-06-16: earlier local scheduler checkout was `ae5298f`; WSL checkout had local dirty scheduler files, so verify live API health and upstream policy before submissions.
 - 2026-06-16: scheduler API hung, was restarted locally, and `/api/health` recovered; avoid broad `/api/tasks` dumps because it returned 200 records despite a `limit` query.
@@ -101,14 +101,14 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is a per-batch/concurrency cap, so more batches may be submitted, but each batch still needs dry-run manifests, filtered result evidence, and no accidental duplicate case plans.
-- Batch2 is now running through attached `fea_bursty` tasks after packed jobs 62-71 were cancelled before Slurm submission; current blocker is waiting for corrected module tasks 8524-8531 on n107 and remaining 8546-8551/8553 on n114 to finish.
+- Batch2 is running through attached `fea_bursty` tasks after packed jobs 62-71 were cancelled before Slurm submission; current blocker is waiting for remaining module tasks 8546-8551/8553 on n114 and 8559-8565 on n107 after quick `analysis=False` rows 8552 and 8566.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
 - n114/allocation 42 failed earlier without the Ansys module, but module setup-only smoke task 8545 passed; use n114 only with explicit module env setup and filtered result evidence.
 - `/tasks` analyze submissions must include explicit `--env-setup "module load ansys-electronics/v252"`; `env_profile=pyaedt2026v1` alone caused tasks 8513-8520 to fail before AEDT discovery.
 
 ## Next steps
 
-1. Poll `/api/tasks/8524`-`/api/tasks/8531` and remaining `/api/tasks/8546`-`/api/tasks/8551`,`8553` with filtered fields; fetch only per-task module result CSV row/status summaries.
+1. Poll remaining `/api/tasks/8546`-`/api/tasks/8551`,`8553` and `/api/tasks/8559`-`/api/tasks/8565` with filtered fields; fetch only per-task module result CSV row/status summaries.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
 4. Submit more batch2 cases as `/tasks` only with explicit Ansys module env setup and after the current n107/n114 module waves give runtime/failure evidence; run setup-only smoke before using any new node.
@@ -143,7 +143,7 @@
 - CSV readers tolerate double-BOM headers; partial replay summarizer computes exact duplicate/reject gate thresholds.
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
-- Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating and Ansys module guards.
+- Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating, Ansys module guards, and per-wave filtered result probes.
 
 ## Risks and gotchas
 

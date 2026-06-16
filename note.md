@@ -1941,3 +1941,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: current wave results are still incomplete.
 - Next action: continue polling module result CSV summaries and aggregate ok/analysis-false rows after completion.
 - Token usage: active goal counter reported 18,504,941 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 01:28:00 +09:00 - Loop 148
+
+- Part: updated scheduler policy check and active wave poll.
+- Goal: keep batch2 FEA execution aligned with the latest scheduler policy and the corrected interpretation that 200 simulations is a concurrent/batch cap, not a total project cap.
+- Hypothesis: the latest scheduler policy still supports attached `/tasks` with `scheduling_profile=fea_bursty`, so current n107/n114 work should continue there while packed jobs remain reserved for many-case batch orchestration.
+- Actions: checked live upstream `slurm_scheduler` HEAD in a fresh clone, read the exact API/policy lines for `/tasks`, `/tasks/git`, `dynamic_packed_srun`, and `fea_bursty`, polled active task statuses, and fetched only nonzero module result row summaries.
+- Candidates: fill freed slots immediately versus wait for more completed row evidence. Chose wait because both completed current-wave rows were fast AEDT `analysis=False` failures while 14 solver tasks were still running.
+- Metrics: upstream scheduler HEAD is `1c493ad8a5d4e8167c7e50c406b93aefe30f63d0`; policy lines confirm `/tasks` for existing remote commands, `/tasks/git` for Git work, and `/jobs dynamic_packed_srun` for packed many-simulation FEA/RL; task poll at 01:27 KST showed 14 running and 2 completed; case 031 on n114 and case 040 on n107 failed with `analysis_returned_false=True`.
+- Result: no new simulation submissions were made; `HANDOFF_CURRENT.md` now points new sessions at the correct active task ranges and current scheduler policy.
+- Failure reason: current wave quality evidence is incomplete and not enough to choose the next wave size.
+- Next action: keep polling tasks 8546-8551, 8553, and 8559-8565; aggregate only completed module-corrected result rows, then submit the next <=200-concurrent wave only after runtime/failure evidence is clear.
+- Token usage: active goal counter reported 18,638,088 tokens used; Codex SQLite token sampler remains unavailable.
