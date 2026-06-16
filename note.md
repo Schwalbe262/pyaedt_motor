@@ -1980,3 +1980,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: many current rows are still running, so retraining and larger next-wave decisions remain premature.
 - Next action: poll tasks 8559-8561, 8565, 8573-8574, 8576-8579, and 8582-8584; aggregate exact result probes and continue small backfills only when observed solver count drops.
 - Token usage: active goal counter reported 18,844,210 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 02:13:00 +09:00 - Loop 151
+
+- Part: n107 wave completion and second n107 backfill.
+- Goal: use the confirmed n107 8-way runtime evidence to keep batch2 moving without treating 200 as a total cap.
+- Hypothesis: after cases 033-040 completed 7/8 ok, n107 can safely take another five single-case tasks while cases 048-050 continue.
+- Actions: polled tasks 8559-8566, fetched result probes, recomputed explicit partial gates, dry-ran cases 051-055 with unique result/log paths, submitted them as tasks 8587-8591, and confirmed all five attached to allocation 64 / Slurm 680569.
+- Candidates: wait for n114 follow-on rows versus backfill n107 immediately. Chose n107 backfill because the current n107 wave completed with strong ok rate and elapsed evidence.
+- Metrics: n107 cases 033-040 finished 7/8 ok with ok elapsed range 2133.616-2654.158s and case 040 `analysis_returned_false=True`; explicit partial summary after cases 001-040 plus case 043 had result_rows=41, ok=37, failed=4, duplicates=0, physical_sanity_violations=0.
+- Result: n107 now has cases 048-055 running as follow-on tasks; n114 cases 041-042/044-047 remain running.
+- Failure reason: batch2 still has too few completed rows for retraining and the n114 follow-on wave has not produced ok rows yet.
+- Next action: poll tasks 8582-8584, 8587-8591, 8573-8574, and 8576-8579; fetch explicit result probes and backfill only after observed solver count drops.
+- Token usage: active goal counter reported 18,872,678 tokens used; Codex SQLite token sampler remains unavailable.
