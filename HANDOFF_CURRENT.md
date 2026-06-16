@@ -61,8 +61,8 @@
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
 - 2026-06-16: scheduler API refused one fetch after task 8159; local WSL scheduler web process was restarted, `/api/health` recovered, and no Slurm task was cancelled or modified.
-- 2026-06-16: production replay snapshots now have 175 fetched rows; raw partial has 158 `ok`, 17 failed, and 15 retry duplicates, while `partial175_bomfix` keeps 13,348 rows with no blank/duplicate case IDs and no physical-sanity violations.
-- 2026-06-16: task 8156 remains the only completed chunk; `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial175_bomfix.csv --disable-tuning` still misses target with min R2 0.703131808625, avg 0.817569261833.
+- 2026-06-16: production replay snapshots now have 178 fetched rows; raw partial has 161 `ok`, 17 failed, and 16 retry duplicates, while `partial178_bomfix` keeps 13,350 rows with no blank/duplicate case IDs and no physical-sanity violations.
+- 2026-06-16: task 8156 remains the only completed chunk; `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial178_bomfix.csv --disable-tuning` still misses target with min R2 0.711052304047, avg 0.816839614984.
 - 2026-06-16: `run_ipmsm_batch.py` now fails future `analysis=False` rows with an explicit AEDT analysis-returned-false error before report export; `python -m unittest discover -s tests` passed 174 tests.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
