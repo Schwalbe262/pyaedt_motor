@@ -1278,3 +1278,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay is incomplete and current partial data has not closed the model performance gap.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 12,772,675 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 17:33:25 +09:00 - Loop 97
+
+- Part: production replay partial99 gate
+- Goal: validate the next replay increment and preserve exact quality/R2 evidence.
+- Hypothesis: two extra ok rows should preserve data quality; R2 may remain unchanged if they are removed as outliers or do not alter the final split metrics.
+- Actions: waited for scheduler progress, refreshed ten result CSVs through `/api/tasks/{id}/remote-file`, counted status rows, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: skip retraining because the increment is small versus rerun because kept rows changed. Chose rerun to keep evidence deterministic.
+- Metrics: raw snapshots rows=99, ok=91, failed=8, duplicate retry rows=8, physical sanity violations=0; summarizer reported combined_kept=13287, combined_rejected=8, new_kept=83; filtered combined dataset rows=13,287 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,963, min R2=0.700955899961, avg R2=0.814627171852.
+- Result: partial99 remains training-ready after filtering; R2 is unchanged versus partial97 and all targets still miss `R^2 >= 0.95`.
+- Failure reason: production replay is incomplete and the added rows do not improve the model metric.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 12,846,516 tokens used; Codex SQLite token sampler remains unavailable.
