@@ -61,8 +61,8 @@
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
 - 2026-06-16: scheduler API refused one fetch after task 8159; local WSL scheduler web process was restarted, `/api/health` recovered, and no Slurm task was cancelled or modified.
-- 2026-06-16: production replay snapshots now have 167 fetched rows; raw partial has 151 `ok`, 16 failed, and 15 retry duplicates, while `partial167_bomfix` keeps 13,341 rows with no blank/duplicate case IDs and no physical-sanity violations.
-- 2026-06-16: task 8156 completed with 20 rows (`ok=14`, `failed=6`); `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial167_bomfix.csv --disable-tuning` still misses target with min R2 0.719410893803, avg 0.820656231336.
+- 2026-06-16: production replay snapshots now have 171 fetched rows; raw partial has 155 `ok`, 16 failed, and 15 retry duplicates, while `partial171_bomfix` keeps 13,345 rows with no blank/duplicate case IDs and no physical-sanity violations.
+- 2026-06-16: task 8156 remains the only completed chunk; `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial171_bomfix.csv --disable-tuning` still misses target with min R2 0.70738314189, avg 0.814998660824.
 - 2026-06-16: `run_ipmsm_batch.py` now fails future `analysis=False` rows with an explicit AEDT analysis-returned-false error before report export; `python -m unittest discover -s tests` passed 174 tests.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
