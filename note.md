@@ -2097,3 +2097,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: queued n114 work and running n107 work are incomplete, so no retraining run yet.
 - Next action: poll tasks 8603, 8606-8607, 8625-8629, 8630, and 8632-8633; submit no more n114 work until soft pressure clears.
 - Token usage: active goal counter reported 19,098,000 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 04:09:00 +09:00 - Loop 160
+
+- Part: n107 064-066 completion and 077 backfill.
+- Goal: maintain n107 throughput while n114 remains soft-blocked.
+- Hypothesis: because n107 cases 064-066 completed ok, one more n107 backfill should preserve the eight-task target without using n114.
+- Actions: polled active tasks, fetched n107 result probes, recomputed explicit partial gates, submitted case 077 as task 8641, and confirmed it attached to allocation 64 / Slurm 680569.
+- Candidates: submit to n114 versus n107 only. Chose n107 only because n114 was still soft-blocked and its queued cases 072-074 had not attached.
+- Metrics: n107 cases 064-066 completed `ok` with elapsed 4281.534s, 3457.894s, and 3319.762s; explicit partial summary reached result_rows=66, ok=62, failed=4, duplicates=0, physical_sanity_violations=0.
+- Result: n107 cases 067-071/075-077 are running; n114 cases 072-074 remain queued.
+- Failure reason: queued n114 work and running n107 rows are incomplete, so no retraining run yet.
+- Next action: poll tasks 8625-8629, 8639-8641, 8630, and 8632-8633; submit no more n114 work until soft pressure clears.
+- Token usage: active goal counter reported 19,124,400 tokens used; Codex SQLite token sampler remains unavailable.
