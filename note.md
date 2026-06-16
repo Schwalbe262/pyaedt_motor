@@ -1200,3 +1200,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay is incomplete and current partial data is still insufficient for the final regression metric.
 - Next action: continue polling running tasks 8152-8159, 8161, and 8163; after completion decide retry handling for failed row indexes 63, 67, 106, 107, 108, 109, 123, and 146.
 - Token usage: active goal counter reported 11,944,053 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 16:59:30 +09:00 - Loop 91
+
+- Part: analysis-false failure classification
+- Goal: improve retry triage for the eight current failed replay rows without changing active running submissions.
+- Hypothesis: failed rows with `analysis_returned_false=True` and `validation=False` should be reported as AEDT analysis failures rather than downstream missing-report failures.
+- Actions: inspected failed row artifact/status fields, read exact `run_ipmsm_batch.py` report export and required-output ranges, added an early `analysis_returned_false` RuntimeError after project save, and added a mocked `run_one_case` unit test.
+- Candidates: leave missing-output error unchanged versus classify analysis false before export. Chose early classification because all eight current failed rows returned analysis false in 20-32 seconds and had no exported reports.
+- Metrics: targeted `tests.test_run_ipmsm_batch_spec` passed 29 tests; py_compile passed; `git diff --check` passed; full `python -m unittest discover -s tests` passed 174 tests.
+- Result: future failed rows will distinguish AEDT analysis false from report export/parser failures, improving retry triage for the production replay.
+- Failure reason: this does not repair the already-running task rows; it only improves future/retry failure evidence.
+- Next action: commit/push the classification fix, then continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 12,055,138 tokens used; Codex SQLite token sampler remains unavailable.

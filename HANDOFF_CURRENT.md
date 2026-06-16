@@ -62,6 +62,7 @@
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
 - 2026-06-16: production replay snapshots now have 78 fetched rows; raw partial has 70 `ok`, 8 failed, and 6 retry duplicates, while `partial78_bomfix` keeps 13,268 rows with no blank/duplicate case IDs and no physical-sanity violations.
 - 2026-06-16: `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial78_bomfix.csv --disable-tuning` passed row gates with 0 invalid rows and 0 duplicate drops; R2 remains below target with min 0.720482605948, avg 0.820403369631.
+- 2026-06-16: `run_ipmsm_batch.py` now fails future `analysis=False` rows with an explicit AEDT analysis-returned-false error before report export; `python -m unittest discover -s tests` passed 174 tests.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -123,6 +124,7 @@
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
 - Scheduler helpers, workflow plans, run output metrics, training CLI, quality analysis, replay selection, dataset filters, and filtered inspection now support `/tasks`, `/tasks/git`, selected-row slicing, physical sanity gates, incomplete/complete profile-group gates, and result-summary-only Slurm evidence.
 - CSV readers now tolerate double-BOM headers, and LightGBM optional input columns are used only when fully populated so sparse new-result columns do not invalidate old rows.
+- Future rows now distinguish AEDT `analysis=False` from missing exported report CSVs before retry triage.
 - Added deterministic partial replay summarizer so quality/filter gate thresholds come from exact duplicate/reject counts instead of manual row-count arithmetic.
 
 ## Risks and gotchas

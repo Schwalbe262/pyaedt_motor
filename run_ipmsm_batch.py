@@ -1607,6 +1607,11 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         except Exception:
             logging.exception("Project save failed for %s", sim.PROJECT_NAME)
 
+        if analysis_returned_false:
+            raise RuntimeError(
+                f"AEDT analysis returned False; validation={setup_result.get('validation')}"
+            )
+
         exported = export_ppt_reports(design, project_path, case_id, setup_name=spec.setup_name) if options.analyze else {}
         output_summary = summarize_transient_outputs(exported, spec, operation=operation) if options.analyze else {}
         row.update(prefixed_row(output_summary, ""))

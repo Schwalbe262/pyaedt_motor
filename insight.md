@@ -532,3 +532,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `summarize_ipmsm_partial_replay.py` reuses the existing dataset-quality and training-filter functions to report result counts, combined kept/rejected rows, new kept rows, and exact gate thresholds.
 - Evidence: live partial46 summary reported `combined_kept=13244`, `new_kept=40`, and duplicate/reject thresholds matching the successful gates; unit tests cover duplicate, failed-row, base-training, and CSV-output behavior; full tests passed 173/173.
 - Remaining risk: threshold automation prevents validation mistakes, but it does not replace final full-replay quality analysis or R2 verification.
+
+## 2026-06-16 16:59:30 +09:00 - Insight 57
+
+- Source loop: `note.md` Loop 91.
+- Improvement: failed Ansys rows should classify AEDT `analysis=False` before downstream report export/parsing checks.
+- Before: rows where `configure_ipmsm_from_ppt()` returned `analysis=False` continued into report export, then failed as missing torque/loss report metrics.
+- After: `run_ipmsm_batch.py` raises an explicit `AEDT analysis returned False` error after project save and before report export, while preserving `analysis_returned_false` and `validation` fields.
+- Evidence: eight current partial replay failures all had `analysis_returned_false=True`, `validation=False`, no exported torque/loss reports, and 20-32s elapsed times; a mocked `run_one_case` test covers the new classification; full tests passed 174/174.
+- Remaining risk: existing running rows were produced by the old code; retries or future submissions need the new commit deployed to the remote work tree.

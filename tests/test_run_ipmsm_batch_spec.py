@@ -377,6 +377,80 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
         self.assertTrue(settings.skip_license_check)
         self.assertFalse(settings.wait_for_license)
 
+    def test_run_one_case_reports_analysis_false_before_missing_reports(self) -> None:
+        core_module = types.ModuleType("pyaedt_module.core")
+        ansys_core_module = types.ModuleType("ansys.aedt.core")
+        settings = types.SimpleNamespace(enable_error_handler=True, skip_license_check=False, wait_for_license=True)
+
+        class FakeProject:
+            def __init__(self, path: Path) -> None:
+                self.path = str(path)
+
+            def save(self) -> None:
+                return None
+
+        class FakeDesktop:
+            def create_project(self, path: str, name: str) -> FakeProject:
+                return FakeProject(Path(path) / name)
+
+            def release_desktop(self, **_kwargs: object) -> None:
+                return None
+
+        core_module.pyDesktop = lambda **_kwargs: FakeDesktop()
+        package_module = types.ModuleType("pyaedt_module")
+        package_module.core = core_module
+        ansys_core_module.settings = settings
+
+        def fake_create_ipmsm_design(_project: object, _sim: object) -> tuple[object, None, dict[str, object]]:
+            return object(), None, {}
+
+        def fake_configure_ipmsm_from_ppt(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {"analysis": False, "validation": False}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result_csv = Path(tmp) / "results.csv"
+            options = run_ipmsm_batch.RunnerOptions(
+                simulation_dir=str(Path(tmp) / "simulation"),
+                result_csv=str(result_csv),
+                analyze=True,
+                non_graphical=True,
+                cleanup_linux=False,
+                symmetry_factor=4,
+                use_periodic_boundary=False,
+                cores=1,
+            )
+
+            with mock.patch.dict(
+                sys.modules,
+                {
+                    "pyaedt_module": package_module,
+                    "pyaedt_module.core": core_module,
+                    "ansys.aedt.core": ansys_core_module,
+                },
+            ), mock.patch(
+                "module.ipmsm_geometry.create_ipmsm_design",
+                side_effect=fake_create_ipmsm_design,
+            ), mock.patch(
+                "module.ipmsm_ppt_setup.configure_ipmsm_from_ppt",
+                side_effect=fake_configure_ipmsm_from_ppt,
+            ), mock.patch(
+                "logging.exception"
+            ):
+                row = run_ipmsm_batch.run_one_case(({"case_id": "analysis_false"}, options.__dict__))
+
+            with result_csv.open("r", encoding="utf-8-sig", newline="") as file:
+                rows = list(csv.DictReader(file))
+
+        self.assertEqual(row["case_id"], "analysis_false")
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["analysis_returned_false"], True)
+        self.assertEqual(row["validation"], "False")
+        self.assertIn("AEDT analysis returned False", row["error"])
+        self.assertEqual(row.get("missing_required_outputs", ""), "")
+        self.assertEqual(len(rows), 1)
+        self.assertIn("AEDT analysis returned False", rows[0]["error"])
+        self.assertEqual(rows[0]["analysis_returned_false"], "True")
+
 
 if __name__ == "__main__":
     unittest.main()
