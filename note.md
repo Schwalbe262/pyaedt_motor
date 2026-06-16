@@ -914,3 +914,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: retry tasks have not yet written `mesh_time_fine` rows, so the five-group quality comparison and 200-case decision remain pending.
 - Next action: poll 8136/8137 result summaries; after both write one `ok` row, combine original 3/4 CSVs with retry CSVs carefully so each source/profile appears once before rerunning guarded quality analysis.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 13:00:00 +09:00 - Loop 69
+
+- Part: five-group quality analysis
+- Goal: complete the fixed-geometry mesh/time comparison across five valid source geometries.
+- Hypothesis: after filling source 0001 with retry task 8136 and source 0004 from its original task 6207, the guarded analyzer should accept all five groups and rank the profile closest to `mesh_time_fine`.
+- Actions: fetched source 0001 retry output, original partial source 0001 output, original source 0004 output, and existing complete outputs into ignored artifacts; checked profile counts before analysis; excluded source 0004 retry output because the original source 0004 CSV already contains a `mesh_time_fine` row; ran `analyze_ipmsm_quality_results.py --complete-groups-only --fail-on-incomplete-groups` across the deduplicated six input CSVs.
+- Candidates: include all retry outputs blindly versus use only one row per source/profile. Chose deduplicated inputs to keep each fixed-geometry profile group exact and avoid double-counting source 0004 `mesh_time_fine`.
+- Metrics: analyzer kept 20/20 rows and 5/5 groups; required output missing rows 0; physical sanity violation rows 0; profile counts baseline/mesh_fine/time_fine/mesh_time_fine all 5; convergence summary reports only `mesh_time_fine` within tolerance, while baseline max delta is 9.8703%, mesh_fine 12.8499%, and time_fine 10.3629%; `mesh_time_fine` average elapsed ratio versus baseline is 1.4643.
+- Result: the current evidence supports `mesh_time_fine` as the only accuracy-safe profile, but it costs about 46% more average runtime in this five-geometry sample.
+- Failure reason: this chooses a quality candidate but does not yet produce a larger training dataset or R2 improvement evidence.
+- Next action: decide whether to accept the `mesh_time_fine` runtime cost for the next replay/training step; if accepted, submit the next scheduler batch with unique output paths and keep the 200-solve guardrail explicit.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
