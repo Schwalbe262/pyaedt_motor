@@ -1005,3 +1005,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay is still incomplete and two failed rows remain retry candidates after the 200-run guardrail is reviewed.
 - Next action: continue polling tasks 8152-8159, 8161, and 8163; fetch only result CSVs, rerun gates on completion, then retrain and compare against the baseline.
 - Token usage: active goal counter reported 10,499,212 tokens used before this loop; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 15:43:35 +09:00 - Loop 76
+
+- Part: production replay partial36 gate
+- Goal: advance the partial replay evidence after another scheduler result row completed.
+- Hypothesis: the new row should pass the same quality and training filters, while the retry duplicate rows remain safe if the filtered dataset de-duplicates by `case_id`.
+- Actions: polled tasks 8152-8159, 8161, and 8163; refreshed only their `simul_log_scheduler/mtf200_task_*_results.csv` files through the task remote-file API; checked process log tails for active AEDT solves; reran dataset-quality, training-filter, filtered-dataset quality, and LightGBM smoke commands for `partial36_bomfix`.
+- Candidates: wait for all rows versus validate each partial increment. Chose partial validation because one new row landed and previous bugs were row-combine issues.
+- Metrics: raw snapshots rows=36, ok=34, failed=2, duplicate retry rows=3, physical sanity violations=0; filtered combined dataset rows=13,235, blank case IDs=0, duplicate case IDs=0, rejected rows=2; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,937, min R2=0.713860783216, avg R2=0.814834488216.
+- Result: partial36 is training-ready and slightly better than partial35, but still below the 0.95 R2 target.
+- Failure reason: most of the 200-row replay is still running, and two failed rows remain retry candidates after the guardrail review.
+- Next action: continue polling until the ten tasks finish or materially advance, then rerun full quality/filter/retraining gates.
+- Token usage: active goal counter reported 10,796,565 tokens used; Codex SQLite token sampler remains unavailable.
