@@ -261,6 +261,13 @@ def validate_scheduler_request(args: argparse.Namespace) -> None:
         raise RuntimeError("absolute local --cases requires --remote-cases for scheduler submission")
     if args.bootstrap_remote_cases and not (args.remote_cases or not args.cases.is_absolute()):
         raise RuntimeError("--bootstrap-remote-cases with an absolute --cases path requires --remote-cases")
+    if (
+        args.job_mode == "python_git"
+        and args.bootstrap_remote_cases
+        and args.remote_cases
+        and not posixpath.isabs(args.remote_cases)
+    ):
+        raise RuntimeError("--bootstrap-remote-cases with --job-mode python_git requires absolute --remote-cases")
     if args.case_start_index < 1:
         raise RuntimeError("--case-start-index must be >= 1")
     if args.case_limit < 0:

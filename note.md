@@ -1785,3 +1785,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: the approved 200 unique simulation attempts are exhausted and the current de-duplicated data does not close the model-performance gap.
 - Next action: commit/push this final replay checkpoint, then request explicit approval before any retry solves; if approved, use updated scheduler policy and current pushed code for retry submission.
 - Token usage: active goal counter reported 16,752,141 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 22:06:05 +09:00 - Loop 136
+
+- Part: retry1 failed-geometry replay and `/tasks/git` bootstrap guard.
+- Goal: apply the user's clarification that 200 is a per-batch/concurrency cap, check the updated scheduler policy, retry the 20 failed first-batch geometries, and prevent the relative-path bootstrap failure mode from recurring.
+- Hypothesis: some first-batch `analysis=False` rows might be transient solver failures, and `/tasks/git` case bootstrapping should work when the embedded case CSV path is absolute on the remote account.
+- Actions: checked latest `Schwalbe262/slurm_scheduler` main at `1c493ad8`, confirmed docs prefer `/tasks/git` or `/api/tasks/git` for Git-backed work and `/jobs dynamic_packed_srun` for packed FEA, observed relative-path retry tasks 8354-8357 fail before solves with `FileNotFoundError`, submitted corrected absolute-path retry tasks 8358-8361, fetched result CSVs through safe relative `/api/tasks/{id}/remote-file` paths, added validation that rejects relative `--remote-cases` with `/tasks/git` bootstrap, updated tests, handoff, and goal status.
+- Candidates: keep relying on operator discipline for remote paths versus enforce the path invariant in the submit helper. Chose validation because the failure happened before Ansys solve and is deterministic for Git tasks.
+- Metrics: retry tasks 8358-8361 completed successfully at the scheduler level with 5 rows each; retry result rows=20, statuses failed=20, `analysis_returned_false`=20; `python -m unittest tests.test_submit_ipmsm_scheduler_job` passed 36 tests; `python -m unittest discover -s tests` passed 175 tests.
+- Result: retry1 did not recover any of the failed geometries, but the scheduler path policy is now documented locally and `/tasks/git` bootstrap submissions fail fast when case CSV paths would be written outside the cloned repo.
+- Failure reason: the repeated failed geometries still return AEDT `analysis=False`; this is now a simulation/geometry triage issue, not a scheduler bootstrap issue.
+- Next action: commit/push this checkpoint, then diagnose or exclude the repeated `analysis=False` geometry set before planning the next explicit <=200-concurrent simulation batch.
+- Token usage: active goal counter reported 17,122,671 tokens used; Codex SQLite token sampler remains unavailable.

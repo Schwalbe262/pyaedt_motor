@@ -75,6 +75,10 @@ def scheduler_args(**overrides: object) -> Namespace:
     return Namespace(**values)
 
 
+def absolute_remote_cases(name: str = "cases.csv") -> str:
+    return f"/home/user/pyaedt_motor/remote/{name}"
+
+
 class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
     def test_build_subprocess_arguments_defaults_to_setup_only(self) -> None:
         args = scheduler_args()
@@ -271,6 +275,12 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "--bootstrap-remote-cases"):
             scheduler_job.validate_scheduler_request(args)
 
+    def test_validate_scheduler_request_requires_absolute_bootstrap_path_for_python_git(self) -> None:
+        args = scheduler_args(remote_cases="remote/cases.csv", bootstrap_remote_cases=True)
+
+        with self.assertRaisesRegex(RuntimeError, "requires absolute --remote-cases"):
+            scheduler_job.validate_scheduler_request(args)
+
     def test_validate_scheduler_request_rejects_bad_case_slice(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "--case-start-index"):
             scheduler_job.validate_scheduler_request(scheduler_args(case_start_index=0))
@@ -294,7 +304,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
                             "--cases",
                             str(path),
                             "--remote-cases",
-                            "remote/cases.csv",
+                            absolute_remote_cases(),
                             "--repo-url",
                             "https://github.com/example/project.git",
                             "--git-ref",
@@ -327,7 +337,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
                             "--cases",
                             str(path),
                             "--remote-cases",
-                            "remote/cases.csv",
+                            absolute_remote_cases(),
                             "--repo-url",
                             "https://github.com/example/project.git",
                             "--git-ref",
@@ -358,7 +368,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
                             "--cases",
                             str(path),
                             "--remote-cases",
-                            "remote/cases.csv",
+                            absolute_remote_cases(),
                             "--repo-url",
                             "https://github.com/example/project.git",
                             "--git-ref",
@@ -371,7 +381,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         post.assert_not_called()
         output = json.loads(stdout.getvalue())
-        self.assertIn("cat > remote/cases.csv", output["payload"]["env_setup"])
+        self.assertIn(f"cat > {absolute_remote_cases()}", output["payload"]["env_setup"])
         self.assertIn("case_0001,15", output["payload"]["env_setup"])
         self.assertNotIn("output_redactions", output)
 
@@ -397,7 +407,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
                             "--cases",
                             str(path),
                             "--remote-cases",
-                            "remote/cases.csv",
+                            absolute_remote_cases(),
                             "--repo-url",
                             "https://github.com/example/project.git",
                             "--git-ref",
@@ -565,7 +575,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
                             "--cases",
                             str(cases_path),
                             "--remote-cases",
-                            "remote/cases.csv",
+                            absolute_remote_cases(),
                             "--repo-url",
                             "https://github.com/example/project.git",
                             "--git-ref",
@@ -601,7 +611,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
                             "--cases",
                             str(cases_path),
                             "--remote-cases",
-                            "remote/cases.csv",
+                            absolute_remote_cases(),
                             "--repo-url",
                             "https://github.com/example/project.git",
                             "--git-ref",
@@ -618,7 +628,7 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(output["scheduler_endpoint"], "/tasks/git")
             self.assertIn("<redacted env_setup bytes=", output["payload"]["env_setup"])
-            self.assertIn("cat > remote/cases.csv", manifest["payload"]["env_setup"])
+            self.assertIn(f"cat > {absolute_remote_cases()}", manifest["payload"]["env_setup"])
             self.assertIn("case_0001,15", manifest["payload"]["env_setup"])
 
     def test_main_submit_compacts_response_and_records_submitted_git_task(self) -> None:

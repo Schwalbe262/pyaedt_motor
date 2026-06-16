@@ -167,10 +167,10 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 ## 2026-06-16 00:51:23 +09:00 - Insight 16
 
 - Source loop: `note.md` Loop 16.
-- Improvement: the approved 200-case simulation budget is now enforced by executable entrypoint guards.
-- Before: old controller/subprocess defaults could plan thousands of analyze cases despite the current sprint's 200-simulation limit.
-- After: direct runner, subprocess launcher, Slurm shell wrapper, and controller all pass or enforce `--max-cases`, with explicit `--allow-over-budget` opt-in.
-- Evidence: 56 unit tests passed; compact CLI guard checks reject 201 direct/subprocess cases and the old 100000-case controller default.
+- Improvement: executable entrypoint guards now prevent accidental oversized explicit case plans.
+- Before: old controller/subprocess defaults could plan thousands of analyze cases without an explicit operator decision.
+- After: direct runner, subprocess launcher, Slurm shell wrapper, and controller all pass or enforce `--max-cases`, with explicit `--allow-over-budget` opt-in for intentionally larger or repeated batches.
+- Evidence: 56 unit tests passed; compact CLI guard checks reject 201 direct/subprocess cases by default and the old 100000-case controller default.
 - Remaining risk: actual scheduler integration still needs endpoint/API validation after credentials and environment are available.
 
 ## 2026-06-16 00:55:18 +09:00 - Insight 17
@@ -550,3 +550,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `train_ipmsm_lightgbm.py` treats `input_steps_per_period` as a density-gated optional input, so it is used only when fully finite for the loaded dataset.
 - Evidence: partial216 smoke improved from min R2 0.721111975302 / avg R2 0.826273728953 to min R2 0.723086116932 / avg R2 0.827271417400; targeted train tests passed 19/19 and full tests passed 174/174.
 - Remaining risk: the improvement is small and does not meet the `R^2 >= 0.95` target; remaining replay completion and simulation-quality triage are still required.
+
+## 2026-06-16 22:06:05 +09:00 - Insight 59
+
+- Source loop: `note.md` Loop 136.
+- Improvement: `/tasks/git` case-CSV bootstrap submissions must require an absolute remote case path.
+- Before: relative `--remote-cases` paths were embedded by scheduler bootstrap outside the cloned repo, then the Git task command ran inside the cloned repo and failed before Ansys solve with `FileNotFoundError`.
+- After: `submit_ipmsm_scheduler_job.py` rejects relative `--remote-cases` when `--job-mode python_git --bootstrap-remote-cases` is used; corrected retry tasks used absolute remote paths.
+- Evidence: tasks 8354-8357 failed before solves with missing relative case CSVs, while tasks 8358-8361 completed scheduler execution with absolute paths; targeted submit tests passed 36/36 and full tests passed 175/175.
+- Remaining risk: this fixes submission plumbing only; retry1 still produced 20/20 AEDT `analysis=False` rows that need simulation/geometry triage.
