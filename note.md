@@ -1655,3 +1655,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay remains incomplete and the current partial data does not close the model-performance gap.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8155, 8157-8159, 8161, and 8163 while task 8156 is complete.
 - Token usage: active goal counter reported 15,331,885 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 20:42:36 +09:00 - Loop 126
+
+- Part: scheduler API recovery and production replay partial194 gate
+- Goal: recover the local scheduler API after a timeout, then checkpoint the next substantial replay advance.
+- Hypothesis: the scheduler web process can be restarted without modifying Slurm tasks, and partial194 should pass strict gates while adding any new failed replay row to retry triage.
+- Actions: observed scheduler API timeout during post-push count polling, identified WSL process `/tmp/slurm_scheduler_smoke_venv/bin/python -m slurm_scheduler`, restarted only that web process from `/home/peets/NEC/slurm_scheduler`, confirmed `/api/health`, fetched and saved all ten result CSVs as partial194, ran replay summarizer, raw quality, combined filter, filtered quality, deterministic LightGBM smoke retraining, and exact failed-row extraction.
+- Candidates: stop after API recovery versus gate the new partial194 rows. Chose gate because live rows advanced from 189 to 194 and a new failed row appeared.
+- Metrics: raw snapshots rows=194, ok=176, failed=18, duplicate retry rows=17, physical sanity violations=0; summarizer reported combined_kept=13364, combined_rejected=17, new_kept=160; filtered combined dataset rows=13,364 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=10,015, min R2=0.724112210031, avg R2=0.819459032508.
+- Result: scheduler API recovered without Slurm task changes; partial194 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`; failed replay row 198 joins retry candidates.
+- Failure reason: production replay remains incomplete and the current partial data does not close the model-performance gap.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8155, 8157-8159, 8161, and 8163 while task 8156 is complete.
+- Token usage: active goal counter reported 15,496,390 tokens used; Codex SQLite token sampler remains unavailable.
