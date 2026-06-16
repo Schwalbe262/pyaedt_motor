@@ -39,19 +39,33 @@ class FilterIpmsmTrainingDatasetTests(unittest.TestCase):
             self.training_row(case_id="failed", status="failed"),
             self.training_row(case_id="bad_input", input_slot_num=""),
             self.training_row(case_id="bad_output", output_torque_last_avg_nm="nan"),
+            self.training_row(case_id="bad_efficiency", output_efficiency_last_pct="120"),
         ]
         fieldnames = list(rows[0])
 
         kept_rows, summary = training_filter.filter_training_rows(rows, fieldnames)
 
         self.assertEqual([row["case_id"] for row in kept_rows], ["duplicate"])
-        self.assertEqual(summary["rows_read"], 5)
-        self.assertEqual(summary["rows_after_dedup"], 4)
+        self.assertEqual(summary["rows_read"], 6)
+        self.assertEqual(summary["rows_after_dedup"], 5)
         self.assertEqual(summary["duplicate_case_id_rows"], 1)
         self.assertEqual(summary["status_rejected_rows"], 1)
         self.assertEqual(summary["nonfinite_input_rows"], 1)
         self.assertEqual(summary["nonfinite_output_rows"], 1)
-        self.assertEqual(summary["rejected_rows"], 3)
+        self.assertEqual(summary["physical_sanity_rejected_rows"], 1)
+        self.assertEqual(summary["rejected_rows"], 4)
+
+    def test_filter_training_rows_rejects_legacy_efficiency_alias_out_of_range(self) -> None:
+        rows = [
+            self.training_row(case_id="ok_alias", output_efficiency_last_pct="", output_efficiency_last_pc="99"),
+            self.training_row(case_id="bad_alias", output_efficiency_last_pct="", output_efficiency_last_pc="-1"),
+        ]
+        fieldnames = list(rows[0])
+
+        kept_rows, summary = training_filter.filter_training_rows(rows, fieldnames)
+
+        self.assertEqual([row["case_id"] for row in kept_rows], ["ok_alias"])
+        self.assertEqual(summary["physical_sanity_rejected_rows"], 1)
 
     def test_filter_training_rows_reports_missing_input_columns(self) -> None:
         rows = [self.training_row()]
@@ -99,6 +113,7 @@ class FilterIpmsmTrainingDatasetTests(unittest.TestCase):
             with summary_path.open("r", encoding="utf-8-sig", newline="") as file:
                 summary_rows = list(csv.DictReader(file))
             self.assertEqual(summary_rows[0]["kept_rows"], "1")
+            self.assertEqual(summary_rows[0]["physical_sanity_rejected_rows"], "0")
 
     def test_cli_can_fail_on_filter_thresholds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

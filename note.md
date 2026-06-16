@@ -693,3 +693,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: scheduler replay remains incomplete; no new mesh/time conclusion or R2-improving retraining evidence.
 - Next action: commit/push the planner wiring, then continue polling jobs 58, 60, and 61.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:19:24 +09:00 - Loop 52
+
+- Part: physical sanity training-data gate
+- Goal: prevent physically invalid efficiency rows from entering the regression training dataset.
+- Hypothesis: the existing CSVs contain out-of-range efficiency rows associated with negative torque/generator-like cases, and finite-only filters currently keep them.
+- Actions: measured existing result CSV efficiency ranges; added efficiency range checks to `filter_ipmsm_training_dataset.py`; added physical sanity counters and `--max-physical-sanity-violation-rows` to `analyze_ipmsm_dataset_quality.py`; wired the zero-violation gate into `plan_ipmsm_quality_workflow.py`.
+- Candidates: rely on output outlier filtering during LightGBM training versus reject physically invalid rows before materializing training-ready CSVs. Chose pre-training filtering because the invalid values are deterministic data-quality defects, not model-tuning choices.
+- Metrics: raw `ipmsm_simulation_results1.csv`/`2.csv` have 345 out-of-range efficiency rows; new filter keeps 13,204/13,748 rows, rejects 544 total rows, and reports `physical_sanity_rejected_rows=345`; raw dataset quality gate fails with `physical_sanity_violation_rows 345 > 0`; filtered training-ready CSV passes with 13,204 rows, 0 failed, 0 missing required, 0 duplicates, and 0 physical sanity violations; full `python -m unittest discover -s tests` ran 156 tests and passed.
+- Result: regression training materialization now has an explicit physical sanity gate that removes invalid efficiency rows before retraining.
+- Failure reason: no retraining evidence yet because local ML dependencies are unavailable and higher-quality scheduler replay remains incomplete.
+- Next action: commit/push the physical sanity gate, then continue polling jobs 58, 60, and 61 for fixed-geometry quality evidence.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

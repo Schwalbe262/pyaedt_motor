@@ -460,3 +460,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `analyze_ipmsm_quality_results.py --complete-groups-only` keeps only groups with every required successful profile, reports row/group filter counts, and fails before writing when no complete group remains.
 - Evidence: tests cover complete-group filtering and no-write failure; partial job 58 failed with no output, while complete job 57 wrote rows 4->4, groups 1->1 comparison/profile/convergence outputs.
 - Remaining risk: complete-group-only outputs are scoped interim evidence; broader geometry coverage and regression retraining are still required before changing production simulation settings.
+
+## 2026-06-16 09:19:24 +09:00 - Insight 49
+
+- Source loop: `note.md` Loop 52.
+- Improvement: regression training-ready datasets should reject out-of-range efficiency rows before model training.
+- Before: finite-only filtering kept rows with physically invalid `output_efficiency_*` values, including 345 existing rows outside 0-100%.
+- After: `filter_ipmsm_training_dataset.py` rejects out-of-range efficiency rows and `analyze_ipmsm_dataset_quality.py` exposes a zero-violation gate wired into workflow plans.
+- Evidence: raw existing CSVs fail with `physical_sanity_violation_rows 345 > 0`; the filtered training-ready CSV keeps 13,204 rows and passes with zero physical sanity violations; tests cover filter, dataset gate, and workflow arguments.
+- Remaining risk: this removes known invalid targets but does not prove improved R2 until LightGBM retraining runs in an environment with pandas, scikit-learn, and LightGBM.

@@ -20,7 +20,9 @@ SUMMARY_FIELDNAMES = (
     "status_rejected_rows",
     "nonfinite_input_rows",
     "nonfinite_output_rows",
+    "physical_sanity_rejected_rows",
 )
+EFFICIENCY_COLUMNS = ("output_efficiency_last_pct", "output_efficiency_last_pc")
 
 
 def finite_float(value: object) -> float:
@@ -39,6 +41,16 @@ def is_status_ok(row: dict[str, str], has_status_column: bool) -> bool:
     if not has_status_column:
         return True
     return str(row.get("status", "")).strip().lower() == "ok"
+
+
+def has_physical_sanity(row: dict[str, str], available_columns: set[str]) -> bool:
+    for column in EFFICIENCY_COLUMNS:
+        if column not in available_columns:
+            continue
+        value = finite_float(row.get(column, ""))
+        if math.isfinite(value) and not 0.0 <= value <= 100.0:
+            return False
+    return True
 
 
 def read_rows(paths: Iterable[Path]) -> tuple[list[dict[str, str]], list[str]]:
@@ -94,17 +106,21 @@ def filter_training_rows(
     status_rejected_rows = 0
     nonfinite_input_rows = 0
     nonfinite_output_rows = 0
+    physical_sanity_rejected_rows = 0
     for row in rows_after_dedup:
         status_ok = is_status_ok(row, has_status_column)
         finite_inputs = is_finite_row(row, trainer.RAW_INPUT_COLUMNS)
         finite_outputs = is_finite_row(row, output_columns)
+        physical_sanity_ok = has_physical_sanity(row, available_columns)
         if not status_ok:
             status_rejected_rows += 1
         if not finite_inputs:
             nonfinite_input_rows += 1
         if not finite_outputs:
             nonfinite_output_rows += 1
-        if status_ok and finite_inputs and finite_outputs:
+        if not physical_sanity_ok:
+            physical_sanity_rejected_rows += 1
+        if status_ok and finite_inputs and finite_outputs and physical_sanity_ok:
             kept_rows.append(row)
 
     summary = {
@@ -116,6 +132,7 @@ def filter_training_rows(
         "status_rejected_rows": status_rejected_rows,
         "nonfinite_input_rows": nonfinite_input_rows,
         "nonfinite_output_rows": nonfinite_output_rows,
+        "physical_sanity_rejected_rows": physical_sanity_rejected_rows,
     }
     return kept_rows, summary
 

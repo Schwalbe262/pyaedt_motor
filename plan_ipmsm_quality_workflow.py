@@ -124,6 +124,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "0",
                 "--max-failed-rows",
                 "0",
+                "--max-physical-sanity-violation-rows",
+                "0",
             ],
             [dataset_quality_csv],
         ),

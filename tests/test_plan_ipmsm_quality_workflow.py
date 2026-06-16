@@ -51,6 +51,7 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
         self.assertIn("baseline,mesh_fine,time_fine,mesh_time_fine", plan["steps"][1]["args"])
         self.assertIn("--fail-on-filter", plan["steps"][2]["args"])
         self.assertIn("--fail-on-quality", plan["steps"][3]["args"])
+        self.assertIn("--max-physical-sanity-violation-rows", plan["steps"][3]["args"])
         self.assertIn("--check-dependencies", plan["steps"][4]["args"])
         self.assertIn("--fail-on-threshold", plan["steps"][5]["args"])
 

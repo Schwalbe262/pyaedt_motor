@@ -15,6 +15,7 @@ DEFAULT_REQUIRED_OUTPUTS = (
     "output_coreloss_all_avg_w",
     "output_solidloss_all_avg_w",
 )
+EFFICIENCY_COLUMNS = ("output_efficiency_last_pct", "output_efficiency_last_pc", "output_efficiency_all_pct")
 SUMMARY_FIELDNAMES = (
     "scope",
     "path",
@@ -27,6 +28,8 @@ SUMMARY_FIELDNAMES = (
     "required_complete_rows",
     "missing_required_rows",
     "missing_required_by_column",
+    "physical_sanity_violation_rows",
+    "physical_sanity_violations_by_column",
     "elapsed_min_s",
     "elapsed_avg_s",
     "elapsed_max_s",
@@ -68,6 +71,8 @@ class DatasetQualityAccumulator:
         self.required_complete_rows = 0
         self.missing_required_rows = 0
         self.missing_required_by_column: Counter[str] = Counter()
+        self.physical_sanity_violation_rows = 0
+        self.physical_sanity_violations_by_column: Counter[str] = Counter()
         self.elapsed = RunningStats()
         self.errors: Counter[str] = Counter()
 
@@ -87,6 +92,11 @@ class DatasetQualityAccumulator:
             self.missing_required_by_column.update(missing)
         else:
             self.required_complete_rows += 1
+
+        physical_violations = physical_sanity_violations(row)
+        if physical_violations:
+            self.physical_sanity_violation_rows += 1
+            self.physical_sanity_violations_by_column.update(physical_violations)
 
         error = normalize_error(row.get("error", ""))
         if error:
@@ -109,6 +119,8 @@ class DatasetQualityAccumulator:
             "required_complete_rows": str(self.required_complete_rows),
             "missing_required_rows": str(self.missing_required_rows),
             "missing_required_by_column": format_counter(self.missing_required_by_column),
+            "physical_sanity_violation_rows": str(self.physical_sanity_violation_rows),
+            "physical_sanity_violations_by_column": format_counter(self.physical_sanity_violations_by_column),
             "elapsed_min_s": self.elapsed.min_text(),
             "elapsed_avg_s": self.elapsed.avg_text(),
             "elapsed_max_s": self.elapsed.max_text(),
@@ -135,6 +147,17 @@ def normalize_error(value: str) -> str:
     if not text:
         return ""
     return text[:160]
+
+
+def physical_sanity_violations(row: dict[str, str]) -> list[str]:
+    violations = []
+    for column in EFFICIENCY_COLUMNS:
+        if column not in row:
+            continue
+        value = finite_float(row.get(column, ""))
+        if math.isfinite(value) and not 0.0 <= value <= 100.0:
+            violations.append(column)
+    return violations
 
 
 def format_counter(counter: Counter[str]) -> str:
@@ -176,12 +199,14 @@ def quality_gate_failures(
     max_missing_required_rows: int | None = None,
     max_duplicate_case_ids: int | None = None,
     max_failed_rows: int | None = None,
+    max_physical_sanity_violation_rows: int | None = None,
 ) -> list[str]:
     failures: list[str] = []
     required_complete_rows = int_field(summary_row, "required_complete_rows")
     missing_required_rows = int_field(summary_row, "missing_required_rows")
     duplicate_case_ids = int_field(summary_row, "duplicate_case_ids")
     failed_rows = int_field(summary_row, "status_failed")
+    physical_sanity_violation_rows = int_field(summary_row, "physical_sanity_violation_rows")
 
     if required_complete_rows < min_required_complete_rows:
         failures.append(f"required_complete_rows {required_complete_rows} < {min_required_complete_rows}")
@@ -191,6 +216,13 @@ def quality_gate_failures(
         failures.append(f"duplicate_case_ids {duplicate_case_ids} > {max_duplicate_case_ids}")
     if max_failed_rows is not None and failed_rows > max_failed_rows:
         failures.append(f"status_failed {failed_rows} > {max_failed_rows}")
+    if (
+        max_physical_sanity_violation_rows is not None
+        and physical_sanity_violation_rows > max_physical_sanity_violation_rows
+    ):
+        failures.append(
+            f"physical_sanity_violation_rows {physical_sanity_violation_rows} > {max_physical_sanity_violation_rows}"
+        )
     return failures
 
 
@@ -212,6 +244,8 @@ def merge_accumulators(accumulators: Iterable[DatasetQualityAccumulator], requir
         merged.required_complete_rows += accumulator.required_complete_rows
         merged.missing_required_rows += accumulator.missing_required_rows
         merged.missing_required_by_column.update(accumulator.missing_required_by_column)
+        merged.physical_sanity_violation_rows += accumulator.physical_sanity_violation_rows
+        merged.physical_sanity_violations_by_column.update(accumulator.physical_sanity_violations_by_column)
         merged.errors.update(accumulator.errors)
         merged.elapsed.count += accumulator.elapsed.count
         merged.elapsed.total += accumulator.elapsed.total
@@ -237,6 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-missing-required-rows", type=nonnegative_int)
     parser.add_argument("--max-duplicate-case-ids", type=nonnegative_int)
     parser.add_argument("--max-failed-rows", type=nonnegative_int)
+    parser.add_argument("--max-physical-sanity-violation-rows", type=nonnegative_int)
     parser.add_argument("--fail-on-quality", action="store_true", help="Return exit code 1 when any quality gate fails.")
     return parser
 
@@ -264,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         "dataset_quality "
         f"rows={combined['rows']} ok={combined['status_ok']} failed={combined['status_failed']} "
         f"required_complete={combined['required_complete_rows']} missing_required={combined['missing_required_rows']} "
+        f"physical_sanity_violations={combined['physical_sanity_violation_rows']} "
         f"duplicates={combined['duplicate_case_ids']} output={args.output}"
     )
     failures = quality_gate_failures(
@@ -272,6 +308,7 @@ def main(argv: list[str] | None = None) -> int:
         max_missing_required_rows=args.max_missing_required_rows,
         max_duplicate_case_ids=args.max_duplicate_case_ids,
         max_failed_rows=args.max_failed_rows,
+        max_physical_sanity_violation_rows=args.max_physical_sanity_violation_rows,
     )
     if failures:
         print("quality_gate failed " + "; ".join(failures))

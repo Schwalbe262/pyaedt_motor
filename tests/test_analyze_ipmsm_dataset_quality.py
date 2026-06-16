@@ -20,6 +20,7 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
                 "output_torque_all_avg_nm": "1.0",
                 "output_coreloss_all_avg_w": "2.0",
                 "output_solidloss_all_avg_w": "3.0",
+                "output_efficiency_all_pct": "90",
                 "error": "",
             },
             {
@@ -29,6 +30,7 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
                 "output_torque_all_avg_nm": "",
                 "output_coreloss_all_avg_w": "nan",
                 "output_solidloss_all_avg_w": "3.0",
+                "output_efficiency_all_pct": "80",
                 "error": "RuntimeError('Missing required transient output metrics')",
             },
             {
@@ -38,6 +40,7 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
                 "output_torque_all_avg_nm": "1.2",
                 "output_coreloss_all_avg_w": "2.2",
                 "output_solidloss_all_avg_w": "3.2",
+                "output_efficiency_all_pct": "120",
                 "error": "",
             },
         ]
@@ -61,6 +64,8 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
             self.assertEqual(summary["required_complete_rows"], "2")
             self.assertEqual(summary["missing_required_rows"], "1")
             self.assertIn("output_torque_all_avg_nm:1", summary["missing_required_by_column"])
+            self.assertEqual(summary["physical_sanity_violation_rows"], "1")
+            self.assertEqual(summary["physical_sanity_violations_by_column"], "output_efficiency_all_pct:1")
             self.assertEqual(summary["elapsed_min_s"], "4")
             self.assertEqual(summary["elapsed_avg_s"], "8.66666666667")
             self.assertEqual(summary["elapsed_max_s"], "12")
@@ -71,6 +76,7 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
             "missing_required_rows": "1",
             "duplicate_case_ids": "1",
             "status_failed": "1",
+            "physical_sanity_violation_rows": "1",
         }
 
         failures = dataset_quality.quality_gate_failures(
@@ -79,6 +85,7 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
             max_missing_required_rows=0,
             max_duplicate_case_ids=0,
             max_failed_rows=0,
+            max_physical_sanity_violation_rows=0,
         )
 
         self.assertEqual(
@@ -88,6 +95,7 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
                 "missing_required_rows 1 > 0",
                 "duplicate_case_ids 1 > 0",
                 "status_failed 1 > 0",
+                "physical_sanity_violation_rows 1 > 0",
             ],
         )
 
@@ -134,12 +142,15 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
                         "0",
                         "--max-failed-rows",
                         "0",
+                        "--max-physical-sanity-violation-rows",
+                        "0",
                     ]
                 )
 
             self.assertEqual(code, 1)
             self.assertIn("quality_gate failed", stdout.getvalue())
             self.assertIn("missing_required_rows 1 > 0", stdout.getvalue())
+            self.assertIn("physical_sanity_violation_rows 1 > 0", stdout.getvalue())
 
     def test_cli_passes_quality_gate_when_thresholds_are_met(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,6 +174,8 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
                         "--max-duplicate-case-ids",
                         "1",
                         "--max-failed-rows",
+                        "1",
+                        "--max-physical-sanity-violation-rows",
                         "1",
                     ]
                 )
