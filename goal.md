@@ -98,6 +98,7 @@
 - Local ignored Python 3.11 `.venv` now has pandas, scikit-learn, and LightGBM; baseline retraining on `training_ready_physical_sanity.csv` reproduces the current gap with 8/8 target failures and min R2 0.715453804063.
 - First production replay evidence is available: the ten running tasks have produced 46 fetched rows so far; filtering de-duplicates retry artifacts, keeps 40 unique new `mesh_time_fine` ok rows, and passes the `partial46_bomfix` quality gate with zero physical sanity violations.
 - LightGBM retraining on the combined `partial46_bomfix` dataset now preserves all case IDs and has 0 invalid training rows, but still misses the R2 target with min R2 0.70979195883 and avg R2 0.820600811599.
+- Partial replay gate thresholds can now be computed deterministically with `summarize_ipmsm_partial_replay.py`, which matched live partial46 evidence and avoids manual kept-row threshold mistakes.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
 - Next focus is polling the submitted `mesh_time_fine` replay, filtering completed result rows, and retraining in the proper ML environment.
 

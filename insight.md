@@ -523,3 +523,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: CSV readers normalize leading BOM characters in field names, and `train_ipmsm_lightgbm.py` selects optional inputs only when the column is fully finite for the loaded dataset.
 - Evidence: unit tests cover BOM normalization and sparse optional exclusion; `partial35_bomfix` filtering reports blank case IDs 0 and duplicate case IDs 0 after de-dup; training smoke reports dropped duplicate rows 0 and invalid training rows 0.
 - Remaining risk: this preserves rows for training, but the partial replay still misses the R2 target and the full 200-row replay must finish before quality claims change.
+
+## 2026-06-16 16:04:33 +09:00 - Insight 56
+
+- Source loop: `note.md` Loop 80.
+- Improvement: recurring partial replay gates should derive thresholds from exact CSV contents, not manual arithmetic.
+- Before: the partial42 loop initially used a kept-row threshold one row too high because retry duplicates and failed rows were counted by hand.
+- After: `summarize_ipmsm_partial_replay.py` reuses the existing dataset-quality and training-filter functions to report result counts, combined kept/rejected rows, new kept rows, and exact gate thresholds.
+- Evidence: live partial46 summary reported `combined_kept=13244`, `new_kept=40`, and duplicate/reject thresholds matching the successful gates; unit tests cover duplicate, failed-row, base-training, and CSV-output behavior; full tests passed 173/173.
+- Remaining risk: threshold automation prevents validation mistakes, but it does not replace final full-replay quality analysis or R2 verification.

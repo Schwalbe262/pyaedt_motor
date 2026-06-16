@@ -1057,3 +1057,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: the 200-row production replay is still incomplete, and partial data is insufficient to prove final regression improvement.
 - Next action: keep polling the ten running tasks, rerun gates on material row advances, then review retry strategy for failed rows after the 200-row submission finishes.
 - Token usage: active goal counter reported 10,948,787 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 16:04:33 +09:00 - Loop 80
+
+- Part: partial replay gate automation
+- Goal: remove manual row-count threshold arithmetic from the recurring partial replay validation loop.
+- Hypothesis: a small wrapper can reuse the existing dataset-quality and training-filter implementations to compute exact thresholds for raw partial quality and combined training filter gates.
+- Actions: added `summarize_ipmsm_partial_replay.py`; added unit tests for duplicate, failed-row, base-training, CSV output, and threshold-line behavior; ran the helper on the live partial46 snapshots; ran the full unit suite.
+- Candidates: keep manually calculating thresholds, hard-code current thresholds in docs, or build a deterministic summarizer. Chose the summarizer because the previous partial42 loop proved manual kept-row math is error-prone.
+- Metrics: live helper output reported result_rows=46, ok=44, failed=2, duplicates=4, combined_kept=13244, combined_rejected=2, new_kept=40, matching the latest successful partial46 gates; full tests passed 173/173.
+- Result: future partial replay gate commands can take thresholds from one deterministic summary instead of ad hoc arithmetic.
+- Failure reason: this improves validation reliability but does not complete the 200-row replay or raise R2 to the target.
+- Next action: use the summarizer before the next partial/full gate run, keep polling production tasks, and retrain when rows materially advance.
+- Token usage: active goal counter reported 11,082,402 tokens used; Codex SQLite token sampler remains unavailable.

@@ -27,6 +27,7 @@
 - `analyze_ipmsm_dataset_quality.py`: streaming quality summary for large simulation result CSVs.
 - `verify_regression_metrics.py`: filtered regression R2 verification against the project threshold.
 - `filter_ipmsm_training_dataset.py`: creates audited training-ready CSVs from simulation result CSVs.
+- `summarize_ipmsm_partial_replay.py`: computes partial replay counts and exact downstream gate thresholds from result CSVs.
 - `plan_ipmsm_quality_workflow.py`: writes a manual command plan for setup dry-run, quality analysis, filtering, gates, and retraining.
 - `train_ipmsm_lightgbm.py`: deterministic LightGBM training CLI with derived geometry input repair and recovered width-ratio feature.
 - `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the 200-solve guardrail.
@@ -61,6 +62,7 @@
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
 - 2026-06-16: production replay snapshots now have 46 fetched rows; raw partial has 44 `ok`, 2 failed, and 4 retry duplicates, while `partial46_bomfix` keeps 13,244 rows with no blank/duplicate case IDs and no physical-sanity violations.
 - 2026-06-16: `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial46_bomfix.csv --disable-tuning` passed row gates with 0 invalid rows and 0 duplicate drops; R2 remains below target with min 0.70979195883, avg 0.820600811599.
+- 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
@@ -121,6 +123,7 @@
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
 - Scheduler helpers, workflow plans, run output metrics, training CLI, quality analysis, replay selection, dataset filters, and filtered inspection now support `/tasks`, `/tasks/git`, selected-row slicing, physical sanity gates, incomplete/complete profile-group gates, and result-summary-only Slurm evidence.
 - CSV readers now tolerate double-BOM headers, and LightGBM optional input columns are used only when fully populated so sparse new-result columns do not invalidate old rows.
+- Added deterministic partial replay summarizer so quality/filter gate thresholds come from exact duplicate/reject counts instead of manual row-count arithmetic.
 
 ## Risks and gotchas
 
