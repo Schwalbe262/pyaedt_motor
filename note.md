@@ -1265,3 +1265,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay remains incomplete and the added rows have not improved regression performance enough.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 12,703,756 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 17:28:10 +09:00 - Loop 96
+
+- Part: production replay partial97 gate
+- Goal: validate the latest material replay advance and keep the regression trend auditable.
+- Hypothesis: additional ok rows should preserve strict dataset gates, while the partial replay still may not improve R2 monotonically.
+- Actions: refreshed ten result CSVs through `/api/tasks/{id}/remote-file`, counted status rows, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: wait for complete task chunks versus validate a 5-row increment. Chose validation because duplicate and kept-row counts changed materially.
+- Metrics: raw snapshots rows=97, ok=89, failed=8, duplicate retry rows=8, physical sanity violations=0; summarizer reported combined_kept=13285, combined_rejected=8, new_kept=81; filtered combined dataset rows=13,285 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,963, min R2=0.700955899961, avg R2=0.814627171852.
+- Result: partial97 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`.
+- Failure reason: production replay is incomplete and current partial data has not closed the model performance gap.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 12,772,675 tokens used; Codex SQLite token sampler remains unavailable.
