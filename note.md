@@ -1434,3 +1434,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay remains incomplete and the current partial data does not close the model-performance gap.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 13,951,162 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 18:45:36 +09:00 - Loop 109
+
+- Part: production replay partial138 gate
+- Goal: validate the latest single-row replay advance after partial137.
+- Hypothesis: one additional ok row should preserve strict quality gates, while split/outlier changes can still move R2 non-monotonically.
+- Actions: fetched and saved all ten result CSVs through `/api/tasks/{id}/remote-file`, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, deterministic LightGBM smoke retraining, and failed-row extraction.
+- Candidates: skip a one-row increment versus rerun because kept rows changed. Chose rerun to keep exact partial replay evidence.
+- Metrics: raw snapshots rows=138, ok=125, failed=13, duplicate retry rows=12, physical sanity violations=0; summarizer reported combined_kept=13318, combined_rejected=12, new_kept=114; filtered combined dataset rows=13,318 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,984, min R2=0.711238743877, avg R2=0.816954151368.
+- Result: partial138 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`; failed row indexes remain unchanged from partial137.
+- Failure reason: production replay remains incomplete and the current partial data does not close the model-performance gap.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 14,065,558 tokens used; Codex SQLite token sampler remains unavailable.
