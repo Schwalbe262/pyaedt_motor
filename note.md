@@ -2084,3 +2084,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active and queued rows are incomplete, so no retraining run yet.
 - Next action: poll tasks 8603, 8606-8607, 8625-8629, 8598-8599, 8601, 8630, and 8632-8633; submit no more n114 work until soft pressure clears.
 - Token usage: active goal counter reported 19,086,888 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 03:47:00 +09:00 - Loop 159
+
+- Part: n114 wave completion and soft-block persistence.
+- Goal: close out the n114 056-063 wave evidence and avoid submitting more while the node is blocked.
+- Hypothesis: queued n114 cases 072-074 should remain queued until the scheduler reports capacity again.
+- Actions: polled active and queued tasks, fetched n114 result probes, checked n114 capacity, and recomputed explicit partial gates.
+- Candidates: cancel/resubmit queued n114 tasks versus leave them queued. Chose leave queued because the scheduler still reports `memory_pressure_state=soft_blocked`.
+- Metrics: n114 cases 056-063 completed 8/8 `ok` with elapsed range 3301.227-3823.836s; explicit partial summary reached result_rows=63, ok=59, failed=4, duplicates=0, physical_sanity_violations=0; n114 capacity still returned fit_slots=0 and soft_blocked.
+- Result: n107 cases 064-071 are running; n114 cases 072-074 remain queued.
+- Failure reason: queued n114 work and running n107 work are incomplete, so no retraining run yet.
+- Next action: poll tasks 8603, 8606-8607, 8625-8629, 8630, and 8632-8633; submit no more n114 work until soft pressure clears.
+- Token usage: active goal counter reported 19,098,000 tokens used; Codex SQLite token sampler remains unavailable.
