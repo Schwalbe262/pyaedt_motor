@@ -1291,3 +1291,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay is incomplete and the added rows do not improve the model metric.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 12,846,516 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 17:43:10 +09:00 - Loop 98
+
+- Part: production replay partial100 gate
+- Goal: validate the next replay advance after task 8161 wrote a new row.
+- Hypothesis: one additional ok row should preserve all quality gates, and R2 may recover slightly but remain below target.
+- Actions: refreshed selected and then all ten result CSVs through `/api/tasks/{id}/remote-file`, reconciled inspector and local row counts, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: treat the first no-change fetch as stable versus re-fetch after inspector showed task 8161 had a new row. Chose re-fetch because inspector is authoritative for the remote file and confirmed row_count=9 for task 8161.
+- Metrics: raw snapshots rows=100, ok=92, failed=8, duplicate retry rows=8, physical sanity violations=0; summarizer reported combined_kept=13288, combined_rejected=8, new_kept=84; filtered combined dataset rows=13,288 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,964, min R2=0.713685477876, avg R2=0.821854356371.
+- Result: partial100 remains training-ready after filtering, and R2 recovered versus partial99 but all targets still miss `R^2 >= 0.95`.
+- Failure reason: production replay is incomplete and current partial data is insufficient for the final regression target.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 12,959,276 tokens used; Codex SQLite token sampler remains unavailable.
