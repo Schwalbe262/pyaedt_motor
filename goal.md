@@ -107,8 +107,9 @@
 - Node-pinned n114 tasks 8472-8479 for batch2 cases 17-24 completed with infrastructure failures `AEDT is not installed on your system`; do not count those rows as simulation-quality failures or send more analyze work to n114 until setup-only smoke passes.
 - n107 diagnostics tasks 8489/8491 showed active `solver2d` processes for the long-running n107 wave, so wrapper logs stopping after `Solving design setup` is not by itself a cancellation signal.
 - n107 first wave tasks 8448-8463 completed with 15/16 `ok` and one AEDT `analysis=False`; module-missing retry tasks 8513-8520 proved `env_profile=pyaedt2026v1` alone is insufficient, while module smoke task 8522 passed and corrected module retry tasks 8524-8531 are running.
+- n114 module setup-only smoke task 8545 passed 1/1 `ok`; module-corrected n114 analyze tasks 8546-8553 for batch2 cases 25-32 are running, so earlier n114 failures are infrastructure-only evidence from missing module setup.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
-- Next focus is polling corrected module retry tasks 8524-8531, summarizing result CSVs, then choosing the next `fea_bursty` wave size from runtime/failure evidence.
+- Next focus is polling corrected module tasks 8524-8531 and 8546-8553, summarizing result CSVs, then choosing the next `fea_bursty` wave size from runtime/failure evidence.
 
 ## Later Milestones
 

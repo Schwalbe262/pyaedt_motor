@@ -595,3 +595,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: task 8522 setup-only smoke included the module and passed, corrected analyze tasks 8524-8531 were submitted with the same module setup, and `submit_ipmsm_scheduler_task.py` now rejects PyAEDT submit/analyze requests missing the module.
 - Evidence: first-wave manifest included the module and produced 15 `ok` analyze rows; module-missing retry tasks failed 8/8 with `AEDT is not installed`; module smoke task 8522 passed 1/1 `ok` in 20.346s; full tests passed 183/183 after adding the guard.
 - Remaining risk: corrected analyze tasks 8524-8531 are still running, so their solve quality and elapsed distribution remain pending.
+
+## 2026-06-17 00:56:16 +09:00 - Insight 64
+
+- Source loop: `note.md` Loop 146.
+- Improvement: requalify a node that failed AEDT discovery with an explicit-module setup-only smoke before permanently excluding it.
+- Before: n114/allocation 42 was treated as unusable after 8 fast AEDT discovery failures from module-missing tasks.
+- After: n114 module smoke task 8545 passed 1/1 `ok`, and module-corrected analyze tasks 8546-8553 were allowed to run on the same allocation.
+- Evidence: task 8545 passed setup-only in 20.377s on allocation 42 / Slurm 680403 after including `module load ansys-electronics/v252`; tasks 8546-8553 then attached to the same allocation.
+- Remaining risk: n114 full analyze success and elapsed distribution are still pending, so only setup readiness is confirmed.

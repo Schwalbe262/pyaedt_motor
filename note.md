@@ -1915,3 +1915,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: corrected retry solves are still pending, so this loop improves submission safety but does not yet add usable simulation rows.
 - Next action: keep polling tasks 8524-8531 and aggregate only corrected module retry rows after completion.
 - Token usage: active goal counter reported 18,364,218 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 00:56:16 +09:00 - Loop 146
+
+- Part: n114 module requalification and analyze wave.
+- Goal: use available scheduler capacity without repeating module-missing infrastructure failures.
+- Hypothesis: n114 failed earlier because module setup was omitted, so an explicit-module setup-only smoke can requalify the node before analyze work.
+- Actions: checked live scheduler HEAD `1c493ad8`, verified n114 capacity on allocation 42, submitted module setup-only smoke task 8545 for batch2 case 25, confirmed it passed 1/1 `ok`, dry-ran module analyze manifests for cases 25-32, then submitted n114 analyze tasks 8546-8553.
+- Candidates: keep n114 excluded versus requalify with a smoke. Chose smoke first because task helper now enforces the Ansys module and n114 still had fit_slots=8.
+- Metrics: task 8545 ran on allocation 42 / Slurm 680403 and passed setup-only in 20.377s; tasks 8546-8553 attached to allocation 42 / Slurm 680403 and are 8/8 running; concurrent corrected n107 tasks 8524-8531 are also 8/8 running with no result rows yet.
+- Result: n114 is no longer treated as node-broken after module smoke; it is usable only under explicit module env setup and pending analyze evidence.
+- Failure reason: analyze result quality and elapsed for both current waves are still pending.
+- Next action: poll tasks 8524-8531 and 8546-8553, then choose the next wave size from completed rows.
+- Token usage: active goal counter reported 18,480,501 tokens used; Codex SQLite token sampler remains unavailable.
