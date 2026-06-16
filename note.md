@@ -2110,3 +2110,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: queued n114 work and running n107 rows are incomplete, so no retraining run yet.
 - Next action: poll tasks 8625-8629, 8639-8641, 8630, and 8632-8633; submit no more n114 work until soft pressure clears.
 - Token usage: active goal counter reported 19,124,400 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 04:22:00 +09:00 - Loop 161
+
+- Part: scheduler policy recheck, n107 case 068 completion, and one-case backfill.
+- Goal: keep batch2 moving under the corrected interpretation that 200 is a per-batch/concurrency cap, not a lifetime simulation cap.
+- Hypothesis: one n107 backfill is appropriate because case 068 completed ok while n114 remains soft-blocked.
+- Actions: verified upstream `Schwalbe262/slurm_scheduler` HEAD `1c493ad8`, rechecked policy docs for `/tasks` `fea_bursty`, `required_capability`, `env_profile`, and `max_workers_per_node`, polled current tasks, fetched explicit result probes for cases 067-068, recomputed explicit partial gates, checked n107/n114 capacity, and submitted case 079 as task 8650.
+- Candidates: send more n114 work versus only backfill n107. Chose n107 only because n114 capacity still reported `fit_slots=0` and `memory_pressure_state=soft_blocked`.
+- Metrics: case 067 completed `ok` in 3403.787s; case 068 completed `ok` in 3513.097s; explicit partial summary reached result_rows=68, ok=64, failed=4, duplicates=0, physical_sanity_violations=0; n107 capacity query returned fit_slots=8 and n114 returned fit_slots=0 soft_blocked.
+- Result: task 8650 for case 079 was accepted and attached to allocation 64 / Slurm 680569; active work is n107 cases 069-071/075-079 plus queued n114 cases 072-074.
+- Failure reason: active/queued rows are incomplete, so retraining remains premature.
+- Next action: poll tasks 8627-8629, 8639-8641, 8649-8650, 8630, and 8632-8633; fetch only completed result probes and keep n114 submissions paused until pressure clears.
+- Token usage: active goal counter reported 19,214,858 tokens used; Codex SQLite token sampler remains unavailable.
