@@ -2214,3 +2214,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8666, 8670-8671, 8676-8677, 8686-8687, and 8692; when a slot opens, submit case 088 unless another earlier gap appears.
 - Token usage: active goal counter reported 19,585,982 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 06:09:00 +09:00 - Loop 169
+
+- Part: rescued case 074 completion and case 088 backfill.
+- Goal: close the last rescued n114-cancelled case and keep n107 at eight active solves.
+- Hypothesis: once case 074 completes ok, the next unused case index can fill the free n107 slot.
+- Actions: polled active tasks, fetched the case 074 result probe, recomputed explicit partial gates, dry-ran and submitted case 088 as task 8716, and confirmed it attached to allocation 64 / Slurm 680569.
+- Candidates: wait for 081-087 versus submit 088. Chose submit 088 because cases 072-080 now have complete evidence and n107 had one open slot.
+- Metrics: case 074 completed `ok` in 3625.204s; explicit partial summary reached result_rows=80, ok=76, failed=4, duplicates=0, physical_sanity_violations=0; n107 returned to 8 running tasks.
+- Result: active n107 work is cases 081-088 on allocation 64 / Slurm 680569.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8670-8671, 8676-8677, 8686-8687, 8692, and 8716; when a slot opens, submit case 089.
+- Token usage: active goal counter reported 19,610,748 tokens used; Codex SQLite token sampler remains unavailable.
