@@ -966,3 +966,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: only 3/200 production rows are complete, so full dataset filtering and R2 improvement verification are still pending.
 - Next action: continue polling the ten production tasks, fetch only updated result CSVs, run full quality/filter gates when rows complete, then retrain with `.venv\\Scripts\\python.exe train_ipmsm_lightgbm.py`.
 - Token usage: active goal counter last reported 10,016,525 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 14:44:23 +09:00 - Loop 73
+
+- Part: production replay partial gate update
+- Goal: keep local quality evidence synchronized as more `mesh_time_fine` rows finish.
+- Hypothesis: new rows should remain physically sane and filter-ready if the selected profile and replay sources are valid.
+- Actions: repolled all ten production tasks, fetched updated `remote_mtf200_task_*` result CSVs into ignored artifacts, and reran dataset quality plus training filter gates.
+- Candidates: wait for all 200 rows before validation versus validate partial batches as rows appear. Chose partial validation to catch any physical-sanity or schema issue early.
+- Metrics: tasks 8152-8159, 8161, and 8163 remain running; current total is 11 `ok` rows; `mtf200_partial11_dataset_quality.csv` passed rows=11, ok=11, missing_required=0, physical_sanity_violations=0, duplicates=0; `mtf200_partial11_training_ready.csv` kept 11/11 rows.
+- Result: partial production data remains usable and training-ready.
+- Failure reason: 189/200 rows are still pending, so full retraining and R2 improvement verification cannot run yet.
+- Next action: continue polling; after the ten task CSVs complete, run full quality/filter gates and retrain with the prepared `.venv`.
+- Token usage: active goal counter reported 10,099,767 tokens used; Codex SQLite token sampler remains unavailable.

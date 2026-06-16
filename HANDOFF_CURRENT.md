@@ -59,7 +59,7 @@
 - 2026-06-16: running scheduler checkout is latest `slurm_scheduler` main `7d9ed52`; remote bootstrap for chunk 021-040 verified the expected 20-case CSV header/range.
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
-- 2026-06-16: first production rows arrived from tasks 8152/8154/8158; fetched 3 ignored CSVs, and `mtf200_partial3_*` quality/filter gates passed 3/3 ok rows with no physical sanity violations.
+- 2026-06-16: production replay has 11/200 `ok` rows so far across the ten running tasks; fetched ignored `remote_mtf200_task_*` CSVs, and `mtf200_partial11_*` quality/filter gates passed with no physical sanity violations.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
@@ -79,7 +79,7 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler reaches AEDT; current blocker is waiting for the remaining 197/200 `mesh_time_fine` replay rows, then filtering and retraining.
+- Scheduler reaches AEDT; current blocker is waiting for the remaining 189/200 `mesh_time_fine` replay rows, then filtering and retraining.
 
 ## Next steps
 
