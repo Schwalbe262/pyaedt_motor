@@ -1967,3 +1967,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: n107 cases 033-039 and n114 follow-on cases 041-042/044-047 are still pending or running, so retraining is not ready.
 - Next action: poll tasks 8559-8565 and 8573-8574/8576-8579, aggregate only explicit module-corrected result files, then decide whether to submit case 048 and/or more n114/n107 waves.
 - Token usage: active goal counter reported 18,781,161 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 02:06:00 +09:00 - Loop 150
+
+- Part: n107 follow-on wave and partial aggregation.
+- Goal: maintain batch2 throughput without exceeding the observed 8-ish concurrent solver target per node.
+- Hypothesis: n107 can accept a small follow-on wave because cases 036-038 completed ok and active solver count dropped while n107 elapsed looked faster than the earlier 16-way wave.
+- Actions: polled current n107/n114 tasks, fetched result probes, ran a diagnostic showing n107 `solver2d_count=7`, cancelled unused queued diagnostic task 8581, dry-ran and submitted n107 follow-on cases 048-050 as tasks 8582-8584, and recomputed explicit partial gates.
+- Candidates: wait for all n107 cases 033-039 to finish versus backfill only the freed n107 slots. Chose backfill with three cases to keep n107 near the previous 8-way level.
+- Metrics: cases 036-038 completed `ok` with elapsed 2348.036s, 2162.986s, and 2133.616s; task 8566/case 040 and task 8575/case 043 failed with `analysis_returned_false=True`; explicit partial summary reached result_rows=37, ok=33, failed=4, duplicates=0, physical_sanity_violations=0; tasks 8582-8584 attached to allocation 64 / Slurm 680569.
+- Result: n107 and n114 both have active follow-on work, with no duplicate result paths in the submitted manifests.
+- Failure reason: many current rows are still running, so retraining and larger next-wave decisions remain premature.
+- Next action: poll tasks 8559-8561, 8565, 8573-8574, 8576-8579, and 8582-8584; aggregate exact result probes and continue small backfills only when observed solver count drops.
+- Token usage: active goal counter reported 18,844,210 tokens used; Codex SQLite token sampler remains unavailable.
