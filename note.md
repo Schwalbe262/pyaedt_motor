@@ -810,3 +810,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no completed new replay result rows are available yet.
 - Next action: poll task 6106 result CSV `simul_log_scheduler/ps_task_0003_results.csv`; when complete profile groups exist, run guarded quality analysis.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 10:18:15 +09:00 - Loop 61
+
+- Part: additional physical-sanity replay submissions
+- Goal: increase the chance of getting multi-geometry fixed-profile replay evidence without exceeding the 200-solve guardrail.
+- Hypothesis: while task 6106 runs rows 5-8, additional non-overlapping 4-profile groups can safely queue through `/tasks` and start as attached capacity frees.
+- Actions: checked task capacity and physical-sanity replay plan prefixes; submitted rows 1-4 as task 6205, rows 13-16 as task 6207, rows 17-20 as task 6208, and rows 9-12 as task 6209; cancelled task 6206 before it started because it accidentally reused task 6106's result path.
+- Candidates: wait for task 6106 only versus queue more `/tasks` groups. Chose a small 16-solve addition because the project allows up to 200 simulations and complete groups across multiple geometries are the current blocker.
+- Metrics: task 6106 remained running on allocation 66 / Slurm job 680574; tasks 6205, 6207, 6208, and 6209 were queued on `r1jae262`; queued task count was 48; no `ps_task_*_results.csv` files were available yet.
+- Result: five valid-source 4-profile groups are now either running or queued, with the duplicate-path submission cancelled before execution.
+- Failure reason: no completed new replay rows are available yet, so quality analysis and retraining remain blocked on scheduler output.
+- Next action: poll tasks 6106/6205/6207/6208/6209 and jobs 60/61; run guarded complete-group quality analysis once result CSVs contain complete source groups.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
