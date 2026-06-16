@@ -1083,3 +1083,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: the production replay is still incomplete, and three failed rows require later retry review under the 200-run guardrail.
 - Next action: continue polling running tasks, use the summarizer before each gate run, and after completion decide retry handling for failed row indexes 63, 67, and 123.
 - Token usage: active goal counter reported 11,193,999 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 16:12:45 +09:00 - Loop 82
+
+- Part: production replay partial53 gate
+- Goal: validate the next material production replay advance with summarizer-derived thresholds.
+- Hypothesis: new completed rows should keep the filtered dataset training-ready, but new failed rows may appear as AEDT transient output extraction failures and should be tracked for later retry review.
+- Actions: confirmed current checkpoint, refreshed the ten task result CSVs, ran `summarize_ipmsm_partial_replay.py`, ran raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining, then listed failed row identities.
+- Candidates: reuse partial50 thresholds versus compute from current CSVs. Chose computed thresholds because result_rows, failed rows, and kept rows changed.
+- Metrics: raw snapshots rows=53, ok=49, failed=4, duplicate retry rows=4, physical sanity violations=0; summarizer reported combined_kept=13249, combined_rejected=4, new_kept=45; filtered combined dataset rows=13,249 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,942, min R2=0.713417353843, avg R2=0.813691878484; failed replay indexes are now 63, 67, 123, and 146, all missing required transient output metrics.
+- Result: partial53 remains training-ready after filtering, but regression performance remains far below the `R^2 >= 0.95` target.
+- Failure reason: production replay is incomplete and failed rows need a guardrail-aware retry decision after the current 200-row submission.
+- Next action: continue polling running tasks, use the summarizer before each gate run, and after completion decide retry handling for failed row indexes 63, 67, 123, and 146.
+- Token usage: active goal counter reported 11,245,217 tokens used; Codex SQLite token sampler remains unavailable.

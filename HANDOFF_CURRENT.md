@@ -60,8 +60,8 @@
 - 2026-06-16: running scheduler checkout is latest `slurm_scheduler` main `7d9ed52`; remote bootstrap for chunk 021-040 verified the expected 20-case CSV header/range.
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
-- 2026-06-16: production replay snapshots now have 50 fetched rows; raw partial has 47 `ok`, 3 failed, and 4 retry duplicates, while `partial50_bomfix` keeps 13,247 rows with no blank/duplicate case IDs and no physical-sanity violations.
-- 2026-06-16: `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial50_bomfix.csv --disable-tuning` passed row gates with 0 invalid rows and 0 duplicate drops; R2 remains below target with min 0.713417353843, avg 0.813691878484.
+- 2026-06-16: production replay snapshots now have 53 fetched rows; raw partial has 49 `ok`, 4 failed, and 4 retry duplicates, while `partial53_bomfix` keeps 13,249 rows with no blank/duplicate case IDs and no physical-sanity violations.
+- 2026-06-16: `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial53_bomfix.csv --disable-tuning` passed row gates with 0 invalid rows and 0 duplicate drops; R2 remains below target with min 0.713417353843, avg 0.813691878484.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -82,7 +82,7 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler reaches AEDT; current blocker is waiting for the remaining production replay rows, then filtering and retraining; failed row indexes 63, 67, and 123 are retry candidates after the 200-run guardrail is reviewed.
+- Scheduler reaches AEDT; current blocker is waiting for the remaining production replay rows, then filtering and retraining; failed row indexes 63, 67, 123, and 146 are retry candidates after the 200-run guardrail is reviewed.
 
 ## Next steps
 
