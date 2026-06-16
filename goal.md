@@ -101,6 +101,7 @@
 - Partial replay gate thresholds can now be computed deterministically with `summarize_ipmsm_partial_replay.py`, which matched live partial46 evidence and avoids manual kept-row threshold mistakes.
 - Future result rows now report AEDT `analysis=False` as the root failure before attempting report export, so retry triage can separate solver/validation failures from report parser/export failures.
 - Retry1 of the 20 failed first-batch geometries used `/tasks/git` tasks 8358-8361 and completed 20/20 with repeated AEDT `analysis=False`; next work should diagnose or avoid that geometry set before scaling more <=200-concurrent batches.
+- `analyze_ipmsm_failure_patterns.py` now makes the retry1 `analysis=False` geometry signature reproducible: `magnet_height_ratio` is the strongest separated feature and the current two-rule OR covers 20/20 failed rows plus 14 ok rows.
 - The replay selector can exclude previous source IDs and numeric high-risk rules; batch2 `mesh_time_fine` has 200 unique new source cases, excludes retry1 high-risk rules, and is partially submitted through `/jobs dynamic_packed_srun` jobs 62-71 for simulations 1-169.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
 - Next focus is polling batch2 jobs 62-71, submitting simulations 170-200 after scheduler capacity frees, then running the usual filter/quality/LightGBM gates.

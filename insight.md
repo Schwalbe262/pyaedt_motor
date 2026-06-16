@@ -559,3 +559,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `submit_ipmsm_scheduler_job.py` rejects relative `--remote-cases` when `--job-mode python_git --bootstrap-remote-cases` is used; corrected retry tasks used absolute remote paths.
 - Evidence: tasks 8354-8357 failed before solves with missing relative case CSVs, while tasks 8358-8361 completed scheduler execution with absolute paths; targeted submit tests passed 36/36 and full tests passed 175/175.
 - Remaining risk: this fixes submission plumbing only; retry1 still produced 20/20 AEDT `analysis=False` rows that need simulation/geometry triage.
+
+## 2026-06-16 22:35:11 +09:00 - Insight 60
+
+- Source loop: `note.md` Loop 139.
+- Improvement: high-risk replay geometry rules should be backed by a deterministic failure-pattern report, not by an ad hoc notebook or copied console output.
+- Before: the retry1 `analysis=False` pattern was identified with a one-off local script, so future batch exclusions were hard to audit or reproduce.
+- After: `analyze_ipmsm_failure_patterns.py` reports numeric feature separation and repeated exclusion-rule coverage from exact case-plan row indexes.
+- Evidence: the report ranked `magnet_height_ratio` first with score 0.397472222222 and the two-rule OR matched 20/20 failed rows plus 14 ok rows; targeted tests passed 4/4 and full tests passed 181/181.
+- Remaining risk: the rule is an empirical guard for batch selection, not proof that the underlying AEDT geometry failure has been fixed.

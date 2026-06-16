@@ -1824,3 +1824,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no idle `cpu2` node is currently available for the pinned packed jobs.
 - Next action: keep polling jobs 62-71 until Slurm ids appear, then start result-row/status summaries; submit remaining simulations 170-200 only after capacity frees.
 - Token usage: active goal counter reported 17,613,205 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 22:35:11 +09:00 - Loop 139
+
+- Part: deterministic failure-pattern evidence.
+- Goal: turn the ad hoc retry1 `analysis=False` geometry triage into a reproducible CLI report that can justify future exclusion rules without rereading raw CSVs or logs.
+- Hypothesis: the first-batch failed row indexes have a measurable numeric case-plan signature, and the batch2 high-risk exclusion rules should be auditable from exact CSV rows.
+- Actions: added `analyze_ipmsm_failure_patterns.py`, added unit tests, regenerated `simul_log_smoke/mtf200_analysis_false_pattern_summary.csv` and `simul_log_smoke/mtf200_analysis_false_rule_eval.csv`, and ran targeted plus full unit tests.
+- Candidates: keep the analysis as an ad hoc local script versus add a repo CLI. Chose a repo CLI because the rule is now used for batch selection and needs repeatable evidence.
+- Metrics: failure-pattern CLI found 13 numeric varying features; top normalized mean-separation feature is `magnet_height_ratio` with score 0.397472222222; rule OR aggregate matched 34 rows, including 20/20 failed rows and 14 ok rows; `tests.test_analyze_ipmsm_failure_patterns` passed 4/4 and full `python -m unittest discover -s tests` passed 181/181.
+- Result: high-risk geometry exclusion evidence is now reproducible and reviewable without dumping the full replay CSV.
+- Failure reason: this improves evidence and batch selection only; live batch2 jobs 62-71 are still waiting for idle `cpu2` capacity.
+- Next action: commit/push the CLI and docs, then keep polling jobs 62-71 for Slurm ids and result summaries.
+- Token usage: active goal counter reported 17,686,222 tokens used; Codex SQLite token sampler remains unavailable.

@@ -25,6 +25,7 @@
 - `codex_ops.py`: local ops utilities, including read-only Codex thread token sampling.
 - `analyze_ipmsm_quality_results.py`: filtered before/after comparison report for quality result CSVs.
 - `analyze_ipmsm_dataset_quality.py`: streaming quality summary for large simulation result CSVs.
+- `analyze_ipmsm_failure_patterns.py`: deterministic numeric pattern/rule report for failed replay rows.
 - `verify_regression_metrics.py`: filtered regression R2 verification against the project threshold.
 - `filter_ipmsm_training_dataset.py`: creates audited training-ready CSVs from simulation result CSVs.
 - `summarize_ipmsm_partial_replay.py`: computes partial replay counts and exact downstream gate thresholds from result CSVs.
@@ -70,6 +71,7 @@
 - 2026-06-16: `select_ipmsm_replay_cases.py` can now exclude previous source IDs and numeric risk rules; `python -m unittest discover -s tests` passed 177 tests.
 - 2026-06-16: generated batch2 `mesh_time_fine` plan with 200 unique new sources, 0 overlap with batch1, and 0 rows matching the retry1 high-risk rule; submitted `/jobs dynamic_packed_srun` jobs 62-71 for 169/200 simulations, all queued initially.
 - 2026-06-16: jobs 62-71 remain queued with no Slurm ids because current scheduler DB shows no strict idle unoccupied `cpu2` node; `batch2_mtf200_results.csv` is still 0 bytes.
+- 2026-06-16: `analyze_ipmsm_failure_patterns.py` reproduced retry1 failure evidence: top feature `magnet_height_ratio` score 0.397472222222 and the two-rule OR matched 20/20 failed rows plus 14 ok rows; full tests passed 181 tests.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -131,7 +133,7 @@
 - CSV readers tolerate double-BOM headers; partial replay summarizer computes exact duplicate/reject gate thresholds.
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
-- Replay selector can exclude previous source IDs and explicit numeric high-risk rules for non-overlapping follow-up batches.
+- Replay selector and failure-pattern analyzer now provide exact source/rule evidence for non-overlapping follow-up batches.
 
 ## Risks and gotchas
 
