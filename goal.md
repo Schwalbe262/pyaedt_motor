@@ -14,7 +14,7 @@
 - 시뮬레이션 정확도 향상.
 - 시뮬레이션 시간이 크게 증가하는 개선은 피한다.
 - 기존 run path인 `controller.py` -> `simulation1.sh` -> `subprocess_run.py` -> `run_ipmsm_batch.py`를 보존하면서 deterministic 기능, tests, docs, UI/report hooks를 보강한다.
-- 최대 200개 Ansys simulation 실행이 허용되지만, 실행 전에는 setup-only/smoke validation과 명확한 실험 계획을 먼저 통과해야 한다.
+- Ansys simulation은 한 번에 최대 200개까지 병렬 실행할 수 있고, 검증된 batch를 여러 번 반복할 수 있지만, 각 batch 실행 전에는 setup-only/smoke validation과 명확한 실험 계획을 먼저 통과해야 한다.
 
 ## System Roles
 
@@ -103,8 +103,9 @@
 - Retry1 of the 20 failed first-batch geometries used `/tasks/git` tasks 8358-8361 and completed 20/20 with repeated AEDT `analysis=False`; next work should diagnose or avoid that geometry set before scaling more <=200-concurrent batches.
 - `analyze_ipmsm_failure_patterns.py` now makes the retry1 `analysis=False` geometry signature reproducible: `magnet_height_ratio` is the strongest separated feature and the current two-rule OR covers 20/20 failed rows plus 14 ok rows.
 - The replay selector can exclude previous source IDs and numeric high-risk rules; batch2 `mesh_time_fine` has 200 unique new source cases, excludes retry1 high-risk rules, and is partially submitted through `/jobs dynamic_packed_srun` jobs 62-71 for simulations 1-169.
+- Packed jobs 62-71 were cancelled before Slurm submission because `cpu2` had no strict idle node; batch2 execution is now using `/tasks` with `scheduling_profile=fea_bursty`, and tasks 8448-8463 attached to allocation 64 / Slurm 680569 for the first 16 cases.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
-- Next focus is polling batch2 jobs 62-71, submitting simulations 170-200 after scheduler capacity frees, then running the usual filter/quality/LightGBM gates.
+- Next focus is polling batch2 tasks 8448-8463, summarizing per-task result CSVs, then submitting more `fea_bursty` task waves only after current capacity/result quality is clear.
 
 ## Later Milestones
 

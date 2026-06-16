@@ -568,3 +568,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `analyze_ipmsm_failure_patterns.py` reports numeric feature separation and repeated exclusion-rule coverage from exact case-plan row indexes.
 - Evidence: the report ranked `magnet_height_ratio` first with score 0.397472222222 and the two-rule OR matched 20/20 failed rows plus 14 ok rows; targeted tests passed 4/4 and full tests passed 181/181.
 - Remaining risk: the rule is an empirical guard for batch selection, not proof that the underlying AEDT geometry failure has been fixed.
+
+## 2026-06-16 22:50:46 +09:00 - Insight 61
+
+- Source loop: `note.md` Loop 141.
+- Improvement: use `/tasks` with `scheduling_profile=fea_bursty` for bursty single-case FEA waves when packed jobs are blocked by `cpu2` idle-node placement.
+- Before: `dynamic_packed_srun` jobs 62-71 stayed queued with no Slurm ids because `cpu2` had no strict idle unoccupied node.
+- After: queued packed jobs were cancelled before Slurm submission, and single-case tasks 8448-8463 were submitted with `fea_bursty`; all attached to allocation 64 / Slurm 680569.
+- Evidence: `/api/task-capacity` reported 16 fit slots with memory pressure ok; task helper tests passed 9/9 and full tests passed 182/182; task 8451 completed and wrote the first batch2 result row while 15 peers were running.
+- Remaining risk: `fea_bursty` improves scheduling throughput, but it does not fix AEDT `analysis=False`; wave size should follow observed memory pressure and failure rate.

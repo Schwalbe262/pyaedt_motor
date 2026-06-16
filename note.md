@@ -1850,3 +1850,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: live capacity is still blocked by lack of idle `cpu2` placement for current jobs.
 - Next action: wait for jobs 62-71 to get Slurm ids or result rows, then submit the prepared tail manifest only after capacity frees.
 - Token usage: active goal counter reported 17,747,536 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 22:50:46 +09:00 - Loop 141
+
+- Part: switch batch2 from packed jobs to `fea_bursty` attached tasks.
+- Goal: make progress while `dynamic_packed_srun` jobs 62-71 are blocked by `cpu2` idle-node placement.
+- Hypothesis: latest scheduler policy's `/tasks` `scheduling_profile=fea_bursty` can use existing warm allocations and avoid the strict idle-node requirement that blocked packed jobs.
+- Actions: confirmed jobs 62-71 had no Slurm ids and `batch2_mtf200_results.csv` was 0 bytes, queried `/api/task-capacity` for `fea_bursty`, added `scheduling_profile` and `max_workers_per_node` support to `submit_ipmsm_scheduler_task.py`, ran targeted and full tests, committed/pushed the helper change, cancelled queued jobs 62-71 before Slurm submission, and submitted batch2 cases 1-16 as single-case `fea_bursty` tasks 8448-8463.
+- Candidates: keep waiting for idle `cpu2` nodes versus switch to attached tasks. Chose attached tasks because scheduler reported 16 `fea_bursty` fit slots on existing allocations 64 and 42, while packed jobs had made no Slurm progress.
+- Metrics: capacity before submit was fit_slots=16, memory_pressure=ok; tasks 8448-8463 submitted successfully; after attach, all 16 tasks reached allocation 64 / Slurm 680569, with task 8451 completed and wrote one failed row for case 004 (`analysis_returned_false=True`, elapsed 42.965s), while the other 15 tasks were still running at last poll; `tests.test_submit_ipmsm_scheduler_task` passed 9/9 and full tests passed 182/182.
+- Result: batch2 is no longer blocked on packed-job idle-node placement; first 16 cases are actively running through the updated scheduler task policy.
+- Failure reason: one early case still hit AEDT `analysis=False`, and most wave-1 task results are pending.
+- Next action: poll tasks 8448-8463, fetch per-task result summaries, then submit additional `fea_bursty` waves only after current capacity and failure rate are clear.
+- Token usage: active goal counter reported 17,816,317 tokens used; Codex SQLite token sampler remains unavailable.
