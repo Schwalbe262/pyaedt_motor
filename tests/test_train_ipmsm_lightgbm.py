@@ -85,11 +85,13 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
                 *trainer.RAW_INPUT_COLUMNS,
                 "input_stator_teeth_width_ratio",
                 "input_slot_opening_ratio",
+                "input_steps_per_period",
             }
         )
 
         self.assertIn("input_stator_teeth_width_ratio", columns)
         self.assertIn("input_slot_opening_ratio", columns)
+        self.assertIn("input_steps_per_period", columns)
         self.assertNotIn("input_magnet_space_height_ratio", columns)
 
     def test_select_training_input_columns_excludes_sparse_optional_inputs(self) -> None:

@@ -62,8 +62,9 @@
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
 - 2026-06-16: scheduler API refused a fetch after task 8159, later timed out after partial189, and timed out during partial207 status sampling; local WSL scheduler web process was restarted each time, `/api/health` recovered, and no Slurm task was cancelled or modified.
 - 2026-06-16: production replay snapshots now have 216 fetched rows including retry duplicates; raw partial has 194 `ok`, 22 failed, and 19 retry duplicates, while `partial216_bomfix` keeps 13,381 rows with no blank/duplicate case IDs and no physical-sanity violations.
-- 2026-06-16: tasks 8163, 8152, 8154, 8155, 8156, 8158, and 8161 are completed, while tasks 8153, 8157, and 8159 still report `running`; `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial216_bomfix.csv --disable-tuning` still misses target with min R2 0.721111975302, avg 0.826273728953.
+- 2026-06-16: tasks 8163, 8152, 8154, 8155, 8156, 8158, and 8161 are completed, while tasks 8153, 8157, and 8159 still report `running`; updated `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial216_bomfix.csv --disable-tuning` includes dense `input_steps_per_period` and still misses target with min R2 0.723086116932, avg 0.827271417400.
 - 2026-06-16: `run_ipmsm_batch.py` now fails future `analysis=False` rows with an explicit AEDT analysis-returned-false error before report export; `python -m unittest discover -s tests` passed 174 tests.
+- 2026-06-16: `input_steps_per_period` is now a density-gated optional LightGBM feature; targeted train tests and full `python -m unittest discover -s tests` passed 174 tests.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -119,6 +120,7 @@
 - Added deterministic IPMSM quality cases, per-case mesh overrides, fixed-geometry replay selection, filtered quality comparison, per-profile summary, and convergence ranking.
 - Added audited multi-result quality workflow command plans, training dependency gates, training-ready dataset filtering, dataset quality promotion gates, and regression R2 verifiers; current LightGBM artifact misses the 0.95 R2 gate.
 - Added deterministic LightGBM training CLI with stable target seeds, recovered width-ratio feature, derived geometry repair, and input quality gates.
+- Added dense simulation-step metadata as a LightGBM optional feature to reduce hidden label noise in mixed baseline/fine datasets.
 - `run_one_case` now writes structured failed rows for pre-AEDT import/setup errors, records missing required outputs, and preserves transient setup metadata.
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.

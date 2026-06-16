@@ -1759,3 +1759,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: scheduler tasks 8153, 8157, and 8159 still report `running`, and the current de-duplicated data does not close the model-performance gap.
 - Next action: commit/push this checkpoint, keep polling until task statuses settle, then run final replay gate and retry triage without exceeding the approved 200-simulation guardrail.
 - Token usage: active goal counter reported 16,571,731 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 21:42:23 +09:00 - Loop 134
+
+- Part: dense simulation-step feature
+- Goal: reduce hidden label noise when historical baseline rows and new `mesh_time_fine` rows are trained together.
+- Hypothesis: `input_steps_per_period` is fully populated and varies between baseline and fine simulations, so exposing it as a density-gated optional feature should improve reproducible LightGBM smoke metrics without dropping rows.
+- Actions: inspected varying numeric input columns, monkeypatched `input_steps_per_period` into optional features for a no-edit probe, added it to `OPTIONAL_INPUT_COLUMNS`, updated selector tests, reran targeted train tests, reran partial216 default LightGBM smoke, and ran full unit tests.
+- Candidates: exclude high-risk geometry rows versus include simulation-step metadata. Excluding high magnet-height subsets worsened R2, while the step feature gave a small reproducible improvement.
+- Metrics: partial216 default before change min R2=0.721111975302 and avg R2=0.826273728953; after adding `input_steps_per_period`, min R2=0.723086116932 and avg R2=0.827271417400 with invalid rows=0, removed output outliers=3353, and 8/8 targets still below 0.95; `python -m unittest tests.test_train_ipmsm_lightgbm` passed 19 tests; `python -m unittest discover -s tests` passed 174 tests.
+- Result: dense simulation-step metadata is now included automatically when fully finite, preserving old sparse optional-column protection and slightly improving smoke metrics.
+- Failure reason: the improvement is real but small; the R2 target remains unmet and remaining replay tasks 8153, 8157, and 8159 still need final settlement.
+- Next action: commit/push this code checkpoint, poll remaining tasks, then rerun final replay gates and retry triage.
+- Token usage: active goal counter reported 16,729,911 tokens used; Codex SQLite token sampler remains unavailable.

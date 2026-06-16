@@ -77,7 +77,7 @@ INPUT_COLUMNS = (
     "input_magnet_thick_ratio",
     "input_magnet_height_ratio",
 )
-OPTIONAL_INPUT_COLUMNS = ("input_slot_opening_ratio", "input_magnet_space_height_ratio")
+OPTIONAL_INPUT_COLUMNS = ("input_slot_opening_ratio", "input_magnet_space_height_ratio", "input_steps_per_period")
 DERIVED_INPUT_REPAIR_COLUMNS = ("input_stator_teeth_width_ratio", "input_rotor_radius", "input_shaft_radius")
 
 REQUESTED_OUTPUT_COLUMNS = (

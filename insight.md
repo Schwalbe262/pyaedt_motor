@@ -541,3 +541,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `run_ipmsm_batch.py` raises an explicit `AEDT analysis returned False` error after project save and before report export, while preserving `analysis_returned_false` and `validation` fields.
 - Evidence: eight current partial replay failures all had `analysis_returned_false=True`, `validation=False`, no exported torque/loss reports, and 20-32s elapsed times; a mocked `run_one_case` test covers the new classification; full tests passed 174/174.
 - Remaining risk: existing running rows were produced by the old code; retries or future submissions need the new commit deployed to the remote work tree.
+
+## 2026-06-16 21:42:23 +09:00 - Insight 58
+
+- Source loop: `note.md` Loop 134.
+- Improvement: mixed baseline/fine simulation datasets should expose dense simulation setup metadata to the surrogate model.
+- Before: `input_steps_per_period` varied across the combined training data but was not selected as a LightGBM feature, hiding a simulation-quality difference from the model.
+- After: `train_ipmsm_lightgbm.py` treats `input_steps_per_period` as a density-gated optional input, so it is used only when fully finite for the loaded dataset.
+- Evidence: partial216 smoke improved from min R2 0.721111975302 / avg R2 0.826273728953 to min R2 0.723086116932 / avg R2 0.827271417400; targeted train tests passed 19/19 and full tests passed 174/174.
+- Remaining risk: the improvement is small and does not meet the `R^2 >= 0.95` target; remaining replay completion and simulation-quality triage are still required.
