@@ -1343,3 +1343,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay is incomplete and the added row does not close the regression gap.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 13,129,131 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 18:04:15 +09:00 - Loop 102
+
+- Part: production replay partial112 gate
+- Goal: validate the next replay increment and maintain exact quality/R2 evidence.
+- Hypothesis: two additional ok rows should preserve strict gates, while R2 remains below target.
+- Actions: confirmed repo/scheduler state, fetched all ten result CSVs through `/api/tasks/{id}/remote-file`, counted status rows, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: defer retraining until more rows versus rerun because partial row and kept-row counts changed. Chose rerun to keep the replay trend exact.
+- Metrics: raw snapshots rows=112, ok=104, failed=8, duplicate retry rows=9, physical sanity violations=0; summarizer reported combined_kept=13299, combined_rejected=8, new_kept=95; filtered combined dataset rows=13,299 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,972, min R2=0.710306741373, avg R2=0.818637829622.
+- Result: partial112 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`.
+- Failure reason: production replay is incomplete and added rows still do not close the regression gap.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 13,174,315 tokens used; Codex SQLite token sampler remains unavailable.
