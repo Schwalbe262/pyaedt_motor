@@ -91,11 +91,11 @@
 - Git-backed scheduler submissions now use `/tasks/git` instead of compatibility `/jobs python_git`; `/tasks` against `/home1/r1jae262/ipmsm_pyaedt_motor_work` works under account `r1jae262` for existing remote working trees.
 - `env_profile=pyaedt2026v1` must be combined with `module load ansys-electronics/v252`; task 18 setup-only completed 4/4 `ok` for baseline, mesh_fine, time_fine, and mesh_time_fine profiles.
 - Task 22 completed the first full analyze solve: baseline 1/1 `ok`, elapsed 936.238s, torque_last_avg 11.0863 Nm, efficiency_last 74.8655%, back-EMF phase-A THD 13.1410%, and no missing required outputs.
-- Job 57 completed a fixed-geometry 4-profile analyze comparison 4/4 `ok`: `time_fine` was close to `mesh_time_fine` on torque/efficiency at about 0.68x reference runtime, but this is only one source geometry.
+- Five valid fixed-geometry groups now show only `mesh_time_fine` within convergence tolerance; it costs about 1.46x baseline runtime in this sample.
 - Job 59 validated dynamic packed row dispatch for setup-only work: `SIMULATION_ID=1` selected the expected single replay row and produced 1/1 `ok` baseline setup in 49.888s.
-- Multi-geometry quality replay is still incomplete; job 58 was cancelled after partial invalid-source rows, jobs 60/61 remain queued on valid sources, and no R2-improving retraining evidence exists yet.
+- `mesh_time_mid` was tested on the same 5 source geometries and rejected: it was not within tolerance, had max delta 11.8041% versus `mesh_time_fine`, and was not meaningfully faster.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
-- Next focus is multi-geometry quality validation, targeted 200-case quality replay selection, and retraining in the proper ML environment after higher-quality simulation data is produced.
+- Next focus is a bounded `mesh_time_fine` production replay from the 200-row physical-sanity plan, followed by dataset filtering and retraining in the proper ML environment.
 
 ## Later Milestones
 

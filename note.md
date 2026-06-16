@@ -927,3 +927,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: this chooses a quality candidate but does not yet produce a larger training dataset or R2 improvement evidence.
 - Next action: decide whether to accept the `mesh_time_fine` runtime cost for the next replay/training step; if accepted, submit the next scheduler batch with unique output paths and keep the 200-solve guardrail explicit.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 14:05:37 +09:00 - Loop 70
+
+- Part: mid-profile quality check and production replay preparation
+- Goal: test whether a mid mesh/time profile can preserve `mesh_time_fine` accuracy with lower runtime before submitting a larger replay batch.
+- Hypothesis: `mesh_time_mid` might reduce the 1.46x runtime cost while remaining close enough to the `mesh_time_fine` reference.
+- Actions: added and tested the `mesh_time_mid` profile, submitted five high-priority scheduler tasks 8144-8148, fetched only the result CSVs into ignored `simul_log_smoke` artifacts, ran complete-group analysis across baseline/mesh_fine/time_fine/mesh_time_fine/mesh_time_mid, and generated a 200-row `mesh_time_fine` replay plan from physical-sanity source rows.
+- Candidates: accept `mesh_time_fine` immediately, test an intermediate profile first, or lower only mesh/time independently. Chose the intermediate profile because five-group evidence showed only `mesh_time_fine` was accurate but its runtime cost was high.
+- Metrics: `mesh_time_mid` completed 5/5 rows with no missing required outputs or physical sanity violations; it was not within tolerance, max delta versus `mesh_time_fine` was 11.8041%, and avg elapsed ratio versus reference was 1.0033; the new replay plan has 200 rows, 200 unique source cases, and only `mesh_time_fine`.
+- Result: `mesh_time_mid` is rejected for now; `mesh_time_fine` remains the selected profile for the next higher-quality data replay.
+- Failure reason: this still has no new 200-row training dataset or R2 improvement evidence.
+- Next action: commit/push the evidence notes, dry-run the next scheduler submission through the updated `/jobs dynamic_packed_srun` policy, then submit a bounded `mesh_time_fine` batch if capacity and guardrails are acceptable.
+- Token usage: active goal counter reported 9,638,991 tokens used; local Codex SQLite token sampler remains unavailable.
