@@ -58,6 +58,8 @@
 - 2026-06-16: submitted 200-row `mesh_time_fine` production replay as `/tasks` chunks: 8152-8159, 8161, and retry 8163 are running; duplicate 8160 was cancelled and stale-allocation task 8151 failed before solving.
 - 2026-06-16: running scheduler checkout is latest `slurm_scheduler` main `7d9ed52`; remote bootstrap for chunk 021-040 verified the expected 20-case CSV header/range.
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
+- 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
+- 2026-06-16: first production rows arrived from tasks 8152/8154/8158; fetched 3 ignored CSVs, and `mtf200_partial3_*` quality/filter gates passed 3/3 ok rows with no physical sanity violations.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
@@ -77,7 +79,7 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler reaches AEDT; current blocker is waiting for the 200-row `mesh_time_fine` replay results, then filtering and retraining.
+- Scheduler reaches AEDT; current blocker is waiting for the remaining 197/200 `mesh_time_fine` replay rows, then filtering and retraining.
 
 ## Next steps
 
@@ -86,7 +88,7 @@
 3. Use `simul_log_smoke/remote_ps_task_complete5_*` plus `remote_ps_task_mid5_*` as current fixed-geometry evidence; `mesh_time_fine` remains the selected profile.
 4. When result rows complete, fetch only the ten `mtf200_task_*_results.csv` files and combine them into a filtered training-ready dataset.
 5. For Git-backed scheduler work use `submit_ipmsm_scheduler_job.py` default `python_git`, which now posts to `/tasks/git`; use `/jobs` only for packed simulation modes.
-6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`.
+6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`, then use `.venv\Scripts\python.exe train_ipmsm_lightgbm.py`.
 7. Run dataset quality gates and LightGBM retraining only after completed fixed-geometry quality results exist.
 
 ## Token/context policy

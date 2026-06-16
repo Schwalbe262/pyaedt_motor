@@ -953,3 +953,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no production result rows are complete yet, so dataset filtering and R2 retraining remain blocked on AEDT completion.
 - Next action: poll task result summaries with `inspect_ipmsm_scheduler_job.py --task`; fetch only completed `mtf200_task_*_results.csv` files, then run physical-sanity filtering and LightGBM retraining in the ML environment.
 - Token usage: active goal counter reported 9,792,185 tokens used; local Codex SQLite token sampler remains unavailable and `python -m codex_ops record-current-codex-thread-usage --label "mtf200 scheduler submission"` failed because the Codex SQLite DB was not found.
+
+## 2026-06-16 14:37:43 +09:00 - Loop 72
+
+- Part: production replay polling and retraining environment preparation
+- Goal: keep the 200-row `mesh_time_fine` replay moving toward a retrainable dataset while preparing a local ML baseline for comparison.
+- Hypothesis: the scheduler tasks are solving normally but result rows will arrive gradually, and a local Python 3.11 venv can reproduce the current LightGBM baseline before the new data is complete.
+- Actions: polled tasks 8152-8159/8161/8163 with filtered result summaries; inspected process-log tails for tasks 8152 and 8163; created ignored `.venv`; installed pandas, scikit-learn, and LightGBM; reran baseline training on `training_ready_physical_sanity.csv`; fetched the first three production result CSVs into ignored artifacts; ran dataset quality and training filter gates on the partial result set.
+- Candidates: wait only for all 200 rows versus prepare retraining and validate partial rows as they arrive. Chose partial validation plus environment setup because it reduces latency after the full replay completes and catches bad output early.
+- Metrics: tasks remain `running`; tasks 8152, 8154, and 8158 produced 3 total `ok` rows; `mtf200_partial3_dataset_quality.csv` passed with rows=3, ok=3, missing_required=0, physical_sanity_violations=0, duplicates=0; `mtf200_partial3_training_ready.csv` kept 3/3 rows; `.venv` dependency check reports numpy/pandas/sklearn/lightgbm all ok; baseline disable-tuning retrain has 9917 valid rows after 3287 outlier removals, 8/8 target failures, min R2 0.715453804063, and avg R2 0.81847092661.
+- Result: the first production rows are usable, and retraining can run locally once enough `mesh_time_fine` rows are available.
+- Failure reason: only 3/200 production rows are complete, so full dataset filtering and R2 improvement verification are still pending.
+- Next action: continue polling the ten production tasks, fetch only updated result CSVs, run full quality/filter gates when rows complete, then retrain with `.venv\\Scripts\\python.exe train_ipmsm_lightgbm.py`.
+- Token usage: active goal counter last reported 10,016,525 tokens used; Codex SQLite token sampler remains unavailable.
