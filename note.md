@@ -1993,3 +1993,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: batch2 still has too few completed rows for retraining and the n114 follow-on wave has not produced ok rows yet.
 - Next action: poll tasks 8582-8584, 8587-8591, 8573-8574, and 8576-8579; fetch explicit result probes and backfill only after observed solver count drops.
 - Token usage: active goal counter reported 18,872,678 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 02:31:00 +09:00 - Loop 152
+
+- Part: n114 follow-on result and backfill.
+- Goal: keep n114 near the observed 6-8 solver level while preserving explicit result evidence.
+- Hypothesis: n114 can take a small backfill because case 042 completed ok and the remaining n114 solver count dropped.
+- Actions: polled n114 follow-on tasks, fetched case 042 result, recomputed explicit partial gates, dry-ran cases 056-058 with unique result/log paths, submitted them as tasks 8595-8597, and confirmed all three attached to allocation 42 / Slurm 680403.
+- Candidates: wait for all n114 follow-on cases to finish versus add three backfill cases. Chose the small backfill because previous n114 evidence was 7/8 ok and current case 042 was ok.
+- Metrics: case 042 completed `ok` in 2650.155s; explicit partial summary reached result_rows=42, ok=38, failed=4, duplicates=0, physical_sanity_violations=0; diagnostic 8594 showed n114 `solver2d_count=6` before the backfill.
+- Result: n114 now has cases 041/044-047 and 056-058 running; n107 has cases 048-055 running.
+- Failure reason: current batch2 rows are still incomplete, so no retraining run is justified yet.
+- Next action: poll n107 tasks 8582-8584/8587-8591 and n114 tasks 8573/8576-8579/8595-8597; update explicit partial summaries as rows complete.
+- Token usage: active goal counter reported 18,897,479 tokens used; Codex SQLite token sampler remains unavailable.
