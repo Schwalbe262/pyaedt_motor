@@ -475,8 +475,8 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Source loop: `note.md` Loop 54.
 - Improvement: fixed-geometry replay source selection should apply the same physical sanity gate as training and quality analysis before submitting expensive Ansys jobs.
 - Before: `replay_quality_cases_200.csv` included 4/50 selected source geometries with out-of-range `output_efficiency_all_pct`, and job 58 spent partial runtime on one invalid source.
-- After: `select_ipmsm_replay_cases.py` rejects out-of-range efficiency source rows, reports `physical_sanity_rejected`, and generated `replay_quality_cases_200_physical_sanity.csv` with 0 invalid selected sources.
-- Evidence: selector dry-run scanned 13,748 rows, rejected 345 physical sanity violations, selected 50 valid sources / 200 replay rows, and full tests ran 158/158 passing.
+- After: `select_ipmsm_replay_cases.py` rejects out-of-range or nonfinite efficiency source rows, reports `physical_sanity_rejected`, and generated `replay_quality_cases_200_physical_sanity.csv` with 0 invalid selected sources.
+- Evidence: selector dry-run scanned 13,748 rows, rejected 346 physical sanity violations, selected 50 valid sources / 200 replay rows, and full tests ran 160/160 passing.
 - Remaining risk: this protects source selection only; completed valid-source replay rows are still required before mesh/time settings or R2 claims can change.
 
 ## 2026-06-16 09:41:44 +09:00 - Insight 51

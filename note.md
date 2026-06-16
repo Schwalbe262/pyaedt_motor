@@ -758,3 +758,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: this improves future data quality but does not yet provide completed multi-geometry replay evidence or R2 improvement.
 - Next action: commit/push the metric fix, then continue polling scheduler outputs.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:45:12 +09:00 - Loop 57
+
+- Part: strict replay source eligibility
+- Goal: ensure future `nan` efficiency outputs cannot be selected as fixed-geometry replay sources.
+- Hypothesis: after making invalid motor efficiency nonfinite, replay selection must reject present-but-nonfinite efficiency columns in addition to finite out-of-range values.
+- Actions: tightened `select_ipmsm_replay_cases.py` physical sanity detection; added a `nan` efficiency fixture; regenerated the canonical ignored physical-sanity replay plan.
+- Candidates: rely on downstream quality analysis to reject `nan` efficiency versus reject it before expensive replay submission. Chose pre-submission rejection to protect the Ansys solve budget.
+- Metrics: selector dry-run scanned 13,748 rows, rejected 198 by status and 346 by physical sanity, selected 50 valid sources / 200 replay rows, and verified 0 selected sources with invalid or nonfinite efficiency; full tests ran 160/160 passing.
+- Result: replay source selection is now aligned with the future nonfinite efficiency policy.
+- Failure reason: no new completed scheduler replay rows yet.
+- Next action: commit/push the strict selector alignment, then continue polling jobs 60/61 and task 6032.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

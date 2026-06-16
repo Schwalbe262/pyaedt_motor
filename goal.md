@@ -77,7 +77,7 @@
 - Future simulation rows no longer write physically invalid efficiency percentages for nonpositive mechanical power; those operating points produce nonfinite efficiency for downstream quality gates.
 - Future failed rows now preserve missing required output names, validation, analysis flags, and effective setup metadata for faster diagnosis.
 - Deterministic LightGBM retraining is now available as `train_ipmsm_lightgbm.py` with input quality gates; local runtime still lacks pandas, scikit-learn, and LightGBM.
-- Existing result geometries can now be replayed as fixed AEDT case rows; the current 200-row mesh/time replay plan rejects out-of-range efficiency source rows and is available under `simul_log_smoke/`.
+- Existing result geometries can now be replayed as fixed AEDT case rows; the current 200-row mesh/time replay plan rejects out-of-range or nonfinite efficiency source rows and is available under `simul_log_smoke/`.
 - Quality comparison now preserves replay source identity so mesh/time deltas are compared against the matching source geometry baseline.
 - Future result rows and retraining now use geometry inputs consistent with AEDT design expressions; existing CSVs can recover `input_stator_teeth_width_ratio` and repair 13,748 stale rotor/shaft radius rows.
 - Slurm submission now guards explicit case CSVs from accidental multi-job or repeated-cycle duplication unless the operator opts in.

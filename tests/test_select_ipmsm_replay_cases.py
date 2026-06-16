@@ -51,6 +51,7 @@ class SelectIpmsmReplayCasesTests(unittest.TestCase):
         rows.append({**rows[0], "case_id": "failed", "status": "failed"})
         rows.append({**rows[0], "case_id": "missing_output", "output_torque_all_avg_nm": ""})
         rows.append({**rows[0], "case_id": "invalid_efficiency", "output_efficiency_all_pct": "120.0"})
+        rows.append({**rows[0], "case_id": "nan_efficiency", "output_efficiency_all_pct": "nan"})
 
         with path.open("w", encoding="utf-8-sig", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=list(rows[0]))
@@ -82,7 +83,7 @@ class SelectIpmsmReplayCasesTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertIn("rows=4 source_cases=2 candidates=3", stdout.getvalue())
-            self.assertIn("physical_sanity_rejected=1", stdout.getvalue())
+            self.assertIn("physical_sanity_rejected=2", stdout.getvalue())
             with output.open("r", encoding="utf-8-sig", newline="") as file:
                 reader = csv.DictReader(file)
                 rows = list(reader)
@@ -105,7 +106,7 @@ class SelectIpmsmReplayCasesTests(unittest.TestCase):
                 status="ok",
             )
 
-            self.assertEqual(metrics["physical_sanity_rejected"], 1)
+            self.assertEqual(metrics["physical_sanity_rejected"], 2)
             self.assertEqual({row["source_case_id"] for row in candidates}, {"source_1", "source_2", "source_3"})
 
     def test_spread_selection_prefers_feature_extremes(self) -> None:

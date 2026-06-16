@@ -117,7 +117,7 @@ def physical_sanity_violations(row: dict[str, str]) -> list[str]:
         if column not in row:
             continue
         value = finite_float(row.get(column, ""))
-        if math.isfinite(value) and not 0.0 <= value <= 100.0:
+        if not math.isfinite(value) or not 0.0 <= value <= 100.0:
             violations.append(column)
     return violations
 
