@@ -91,6 +91,12 @@ REQUESTED_OUTPUT_COLUMNS = (
     "output_efficiency_last_pc",
 )
 OUTPUT_ALIASES = {"output_efficiency_last_pc": "output_efficiency_last_pct"}
+EFFICIENCY_OUTPUT_COLUMNS = (
+    "output_efficiency_first_pct",
+    "output_efficiency_last_pct",
+    "output_efficiency_last_pc",
+    "output_efficiency_all_pct",
+)
 
 BASE_PARAMS = {
     "objective": "regression",
@@ -149,6 +155,7 @@ class TrainingQualityReport:
     status_rejected_rows: int
     nonfinite_input_rows: int
     nonfinite_output_rows: int
+    physical_sanity_rejected_rows: int
     valid_rows_before_outliers: int
     removed_output_outliers: int
     valid_rows: int
@@ -183,6 +190,7 @@ class TrainingQualityReport:
             "status_rejected_rows": self.status_rejected_rows,
             "nonfinite_input_rows": self.nonfinite_input_rows,
             "nonfinite_output_rows": self.nonfinite_output_rows,
+            "physical_sanity_rejected_rows": self.physical_sanity_rejected_rows,
             "invalid_training_rows": self.invalid_training_rows,
             "valid_rows_before_outliers": self.valid_rows_before_outliers,
             "removed_output_outliers": self.removed_output_outliers,
@@ -318,6 +326,17 @@ def finite_float(value: object) -> float:
     except Exception:
         return math.nan
     return number if math.isfinite(number) else math.nan
+
+
+def physical_sanity_violations(row: Any) -> list[str]:
+    violations = []
+    for column in EFFICIENCY_OUTPUT_COLUMNS:
+        if column not in row:
+            continue
+        value = finite_float(row.get(column))
+        if math.isfinite(value) and not 0.0 <= value <= 100.0:
+            violations.append(column)
+    return violations
 
 
 def repaired_derived_input_values(row: Any) -> dict[str, float]:
@@ -468,10 +487,17 @@ def prepare_training_data(
     status_ok = df["status"].astype(str).str.lower().eq("ok") if "status" in df.columns else deps.pd.Series(True, index=df.index)
     finite_inputs = deps.np.isfinite(df[list(input_columns)]).all(axis=1)
     finite_outputs = deps.np.isfinite(df[list(output_columns)]).all(axis=1)
-    valid_mask = status_ok & finite_inputs & finite_outputs
+    physical_sanity_ok = deps.pd.Series(True, index=df.index)
+    for column in EFFICIENCY_OUTPUT_COLUMNS:
+        if column not in df.columns:
+            continue
+        values = deps.pd.to_numeric(df[column], errors="coerce")
+        physical_sanity_ok &= values.isna() | values.between(0.0, 100.0)
+    valid_mask = status_ok & finite_inputs & finite_outputs & physical_sanity_ok
     status_rejected_rows = int((~status_ok).sum())
     nonfinite_input_rows = int((~finite_inputs).sum())
     nonfinite_output_rows = int((~finite_outputs).sum())
+    physical_sanity_rejected_rows = int((~physical_sanity_ok).sum())
     valid_rows_before_outliers = int(valid_mask.sum())
     valid_df = df.loc[valid_mask].copy()
 
@@ -499,6 +525,7 @@ def prepare_training_data(
         status_rejected_rows=status_rejected_rows,
         nonfinite_input_rows=nonfinite_input_rows,
         nonfinite_output_rows=nonfinite_output_rows,
+        physical_sanity_rejected_rows=physical_sanity_rejected_rows,
         valid_rows_before_outliers=valid_rows_before_outliers,
         removed_output_outliers=removed_output_outliers,
         valid_rows=len(valid_df),

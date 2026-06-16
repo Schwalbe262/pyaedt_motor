@@ -38,7 +38,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 160 tests and passed; touched-file py_compile and `git diff --check` passed for latest efficiency-output changes.
+- 2026-06-16: `python -m unittest discover -s tests` ran 161 tests and passed; touched-file py_compile and `git diff --check` passed for latest training gate changes.
 - 2026-06-16: scheduler job 20 validated branch checkout/imports/case-plan checks; job 21 reached `run_ipmsm_batch.py` and wrote one structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
@@ -53,9 +53,11 @@
 - 2026-06-16: physical-sanity replay selection now rejects 346 out-of-range or nonfinite efficiency source rows and writes a 200-row valid-source plan at `simul_log_smoke/replay_quality_cases_200_physical_sanity.csv`.
 - 2026-06-16: `train_ipmsm_lightgbm.py --check-dependencies --dependency-report ...` reports numpy ok and pandas/sklearn/lightgbm missing locally.
 - 2026-06-16: physical sanity filter on existing CSVs rejects 345 out-of-range efficiency rows; training-ready CSV now keeps 13,204/13,748 rows and passes strict dataset gate with zero physical sanity violations.
+- 2026-06-16: `train_ipmsm_lightgbm.py` now applies the same physical sanity gate when run directly on raw CSVs; raw prepare step reports 345 physical sanity rejects and 13,204 valid rows before outliers.
 - 2026-06-16: quality comparison now marks out-of-range efficiency rows as physical sanity violations and excludes them from complete-profile group eligibility.
 - 2026-06-16: future derived efficiency outputs now become `nan` for nonpositive mechanical power or negative total loss instead of writing physically invalid percentages.
 - 2026-06-15: existing LightGBM test metrics failed R2 gate: 8/8 targets below 0.95, min R2 0.7105, avg R2 0.8116.
+- 2026-06-16: Python 3.11 isolated retraining on `training_ready_physical_sanity.csv` still fails R2: disable tuning with outlier removal min R2 0.7155, avg R2 0.8185; 20-trial tuning min R2 0.7272, avg R2 0.8208.
 - 2026-06-15: import probe found `pyaedt_module=False` and no `ansys` package.
 - 2026-06-15: generated 4-row ignored smoke CSV at `simul_log_smoke/quality_cases_smoke.csv`.
 - Token command ran at closeout; default Codex SQLite DB was not found, so no live token sample was available.
@@ -103,7 +105,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helpers, workflow plans, run output metrics, quality analysis, replay selection, and dataset filters now support `/tasks/git` Git submissions, selected-row slicing, physical sanity gates, incomplete/complete profile-group gates, and filtered Slurm log inspection.
+- Scheduler helpers, workflow plans, run output metrics, training CLI, quality analysis, replay selection, and dataset filters now support `/tasks/git` Git submissions, selected-row slicing, physical sanity gates, incomplete/complete profile-group gates, and filtered Slurm log inspection.
 
 ## Risks and gotchas
 

@@ -771,3 +771,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no new completed scheduler replay rows yet.
 - Next action: commit/push the strict selector alignment, then continue polling jobs 60/61 and task 6032.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:55:21 +09:00 - Loop 58
+
+- Part: local regression evidence and training CLI gate
+- Goal: quantify whether the physical-sanity-filtered existing dataset improves R2 enough, and prevent direct raw-CSV training from keeping invalid efficiency targets.
+- Hypothesis: if physical sanity filtering alone is sufficient, retraining on the filtered dataset should approach R2 0.95; otherwise the remaining gap supports the need for higher-quality simulation replay data.
+- Actions: created an isolated Python 3.11 venv outside the repo; installed pandas/scikit-learn/LightGBM; ran dependency check; trained on `training_ready_physical_sanity.csv` with tuning disabled, no outlier removal, and 20-trial tuning; ran a generated feature probe with derived geometry features; added physical sanity rejection to `train_ipmsm_lightgbm.py`.
+- Candidates: tune model parameters versus improve feature engineering versus treat this as simulation data quality evidence. Chose to gather all three quick checks before changing production training behavior.
+- Metrics: dependencies ready in Python 3.11 with pandas 3.0.3, scikit-learn 1.9.0, LightGBM 4.6.0; filtered disable-tuning/outlier-removal run failed 8/8 targets with min R2 0.7155 and avg R2 0.8185; keep-outliers run was worse with min R2 0.3107 and avg R2 0.6799; 20-trial tuning failed 8/8 with min R2 0.7272 and avg R2 0.8208; derived geometry feature probe did not improve results; raw CSV prepare step now reports 345 physical sanity rejects and 13,204 valid rows before outliers; full tests ran 161/161 passing.
+- Result: physical sanity filtering helps only slightly and does not satisfy the R2 goal; training CLI now enforces the same invalid-efficiency gate as the dataset filter.
+- Failure reason: R2 remains far below 0.95 and scheduler replay has not produced new valid multi-geometry solve rows yet.
+- Next action: commit/push the training gate and evidence notes, then continue polling scheduler jobs 60/61 and task 6032.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

@@ -74,6 +74,7 @@
 - Mesh/time-step case generation, per-case mesh CSV overrides, quality-result comparison/profile summary/convergence ranking, physical sanity gates, incomplete and explicitly complete-only profile-group gates, and regression R2 verification are implemented.
 - Existing LightGBM artifact is below target: test split has 8/8 targets below `R^2 >= 0.95`, min R2 0.7105, avg R2 0.8116.
 - Existing simulation result CSVs contain 13,748 rows; audited training filtering now rejects 199 failed/nonfinite rows plus 345 out-of-range efficiency rows, keeps 13,204 training-ready rows, and passes the strict dataset quality gate with zero physical sanity violations.
+- Python 3.11 isolated retraining on the physical-sanity-filtered dataset still misses the R2 target: best quick evidence so far is 20-trial LightGBM tuning with min R2 0.7272 and avg R2 0.8208, so higher-quality simulation data is still required.
 - Future simulation rows no longer write physically invalid efficiency percentages for nonpositive mechanical power; those operating points produce nonfinite efficiency for downstream quality gates.
 - Future failed rows now preserve missing required output names, validation, analysis flags, and effective setup metadata for faster diagnosis.
 - Deterministic LightGBM retraining is now available as `train_ipmsm_lightgbm.py` with input quality gates; local runtime still lacks pandas, scikit-learn, and LightGBM.

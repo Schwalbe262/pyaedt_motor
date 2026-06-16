@@ -487,3 +487,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `run_ipmsm_batch.py` uses `motor_efficiency_pct()` so future invalid motor operating points produce `nan` efficiency and are rejected by existing output-quality gates instead of becoming training targets.
 - Evidence: unit tests cover negative mechanical power and negative loss inputs; full tests ran 160/160 passing.
 - Remaining risk: historical CSVs still contain old invalid efficiency values and must continue to pass through the physical sanity filter before retraining.
+
+## 2026-06-16 09:55:21 +09:00 - Insight 52
+
+- Source loop: `note.md` Loop 58.
+- Improvement: the LightGBM training CLI itself should reject physically invalid efficiency rows, not rely only on a separate pre-filter command.
+- Before: direct `train_ipmsm_lightgbm.py --data ipmsm_simulation_results*.csv` could keep finite but out-of-range efficiency targets unless the operator first materialized a filtered training CSV.
+- After: `train_ipmsm_lightgbm.py` applies an efficiency physical sanity mask during `prepare_training_data()` and records `physical_sanity_rejected_rows` in metadata.
+- Evidence: raw CSV prepare now reports 345 physical sanity rejects and 13,204 valid rows before outliers, matching the separate training-ready filter; full tests ran 161/161 passing.
+- Remaining risk: this prevents invalid targets from entering training, but current filtered data still fails the R2 target and needs better simulation evidence.

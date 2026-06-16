@@ -110,6 +110,7 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
             status_rejected_rows=2,
             nonfinite_input_rows=1,
             nonfinite_output_rows=1,
+            physical_sanity_rejected_rows=1,
             valid_rows_before_outliers=6,
             removed_output_outliers=2,
             valid_rows=4,
@@ -121,6 +122,18 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
             ["invalid_training_rows 3 > 0", "removed_output_outlier_rows 2 > 1"],
         )
         self.assertEqual(report.as_metadata()["valid_rows"], 4)
+        self.assertEqual(report.as_metadata()["physical_sanity_rejected_rows"], 1)
+
+    def test_physical_sanity_violations_detect_out_of_range_efficiency(self) -> None:
+        violations = trainer.physical_sanity_violations(
+            {
+                "output_efficiency_last_pct": "120",
+                "output_efficiency_all_pct": "nan",
+                "output_torque_last_avg_nm": "10",
+            }
+        )
+
+        self.assertEqual(violations, ["output_efficiency_last_pct"])
 
     def test_validate_training_options_rejects_bad_split_sum(self) -> None:
         args = trainer.build_parser().parse_args(["--test-size", "0.8", "--val-size", "0.3"])
