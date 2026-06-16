@@ -979,3 +979,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: 189/200 rows are still pending, so full retraining and R2 improvement verification cannot run yet.
 - Next action: continue polling; after the ten task CSVs complete, run full quality/filter gates and retrain with the prepared `.venv`.
 - Token usage: active goal counter reported 10,099,767 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 15:11:06 +09:00 - Loop 74
+
+- Part: production replay failure-pattern check
+- Goal: validate new production rows and identify whether failed rows need code changes or post-run retry planning.
+- Hypothesis: occasional `analysis_returned_false` rows may be AEDT/report transient failures rather than invalid replay geometry, and should be filtered now and reviewed for retry after the 200-run guardrail.
+- Actions: polled all ten production tasks, fetched updated `remote_mtf200_task_*` result CSVs, mapped failed rows back to the 200-row replay plan, inspected failure metadata and representative process-log lines, and reran dataset quality plus training filter gates.
+- Candidates: immediately submit retries for failed rows versus defer retries until the 200 submitted rows finish. Chose to defer because the current production batch already uses the 200-row simulation guardrail.
+- Metrics: tasks 8152-8159, 8161, and 8163 remain running; current total is 24 rows with 22 `ok` and 2 failed; failed replay plan row indexes are 63 and 123, both `analysis_returned_false=True` with missing `output_torque_all_avg_nm`, `output_coreloss_all_avg_w`, and `output_solidloss_all_avg_w`; `mtf200_partial24_dataset_quality.csv` passed with rows=24, ok=22, failed=2, physical_sanity_violations=0; `mtf200_partial24_training_ready.csv` kept 22/24 rows.
+- Result: partial production data remains usable after filtering, and the two failed rows are identified for possible later retry.
+- Failure reason: 176/200 submitted rows are still pending, and retrying failed rows now would exceed the explicit 200-row guardrail.
+- Next action: continue polling the ten production tasks, fetch updated CSVs, rerun partial gates, then run full filtering/retraining when the submitted rows finish.
+- Token usage: active goal counter reported 10,206,137 tokens used; Codex SQLite token sampler remains unavailable.
