@@ -2266,3 +2266,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8716, 8722-8723, and 8729-8733; when a slot opens, fetch the completed result and submit case 096.
 - Token usage: active goal counter reported 19,912,296 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 07:30:00 +09:00 - Loop 173
+
+- Part: case 088 completion and case 096 backfill.
+- Goal: keep n107 saturated while preserving exact result-file accounting.
+- Hypothesis: case 088's long solve should finish normally because its process log showed an active AEDT transient solve.
+- Actions: polled active tasks, fetched case 088 result probe through `-o`, recomputed explicit partial gates, dry-ran and submitted case 096 as task 8738, and confirmed it attached to allocation 64 / Slurm 680569.
+- Candidates: cancel long-running case 088 versus wait. Chose wait because the log showed `Solving design setup PPT_Transient`; it completed ok.
+- Metrics: case 088 completed `ok` in 4577.645s; explicit partial summary reached result_rows=88, ok=84, failed=4, duplicates=0, physical_sanity_violations=0; n107 returned to 8 running tasks.
+- Result: active n107 work is cases 089-096 on allocation 64 / Slurm 680569.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8722-8723, 8729-8733, and 8738; when a slot opens, submit case 097.
+- Token usage: active goal counter reported 20,063,710 tokens used; Codex SQLite token sampler remains unavailable.
