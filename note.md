@@ -1122,3 +1122,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay is incomplete, and failed rows require retry review after the 200-row submission finishes.
 - Next action: continue polling running tasks, use the summarizer before each gate run, and after completion decide retry handling for failed row indexes 63, 67, 106, 123, and 146.
 - Token usage: active goal counter reported 11,351,871 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 16:29:56 +09:00 - Loop 85
+
+- Part: production replay partial65 gate
+- Goal: validate the next production replay advance and update failed-row retry evidence.
+- Hypothesis: the filtered dataset should remain clean, while the `101_120` chunk may be accumulating transient output extraction failures.
+- Actions: confirmed the current checkpoint, refreshed task statuses and the ten result CSVs through the WSL-local scheduler API, repaired local snapshot counting after a Windows loopback forwarding issue, ran `summarize_ipmsm_partial_replay.py`, ran raw partial quality, combined training filter, filtered-dataset quality, deterministic LightGBM smoke retraining, and listed failed row identities.
+- Candidates: restart scheduler forwarding versus use the healthy WSL-local scheduler API. Chose WSL-local API because `/api/health` works inside WSL and task metadata is current.
+- Metrics: raw snapshots rows=65, ok=57, failed=8, duplicate retry rows=5, physical sanity violations=0; summarizer reported combined_kept=13256, combined_rejected=8, new_kept=52; filtered combined dataset rows=13,256 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,949, min R2=0.7148232912, avg R2=0.821373174101; failed replay indexes are now 63, 67, 106, 107, 108, 109, 123, and 146.
+- Result: partial65 remains training-ready after filtering, but regression metrics remain below target and the failed-row cluster needs post-run retry review.
+- Failure reason: production replay is incomplete, and several AEDT runs are missing required transient output metrics.
+- Next action: continue polling running tasks via the WSL-local scheduler API if Windows loopback remains unhealthy; use the summarizer before each gate run, and after completion decide retry handling for failed row indexes 63, 67, 106, 107, 108, 109, 123, and 146.
+- Token usage: active goal counter reported 11,429,654 tokens used; Codex SQLite token sampler remains unavailable.
