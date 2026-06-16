@@ -27,6 +27,7 @@ REQUIRED_OUTPUTS = (
 QUALITY_PROFILES = ("mesh_time_fine", "mesh_fine", "time_fine", "baseline")
 GROUP_COLUMNS = ("input_base_rpm", "input_i_peak_a", "input_beta_deg")
 SOURCE_GROUP_COLUMNS = ("input_source_case_id", "source_case_id")
+EFFICIENCY_COLUMNS = ("output_efficiency_last_pct", "output_efficiency_last_pc", "output_efficiency_all_pct")
 
 
 def read_rows(path: Path) -> list[dict[str, str]]:
@@ -84,6 +85,17 @@ def missing_required_outputs(row: dict[str, str]) -> list[str]:
     return missing
 
 
+def physical_sanity_violations(row: dict[str, str]) -> list[str]:
+    violations = []
+    for column in EFFICIENCY_COLUMNS:
+        if column not in row:
+            continue
+        value = finite_float(row.get(column, ""))
+        if math.isfinite(value) and not 0.0 <= value <= 100.0:
+            violations.append(column)
+    return violations
+
+
 def pct_delta(value: float, baseline: float) -> float:
     if not math.isfinite(value) or not math.isfinite(baseline) or baseline == 0:
         return math.nan
@@ -118,7 +130,7 @@ def row_has_complete_outputs(row: dict[str, str]) -> bool:
     status = first_value(row, "status").lower()
     if status and status != "ok":
         return False
-    return not missing_required_outputs(row)
+    return not missing_required_outputs(row) and not physical_sanity_violations(row)
 
 
 def incomplete_group_issues(
@@ -228,6 +240,7 @@ def build_comparison_rows(
                 if math.isfinite(elapsed) and math.isfinite(baseline_elapsed) and baseline_elapsed != 0
                 else "",
                 "missing_required_outputs": ";".join(missing_required_outputs(row)),
+                "physical_sanity_violations": ";".join(physical_sanity_violations(row)),
             }
             for metric in metrics:
                 value = finite_float(row.get(metric, ""))
@@ -255,6 +268,7 @@ def comparison_fieldnames(metrics: tuple[str, ...]) -> list[str]:
         "elapsed_delta_s",
         "elapsed_ratio",
         "missing_required_outputs",
+        "physical_sanity_violations",
     ]
     for metric in metrics:
         fields.extend([metric, f"{metric}_baseline", f"{metric}_delta", f"{metric}_pct_delta"])
@@ -478,19 +492,23 @@ def summarize(rows: list[dict[str, str]], comparison_rows: list[dict[str, str]])
     statuses: dict[str, int] = {}
     profiles: dict[str, int] = {}
     missing_count = 0
+    physical_sanity_violation_count = 0
     for row in rows:
         statuses[first_value(row, "status") or ""] = statuses.get(first_value(row, "status") or "", 0) + 1
         profile = infer_quality_profile(row)
         profiles[profile or ""] = profiles.get(profile or "", 0) + 1
         if missing_required_outputs(row):
             missing_count += 1
+        if physical_sanity_violations(row):
+            physical_sanity_violation_count += 1
 
     status_text = ",".join(f"{key}:{statuses[key]}" for key in sorted(statuses))
     profile_text = ",".join(f"{key}:{profiles[key]}" for key in sorted(profiles))
     baseline_count = sum(1 for row in comparison_rows if row["quality_profile"] == "baseline")
     return (
         f"rows={len(rows)} comparisons={len(comparison_rows)} baselines={baseline_count} "
-        f"missing_required_output_rows={missing_count} statuses={status_text} profiles={profile_text}"
+        f"missing_required_output_rows={missing_count} physical_sanity_violation_rows={physical_sanity_violation_count} "
+        f"statuses={status_text} profiles={profile_text}"
     )
 
 

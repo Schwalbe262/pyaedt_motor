@@ -79,6 +79,7 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
         self.assertEqual(rows[1]["output_torque_all_avg_nm_pct_delta"], "5")
         self.assertEqual(rows[1]["output_efficiency_all_pct_delta"], "1")
         self.assertEqual(rows[1]["missing_required_outputs"], "")
+        self.assertEqual(rows[1]["physical_sanity_violations"], "")
 
     def test_missing_required_outputs_are_reported(self) -> None:
         row = self.sample_rows()[0]
@@ -211,6 +212,18 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
         self.assertEqual(issues[0]["group_source_case_id"], "source_a")
         self.assertEqual(issues[0]["present_profiles"], "baseline,mesh_fine")
         self.assertEqual(issues[0]["missing_profiles"], "mesh_fine,time_fine")
+
+    def test_physical_sanity_violations_make_profile_incomplete(self) -> None:
+        rows = self.sample_rows()
+        rows[1]["output_efficiency_all_pct"] = "120"
+
+        comparison_rows = quality_results.build_comparison_rows(rows, ("output_efficiency_all_pct",))
+        issues = quality_results.incomplete_group_issues(rows, ("baseline", "mesh_fine"))
+
+        mesh_row = [row for row in comparison_rows if row["quality_profile"] == "mesh_fine"][0]
+        self.assertEqual(mesh_row["physical_sanity_violations"], "output_efficiency_all_pct")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["missing_profiles"], "mesh_fine")
 
     def test_filter_complete_group_rows_keeps_only_groups_with_required_successful_profiles(self) -> None:
         rows = self.sample_rows()

@@ -706,3 +706,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no retraining evidence yet because local ML dependencies are unavailable and higher-quality scheduler replay remains incomplete.
 - Next action: commit/push the physical sanity gate, then continue polling jobs 58, 60, and 61 for fixed-geometry quality evidence.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:23:00 +09:00 - Loop 53
+
+- Part: quality-comparison physical sanity guard
+- Goal: prevent mesh/time quality comparison from treating physically invalid efficiency rows as complete evidence.
+- Hypothesis: if out-of-range efficiency rows remain eligible for complete profile groups, the quality comparison can produce misleading convergence summaries even after the training filter rejects those rows.
+- Actions: added physical sanity violation detection to `analyze_ipmsm_quality_results.py`; comparison rows now show `physical_sanity_violations`, summaries count violation rows, and complete-profile checks reject rows with out-of-range efficiency.
+- Candidates: gate only training datasets versus also gate quality comparison. Chose both because job 58 currently has 160% efficiency rows and would otherwise become a complete but physically invalid profile group once `mesh_time_fine` finishes.
+- Metrics: targeted quality/filter/dataset/workflow tests ran 34 tests and passed; full `python -m unittest discover -s tests` ran 157 tests and passed; job 57 fixed4 comparison passed with 0 physical sanity violations; job 58 partial output still fails with no complete quality group and no output.
+- Result: quality comparison cannot silently promote out-of-range efficiency rows into complete fixed-geometry evidence.
+- Failure reason: job 58 still lacks a physically valid complete group, jobs 60/61 remain queued, and no retraining evidence exists yet.
+- Next action: commit/push the quality-analysis guard, then continue polling scheduler replay jobs.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

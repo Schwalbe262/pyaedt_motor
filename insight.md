@@ -466,6 +466,6 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Source loop: `note.md` Loop 52.
 - Improvement: regression training-ready datasets should reject out-of-range efficiency rows before model training.
 - Before: finite-only filtering kept rows with physically invalid `output_efficiency_*` values, including 345 existing rows outside 0-100%.
-- After: `filter_ipmsm_training_dataset.py` rejects out-of-range efficiency rows and `analyze_ipmsm_dataset_quality.py` exposes a zero-violation gate wired into workflow plans.
-- Evidence: raw existing CSVs fail with `physical_sanity_violation_rows 345 > 0`; the filtered training-ready CSV keeps 13,204 rows and passes with zero physical sanity violations; tests cover filter, dataset gate, and workflow arguments.
+- After: `filter_ipmsm_training_dataset.py` rejects out-of-range efficiency rows, `analyze_ipmsm_dataset_quality.py` exposes a zero-violation gate wired into workflow plans, and `analyze_ipmsm_quality_results.py` prevents physically invalid rows from satisfying complete-profile evidence.
+- Evidence: raw existing CSVs fail with `physical_sanity_violation_rows 345 > 0`; the filtered training-ready CSV keeps 13,204 rows and passes with zero physical sanity violations; job 57 quality comparison passes with 0 violations while job 58 remains ineligible for complete-group analysis; tests cover filter, dataset gate, quality comparison, and workflow arguments.
 - Remaining risk: this removes known invalid targets but does not prove improved R2 until LightGBM retraining runs in an environment with pandas, scikit-learn, and LightGBM.
