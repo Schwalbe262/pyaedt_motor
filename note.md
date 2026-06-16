@@ -2149,3 +2149,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active n107 solves are still running, and no validated extra node capacity is available.
 - Next action: continue polling tasks 8639-8641, 8649-8651, and 8653-8654; submit case 074 first when a safe slot opens.
 - Token usage: active goal counter reported 19,501,399 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 05:03:00 +09:00 - Loop 164
+
+- Part: case 075 completion and rescued case 074 submission.
+- Goal: preserve ordered batch2 coverage after n114 queued tasks were cancelled.
+- Hypothesis: the next safe n107 slot should be used for missing case 074 before advancing to later case indexes.
+- Actions: polled n107 tasks, fetched case 075 result probe, recomputed explicit partial gates, dry-ran and submitted case 074 as n107 task 8666, and confirmed it attached to allocation 64 / Slurm 680569.
+- Candidates: advance to case 081 versus fill missing case 074. Chose case 074 to avoid a permanent gap after cancelled n114 queue tasks.
+- Metrics: case 075 completed `ok` in 3099.532s; explicit partial summary reached result_rows=72, ok=68, failed=4, duplicates=0, physical_sanity_violations=0; n107 returned to 8 running tasks.
+- Result: active n107 work is cases 076-080 plus rescued cases 072-074 on allocation 64 / Slurm 680569.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8640-8641, 8649-8651, 8653-8654, and 8666; when a slot opens, submit case 081 unless another earlier gap appears.
+- Token usage: active goal counter reported 19,516,598 tokens used; Codex SQLite token sampler remains unavailable.
