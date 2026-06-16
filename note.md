@@ -1044,3 +1044,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: most of the 200-row replay is still running, and current partial data does not yet prove the required regression improvement.
 - Next action: continue polling running tasks; when row count materially advances, rerun the gates, and after completion decide retry handling for failed rows 63 and 123 under the 200-run guardrail.
 - Token usage: active goal counter reported 10,912,223 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 15:54:17 +09:00 - Loop 79
+
+- Part: production replay partial46 gate
+- Goal: validate the next four completed `mesh_time_fine` rows and refresh regression evidence.
+- Hypothesis: the additional rows should keep the dataset physically sane and training-ready, while R2 remains below target until substantially more high-quality rows finish.
+- Actions: confirmed the pushed `partial42` checkpoint, polled all ten production tasks, refreshed only the task result CSVs, ran raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining for `partial46_bomfix`.
+- Candidates: run only quality/filter gates versus include LightGBM smoke. Chose the smoke run because the model metric trend is the project-level success signal and the local ML environment is ready.
+- Metrics: raw snapshots rows=46, ok=44, failed=2, duplicate retry rows=4, physical sanity violations=0; filtered combined dataset rows=13,244, rejected rows=2, blank case IDs=0, duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,942, min R2=0.70979195883, avg R2=0.820600811599.
+- Result: partial46 remains training-ready and stable; average R2 is slightly up from partial42 but every target still misses `R^2 >= 0.95`.
+- Failure reason: the 200-row production replay is still incomplete, and partial data is insufficient to prove final regression improvement.
+- Next action: keep polling the ten running tasks, rerun gates on material row advances, then review retry strategy for failed rows after the 200-row submission finishes.
+- Token usage: active goal counter reported 10,948,787 tokens used; Codex SQLite token sampler remains unavailable.
