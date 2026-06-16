@@ -2305,3 +2305,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8730, 8732-8733, 8738, 8742, 8744, and 8749-8750; when a slot opens, submit case 101.
 - Token usage: active goal counter reported 20,109,627 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 08:16:26 +09:00 - Loop 176
+
+- Part: cases 092/094/095 completion and cases 101-103 backfill.
+- Goal: keep n107 saturated while advancing batch2 with explicit result-file accounting.
+- Hypothesis: completed out-of-order cases can be fetched safely, and each open n107 slot can advance to the next unused case without duplicate scheduler tasks.
+- Actions: verified cases 101-103 had no existing task rows, submitted cases 101-102 as tasks 8757-8758 and case 103 as task 8760, fetched case 094 result evidence, recomputed the explicit partial95 summary, and confirmed cases 096-103 are running on allocation 64 / Slurm 680569.
+- Candidates: stop after cases 101-102 versus also fill the extra slot from completed case 094. Chose to submit case 103 because n107 had only seven active solves after case 094 completed.
+- Metrics: case 092 completed `ok` in 5431.712s, case 094 completed `ok` in 5692.121s, and case 095 completed `ok` in 4893.621s; explicit partial summary reached result_rows=95, ok=91, failed=4, duplicates=0, physical_sanity_violations=0.
+- Result: active n107 work is cases 096-103 on allocation 64 / Slurm 680569.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8738, 8742, 8744, 8749, 8750, 8757, 8758, and 8760; when a slot opens, fetch the completed result and submit case 104.
+- Token usage: active goal counter reported 20,205,033 tokens used; Codex SQLite token sampler remains unavailable.
