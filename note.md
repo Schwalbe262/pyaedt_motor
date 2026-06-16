@@ -2227,3 +2227,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8670-8671, 8676-8677, 8686-8687, 8692, and 8716; when a slot opens, submit case 089.
 - Token usage: active goal counter reported 19,610,748 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 06:35:00 +09:00 - Loop 170
+
+- Part: cases 081-086 completion and cases 089-094 backfill.
+- Goal: recover from scheduler API stalls without duplicate case submissions and keep n107 saturated.
+- Hypothesis: result files can be trusted for completed wrappers even if scheduler status refresh lags; failed submit attempts must be checked against the scheduler DB before retrying.
+- Actions: recovered local scheduler API timeouts by restarting only the WSL web process, fetched result probes for cases 081-086, recomputed explicit partial gates, submitted cases 089-090 as tasks 8722-8723, verified failed 091-092 `n107_module22` attempts created no task rows, resubmitted cases 091-094 with tag `n107_module23` as tasks 8729-8732, and confirmed all active tasks attached to allocation 64 / Slurm 680569.
+- Candidates: retry 091-092 under the same tag versus use a new tag. Chose a new tag to keep failed submit artifacts separate from result evidence.
+- Metrics: cases 081-086 completed `ok` with elapsed 3254.011-3903.569s; explicit partial summary reached result_rows=86, ok=82, failed=4, duplicates=0, physical_sanity_violations=0; active n107 set is cases 087-094.
+- Result: n107 is back to 8 running tasks; no duplicate scheduler task rows were created for cases 091-092.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8692, 8716, 8722-8723, and 8729-8732; when a slot opens, submit case 095.
+- Token usage: active goal counter reported 19,675,665 tokens used; Codex SQLite token sampler remains unavailable.
