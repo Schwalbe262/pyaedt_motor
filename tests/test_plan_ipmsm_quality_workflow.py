@@ -47,6 +47,7 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
         self.assertNotIn("--submit", scheduler_args)
         self.assertIn("--convergence-output", plan["steps"][1]["args"])
         self.assertIn("--fail-on-incomplete-groups", plan["steps"][1]["args"])
+        self.assertNotIn("--complete-groups-only", plan["steps"][1]["args"])
         self.assertIn("baseline,mesh_fine,time_fine,mesh_time_fine", plan["steps"][1]["args"])
         self.assertIn("--fail-on-filter", plan["steps"][2]["args"])
         self.assertIn("--fail-on-quality", plan["steps"][3]["args"])
@@ -73,6 +74,25 @@ class PlanIpmsmQualityWorkflowTests(unittest.TestCase):
         self.assertIn("second_results.csv", plan["steps"][1]["args"])
         self.assertIn("first_results.csv", plan["steps"][2]["args"])
         self.assertIn("second_results.csv", plan["steps"][2]["args"])
+
+    def test_build_plan_can_scope_quality_analysis_to_complete_groups(self) -> None:
+        args = workflow_plan.build_parser().parse_args(
+            [
+                "--cases",
+                "cases.csv",
+                "--results",
+                "results.csv",
+                "--output",
+                "plan.json",
+                "--complete-groups-only",
+            ]
+        )
+
+        plan = workflow_plan.build_plan(args)
+
+        quality_args = plan["steps"][1]["args"]
+        self.assertIn("--complete-groups-only", quality_args)
+        self.assertIn("--fail-on-incomplete-groups", quality_args)
 
     def test_build_plan_can_target_packed_srun_remote_path(self) -> None:
         args = workflow_plan.build_parser().parse_args(

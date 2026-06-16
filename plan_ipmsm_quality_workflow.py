@@ -80,6 +80,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 str(args.convergence_pct_tolerance),
                 "--required-profiles",
                 args.required_profiles,
+                *(["--complete-groups-only"] if args.complete_groups_only else []),
                 "--fail-on-incomplete-groups",
             ],
             [comparison_csv, profile_summary_csv, convergence_csv],
@@ -191,6 +192,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reference-profile", default="mesh_time_fine")
     parser.add_argument("--convergence-pct-tolerance", type=float, default=2.0)
     parser.add_argument("--required-profiles", default="baseline,mesh_fine,time_fine,mesh_time_fine")
+    parser.add_argument(
+        "--complete-groups-only",
+        action="store_true",
+        help="Make the quality comparison step analyze only complete fixed-geometry profile groups.",
+    )
     parser.add_argument("--min-kept-rows", type=int, default=1)
     parser.add_argument("--r2-threshold", type=float, default=0.95)
     return parser

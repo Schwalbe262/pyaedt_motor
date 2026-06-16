@@ -680,3 +680,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: job 58 still has only baseline/mesh_fine, so no new multi-geometry mesh/time conclusion or R2-improving retraining evidence.
 - Next action: commit/push the analysis helper, then continue polling jobs 58, 60, and 61.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:13:15 +09:00 - Loop 51
+
+- Part: workflow plan complete-group wiring
+- Goal: make generated workflow JSON include the new scoped complete-group quality-analysis mode when requested.
+- Hypothesis: adding a planner flag is safer than requiring operators to manually edit generated quality comparison commands during partial scheduler runs.
+- Actions: added `--complete-groups-only` to `plan_ipmsm_quality_workflow.py`; the generated `quality_comparison` step includes it only when explicitly requested and still keeps `--fail-on-incomplete-groups`.
+- Candidates: always include complete-group filtering versus make it opt-in. Chose opt-in so full-file strict analysis remains the default.
+- Metrics: `python -m unittest tests.test_plan_ipmsm_quality_workflow` ran 9 tests and passed; full `python -m unittest discover -s tests` ran 155 tests and passed; plan dry-run wrote a JSON command containing `--complete-groups-only`; jobs 58/60/61 have no new completed rows.
+- Result: workflow plans can now generate safe interim complete-group analysis commands without weakening the default strict guard.
+- Failure reason: scheduler replay remains incomplete; no new mesh/time conclusion or R2-improving retraining evidence.
+- Next action: commit/push the planner wiring, then continue polling jobs 58, 60, and 61.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.

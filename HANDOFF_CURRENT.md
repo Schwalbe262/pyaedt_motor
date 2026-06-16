@@ -38,7 +38,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 154 tests and passed; touched-file py_compile with temp pycache and `git diff --check` passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 155 tests and passed; touched-file py_compile with temp pycache and `git diff --check` passed.
 - 2026-06-16: scheduler job 20 validated branch checkout/imports/case-plan checks; job 21 reached `run_ipmsm_batch.py` and wrote one structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
@@ -100,7 +100,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helpers and quality analysis now support `/tasks/git` Git submissions, dry-run review manifests, selected-row slicing, partial-child coverage warnings, incomplete/complete profile-group gates, and filtered Slurm log inspection.
+- Scheduler helpers, workflow plans, and quality analysis now support `/tasks/git` Git submissions, dry-run review manifests, selected-row slicing, partial-child coverage warnings, incomplete/complete profile-group gates, and filtered Slurm log inspection.
 
 ## Risks and gotchas
 
