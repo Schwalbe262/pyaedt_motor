@@ -1525,3 +1525,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay remains incomplete and the current partial data does not close the model-performance gap.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 14,537,325 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 19:31:43 +09:00 - Loop 116
+
+- Part: production replay partial160 gate and scheduler policy refresh
+- Goal: refresh scheduler policy after the next upstream update and validate the saved partial160 replay snapshot.
+- Hypothesis: scheduler policy remains operationally unchanged for existing remote work, and the one new ok row should preserve strict gates after filtering.
+- Actions: confirmed scheduler API health, fetched `slurm_scheduler` origin/main and inspected README/API policy at `ae5298f`, fetched and saved all ten result CSVs as partial160 through `/api/tasks/{id}/remote-file`, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, deterministic LightGBM smoke retraining, and exact failed-row extraction.
+- Candidates: treat count-only partial160 as sufficient versus save and gate exact local CSVs. Chose saved exact CSVs for reproducible threshold and retraining evidence.
+- Metrics: raw snapshots rows=160, ok=145, failed=15, duplicate retry rows=14, physical sanity violations=0; summarizer reported combined_kept=13336, combined_rejected=14, new_kept=132; filtered combined dataset rows=13,336 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,998, min R2=0.707122613402, avg R2=0.817872689282.
+- Result: scheduler policy remains `/tasks`, `/tasks/git`, and `/jobs dynamic_packed_srun`; partial160 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`; failed row indexes are unchanged from partial159.
+- Failure reason: production replay remains incomplete and the current partial data does not close the model-performance gap.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 14,608,687 tokens used; Codex SQLite token sampler remains unavailable.

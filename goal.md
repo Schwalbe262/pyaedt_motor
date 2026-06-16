@@ -87,7 +87,7 @@
 - Direct, subprocess, Slurm shell, and controller entrypoints now enforce the 200-case planning guard by default.
 - Subprocess splitting now rejects duplicate explicit `case_id`s before worker CSV generation.
 - Scheduler endpoint is verified at `http://localhost:8000`; dry-run-first scheduler preparation now supports the updated `/tasks` API for existing remote working trees with exact `account_name`, `env_profile`, and optional small case-CSV bootstrap.
-- Latest `slurm_scheduler` policy at main `e11377a` still prefers `/tasks` for existing remote directories, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case packed simulation batches; `/jobs python_git` is compatibility-only and becomes an attached task.
+- Latest `slurm_scheduler` policy at main `ae5298f` still prefers `/tasks` for existing remote directories, `/tasks/git` for Git-backed work, and `/jobs dynamic_packed_srun` for many-case packed simulation batches; `/jobs python_git` is compatibility-only and becomes an attached task.
 - Git-backed scheduler submissions now use `/tasks/git` instead of compatibility `/jobs python_git`; `/tasks` against `/home1/r1jae262/ipmsm_pyaedt_motor_work` works under account `r1jae262` for existing remote working trees.
 - `env_profile=pyaedt2026v1` must be combined with `module load ansys-electronics/v252`; task 18 setup-only completed 4/4 `ok` for baseline, mesh_fine, time_fine, and mesh_time_fine profiles.
 - Task 22 completed the first full analyze solve: baseline 1/1 `ok`, elapsed 936.238s, torque_last_avg 11.0863 Nm, efficiency_last 74.8655%, back-EMF phase-A THD 13.1410%, and no missing required outputs.
@@ -96,8 +96,8 @@
 - `mesh_time_mid` was tested on the same 5 source geometries and rejected: it was not within tolerance, had max delta 11.8041% versus `mesh_time_fine`, and was not meaningfully faster.
 - A 200-row `mesh_time_fine` production replay is now submitted through the updated scheduler `/tasks` path against the existing remote work tree; valid running task ids are 8152-8159, 8161, and 8163.
 - Local ignored Python 3.11 `.venv` now has pandas, scikit-learn, and LightGBM; baseline retraining on `training_ready_physical_sanity.csv` reproduces the current gap with 8/8 target failures and min R2 0.715453804063.
-- Current production replay evidence is available: the ten running tasks have produced 159 fetched rows so far; filtering de-duplicates retry artifacts, keeps 131 unique new `mesh_time_fine` ok rows, and passes the `partial159_bomfix` quality gate with zero physical sanity violations.
-- LightGBM retraining on the combined `partial159_bomfix` dataset now preserves all case IDs and has 0 invalid training rows, but still misses the R2 target with min R2 0.713894486431 and avg R2 0.819531464525.
+- Current production replay evidence is available: the ten running tasks have produced 160 fetched rows so far; filtering de-duplicates retry artifacts, keeps 132 unique new `mesh_time_fine` ok rows, and passes the `partial160_bomfix` quality gate with zero physical sanity violations.
+- LightGBM retraining on the combined `partial160_bomfix` dataset now preserves all case IDs and has 0 invalid training rows, but still misses the R2 target with min R2 0.707122613402 and avg R2 0.817872689282.
 - Partial replay gate thresholds can now be computed deterministically with `summarize_ipmsm_partial_replay.py`, which matched live partial46 evidence and avoids manual kept-row threshold mistakes.
 - Future result rows now report AEDT `analysis=False` as the root failure before attempting report export, so retry triage can separate solver/validation failures from report parser/export failures.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
