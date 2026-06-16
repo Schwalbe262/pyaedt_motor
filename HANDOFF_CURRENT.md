@@ -38,7 +38,7 @@
 ## Last validation
 
 - 2026-06-15: `python -m py_compile ...` passed for ops and main Python entrypoints.
-- 2026-06-16: `python -m unittest discover -s tests` ran 151 tests and passed; touched-file py_compile with temp pycache and `git diff --check` passed.
+- 2026-06-16: `python -m unittest discover -s tests` ran 154 tests and passed; touched-file py_compile with temp pycache and `git diff --check` passed.
 - 2026-06-16: scheduler job 20 validated branch checkout/imports/case-plan checks; job 21 reached `run_ipmsm_batch.py` and wrote one structured failed row with `ModuleNotFoundError("No module named 'ansys'")`.
 - 2026-06-16: updated scheduler `/tasks` path with `account_name=r1jae262`, `env_profile=pyaedt2026v1`, and `module load ansys-electronics/v252` succeeded: task 18 setup-only 4/4 ok; task 22 analyze 1/1 ok with no missing required outputs.
 - 2026-06-16: latest `slurm_scheduler` main is `7d9ed52`; normal remote work should use `/tasks`, Git work `/tasks/git`, and `/jobs dynamic_packed_srun` for many-case packed simulation batches.
@@ -46,6 +46,7 @@
 - 2026-06-16: job 58 fixed-geometry next chunk is running on Slurm job 680506; result CSV still has 2/8 `ok` rows as of 08:57 KST: baseline and mesh_fine for `submit7_job664260_p009_case_0021`; `time_fine` is solving.
 - 2026-06-16: setup-only dynamic packed probe job 59 selected the expected one-row `SIMULATION_ID=1` CSV and wrote 1/1 `ok` row for baseline setup in 49.888s; scheduler status is now `completed`.
 - 2026-06-16: submitted next fixed replay window rows 13-20 via `dynamic_packed_srun`; scheduler created partial child coverage jobs 60/61 for 2/8 rows on `cpu2` nodes `n115`/`n110`, still queued without Slurm ids as of 09:02 KST.
+- 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
 - 2026-06-16: selected 200 fixed-geometry spread-sampled replay rows at `simul_log_smoke/replay_quality_cases_200.csv` from 13,550 eligible source rows.
@@ -99,7 +100,7 @@
 - Hardened simulation project naming against stale `simulation_num.txt` counters.
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
-- Scheduler helpers and quality analysis now support `/tasks/git` Git submissions, dry-run review manifests, selected-row slicing, partial-child coverage warnings, incomplete profile-group gates, and filtered Slurm log inspection.
+- Scheduler helpers and quality analysis now support `/tasks/git` Git submissions, dry-run review manifests, selected-row slicing, partial-child coverage warnings, incomplete/complete profile-group gates, and filtered Slurm log inspection.
 
 ## Risks and gotchas
 

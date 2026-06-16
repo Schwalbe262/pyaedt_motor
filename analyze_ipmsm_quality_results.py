@@ -153,6 +153,34 @@ def incomplete_group_issues(
     return issues
 
 
+def complete_group_keys(
+    rows: Iterable[dict[str, str]],
+    required_profiles: tuple[str, ...],
+) -> set[tuple[str, ...]]:
+    rows_by_group: dict[tuple[str, ...], list[dict[str, str]]] = {}
+    for row in rows:
+        rows_by_group.setdefault(group_key(row), []).append(row)
+
+    complete: set[tuple[str, ...]] = set()
+    for key, group_rows in rows_by_group.items():
+        complete_profiles = {
+            infer_quality_profile(row)
+            for row in group_rows
+            if infer_quality_profile(row) in required_profiles and row_has_complete_outputs(row)
+        }
+        if all(profile in complete_profiles for profile in required_profiles):
+            complete.add(key)
+    return complete
+
+
+def filter_complete_group_rows(
+    rows: list[dict[str, str]],
+    required_profiles: tuple[str, ...],
+) -> list[dict[str, str]]:
+    complete_keys = complete_group_keys(rows, required_profiles)
+    return [row for row in rows if group_key(row) in complete_keys]
+
+
 def format_incomplete_group_issues(issues: list[dict[str, str]], limit: int = 5) -> str:
     preview = []
     for issue in issues[:limit]:
@@ -486,6 +514,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail before writing outputs when any group is missing a required successful profile row.",
     )
+    parser.add_argument(
+        "--complete-groups-only",
+        action="store_true",
+        help="Analyze only groups that contain every required successful profile row; fail if none are complete.",
+    )
     return parser
 
 
@@ -499,11 +532,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.convergence_pct_tolerance < 0:
         parser.error("--convergence-pct-tolerance must be >= 0")
     rows = read_rows_from_paths(args.results)
-    if args.fail_on_incomplete_groups:
+    required_profiles: tuple[str, ...] = ()
+    if args.fail_on_incomplete_groups or args.complete_groups_only:
         try:
             required_profiles = parse_profiles(args.required_profiles or ",".join(QUALITY_PROFILES))
         except ValueError as exc:
             parser.error(str(exc))
+    if args.complete_groups_only:
+        before_rows = len(rows)
+        before_groups = len({group_key(row) for row in rows})
+        rows = filter_complete_group_rows(rows, required_profiles)
+        after_groups = len({group_key(row) for row in rows})
+        if not rows:
+            parser.error(f"no complete quality groups found among {before_groups} group(s)")
+        print(
+            f"Filtered complete quality groups: rows {before_rows}->{len(rows)} "
+            f"groups {before_groups}->{after_groups}"
+        )
+    if args.fail_on_incomplete_groups:
         issues = incomplete_group_issues(rows, required_profiles)
         if issues:
             parser.error(

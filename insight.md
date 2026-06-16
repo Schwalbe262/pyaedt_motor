@@ -451,3 +451,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `submit_ipmsm_scheduler_job.py` supports `dynamic_packed_srun`, records packed child jobs, and carries exact `account_name`; normal remote execution uses `submit_ipmsm_scheduler_task.py`.
 - Evidence: latest scheduler main `5215dbb` docs/source show `/jobs python_git` creates an attached task; helper tests cover dynamic packed payloads and child lookup; commit `e6d4f65` pushed the policy update.
 - Remaining risk: the live local scheduler may lag the latest repo; task 33 showed the older `~/.../task.sh` path expansion failure, so update/restart the scheduler before relying on `/tasks`.
+
+## 2026-06-16 09:08:41 +09:00 - Insight 48
+
+- Source loop: `note.md` Loop 50.
+- Improvement: interim mesh/time quality analysis should filter to complete fixed-geometry groups explicitly instead of either failing every partial file or analyzing incomplete groups.
+- Before: `--fail-on-incomplete-groups` correctly rejected partial scheduler outputs, but it also prevented scoped analysis once one source geometry completed while later groups were still running.
+- After: `analyze_ipmsm_quality_results.py --complete-groups-only` keeps only groups with every required successful profile, reports row/group filter counts, and fails before writing when no complete group remains.
+- Evidence: tests cover complete-group filtering and no-write failure; partial job 58 failed with no output, while complete job 57 wrote rows 4->4, groups 1->1 comparison/profile/convergence outputs.
+- Remaining risk: complete-group-only outputs are scoped interim evidence; broader geometry coverage and regression retraining are still required before changing production simulation settings.

@@ -212,6 +212,21 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
         self.assertEqual(issues[0]["present_profiles"], "baseline,mesh_fine")
         self.assertEqual(issues[0]["missing_profiles"], "mesh_fine,time_fine")
 
+    def test_filter_complete_group_rows_keeps_only_groups_with_required_successful_profiles(self) -> None:
+        rows = self.sample_rows()
+        rows.append(
+            {
+                **self.sample_rows()[0],
+                "case_id": "source_b_baseline",
+                "input_source_case_id": "source_b",
+                "input_quality_profile": "baseline",
+            }
+        )
+
+        filtered = quality_results.filter_complete_group_rows(rows, ("baseline", "mesh_fine"))
+
+        self.assertEqual([row["case_id"] for row in filtered], ["quality_baseline_beta_30p0", "quality_mesh_fine_beta_30p0"])
+
     def test_cli_rejects_negative_convergence_tolerance(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as error:
@@ -255,6 +270,75 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
 
         self.assertEqual(error.exception.code, 2)
         self.assertIn("incomplete quality group", stderr.getvalue())
+        self.assertFalse(output_path.exists())
+
+    def test_cli_complete_groups_only_filters_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_path = Path(tmp) / "results.csv"
+            output_path = Path(tmp) / "comparison.csv"
+            rows = self.sample_rows()
+            rows.append(
+                {
+                    **self.sample_rows()[0],
+                    "case_id": "source_b_baseline",
+                    "input_source_case_id": "source_b",
+                    "input_quality_profile": "baseline",
+                }
+            )
+            with results_path.open("w", encoding="utf-8-sig", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = quality_results.main(
+                    [
+                        "--results",
+                        str(results_path),
+                        "--output",
+                        str(output_path),
+                        "--required-profiles",
+                        "baseline,mesh_fine",
+                        "--complete-groups-only",
+                        "--fail-on-incomplete-groups",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertIn("groups 2->1", stdout.getvalue())
+            with output_path.open("r", encoding="utf-8-sig", newline="") as file:
+                comparison_rows = list(csv.DictReader(file))
+            self.assertEqual(len(comparison_rows), 2)
+            self.assertEqual({row["group_source_case_id"] for row in comparison_rows}, {"source_a"})
+
+    def test_cli_complete_groups_only_fails_without_writing_when_none_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_path = Path(tmp) / "results.csv"
+            output_path = Path(tmp) / "comparison.csv"
+            rows = self.sample_rows()[:1]
+            with results_path.open("w", encoding="utf-8-sig", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as error:
+                    quality_results.main(
+                        [
+                            "--results",
+                            str(results_path),
+                            "--output",
+                            str(output_path),
+                            "--required-profiles",
+                            "baseline,mesh_fine",
+                            "--complete-groups-only",
+                        ]
+                    )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("no complete quality groups", stderr.getvalue())
         self.assertFalse(output_path.exists())
 
     def test_cli_writes_filtered_comparison_csv(self) -> None:

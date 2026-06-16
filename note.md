@@ -667,3 +667,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no new completed simulation rows yet; jobs 60/61 have not reached Slurm submission and job 58 is still incomplete.
 - Next action: poll jobs 58, 60, and 61; once complete profile groups exist, run guarded quality analysis before drawing mesh/time conclusions.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:08:41 +09:00 - Loop 50
+
+- Part: complete-group-only quality analysis
+- Goal: make interim fixed-geometry quality analysis possible without allowing partial source groups to produce misleading conclusions.
+- Hypothesis: an explicit `--complete-groups-only` filter can analyze only source groups that contain every required successful profile while still failing when no complete group exists.
+- Actions: added complete-group detection and `--complete-groups-only` to `analyze_ipmsm_quality_results.py`; added unit tests for function filtering, CLI filtering, and no-write failure when no group is complete.
+- Candidates: wait for full job files only versus allow a scoped complete-group subset. Chose the scoped option because long scheduler jobs can finish one geometry before others, and the output now states the row/group filter count.
+- Metrics: `python -m unittest tests.test_analyze_ipmsm_quality_results` ran 14 tests and passed; full `python -m unittest discover -s tests` ran 154 tests and passed; py_compile passed; partial job 58 failed with `no complete quality groups found among 1 group(s)` and wrote no output; complete job 57 filtered rows 4->4 groups 1->1 and wrote comparison/profile/convergence outputs.
+- Result: operators can safely run interim analysis on complete fixed-geometry groups without weakening the incomplete-group guard.
+- Failure reason: job 58 still has only baseline/mesh_fine, so no new multi-geometry mesh/time conclusion or R2-improving retraining evidence.
+- Next action: commit/push the analysis helper, then continue polling jobs 58, 60, and 61.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
