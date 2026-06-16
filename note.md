@@ -654,3 +654,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: job 58 is still incomplete, so no new mesh/time quality conclusion or R2 improvement evidence.
 - Next action: commit/push this scheduler-policy checkpoint, then continue polling job 58 until complete profile groups are available for guarded analysis.
 - Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
+
+## 2026-06-16 09:02:40 +09:00 - Loop 49
+
+- Part: fixed replay scheduler continuation
+- Goal: use the updated scheduler path to start the next non-overlapping fixed-geometry replay window while job 58 continues.
+- Hypothesis: rows 13-20 of `replay_quality_cases_200.csv` can be submitted safely because rows 1-4 were covered by job 57 and rows 5-12 are covered by job 58.
+- Actions: checked rows 13-20, dry-ran `submit_ipmsm_scheduler_job.py` with `job_mode=dynamic_packed_srun`, `--case-start-index 13`, `--case-limit 8`, `--case-index-from-simulation-id`, and distinct next2 result/log names; submitted the request through `/jobs`.
+- Candidates: wait for job 58 before using more capacity versus submit the next non-overlapping window with partial child coverage tracking. Chose a small 8-row window to gain parallel evidence without duplicate rows.
+- Metrics: dry-run showed `scheduler_endpoint=/jobs`, 8 selected cases, and dynamic row dispatch enabled; live submit created child jobs 60 and 61 for 2/8 requested simulations with `simulation_start=1` and `2`, both queued on `cpu2` nodes `n115`/`n110` without Slurm ids after two polls; job 58 still has 2/8 `ok` rows.
+- Result: next fixed replay window is queued with explicit partial coverage, using the current `dynamic_packed_srun` policy.
+- Failure reason: no new completed simulation rows yet; jobs 60/61 have not reached Slurm submission and job 58 is still incomplete.
+- Next action: poll jobs 58, 60, and 61; once complete profile groups exist, run guarded quality analysis before drawing mesh/time conclusions.
+- Token usage: unavailable; local Codex SQLite token sampler is still unavailable.
