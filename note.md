@@ -1733,3 +1733,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: scheduler tasks 8152, 8153, 8157, 8159, and 8161 still report `running`, and the current de-duplicated data does not close the model-performance gap.
 - Next action: commit/push this checkpoint, keep polling until task statuses settle, then run final replay gate and retry triage without exceeding the approved 200-simulation guardrail.
 - Token usage: active goal counter reported 16,314,073 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 21:25:05 +09:00 - Loop 132
+
+- Part: scheduler policy refresh and post-200 partial215 gate
+- Goal: re-check the updated `slurm_scheduler` policy, capture the next replay advance, and keep GitHub checkpoints current.
+- Hypothesis: latest scheduler policy remains `/tasks` for existing remote work and `/tasks/git` for Git work; added rows should remain safe after de-dup/filtering but may add retry candidates.
+- Actions: committed/pushed the partial209 checkpoint, checked upstream `slurm_scheduler` main and local scheduler HEAD at `ae5298f`, confirmed `/api/health` and task capacity, narrowly polled known task IDs, saved all ten result CSVs as partial212 and then partial215, ran replay summarizer, raw quality, combined filter, filtered quality, deterministic LightGBM smoke retraining, failed-row extraction, and target-level R2 extraction.
+- Candidates: report only scheduler policy versus checkpoint the new replay rows. Chose checkpoint because result rows advanced from 209 to 215 and task 8152 completed.
+- Metrics: raw snapshots rows=215, ok=193, failed=22, duplicate retry rows=19, physical sanity violations=0; summarizer reported combined_kept=13380, combined_rejected=20, new_kept=176; filtered combined dataset rows=13,380 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=10,028, min R2=0.719673337647, avg R2=0.826506384882.
+- Result: scheduler policy remains `/tasks`, `/tasks/git`, `/api/tasks/git`, and `/jobs dynamic_packed_srun` for packed FEA; partial215 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`; failed replay row indexes are 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198.
+- Failure reason: scheduler tasks 8153, 8157, 8159, and 8161 still report `running`, and the current de-duplicated data does not close the model-performance gap.
+- Next action: commit/push this checkpoint, keep polling until task statuses settle, then run final replay gate and retry triage without exceeding the approved 200-simulation guardrail.
+- Token usage: active goal counter reported 16,421,353 tokens used; Codex SQLite token sampler remains unavailable.
