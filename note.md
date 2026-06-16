@@ -2019,3 +2019,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no new training run yet because the current active rows are still solving.
 - Next action: poll tasks 8582-8584, 8587-8591, and 8595-8602; keep explicit partial summaries current as rows complete.
 - Token usage: active goal counter reported 18,920,254 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 02:52:00 +09:00 - Loop 154
+
+- Part: n107 case 048 completion and single-case backfill.
+- Goal: keep n107 near eight active solver tasks while current batch2 evidence accumulates.
+- Hypothesis: a one-case n107 backfill is appropriate because case 048 completed ok and reduced active n107 solves to seven.
+- Actions: polled active tasks, fetched case 048 result, submitted case 064 as task 8603 with a unique result/log path, confirmed 8603 attached to allocation 64 / Slurm 680569, and recomputed the explicit partial gate.
+- Candidates: wait for more n107 completions versus backfill only the one freed slot. Chose one-case backfill to preserve the observed n107 wave size.
+- Metrics: case 048 completed `ok` in 2625.834s; explicit partial summary reached result_rows=48, ok=44, failed=4, duplicates=0, physical_sanity_violations=0.
+- Result: active work is n107 cases 049-055/064 and n114 cases 056-063, 16 tasks total.
+- Failure reason: current active rows remain incomplete, so retraining is not ready.
+- Next action: poll tasks 8583-8584, 8587-8591, 8603, and 8595-8602; update explicit partial summaries as rows complete.
+- Token usage: active goal counter reported 18,983,592 tokens used; Codex SQLite token sampler remains unavailable.
