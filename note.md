@@ -1811,3 +1811,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: scheduler capacity/account limits prevented creating the full 200 simulations in one request.
 - Next action: poll jobs 62-71 with filtered fields, fetch only result row/status summaries, then submit batch2 simulations 170-200 after capacity frees.
 - Token usage: active goal counter reported 17,391,734 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 22:30:06 +09:00 - Loop 138
+
+- Part: batch2 queued-state triage.
+- Goal: determine whether batch2 jobs 62-71 are stuck due to scheduler failure or waiting for valid Slurm placement.
+- Hypothesis: if the scheduler loop is healthy but no strict idle `cpu2` node exists, jobs should remain queued without Slurm ids until one of the pinned nodes becomes idle.
+- Actions: checked repo state and scheduler health, confirmed upstream `slurm_scheduler` main remains `1c493ad8`, polled jobs 62-71 twice, inspected account status and latest scheduler queue-placement code, read scheduler DB read-only for `cpu2` pestat/job placement summaries, and probed the remote batch2 result CSV through a safe relative scheduler file endpoint.
+- Candidates: submit simulations 170-200 immediately versus wait for current jobs to leave queued. Chose wait because simulations 1-169 have not reached Slurm yet and the scheduler already reported limited capacity.
+- Metrics: jobs 62-71 all remain `queued` with no Slurm ids or failure messages; `r1jae262` account snapshot reports running=4, pending=0, max_total=10; scheduler DB has 10 `cpu2` pestat rows with states `mix`=7, `drain`=1, `drng`=2, and 0 strict idle unoccupied `cpu2` nodes; `batch2_mtf200_results.csv` fetch returned 0 bytes.
+- Result: current blocker is Slurm placement capacity on `cpu2`, not an immediate scheduler submission error or missing result parser issue.
+- Failure reason: no idle `cpu2` node is currently available for the pinned packed jobs.
+- Next action: keep polling jobs 62-71 until Slurm ids appear, then start result-row/status summaries; submit remaining simulations 170-200 only after capacity frees.
+- Token usage: active goal counter reported 17,613,205 tokens used; Codex SQLite token sampler remains unavailable.

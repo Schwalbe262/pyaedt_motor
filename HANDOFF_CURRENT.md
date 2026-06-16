@@ -69,6 +69,7 @@
 - 2026-06-16: `/tasks/git` bootstrap now requires absolute `--remote-cases` when embedding a case CSV, because relative paths are written outside the cloned repo but execution runs inside it; `python -m unittest discover -s tests` passed 175 tests.
 - 2026-06-16: `select_ipmsm_replay_cases.py` can now exclude previous source IDs and numeric risk rules; `python -m unittest discover -s tests` passed 177 tests.
 - 2026-06-16: generated batch2 `mesh_time_fine` plan with 200 unique new sources, 0 overlap with batch1, and 0 rows matching the retry1 high-risk rule; submitted `/jobs dynamic_packed_srun` jobs 62-71 for 169/200 simulations, all queued initially.
+- 2026-06-16: jobs 62-71 remain queued with no Slurm ids because current scheduler DB shows no strict idle unoccupied `cpu2` node; `batch2_mtf200_results.csv` is still 0 bytes.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -91,11 +92,11 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is a per-batch/concurrency cap, so more batches may be submitted, but each batch still needs dry-run manifests, filtered result evidence, and no accidental duplicate case plans.
-- Batch2 is now partially submitted: scheduler created jobs 62-71 for simulations 1-169 and warned that simulations 170-200 need another dynamic request after capacity frees.
+- Batch2 is now partially submitted: scheduler created jobs 62-71 for simulations 1-169 and warned that simulations 170-200 need another dynamic request after capacity frees; current blocker is waiting for an idle `cpu2` node.
 
 ## Next steps
 
-1. Poll `/api/jobs/62`-`/api/jobs/71` with filtered fields; fetch `batch2_mtf200_results.csv` only as row/status summaries.
+1. Poll `/api/jobs/62`-`/api/jobs/71` with filtered fields until at least one Slurm id appears; fetch `batch2_mtf200_results.csv` only as row/status summaries.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
 4. Submit remaining batch2 simulations 170-200 only after scheduler capacity frees, using the same batch2 case CSV and dry-run manifest review.
