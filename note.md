@@ -1798,3 +1798,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: the repeated failed geometries still return AEDT `analysis=False`; this is now a simulation/geometry triage issue, not a scheduler bootstrap issue.
 - Next action: commit/push this checkpoint, then diagnose or exclude the repeated `analysis=False` geometry set before planning the next explicit <=200-concurrent simulation batch.
 - Token usage: active goal counter reported 17,122,671 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 22:22:10 +09:00 - Loop 137
+
+- Part: non-overlapping batch2 replay selection and dynamic packed submission.
+- Goal: continue beyond the first 200-case batch under the clarified 200-concurrent/batch cap while avoiding known repeated `analysis=False` geometry patterns.
+- Hypothesis: excluding previous source IDs plus the retry1 high-risk rules should create a non-overlapping 200-case `mesh_time_fine` batch with fewer deterministic AEDT `analysis=False` failures.
+- Actions: added selector support for `--exclude-source-case-ids` and repeated `--exclude-where` numeric rule groups, ran targeted selector tests and full tests, generated `simul_log_smoke/replay_quality_cases_mesh_time_fine_batch2_excluding_analysis_false_rule_200.csv`, verified 200 unique source IDs, 0 overlap with batch1, and 0 high-risk-rule rows, dry-ran `/jobs dynamic_packed_srun`, then submitted batch2 with the updated scheduler policy.
+- Candidates: submit another `/tasks/git` chunked batch versus use `/jobs dynamic_packed_srun`. Chose dynamic packed mode because the current scheduler docs reserve it for many-case FEA/RL batches and the remote work tree already runs the simulation entrypoints.
+- Metrics: selector scanned 13,748 rows, rejected 198 status rows, 346 physical sanity rows, 200 previous source IDs, and 1,668 high-risk-rule rows; eligible candidates=11,336; tests passed `tests.test_select_ipmsm_replay_cases` 7/7 and full suite 177/177; dry-run manifest had 200 embedded case rows; scheduler created jobs 62-71 covering 169/200 simulations and warned that 170-200 require another dynamic request after capacity frees.
+- Result: batch2 simulations 1-169 are queued as dynamic packed jobs 62-71; simulations 170-200 are not submitted yet.
+- Failure reason: scheduler capacity/account limits prevented creating the full 200 simulations in one request.
+- Next action: poll jobs 62-71 with filtered fields, fetch only result row/status summaries, then submit batch2 simulations 170-200 after capacity frees.
+- Token usage: active goal counter reported 17,391,734 tokens used; Codex SQLite token sampler remains unavailable.

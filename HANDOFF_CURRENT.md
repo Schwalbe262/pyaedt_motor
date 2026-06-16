@@ -30,7 +30,7 @@
 - `summarize_ipmsm_partial_replay.py`: computes partial replay counts and exact downstream gate thresholds from result CSVs.
 - `plan_ipmsm_quality_workflow.py`: writes a manual command plan for setup dry-run, quality analysis, filtering, gates, and retraining.
 - `train_ipmsm_lightgbm.py`: deterministic LightGBM training CLI with derived geometry input repair and recovered width-ratio feature.
-- `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the 200-solve guardrail.
+- `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the current 200-concurrent/batch cap.
 - `submit_ipmsm_scheduler_job.py` / `submit_ipmsm_scheduler_task.py`: dry-run-first Slurm Scheduler helpers for `/tasks/git`, `/tasks`, and `dynamic_packed_srun`.
 - `inspect_ipmsm_scheduler_job.py`: filtered scheduler job/task/status/log/result inspector.
 - `run_ipmsm_batch.py`: batch execution and result CSV writer.
@@ -67,6 +67,8 @@
 - 2026-06-16: `input_steps_per_period` is now a density-gated optional LightGBM feature; targeted train tests and full `python -m unittest discover -s tests` passed 174 tests.
 - 2026-06-16: user clarified 200 is a per-batch/concurrency cap, not a total lifetime simulation cap; retry1 tasks 8358-8361 completed 20/20 with repeated AEDT `analysis=False`.
 - 2026-06-16: `/tasks/git` bootstrap now requires absolute `--remote-cases` when embedding a case CSV, because relative paths are written outside the cloned repo but execution runs inside it; `python -m unittest discover -s tests` passed 175 tests.
+- 2026-06-16: `select_ipmsm_replay_cases.py` can now exclude previous source IDs and numeric risk rules; `python -m unittest discover -s tests` passed 177 tests.
+- 2026-06-16: generated batch2 `mesh_time_fine` plan with 200 unique new sources, 0 overlap with batch1, and 0 rows matching the retry1 high-risk rule; submitted `/jobs dynamic_packed_srun` jobs 62-71 for 169/200 simulations, all queued initially.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -89,14 +91,15 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is a per-batch/concurrency cap, so more batches may be submitted, but each batch still needs dry-run manifests, filtered result evidence, and no accidental duplicate case plans.
+- Batch2 is now partially submitted: scheduler created jobs 62-71 for simulations 1-169 and warned that simulations 170-200 need another dynamic request after capacity frees.
 
 ## Next steps
 
-1. Treat 200 as the maximum concurrent/batch simulation size; submit additional batches only from explicit case CSVs with dry-run manifests.
+1. Poll `/api/jobs/62`-`/api/jobs/71` with filtered fields; fetch `batch2_mtf200_results.csv` only as row/status summaries.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
-4. Fetch scheduler results through safe relative `/api/tasks/{id}/remote-file` paths and summarize rows/statuses only; do not dump full CSVs.
-5. For Git-backed scheduler work use `submit_ipmsm_scheduler_job.py` default `python_git`, which posts to `/tasks/git` and requires absolute `--remote-cases` when `--bootstrap-remote-cases` is used.
+4. Submit remaining batch2 simulations 170-200 only after scheduler capacity frees, using the same batch2 case CSV and dry-run manifest review.
+5. Fetch scheduler results through safe relative `/api/jobs/{id}/remote-file` or `/api/tasks/{id}/remote-file` paths and summarize rows/statuses only; do not dump full CSVs.
 6. Before retraining, run `filter_ipmsm_training_dataset.py`, filtered quality checks, and `.venv\Scripts\python.exe train_ipmsm_lightgbm.py` with the current combined CSV.
 7. Next simulation-quality work should diagnose or avoid the repeated `analysis=False` geometry set, then plan the next <=200-concurrent batch.
 
@@ -118,7 +121,6 @@
 
 ## Recent changes
 
-- Created canonical root project-memory files plus read-only Codex thread token accounting CLI.
 - Added deterministic IPMSM quality cases, mesh overrides, fixed-geometry replay selection, filtered comparison, profile summaries, convergence ranking, and workflow plans.
 - Added training dependency gates, training-ready dataset filtering, dataset quality gates, regression R2 verifiers, and deterministic LightGBM training.
 - Recovered/repair derived geometry inputs, added dense `input_steps_per_period`, and made optional inputs density-gated.
@@ -128,6 +130,7 @@
 - CSV readers tolerate double-BOM headers; partial replay summarizer computes exact duplicate/reject gate thresholds.
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
+- Replay selector can exclude previous source IDs and explicit numeric high-risk rules for non-overlapping follow-up batches.
 
 ## Risks and gotchas
 
