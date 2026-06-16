@@ -2201,3 +2201,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8654, 8666, 8670-8671, 8676-8677, and 8686-8687; when a slot opens, submit case 087 unless another earlier gap appears.
 - Token usage: active goal counter reported 19,571,531 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 05:40:00 +09:00 - Loop 168
+
+- Part: rescued case 073 completion and case 087 backfill.
+- Goal: close remaining rescued-case gaps while keeping n107 saturated.
+- Hypothesis: after rescued case 073 completed ok, the next new case should fill the single free n107 slot because case 074 is already active.
+- Actions: polled active tasks, fetched the case 073 result probe, recomputed explicit partial gates, dry-ran and submitted case 087 as task 8692, and confirmed it attached to allocation 64 / Slurm 680569.
+- Candidates: wait for case 074 versus submit case 087. Chose case 087 because case 074 is running and the free slot would otherwise sit idle.
+- Metrics: case 073 completed `ok` in 3420.386s; explicit partial summary reached result_rows=79, ok=75, failed=4, duplicates=0, physical_sanity_violations=0; n107 returned to 8 running tasks.
+- Result: active n107 work is cases 081-087 plus rescued case 074 on allocation 64 / Slurm 680569.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8666, 8670-8671, 8676-8677, 8686-8687, and 8692; when a slot opens, submit case 088 unless another earlier gap appears.
+- Token usage: active goal counter reported 19,585,982 tokens used; Codex SQLite token sampler remains unavailable.
