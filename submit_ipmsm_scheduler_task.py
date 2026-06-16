@@ -44,6 +44,8 @@ def build_task_payload(args: argparse.Namespace) -> dict[str, Any]:
         "exclusive_node": args.exclusive_node,
         "cpus": args.cpus,
         "memory_mb": args.memory_mb,
+        "scheduling_profile": args.scheduling_profile,
+        "max_workers_per_node": args.max_workers_per_node,
         "gpus": args.gpus,
         "gpu_model": args.gpu_model,
     }
@@ -117,6 +119,8 @@ def selected_submit_task_fields(task: dict[str, Any]) -> dict[str, Any]:
         "stderr_path",
         "return_code",
         "failure_message",
+        "scheduling_profile",
+        "max_workers_per_node",
         "created_at",
         "started_at",
         "updated_at",
@@ -173,6 +177,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--exclusive-node", action="store_true")
     parser.add_argument("--cpus", type=int, default=4)
     parser.add_argument("--memory-mb", type=int, default=16_384)
+    parser.add_argument("--scheduling-profile", choices=("standard", "fea_bursty"), default="standard")
+    parser.add_argument("--max-workers-per-node", type=int, default=0)
     parser.add_argument("--gpus", type=int, default=0)
     parser.add_argument("--gpu-model", default="")
     parser.add_argument("--timeout", type=float, default=10.0)

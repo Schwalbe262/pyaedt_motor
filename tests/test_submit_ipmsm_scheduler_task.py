@@ -48,6 +48,8 @@ def task_args(**overrides: object) -> Namespace:
         "exclusive_node": False,
         "cpus": 8,
         "memory_mb": 16384,
+        "scheduling_profile": "standard",
+        "max_workers_per_node": 0,
         "gpus": 0,
         "gpu_model": "",
         "timeout": 10.0,
@@ -77,6 +79,16 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         self.assertEqual(payload["account_name"], "r1jae262")
         self.assertEqual(payload["env_profile"], "pyaedt2026v1")
         self.assertEqual(payload["memory_mb"], 16384)
+        self.assertEqual(payload["scheduling_profile"], "standard")
+        self.assertEqual(payload["max_workers_per_node"], 0)
+
+    def test_build_task_payload_supports_fea_bursty_profile(self) -> None:
+        payload = scheduler_task.build_task_payload(
+            task_args(scheduling_profile="fea_bursty", max_workers_per_node=200)
+        )
+
+        self.assertEqual(payload["scheduling_profile"], "fea_bursty")
+        self.assertEqual(payload["max_workers_per_node"], 200)
 
     def test_validate_task_request_requires_remote_cwd(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "--remote-cwd"):
