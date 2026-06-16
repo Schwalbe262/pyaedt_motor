@@ -61,8 +61,8 @@
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
 - 2026-06-16: scheduler API refused a fetch after task 8159, later timed out after partial189, and timed out during partial207 status sampling; local WSL scheduler web process was restarted each time, `/api/health` recovered, and no Slurm task was cancelled or modified.
-- 2026-06-16: production replay snapshots now have 216 fetched rows including retry duplicates; raw partial has 194 `ok`, 22 failed, and 19 retry duplicates, while `partial216_bomfix` keeps 13,381 rows with no blank/duplicate case IDs and no physical-sanity violations.
-- 2026-06-16: tasks 8163, 8152, 8154, 8155, 8156, 8158, and 8161 are completed, while tasks 8153, 8157, and 8159 still report `running`; updated `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial216_bomfix.csv --disable-tuning` includes dense `input_steps_per_period` and still misses target with min R2 0.723086116932, avg 0.827271417400.
+- 2026-06-16: final production replay snapshots have 219 fetched rows including retry duplicates; de-dup leaves 200 unique attempts with 180 usable `mesh_time_fine` rows and 20 failed AEDT `analysis=False` cases; `partial219_bomfix` keeps 13,384 rows with no blank/duplicate case IDs and no physical-sanity violations.
+- 2026-06-16: tasks 8163, 8152-8159, and 8161 are all completed; updated `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial219_bomfix.csv --disable-tuning` includes dense `input_steps_per_period` but still misses target with min R2 0.702267396206, avg 0.817799856322.
 - 2026-06-16: `run_ipmsm_batch.py` now fails future `analysis=False` rows with an explicit AEDT analysis-returned-false error before report export; `python -m unittest discover -s tests` passed 174 tests.
 - 2026-06-16: `input_steps_per_period` is now a density-gated optional LightGBM feature; targeted train tests and full `python -m unittest discover -s tests` passed 174 tests.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
@@ -85,17 +85,17 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler reaches AEDT; current blocker is waiting for the remaining production replay rows, then filtering and retraining; failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 are retry candidates after the 200-run guardrail is reviewed.
+- Scheduler reaches AEDT; current blocker is final triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 need retry approval because the approved 200 unique simulation attempts are already exhausted, and the combined dataset still misses the R2 target.
 
 ## Next steps
 
-1. Poll remaining running production replay tasks 8153, 8157, and 8159 plus completed result files for 8152, 8154-8156, 8158, 8161, and 8163; do not use failed task 8151 or cancelled duplicate 8160.
+1. Do not submit more Ansys solves without explicit approval; the final replay used 200 unique attempts and any retry of the 20 failed rows exceeds the current guardrail.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Use `simul_log_smoke/remote_ps_task_complete5_*` plus `remote_ps_task_mid5_*` as current fixed-geometry evidence; `mesh_time_fine` remains the selected profile.
 4. Fetch only the ten `simul_log_scheduler/mtf200_task_*_results.csv` files through `/api/tasks/{id}/remote-file`; the local `001_020` retry snapshot currently contains duplicate rows, so rely on `filter_ipmsm_training_dataset.py` de-dup evidence before retraining.
 5. For Git-backed scheduler work use `submit_ipmsm_scheduler_job.py` default `python_git`, which now posts to `/tasks/git`; use `/jobs` only for packed simulation modes.
 6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`, then use `.venv\Scripts\python.exe train_ipmsm_lightgbm.py`.
-7. For material production-replay increments, run `summarize_ipmsm_partial_replay.py` first, then raw quality, filter, filtered quality, and LightGBM smoke gates.
+7. For any approved retry or production-replay increment, run `summarize_ipmsm_partial_replay.py` first, then raw quality, filter, filtered quality, and LightGBM smoke gates.
 
 ## Token/context policy
 

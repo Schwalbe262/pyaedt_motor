@@ -1772,3 +1772,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: the improvement is real but small; the R2 target remains unmet and remaining replay tasks 8153, 8157, and 8159 still need final settlement.
 - Next action: commit/push this code checkpoint, poll remaining tasks, then rerun final replay gates and retry triage.
 - Token usage: active goal counter reported 16,729,911 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 21:46:34 +09:00 - Loop 135
+
+- Part: final production replay partial219 gate
+- Goal: capture the settled 200-unique-attempt replay after all valid scheduler tasks completed.
+- Hypothesis: all task result files should now be complete; de-duplication should leave exactly the approved 200 unique attempts, with failed rows excluded before retraining.
+- Actions: verified branch push state and scheduler health, observed tasks 8157 and 8159 complete and then saved all ten result CSVs after task 8153 reached 20 rows, ran replay summarizer, raw quality, combined filter, filtered quality, updated-feature LightGBM smoke retraining, failed-row extraction, target-level R2 extraction, and final task status sampling.
+- Candidates: checkpoint partial218 versus saved partial219. Chose partial219 because the fetch captured the final 20th row from task 8153 and all ten valid tasks reported completed.
+- Metrics: raw snapshots rows=219, ok=197, failed=22, duplicate retry rows=19, physical sanity violations=0; de-dup leaves 200 unique attempts with 180 usable new `mesh_time_fine` rows and 20 unique failed rows; summarizer reported combined_kept=13384, combined_rejected=20, new_kept=180; filtered combined dataset rows=13,384 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=10,030, min R2=0.702267396206, avg R2=0.817799856322.
+- Result: final production replay remains training-ready after filtering and all scheduler tasks completed, but all targets still miss `R^2 >= 0.95`; failed replay row indexes remain 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198.
+- Failure reason: the approved 200 unique simulation attempts are exhausted and the current de-duplicated data does not close the model-performance gap.
+- Next action: commit/push this final replay checkpoint, then request explicit approval before any retry solves; if approved, use updated scheduler policy and current pushed code for retry submission.
+- Token usage: active goal counter reported 16,752,141 tokens used; Codex SQLite token sampler remains unavailable.
