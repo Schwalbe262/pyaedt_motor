@@ -2136,3 +2136,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, and case 074 still needs a future n107 or recovered-n114 submission.
 - Next action: poll tasks 8639-8641, 8649-8651, and 8653-8654; submit case 074 first when the next n107 slot opens.
 - Token usage: active goal counter reported 19,393,162 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 04:56:00 +09:00 - Loop 163
+
+- Part: fallback-node smoke triage and API recovery.
+- Goal: determine whether available non-n107 allocations can safely expand batch2 throughput without mixing in unqualified nodes.
+- Hypothesis: setup-only smoke is required before using fallback nodes for analyze tasks.
+- Actions: checked n107/n114 capacity, identified fallback allocations n108/n109/n110/n115, submitted setup-only smoke tasks 8662-8665, inspected scheduler DB allocation ownership, cancelled those queued smoke tasks before attach, recovered a local scheduler API timeout by restarting only the WSL web process, and re-polled active n107 tasks.
+- Candidates: use fallback nodes immediately versus validate first. Chose validate first, then cancel because allocations 186-189 are occupied by unrelated `crypto-sweep` tasks and pending GPU allocations are not appropriate FEA evidence.
+- Metrics: active n107 task set stayed at 8 running tasks on allocation 64 / Slurm 680569; smoke tasks 8662-8665 were cancelled from `queued`; API health recovered after local web PID restart.
+- Result: no new simulation result rows; current partial evidence remains result_rows=71, ok=67, failed=4, duplicates=0, physical_sanity_violations=0.
+- Failure reason: active n107 solves are still running, and no validated extra node capacity is available.
+- Next action: continue polling tasks 8639-8641, 8649-8651, and 8653-8654; submit case 074 first when a safe slot opens.
+- Token usage: active goal counter reported 19,501,399 tokens used; Codex SQLite token sampler remains unavailable.

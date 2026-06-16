@@ -102,6 +102,7 @@
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is a per-batch/concurrency cap, so more batches may be submitted, but each batch still needs dry-run manifests, filtered result evidence, and no accidental duplicate case plans.
 - Batch2 is running through attached `fea_bursty` tasks after packed jobs 62-71 were cancelled before Slurm submission; current blocker is waiting for n107 tasks 8639-8641/8649-8651/8653-8654.
+- Fallback allocations n108/n109/n110/n115 are occupied by unrelated `crypto-sweep` tasks; setup-only smoke tasks 8662-8665 were cancelled before running.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
 - n114/allocation 42 failed earlier without the Ansys module, but module setup-only smoke task 8545 passed; use n114 only with explicit module env setup and filtered result evidence.
 - `/tasks` analyze submissions must include explicit `--env-setup "module load ansys-electronics/v252"`; `env_profile=pyaedt2026v1` alone caused tasks 8513-8520 to fail before AEDT discovery.
@@ -143,7 +144,7 @@
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
 - Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating, Ansys module guards, and per-wave filtered result probes.
-- Partial batch2 evidence is now result_rows=71, ok=67, failed=4, duplicates=0; n107 cases 069-071 are `ok`, n114 queued cases 072-074 were cancelled before running, and cases 072-073 were resubmitted to n107 as tasks 8653-8654.
+- Partial batch2 evidence is now result_rows=71, ok=67, failed=4, duplicates=0; n107 cases 069-071 are `ok`, n114 queued cases 072-074 were cancelled before running, cases 072-073 were resubmitted to n107 as tasks 8653-8654, and fallback-node smoke 8662-8665 was cancelled before attach.
 
 ## Risks and gotchas
 
