@@ -1889,3 +1889,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no new result rows have completed yet, and wall time is now above prior first-batch max elapsed.
 - Next action: keep polling 8448-8463, aggregate only completed n107 result rows, and decide next wave size from actual elapsed/failure outcomes.
 - Token usage: active goal counter reported 18,144,136 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 00:30:38 +09:00 - Loop 144
+
+- Part: module-corrected n107 retry submission.
+- Goal: recover batch2 cases 17-24 after n114 infrastructure failures without polluting quality evidence.
+- Hypothesis: retry failures on n107 were caused by missing `module load ansys-electronics/v252` in `env_setup`, not by geometry or node capacity.
+- Actions: completed polling tasks 8448-8463, summarized 15 `ok` rows and one `analysis_returned_false=True` failure, verified task 001 manifest included the Ansys module while retry manifests did not, ran module setup-only smoke task 8522 for case 17, then submitted corrected analyze tasks 8524-8531 with explicit module env setup.
+- Candidates: keep retrying with `env_profile` only versus require explicit module setup. Chose explicit module setup because tasks 8513-8520 failed 8/8 with AEDT discovery errors, while smoke task 8522 passed 1/1 `ok`.
+- Metrics: n107 first wave ok elapsed range was 4385.824-5517.626s; tasks 8513-8520 failed 8/8 in about 1.39-1.54s with `AEDT is not installed`; task 8522 setup-only passed in 20.346s; tasks 8524-8531 attached to allocation 64 / Slurm 680569 and reached `Solving design setup`.
+- Result: corrected retry wave for cases 17-24 is running with reproducible Ansys module setup; module-missing rows are infrastructure-only evidence.
+- Failure reason: the earlier retry omitted the required Ansys module env setup.
+- Next action: poll tasks 8524-8531 and aggregate only corrected module retry rows with the 15 ok rows from tasks 8448-8463.
+- Token usage: active goal counter reported 18,323,442 tokens used; Codex SQLite token sampler remains unavailable.

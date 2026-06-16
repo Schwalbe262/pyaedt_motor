@@ -586,3 +586,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: n114/allocation 42 is excluded from analyze submissions until setup-only smoke passes there, and its failed batch2 rows are classified as infrastructure-only evidence.
 - Evidence: node-pinned tasks 8472-8479 all attached to allocation 42 / Slurm 680403 and completed with `AEDT is not installed on your system` result-row failures in about 1.35-1.41s.
 - Remaining risk: other nodes may also differ in Ansys visibility; future node expansion should start with one setup-only or one low-risk analyze smoke before an 8+ task wave.
+
+## 2026-06-17 00:30:38 +09:00 - Insight 63
+
+- Source loop: `note.md` Loop 144.
+- Improvement: every fresh `/tasks` AEDT submission must carry explicit `module load ansys-electronics/v252` in `env_setup`; do not rely on `env_profile` or allocation history.
+- Before: retry tasks 8513-8520 used `env_profile=pyaedt2026v1` but omitted the Ansys module, causing fast AEDT discovery failures even on n107.
+- After: task 8522 setup-only smoke included the module and passed, and corrected analyze tasks 8524-8531 were submitted with the same module setup.
+- Evidence: first-wave manifest included the module and produced 15 `ok` analyze rows; module-missing retry tasks failed 8/8 with `AEDT is not installed`; module smoke task 8522 passed 1/1 `ok` in 20.346s.
+- Remaining risk: corrected analyze tasks 8524-8531 are still running, so their solve quality and elapsed distribution remain pending.
