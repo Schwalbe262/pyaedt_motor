@@ -2253,3 +2253,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8716, 8722-8723, and 8729-8733; when a slot opens, submit case 096.
 - Token usage: active goal counter reported 19,694,135 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 07:18:00 +09:00 - Loop 172
+
+- Part: n107 active-wave monitoring with no new result rows.
+- Goal: distinguish a long solve from a stalled task without cancelling valid AEDT work.
+- Hypothesis: case 088 is still legitimately solving, not stuck in wrapper setup.
+- Actions: repeatedly polled tasks 8716, 8722-8723, and 8729-8733; inspected case 088 process log tail through a bounded remote-file request; avoided additional submissions while n107 stayed at eight running tasks.
+- Candidates: cancel or replace long-running case 088 versus continue waiting. Chose continue because the process log showed `Solving design setup PPT_Transient` and no failure marker.
+- Metrics: active n107 set remained eight running tasks for cases 088-095; no new result rows after partial summary result_rows=87, ok=83, failed=4.
+- Result: no state change requiring a new summary; current active tasks are unchanged.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8716, 8722-8723, and 8729-8733; when a slot opens, fetch the completed result and submit case 096.
+- Token usage: active goal counter reported 19,912,296 tokens used; Codex SQLite token sampler remains unavailable.
