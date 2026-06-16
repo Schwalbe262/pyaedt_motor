@@ -1070,3 +1070,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: this improves validation reliability but does not complete the 200-row replay or raise R2 to the target.
 - Next action: use the summarizer before the next partial/full gate run, keep polling production tasks, and retrain when rows materially advance.
 - Token usage: active goal counter reported 11,082,402 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 16:08:44 +09:00 - Loop 81
+
+- Part: production replay partial50 gate
+- Goal: validate the next material production replay advance using the new threshold summarizer.
+- Hypothesis: the summarizer should prevent manual threshold mistakes and the new rows should remain training-ready after failed rows and retry duplicates are filtered.
+- Actions: confirmed the pushed summarizer checkpoint; polled tasks 8152-8159, 8161, and 8163; refreshed only the ten remote result CSVs; ran `summarize_ipmsm_partial_replay.py`; ran raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining with summarizer-derived thresholds; extracted failed row identities.
+- Candidates: reuse old partial46 gates versus compute thresholds from current CSV contents. Chose computed thresholds because row/failed/duplicate counts changed.
+- Metrics: raw snapshots rows=50, ok=47, failed=3, duplicate retry rows=4, physical sanity violations=0; summarizer reported combined_kept=13247, combined_rejected=3, new_kept=43; filtered combined dataset rows=13,247, blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,942, min R2=0.713417353843, avg R2=0.813691878484; failed replay indexes are 63, 67, and 123, all missing required transient output metrics.
+- Result: partial50 is training-ready after filtering, but all regression targets still miss `R^2 >= 0.95`.
+- Failure reason: the production replay is still incomplete, and three failed rows require later retry review under the 200-run guardrail.
+- Next action: continue polling running tasks, use the summarizer before each gate run, and after completion decide retry handling for failed row indexes 63, 67, and 123.
+- Token usage: active goal counter reported 11,193,999 tokens used; Codex SQLite token sampler remains unavailable.
