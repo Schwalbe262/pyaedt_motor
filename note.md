@@ -1213,3 +1213,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: this does not repair the already-running task rows; it only improves future/retry failure evidence.
 - Next action: commit/push the classification fix, then continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 12,055,138 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 17:04:30 +09:00 - Loop 92
+
+- Part: production replay partial85 gate
+- Goal: validate the next material replay advance after the analysis-false classification fix was pushed.
+- Hypothesis: new `mesh_time_fine` ok rows should continue to pass strict gates, and the R2 trend may improve but remain below target until the full replay finishes.
+- Actions: waited for scheduler progress, refreshed ten result CSVs through `/api/tasks/{id}/remote-file`, counted status rows, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: skip validation until task completion versus validate a 7-row increment. Chose validation because row count and duplicate retry count changed materially.
+- Metrics: raw snapshots rows=85, ok=77, failed=8, duplicate retry rows=7, physical sanity violations=0; summarizer reported combined_kept=13274, combined_rejected=8, new_kept=70; filtered combined dataset rows=13,274 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,956, min R2=0.725556041793, avg R2=0.821848444227.
+- Result: partial85 remains training-ready after filtering, and R2 improved versus partial78 but still misses `R^2 >= 0.95` for all 8 targets.
+- Failure reason: production replay remains incomplete and current partial data is not sufficient for the final target.
+- Next action: commit/push this checkpoint, continue polling running tasks 8152-8159, 8161, and 8163, and review retry handling after the 200-row submission finishes.
+- Token usage: active goal counter reported 12,125,484 tokens used; Codex SQLite token sampler remains unavailable.
