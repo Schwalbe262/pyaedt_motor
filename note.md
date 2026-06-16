@@ -1928,3 +1928,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: analyze result quality and elapsed for both current waves are still pending.
 - Next action: poll tasks 8524-8531 and 8546-8553, then choose the next wave size from completed rows.
 - Token usage: active goal counter reported 18,480,501 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 01:10:38 +09:00 - Loop 147
+
+- Part: current module wave monitoring.
+- Goal: verify the n107/n114 module analyze waves are actually solving before submitting any more work.
+- Hypothesis: after module setup correction, running tasks should show active `solver2d` processes rather than silent wrapper stalls or AEDT discovery failures.
+- Actions: polled tasks 8524-8531 and 8546-8553, fetched nonzero result summaries, and submitted diagnostic tasks 8557/8558 to summarize solver process counts on n107 and n114.
+- Candidates: submit more batch2 cases versus wait. Chose wait because 15 tasks are still solving and one n114 row already hit AEDT `analysis=False`.
+- Metrics: task status at 01:09 KST was 15 running and 1 completed; only case 031 had a result row, failed with `analysis_returned_false=True` in 69.694s; diagnostic 8557 reported n107 `solver2d_count=8`, avg_pcpu=49.24; diagnostic 8558 reported n114 `solver2d_count=7`, avg_pcpu=56.23.
+- Result: both current module waves are actively computing; no additional analyze submissions should be made until these rows finish.
+- Failure reason: current wave results are still incomplete.
+- Next action: continue polling module result CSV summaries and aggregate ok/analysis-false rows after completion.
+- Token usage: active goal counter reported 18,504,941 tokens used; Codex SQLite token sampler remains unavailable.
