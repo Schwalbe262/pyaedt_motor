@@ -94,8 +94,9 @@
 - Five valid fixed-geometry groups now show only `mesh_time_fine` within convergence tolerance; it costs about 1.46x baseline runtime in this sample.
 - Job 59 validated dynamic packed row dispatch for setup-only work: `SIMULATION_ID=1` selected the expected single replay row and produced 1/1 `ok` baseline setup in 49.888s.
 - `mesh_time_mid` was tested on the same 5 source geometries and rejected: it was not within tolerance, had max delta 11.8041% versus `mesh_time_fine`, and was not meaningfully faster.
+- A 200-row `mesh_time_fine` production replay is now submitted through the updated scheduler `/tasks` path against the existing remote work tree; valid running task ids are 8152-8159, 8161, and 8163.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
-- Next focus is a bounded `mesh_time_fine` production replay from the 200-row physical-sanity plan, followed by dataset filtering and retraining in the proper ML environment.
+- Next focus is polling the submitted `mesh_time_fine` replay, filtering completed result rows, and retraining in the proper ML environment.
 
 ## Later Milestones
 

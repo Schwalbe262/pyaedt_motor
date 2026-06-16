@@ -940,3 +940,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: this still has no new 200-row training dataset or R2 improvement evidence.
 - Next action: commit/push the evidence notes, dry-run the next scheduler submission through the updated `/jobs dynamic_packed_srun` policy, then submit a bounded `mesh_time_fine` batch if capacity and guardrails are acceptable.
 - Token usage: active goal counter reported 9,638,991 tokens used; local Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 14:19:39 +09:00 - Loop 71
+
+- Part: 200-row `mesh_time_fine` production replay submission
+- Goal: send the selected high-quality replay dataset to the updated Slurm Scheduler without direct Slurm calls or raw API dumps.
+- Hypothesis: `/jobs dynamic_packed_srun` is the documented many-FEA path, but because `r1jae262` Slurm job slots are full, `/tasks` chunks against the existing remote working tree can start immediately on warm allocations.
+- Actions: checked the latest GitHub scheduler README policy, verified the running WSL scheduler checkout is latest main `7d9ed52`, dry-ran a 200-row `/jobs dynamic_packed_srun` payload, checked account capacity, cancelled stale completed mid-profile tasks 8144-8148, submitted ten 20-row `/tasks` chunks, cancelled duplicate task 8160, refreshed stale allocations, and resubmitted failed range 001-020 as task 8163.
+- Candidates: submit one 200-row packed job, submit all rows as one attached task, or split into attached 20-row chunks. Chose ten chunks because packed Slurm slots were saturated while attached-task capacity was available, and one process per chunk limits concurrency to about ten solves.
+- Metrics: valid running production tasks are 8152-8159, 8161, and 8163; failed task 8151 hit expired Slurm job 680564 before any result rows; cancelled duplicate 8160 before execution; verified remote case CSV for 021-040 has the expected header and 20 selected replay rows; current result summaries have 0 rows because solves have just started.
+- Result: all 200 planned `mesh_time_fine` replay rows have active scheduler coverage through `/tasks` on account `r1jae262`.
+- Failure reason: no production result rows are complete yet, so dataset filtering and R2 retraining remain blocked on AEDT completion.
+- Next action: poll task result summaries with `inspect_ipmsm_scheduler_job.py --task`; fetch only completed `mtf200_task_*_results.csv` files, then run physical-sanity filtering and LightGBM retraining in the ML environment.
+- Token usage: active goal counter last reported 9,638,991 tokens used; local Codex SQLite token sampler remains unavailable.
