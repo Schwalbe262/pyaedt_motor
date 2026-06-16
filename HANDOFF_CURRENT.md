@@ -61,8 +61,8 @@
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
 - 2026-06-16: scheduler API refused a fetch after task 8159, later timed out after partial189, and timed out during partial207 status sampling; local WSL scheduler web process was restarted each time, `/api/health` recovered, and no Slurm task was cancelled or modified.
-- 2026-06-16: production replay snapshots now have 215 fetched rows including retry duplicates; raw partial has 193 `ok`, 22 failed, and 19 retry duplicates, while `partial215_bomfix` keeps 13,380 rows with no blank/duplicate case IDs and no physical-sanity violations.
-- 2026-06-16: tasks 8163, 8152, 8154, 8155, 8156, and 8158 are completed, while tasks 8153, 8157, 8159, and 8161 still report `running`; `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial215_bomfix.csv --disable-tuning` still misses target with min R2 0.719673337647, avg 0.826506384882.
+- 2026-06-16: production replay snapshots now have 216 fetched rows including retry duplicates; raw partial has 194 `ok`, 22 failed, and 19 retry duplicates, while `partial216_bomfix` keeps 13,381 rows with no blank/duplicate case IDs and no physical-sanity violations.
+- 2026-06-16: tasks 8163, 8152, 8154, 8155, 8156, 8158, and 8161 are completed, while tasks 8153, 8157, and 8159 still report `running`; `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial216_bomfix.csv --disable-tuning` still misses target with min R2 0.721111975302, avg 0.826273728953.
 - 2026-06-16: `run_ipmsm_batch.py` now fails future `analysis=False` rows with an explicit AEDT analysis-returned-false error before report export; `python -m unittest discover -s tests` passed 174 tests.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
@@ -88,7 +88,7 @@
 
 ## Next steps
 
-1. Poll remaining running production replay tasks 8153, 8157, 8159, and 8161 plus completed result files for 8152, 8154-8156, 8158, and 8163; do not use failed task 8151 or cancelled duplicate 8160.
+1. Poll remaining running production replay tasks 8153, 8157, and 8159 plus completed result files for 8152, 8154-8156, 8158, 8161, and 8163; do not use failed task 8151 or cancelled duplicate 8160.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Use `simul_log_smoke/remote_ps_task_complete5_*` plus `remote_ps_task_mid5_*` as current fixed-geometry evidence; `mesh_time_fine` remains the selected profile.
 4. Fetch only the ten `simul_log_scheduler/mtf200_task_*_results.csv` files through `/api/tasks/{id}/remote-file`; the local `001_020` retry snapshot currently contains duplicate rows, so rely on `filter_ipmsm_training_dataset.py` de-dup evidence before retraining.

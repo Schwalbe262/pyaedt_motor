@@ -1746,3 +1746,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: scheduler tasks 8153, 8157, 8159, and 8161 still report `running`, and the current de-duplicated data does not close the model-performance gap.
 - Next action: commit/push this checkpoint, keep polling until task statuses settle, then run final replay gate and retry triage without exceeding the approved 200-simulation guardrail.
 - Token usage: active goal counter reported 16,421,353 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 21:32:36 +09:00 - Loop 133
+
+- Part: post-200 partial216 gate and model-ceiling probe
+- Goal: checkpoint the next completed-row advance and test whether simple LightGBM/outlier settings can explain the R2 gap.
+- Hypothesis: the added row should preserve strict gates, while 20-trial tuning and outlier-policy probes can separate model-capacity issues from simulation-data issues.
+- Actions: compared `keep-output-outliers`, IQR 3.0, and 20-trial tuned LightGBM runs on partial215, observed task 8161 completion and live count 216, fetched and saved all ten result CSVs as partial216, ran replay summarizer, raw quality, combined filter, filtered quality, deterministic LightGBM smoke retraining, failed-row extraction, target-level R2 extraction, and task status sampling.
+- Candidates: wait for all remaining tasks before another checkpoint versus checkpoint partial216 because a task completed. Chose checkpoint because the completed task changed current-state handoff and all gate outputs are exact.
+- Metrics: raw snapshots rows=216, ok=194, failed=22, duplicate retry rows=19, physical sanity violations=0; summarizer reported combined_kept=13381, combined_rejected=20, new_kept=177; filtered combined dataset rows=13,381 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=10,028, min R2=0.721111975302, avg R2=0.826273728953; partial215 20-trial tuned min R2=0.736641390716, avg R2=0.826899509905.
+- Result: partial216 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`; failed replay row indexes remain 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198; simple model/outlier probes do not close the gap.
+- Failure reason: scheduler tasks 8153, 8157, and 8159 still report `running`, and the current de-duplicated data does not close the model-performance gap.
+- Next action: commit/push this checkpoint, keep polling until task statuses settle, then run final replay gate and retry triage without exceeding the approved 200-simulation guardrail.
+- Token usage: active goal counter reported 16,571,731 tokens used; Codex SQLite token sampler remains unavailable.
