@@ -2123,3 +2123,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active/queued rows are incomplete, so retraining remains premature.
 - Next action: poll tasks 8627-8629, 8639-8641, 8649-8650, 8630, and 8632-8633; fetch only completed result probes and keep n114 submissions paused until pressure clears.
 - Token usage: active goal counter reported 19,214,858 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 04:40:00 +09:00 - Loop 162
+
+- Part: n107 case 069-071 completion, n114 queue cancellation, and n107 rescue submissions.
+- Goal: keep batch2 progress deterministic without letting soft-blocked n114 queued tasks block n107 scheduling.
+- Hypothesis: cancelling n114 queued-only tasks is safe because they had no allocation, and resubmitting cases 072-073 to n107 avoids skipped source cases.
+- Actions: fetched result probes for cases 069-071, recomputed explicit partial gates, restarted only the local WSL scheduler web process after API timeouts, cancelled queued n114 tasks 8630/8632/8633, confirmed case 080 task 8651 attached to n107, and submitted cases 072-073 as n107 tasks 8653-8654.
+- Candidates: leave n114 tasks queued versus cancel and resubmit to n107. Chose cancel/resubmit because queued task diagnostics were timing out and n114 remained soft-blocked.
+- Metrics: cases 069-071 completed `ok` in 3842.629s, 3509.56s, and 3711.952s; explicit partial summary reached result_rows=71, ok=67, failed=4, duplicates=0, physical_sanity_violations=0; n107 active set returned to 8 running tasks.
+- Result: active n107 work is cases 075-080 and rescued cases 072-073 on allocation 64 / Slurm 680569; n114 queued tasks 072-074 are cancelled and should not be counted as result evidence.
+- Failure reason: active rows are still solving, and case 074 still needs a future n107 or recovered-n114 submission.
+- Next action: poll tasks 8639-8641, 8649-8651, and 8653-8654; submit case 074 first when the next n107 slot opens.
+- Token usage: active goal counter reported 19,393,162 tokens used; Codex SQLite token sampler remains unavailable.
