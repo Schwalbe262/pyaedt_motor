@@ -2045,3 +2045,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so retraining remains premature.
 - Next action: poll tasks 8587-8591, 8603, 8606-8607, and 8595-8602; backfill only after observed completions.
 - Token usage: active goal counter reported 19,006,317 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 03:23:00 +09:00 - Loop 156
+
+- Part: scheduler API recovery and n107 backfill continuation.
+- Goal: recover local scheduler visibility without touching remote Slurm solves, then keep n107 loaded.
+- Hypothesis: the hung API is the local WSL web process only; restarting it should restore task/result polling while Slurm tasks continue.
+- Actions: observed `/api/health` and task detail timeouts, killed hung WSL scheduler PID 3347058, started new scheduler PID 3843042 from `/home/peets/NEC/slurm_scheduler`, confirmed `/api/health`, fetched n107 result probes, recomputed explicit partial gates, submitted cases 067-070 as tasks 8625-8628, and confirmed they attached to allocation 64 / Slurm 680569.
+- Candidates: wait for the dead API versus restart only the web process. Chose restart because this has recovered prior outages without Slurm task changes.
+- Metrics: health recovered with `ok=true`; cases 051-054 completed `ok` with elapsed range 3569.924-3927.49s; explicit partial summary reached result_rows=54, ok=50, failed=4, duplicates=0, physical_sanity_violations=0.
+- Result: active work is n107 cases 055/064-070 and n114 cases 056-063, 16 tasks total.
+- Failure reason: active rows are still solving, so retraining remains premature.
+- Next action: poll tasks 8591, 8603, 8606-8607, 8625-8628, and 8595-8602; update explicit partial summaries as rows complete.
+- Token usage: active goal counter reported 19,044,369 tokens used; Codex SQLite token sampler remains unavailable.
