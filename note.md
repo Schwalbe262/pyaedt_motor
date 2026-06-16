@@ -2318,3 +2318,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8738, 8742, 8744, 8749, 8750, 8757, 8758, and 8760; when a slot opens, fetch the completed result and submit case 104.
 - Token usage: active goal counter reported 20,205,033 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 08:35:23 +09:00 - Loop 177
+
+- Part: extra-node smoke validation and production concurrency expansion.
+- Goal: honor the per-batch 200-concurrency allowance by using validated spare scheduler capacity beyond n107.
+- Hypothesis: n108/n109/n110/n115 can run PyAEDT safely if an explicit Ansys module setup passes setup-only smoke, and n114 can take one production task because it already had module-smoke and solve evidence.
+- Actions: checked scheduler HEAD, allocation capacity, and active tasks; submitted n114 case104 as task 8764; ran setup-only module smokes on n108/n109/n110/n115 as tasks 8765-8768; submitted cases105-120 as tasks 8771-8786; fetched case113 evidence after its early completion; submitted case121 as task 8788 to refill the n110 slot.
+- Candidates: keep only eight n107 solves versus expand to validated extra nodes. Chose expansion because the user clarified 200 is a concurrency cap, not a total simulation cap, and all extra-node smokes passed.
+- Metrics: scheduler HEAD remained `1c493ad8`; smokes 8765-8768 were `ok` in 22.747-39.601s; case113 failed with `analysis_returned_false=True` in 27.785s; explicit non-contiguous partial summary reached result_rows=96, ok=91, failed=5, duplicates=0, physical_sanity_violations=0; production concurrency is now 25 running tasks.
+- Result: active production work spans n107/n108/n109/n110/n114/n115 with tasks 8738/8742/8744/8749/8750/8757/8758/8760, 8764, 8771-8778, 8780-8786, and 8788.
+- Failure reason: most active rows are still solving, and case113 adds one more AEDT `analysis=False` geometry failure.
+- Next action: poll the active production task set, fetch completed row summaries, and backfill case122 when the next production slot opens.
+- Token usage: active goal counter reported 20,366,288 tokens used; Codex SQLite token sampler remains unavailable.
