@@ -2292,3 +2292,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll tasks 8722, 8729-8730, 8732-8733, 8738, 8742, and 8744; when a slot opens, submit case 099.
 - Token usage: active goal counter reported 20,094,067 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 08:05:00 +09:00 - Loop 175
+
+- Part: cases 089 and 091 completion, cases 099-100 backfill.
+- Goal: keep n107 saturated and continue explicit partial accounting.
+- Hypothesis: after cases 089 and 091 completed ok, two open n107 slots can safely advance to cases 099-100.
+- Actions: polled active tasks, fetched case 089 and case 091 result probes, recomputed explicit partial gates, dry-ran and submitted cases 099-100 as tasks 8749-8750, and confirmed both attached to allocation 64 / Slurm 680569.
+- Candidates: wait for older 092/094-098 versus continue. Chose continue because those cases are already active and two slots were open.
+- Metrics: case 089 completed `ok` in 5332.792s; case 091 completed `ok` in 5180.374s; explicit partial summary reached result_rows=92, ok=88, failed=4, duplicates=0, physical_sanity_violations=0.
+- Result: active n107 work is cases 092, 094-100 on allocation 64 / Slurm 680569.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll tasks 8730, 8732-8733, 8738, 8742, 8744, and 8749-8750; when a slot opens, submit case 101.
+- Token usage: active goal counter reported 20,109,627 tokens used; Codex SQLite token sampler remains unavailable.
