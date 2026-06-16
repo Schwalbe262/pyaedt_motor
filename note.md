@@ -1382,3 +1382,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay remains incomplete and the current partial data does not close the model-performance gap.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 13,447,694 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 18:21:32 +09:00 - Loop 105
+
+- Part: production replay partial124 gate
+- Goal: validate the next two ok replay rows and keep the regression trend auditable.
+- Hypothesis: added ok rows should preserve strict data quality and may improve R2 slightly, but the partial replay remains below target until enough clean coverage accumulates.
+- Actions: fetched and saved all ten result CSVs through `/api/tasks/{id}/remote-file`, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: skip retraining because failures did not change versus rerun because kept rows and split changed. Chose rerun for exact checkpoint evidence.
+- Metrics: raw snapshots rows=124, ok=114, failed=10, duplicate retry rows=10, physical sanity violations=0; summarizer reported combined_kept=13308, combined_rejected=10, new_kept=104; filtered combined dataset rows=13,308 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,977, min R2=0.723483380439, avg R2=0.821460739012.
+- Result: partial124 remains training-ready after filtering, and R2 improved versus partial122 but all targets still miss `R^2 >= 0.95`.
+- Failure reason: production replay remains incomplete and the current partial data does not close the model-performance gap.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 13,511,277 tokens used; Codex SQLite token sampler remains unavailable.
