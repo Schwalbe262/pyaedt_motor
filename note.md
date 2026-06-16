@@ -1252,3 +1252,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay is incomplete and one additional row is not enough to close the regression gap.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 12,553,182 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 17:22:40 +09:00 - Loop 95
+
+- Part: production replay partial92 gate
+- Goal: validate the next material replay advance and keep the R2 trend current.
+- Hypothesis: the new ok rows should preserve strict data gates, but the regression score can still move down while the partial replay is incomplete.
+- Actions: waited for scheduler progress, refreshed ten result CSVs through `/api/tasks/{id}/remote-file`, counted status rows, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: wait for full completion versus validate the 3-row increment. Chose validation because row count changed materially and the summary thresholds are deterministic.
+- Metrics: raw snapshots rows=92, ok=84, failed=8, duplicate retry rows=7, physical sanity violations=0; summarizer reported combined_kept=13281, combined_rejected=8, new_kept=77; filtered combined dataset rows=13,281 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,960, min R2=0.706128410439, avg R2=0.814275859004.
+- Result: partial92 remains training-ready after filtering, but R2 dipped again and all targets still miss `R^2 >= 0.95`.
+- Failure reason: production replay remains incomplete and the added rows have not improved regression performance enough.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 12,703,756 tokens used; Codex SQLite token sampler remains unavailable.
