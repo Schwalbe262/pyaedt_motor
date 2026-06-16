@@ -1694,3 +1694,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: scheduler tasks 8163, 8152, 8153, 8155, 8157, 8158, 8159, and 8161 still report `running`, and the current de-duplicated data does not close the model-performance gap.
 - Next action: commit/push this checkpoint, keep polling until task statuses settle, then run final full replay gate and retry triage without exceeding the approved 200-simulation guardrail.
 - Token usage: active goal counter reported 15,940,800 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 21:00:53 +09:00 - Loop 129
+
+- Part: post-200 partial205 de-dup gate
+- Goal: checkpoint the next post-200 saved replay snapshot and track completed task status.
+- Hypothesis: additional post-200 raw rows are retry duplicates or late chunk rows that should remain safe after de-duplication and failed-row filtering.
+- Actions: confirmed current handoff/goal state and scheduler health, polled known result CSVs, saved all ten result CSVs as partial205, ran replay summarizer, raw quality, combined filter, filtered quality, deterministic LightGBM smoke retraining, exact failed-row extraction, and task status sampling.
+- Candidates: wait for all task statuses to settle versus checkpoint partial205. Chose checkpoint because saved rows advanced by three and task 8158 changed to completed.
+- Metrics: raw snapshots rows=205, ok=185, failed=20, duplicate retry rows=19, physical sanity violations=0; summarizer reported combined_kept=13372, combined_rejected=18, new_kept=168; filtered combined dataset rows=13,372 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=10,021, min R2=0.719524961251, avg R2=0.816394577961.
+- Result: partial205 remains training-ready after filtering, but all targets still miss `R^2 >= 0.95`; failed replay row indexes remain 12, 19, 35, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198.
+- Failure reason: scheduler tasks 8163, 8152, 8153, 8155, 8157, 8159, and 8161 still report `running`, and the current de-duplicated data does not close the model-performance gap.
+- Next action: commit/push this checkpoint, keep polling until task statuses settle, then run final replay gate and retry triage without exceeding the approved 200-simulation guardrail.
+- Token usage: active goal counter reported 16,046,777 tokens used; Codex SQLite token sampler remains unavailable.
