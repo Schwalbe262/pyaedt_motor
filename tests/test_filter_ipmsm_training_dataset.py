@@ -74,6 +74,17 @@ class FilterIpmsmTrainingDatasetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing input columns"):
             training_filter.filter_training_rows(rows, fieldnames)
 
+    def test_read_rows_normalizes_double_bom_fieldnames(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "double_bom.csv"
+            path.write_text("\ufeffcase_id,status\ncase_1,ok\n", encoding="utf-8-sig", newline="")
+
+            rows, fieldnames = training_filter.read_rows([path])
+
+        self.assertIn("case_id", fieldnames)
+        self.assertNotIn("\ufeffcase_id", fieldnames)
+        self.assertEqual(rows[0]["case_id"], "case_1")
+
     def test_cli_writes_filtered_dataset_and_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_path = Path(tmp) / "results.csv"

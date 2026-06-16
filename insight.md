@@ -514,3 +514,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: the inspector supports `--task` and `--result-csv`, returning selected task fields, filtered stdout/stderr summaries, row/status counts, and complete quality group counts.
 - Evidence: live task 6106 inspection returned compact running-state and 0-row result summary; full tests ran 166/166 passing.
 - Remaining risk: the summary reports availability and grouping only; final quality decisions still require `analyze_ipmsm_quality_results.py` once result rows exist.
+
+## 2026-06-16 15:36:27 +09:00 - Insight 55
+
+- Source loop: `note.md` Loop 75.
+- Improvement: mixed historical/new training CSVs need encoding-robust headers and density-gated optional input columns before LightGBM training.
+- Before: scheduler-fetched CSVs with a double BOM could appear as `\ufeffcase_id`, causing blank/duplicate case IDs after combine, and sparse optional columns from new rows made old rows nonfinite when selected globally.
+- After: CSV readers normalize leading BOM characters in field names, and `train_ipmsm_lightgbm.py` selects optional inputs only when the column is fully finite for the loaded dataset.
+- Evidence: unit tests cover BOM normalization and sparse optional exclusion; `partial35_bomfix` filtering reports blank case IDs 0 and duplicate case IDs 0 after de-dup; training smoke reports dropped duplicate rows 0 and invalid training rows 0.
+- Remaining risk: this preserves rows for training, but the partial replay still misses the R2 target and the full 200-row replay must finish before quality claims change.

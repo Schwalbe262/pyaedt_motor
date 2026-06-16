@@ -25,6 +25,10 @@ SUMMARY_FIELDNAMES = (
 EFFICIENCY_COLUMNS = ("output_efficiency_last_pct", "output_efficiency_last_pc")
 
 
+def normalize_fieldname(fieldname: str | None) -> str:
+    return (fieldname or "").lstrip("\ufeff")
+
+
 def finite_float(value: object) -> float:
     try:
         number = float(str(value).strip())
@@ -59,6 +63,7 @@ def read_rows(paths: Iterable[Path]) -> tuple[list[dict[str, str]], list[str]]:
     for path in paths:
         with path.open("r", encoding="utf-8-sig", newline="") as file:
             reader = csv.DictReader(file)
+            reader.fieldnames = [normalize_fieldname(fieldname) for fieldname in reader.fieldnames or ()]
             for fieldname in reader.fieldnames or ():
                 if fieldname not in fieldnames:
                     fieldnames.append(fieldname)

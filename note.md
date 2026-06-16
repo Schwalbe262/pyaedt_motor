@@ -992,3 +992,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: 176/200 submitted rows are still pending, and retrying failed rows now would exceed the explicit 200-row guardrail.
 - Next action: continue polling the ten production tasks, fetch updated CSVs, rerun partial gates, then run full filtering/retraining when the submitted rows finish.
 - Token usage: active goal counter reported 10,206,137 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 15:36:27 +09:00 - Loop 75
+
+- Part: production replay partial training gate and CSV reader hardening
+- Goal: ensure scheduler-fetched result CSVs can be combined with historical training data without losing new rows or poisoning old rows.
+- Hypothesis: double-BOM headers from fetched CSVs caused blank `case_id` values, and sparse optional new input columns caused historical rows to become nonfinite when selected globally.
+- Actions: added BOM-header normalization to the result/dataset readers; made LightGBM optional input selection require fully finite column coverage; refreshed the ten scheduler result snapshots through `/api/tasks/{id}/remote-file`; regenerated the combined training-ready dataset; ran dataset-quality and LightGBM smoke training.
+- Candidates: rewrite fetched artifacts, allow blank IDs, or harden readers. Chose reader hardening plus filter de-duplication because generated artifacts and future scheduler fetches can vary by encoding.
+- Metrics: targeted tests passed 47/47; full tests passed 171/171; refreshed snapshots had 35 rows with 3 duplicate retry rows and 2 failed rows; filtered `partial35_bomfix` kept 13,234 rows, 30 new `mesh_time_fine` rows, blank case IDs 0, duplicate case IDs 0; training smoke had 0 invalid rows, 0 duplicate drops, 9,936 valid rows after outlier filtering, min R2 0.703240437759, avg R2 0.811196562555.
+- Result: partial production data is now retrainable without schema/encoding row loss, but current partial data does not improve R2.
+- Failure reason: production replay is still incomplete and two failed rows remain retry candidates after the 200-run guardrail is reviewed.
+- Next action: continue polling tasks 8152-8159, 8161, and 8163; fetch only result CSVs, rerun gates on completion, then retrain and compare against the baseline.
+- Token usage: active goal counter reported 10,499,212 tokens used before this loop; Codex SQLite token sampler remains unavailable.

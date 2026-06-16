@@ -92,6 +92,20 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
         self.assertIn("input_slot_opening_ratio", columns)
         self.assertNotIn("input_magnet_space_height_ratio", columns)
 
+    def test_select_training_input_columns_excludes_sparse_optional_inputs(self) -> None:
+        columns = trainer.select_training_input_columns(
+            {
+                *trainer.RAW_INPUT_COLUMNS,
+                "input_slot_opening_ratio",
+            },
+            [
+                {"input_slot_opening_ratio": "0.09"},
+                {"input_slot_opening_ratio": ""},
+            ],
+        )
+
+        self.assertNotIn("input_slot_opening_ratio", columns)
+
     def test_sample_params_uses_each_search_space_key(self) -> None:
         rng = __import__("random").Random(7)
         search_space = {"a": (1, 2), "b": ("x", "y")}

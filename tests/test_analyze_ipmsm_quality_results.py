@@ -89,6 +89,16 @@ class AnalyzeIpmsmQualityResultsTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["missing_required_outputs"], "output_coreloss_all_avg_w")
 
+    def test_read_rows_normalizes_double_bom_case_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "double_bom.csv"
+            path.write_text("\ufeffcase_id,input_quality_profile\ncase_1,baseline\n", encoding="utf-8-sig", newline="")
+
+            rows = quality_results.read_rows(path)
+
+        self.assertEqual(rows[0]["case_id"], "case_1")
+        self.assertNotIn("\ufeffcase_id", rows[0])
+
     def test_replay_rows_compare_against_matching_source_geometry(self) -> None:
         rows = [
             {

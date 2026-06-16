@@ -30,9 +30,15 @@ SOURCE_GROUP_COLUMNS = ("input_source_case_id", "source_case_id")
 EFFICIENCY_COLUMNS = ("output_efficiency_last_pct", "output_efficiency_last_pc", "output_efficiency_all_pct")
 
 
+def normalize_fieldname(fieldname: str | None) -> str:
+    return (fieldname or "").lstrip("\ufeff")
+
+
 def read_rows(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as file:
-        return [dict(row) for row in csv.DictReader(file)]
+        reader = csv.DictReader(file)
+        reader.fieldnames = [normalize_fieldname(fieldname) for fieldname in reader.fieldnames or ()]
+        return [dict(row) for row in reader]
 
 
 def read_rows_from_paths(paths: Iterable[Path]) -> list[dict[str, str]]:

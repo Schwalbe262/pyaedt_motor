@@ -70,6 +70,22 @@ class AnalyzeIpmsmDatasetQualityTests(unittest.TestCase):
             self.assertEqual(summary["elapsed_avg_s"], "8.66666666667")
             self.assertEqual(summary["elapsed_max_s"], "12")
 
+    def test_analyze_file_normalizes_double_bom_case_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "double_bom.csv"
+            path.write_text(
+                "\ufeffcase_id,status,output_torque_all_avg_nm,output_coreloss_all_avg_w,output_solidloss_all_avg_w\n"
+                "case_1,ok,1,2,3\n"
+                "case_1,ok,1,2,3\n",
+                encoding="utf-8-sig",
+                newline="",
+            )
+
+            summary = dataset_quality.analyze_file(path, dataset_quality.DEFAULT_REQUIRED_OUTPUTS).summary_row("file", str(path))
+
+        self.assertEqual(summary["unique_case_ids"], "1")
+        self.assertEqual(summary["duplicate_case_ids"], "1")
+
     def test_quality_gate_failures_report_threshold_misses(self) -> None:
         summary = {
             "required_complete_rows": "2",

@@ -59,7 +59,8 @@
 - 2026-06-16: running scheduler checkout is latest `slurm_scheduler` main `7d9ed52`; remote bootstrap for chunk 021-040 verified the expected 20-case CSV header/range.
 - 2026-06-16: post-submission validation `python -m unittest discover -s tests` passed 167 tests; sampled tasks 8152 and 8163 remain running with 0 result rows so far.
 - 2026-06-16: local ignored `.venv` now has pandas/sklearn/lightgbm; reproduced baseline on `training_ready_physical_sanity.csv` with min R2 0.715453804063 and 8/8 target failures.
-- 2026-06-16: production replay has 24 rows so far: 22 `ok`, 2 failed due missing required transient output metrics; `mtf200_partial24_*` gates passed with max 2 rejects and no physical sanity violations.
+- 2026-06-16: production replay snapshots now have 35 fetched rows; after de-dup/filtering, `partial35_bomfix` keeps 13,234 rows with 30 unique new `mesh_time_fine` rows, no blank/duplicate case IDs, and no physical-sanity violations.
+- 2026-06-16: `train_ipmsm_lightgbm.py --data simul_log_smoke\training_ready_physical_plus_mtf200_partial35_bomfix.csv --disable-tuning` passed row gates with 0 invalid rows and 0 duplicate drops; R2 remains below target with min 0.703240437759, avg 0.811196562555.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
 - 2026-06-16: historical CSV scan found 13,748/13,748 rows recover `input_stator_teeth_width_ratio` plus repaired rotor/shaft radius inputs.
@@ -79,14 +80,14 @@
 ## Current blocker
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
-- Scheduler reaches AEDT; current blocker is waiting for the remaining 176/200 `mesh_time_fine` replay rows, then filtering and retraining; failed row indexes 63 and 123 are retry candidates after the 200-run guardrail is reviewed.
+- Scheduler reaches AEDT; current blocker is waiting for the remaining production replay rows, then filtering and retraining; failed row indexes 63 and 123 are retry candidates after the 200-run guardrail is reviewed.
 
 ## Next steps
 
 1. Poll production replay tasks 8152-8159, 8161, and 8163 with `inspect_ipmsm_scheduler_job.py --task`; do not use failed task 8151 or cancelled duplicate 8160.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Use `simul_log_smoke/remote_ps_task_complete5_*` plus `remote_ps_task_mid5_*` as current fixed-geometry evidence; `mesh_time_fine` remains the selected profile.
-4. When result rows complete, fetch only the ten `mtf200_task_*_results.csv` files and combine them into a filtered training-ready dataset.
+4. Fetch only the ten `simul_log_scheduler/mtf200_task_*_results.csv` files through `/api/tasks/{id}/remote-file`; the local `001_020` retry snapshot currently contains duplicate rows, so rely on `filter_ipmsm_training_dataset.py` de-dup evidence before retraining.
 5. For Git-backed scheduler work use `submit_ipmsm_scheduler_job.py` default `python_git`, which now posts to `/tasks/git`; use `/jobs` only for packed simulation modes.
 6. Before retraining, run `python filter_ipmsm_training_dataset.py --results path/to/results.csv --output path/to/training_ready.csv --summary-output path/to/filter_summary.csv --fail-on-filter`, then use `.venv\Scripts\python.exe train_ipmsm_lightgbm.py`.
 7. Run dataset quality gates and LightGBM retraining only after completed fixed-geometry quality results exist.
@@ -119,6 +120,7 @@
 - Direct, subprocess, shell, and controller entrypoints now enforce the 200-case plan guard unless explicitly overridden.
 - Controller and subprocess launch paths now reject duplicate or repeated explicit case plans before costly execution.
 - Scheduler helpers, workflow plans, run output metrics, training CLI, quality analysis, replay selection, dataset filters, and filtered inspection now support `/tasks`, `/tasks/git`, selected-row slicing, physical sanity gates, incomplete/complete profile-group gates, and result-summary-only Slurm evidence.
+- CSV readers now tolerate double-BOM headers, and LightGBM optional input columns are used only when fully populated so sparse new-result columns do not invalidate old rows.
 
 ## Risks and gotchas
 

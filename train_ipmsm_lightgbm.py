@@ -386,10 +386,33 @@ def repair_derived_input_columns(df: Any) -> dict[str, int]:
     return repaired
 
 
-def select_training_input_columns(available_columns: Iterable[str]) -> tuple[str, ...]:
-    """Return model input columns, including new ratio columns only when available."""
+def finite_column_coverage(data: Any, column: str) -> float:
+    if data is None:
+        return 1.0
+    row_count = len(data)
+    if row_count <= 0:
+        return 0.0
+    try:
+        values = data[column]
+    except Exception:
+        values = [row.get(column) for row in data]
+    finite_count = sum(1 for value in values if math.isfinite(finite_float(value)))
+    return finite_count / row_count
+
+
+def select_training_input_columns(
+    available_columns: Iterable[str],
+    data: Any = None,
+    *,
+    min_optional_coverage: float = 1.0,
+) -> tuple[str, ...]:
+    """Return model input columns, adding optional inputs only when densely populated."""
     available = set(available_columns)
-    optional = tuple(column for column in OPTIONAL_INPUT_COLUMNS if column in available)
+    optional = tuple(
+        column
+        for column in OPTIONAL_INPUT_COLUMNS
+        if column in available and finite_column_coverage(data, column) >= min_optional_coverage
+    )
     return (*INPUT_COLUMNS, *optional)
 
 
@@ -477,7 +500,7 @@ def prepare_training_data(
         if column in df.columns:
             df[column] = deps.pd.to_numeric(df[column], errors="coerce")
     repaired_derived_inputs = repair_derived_input_columns(df)
-    input_columns = select_training_input_columns(df.columns)
+    input_columns = select_training_input_columns(df.columns, df)
     print(
         "repaired_derived_input_rows "
         + " ".join(f"{column}={count}" for column, count in repaired_derived_inputs.items())

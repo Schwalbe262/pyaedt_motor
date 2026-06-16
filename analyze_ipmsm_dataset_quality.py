@@ -37,6 +37,10 @@ SUMMARY_FIELDNAMES = (
 )
 
 
+def normalize_fieldname(fieldname: str | None) -> str:
+    return (fieldname or "").lstrip("\ufeff")
+
+
 class RunningStats:
     def __init__(self) -> None:
         self.count = 0
@@ -230,6 +234,7 @@ def analyze_file(path: Path, required_outputs: tuple[str, ...]) -> DatasetQualit
     accumulator = DatasetQualityAccumulator(required_outputs)
     with path.open("r", encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
+        reader.fieldnames = [normalize_fieldname(fieldname) for fieldname in reader.fieldnames or ()]
         for row in reader:
             accumulator.add_row(row)
     return accumulator

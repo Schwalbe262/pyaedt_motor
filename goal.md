@@ -96,7 +96,8 @@
 - `mesh_time_mid` was tested on the same 5 source geometries and rejected: it was not within tolerance, had max delta 11.8041% versus `mesh_time_fine`, and was not meaningfully faster.
 - A 200-row `mesh_time_fine` production replay is now submitted through the updated scheduler `/tasks` path against the existing remote work tree; valid running task ids are 8152-8159, 8161, and 8163.
 - Local ignored Python 3.11 `.venv` now has pandas, scikit-learn, and LightGBM; baseline retraining on `training_ready_physical_sanity.csv` reproduces the current gap with 8/8 target failures and min R2 0.715453804063.
-- First production replay evidence is available: the ten running tasks have produced 24 rows so far, with 22 `mesh_time_fine` `ok` rows and 2 early `analysis_returned_false` rows; `mtf200_partial24_*` quality/filter gates passed with zero physical sanity violations.
+- First production replay evidence is available: the ten running tasks have produced 35 fetched rows so far; filtering de-duplicates retry artifacts, keeps 30 unique new `mesh_time_fine` ok rows, and passes the `partial35_bomfix` quality gate with zero physical sanity violations.
+- LightGBM retraining on the combined `partial35_bomfix` dataset now preserves all case IDs and has 0 invalid training rows, but still misses the R2 target with min R2 0.703240437759 and avg R2 0.811196562555.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
 - Next focus is polling the submitted `mesh_time_fine` replay, filtering completed result rows, and retraining in the proper ML environment.
 
