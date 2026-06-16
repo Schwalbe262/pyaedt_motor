@@ -1226,3 +1226,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay remains incomplete and current partial data is not sufficient for the final target.
 - Next action: commit/push this checkpoint, continue polling running tasks 8152-8159, 8161, and 8163, and review retry handling after the 200-row submission finishes.
 - Token usage: active goal counter reported 12,125,484 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 17:09:10 +09:00 - Loop 93
+
+- Part: production replay partial88 gate
+- Goal: validate the next replay increment and update the regression smoke trend.
+- Hypothesis: the extra ok rows should remain quality-clean and may slightly improve R2, but not enough to satisfy the 0.95 target.
+- Actions: refreshed ten scheduler result CSVs through `/api/tasks/{id}/remote-file`, counted status rows, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: defer until completion versus validate a 3-row increment. Chose validation because the filtered dataset and test split changed.
+- Metrics: raw snapshots rows=88, ok=80, failed=8, duplicate retry rows=7, physical sanity violations=0; summarizer reported combined_kept=13277, combined_rejected=8, new_kept=73; filtered combined dataset rows=13,277 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,957, min R2=0.7257998934, avg R2=0.823225734336.
+- Result: partial88 remains training-ready after filtering; R2 improved slightly versus partial85 but all targets still miss `R^2 >= 0.95`.
+- Failure reason: production replay is incomplete and the new quality rows are not yet enough to close the regression gap.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 12,306,410 tokens used; Codex SQLite token sampler remains unavailable.
