@@ -72,6 +72,7 @@
 - 2026-06-16: generated batch2 `mesh_time_fine` plan with 200 unique new sources, 0 overlap with batch1, and 0 rows matching the retry1 high-risk rule; submitted `/jobs dynamic_packed_srun` jobs 62-71 for 169/200 simulations, all queued initially.
 - 2026-06-16: jobs 62-71 remain queued with no Slurm ids because current scheduler DB shows no strict idle unoccupied `cpu2` node; `batch2_mtf200_results.csv` is still 0 bytes.
 - 2026-06-16: `analyze_ipmsm_failure_patterns.py` reproduced retry1 failure evidence: top feature `magnet_height_ratio` score 0.397472222222 and the two-rule OR matched 20/20 failed rows plus 14 ok rows; full tests passed 181 tests.
+- 2026-06-16: dry-run manifest for remaining batch2 rows 170-200 is ready at `simul_log_smoke/batch2_mtf200_tail170_200_dynamic_dryrun_manifest.json`; verified 31 embedded rows and separate result CSV path, not submitted.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -101,7 +102,7 @@
 1. Poll `/api/jobs/62`-`/api/jobs/71` with filtered fields until at least one Slurm id appears; fetch `batch2_mtf200_results.csv` only as row/status summaries.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
-4. Submit remaining batch2 simulations 170-200 only after scheduler capacity frees, using the same batch2 case CSV and dry-run manifest review.
+4. Submit remaining batch2 simulations 170-200 only after scheduler capacity frees, using the reviewed tail dry-run manifest and a separate tail result CSV.
 5. Fetch scheduler results through safe relative `/api/jobs/{id}/remote-file` or `/api/tasks/{id}/remote-file` paths and summarize rows/statuses only; do not dump full CSVs.
 6. Before retraining, run `filter_ipmsm_training_dataset.py`, filtered quality checks, and `.venv\Scripts\python.exe train_ipmsm_lightgbm.py` with the current combined CSV.
 7. Next simulation-quality work should diagnose or avoid the repeated `analysis=False` geometry set, then plan the next <=200-concurrent batch.

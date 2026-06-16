@@ -1837,3 +1837,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: this improves evidence and batch selection only; live batch2 jobs 62-71 are still waiting for idle `cpu2` capacity.
 - Next action: commit/push the CLI and docs, then keep polling jobs 62-71 for Slurm ids and result summaries.
 - Token usage: active goal counter reported 17,686,222 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 22:38:50 +09:00 - Loop 140
+
+- Part: batch2 tail dry-run preparation.
+- Goal: prepare the remaining batch2 simulations 170-200 without submitting duplicate solves while jobs 62-71 remain queued.
+- Hypothesis: a reviewed tail manifest with selected rows 170-200 and a separate result CSV will make the later capacity-free submission deterministic and avoid appending to the active 1-169 result file.
+- Actions: re-polled jobs 62-71 and batch2 result file, confirmed `cpu2` still has no strict idle node, generated `simul_log_smoke/batch2_mtf200_tail170_200_dynamic_dryrun_manifest.json` with `--case-start-index 170 --case-limit 31`, and parsed the manifest to verify embedded row count and case-id range.
+- Candidates: submit the tail immediately versus prepare only. Chose prepare only because existing jobs 62-71 have not reached Slurm and duplicate pressure would not improve current capacity.
+- Metrics: jobs 62-71 still queued with no Slurm ids; `batch2_mtf200_results.csv` is 0 bytes; tail dry-run selected_cases=31, embedded_rows=31, unique_case_ids=31, first case `replay2_mtf_0170...`, last case `replay2_mtf_0200...`, total_simulations=31, max_new_jobs=2.
+- Result: remaining simulations 170-200 have a reviewed dry-run manifest but are not submitted.
+- Failure reason: live capacity is still blocked by lack of idle `cpu2` placement for current jobs.
+- Next action: wait for jobs 62-71 to get Slurm ids or result rows, then submit the prepared tail manifest only after capacity frees.
+- Token usage: active goal counter reported 17,747,536 tokens used; Codex SQLite token sampler remains unavailable.
