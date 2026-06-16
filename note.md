@@ -1239,3 +1239,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: production replay is incomplete and the new quality rows are not yet enough to close the regression gap.
 - Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
 - Token usage: active goal counter reported 12,306,410 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-16 17:17:50 +09:00 - Loop 94
+
+- Part: production replay partial89 gate
+- Goal: validate the next single-row replay advance after a stagnant poll.
+- Hypothesis: a single new ok row should preserve data quality gates, while R2 may move non-monotonically.
+- Actions: confirmed scheduler/main checkout, refreshed ten result CSVs through `/api/tasks/{id}/remote-file`, inspected task/result summaries, waited for one row of progress, ran `summarize_ipmsm_partial_replay.py`, raw partial quality, combined training filter, filtered-dataset quality, and deterministic LightGBM smoke retraining.
+- Candidates: wait for larger progress versus gate a single-row increment. Chose validation because the fetched row count changed and the training/test split changed.
+- Metrics: raw snapshots rows=89, ok=81, failed=8, duplicate retry rows=7, physical sanity violations=0; summarizer reported combined_kept=13278, combined_rejected=8, new_kept=74; filtered combined dataset rows=13,278 with blank/duplicate case IDs=0; training smoke invalid rows=0, duplicate drops=0, valid rows after outliers=9,958, min R2=0.712955751338, avg R2=0.817125770818.
+- Result: partial89 remains training-ready after filtering, but R2 dipped versus partial88 and all targets still miss `R^2 >= 0.95`.
+- Failure reason: production replay is incomplete and one additional row is not enough to close the regression gap.
+- Next action: commit/push this checkpoint and continue polling running tasks 8152-8159, 8161, and 8163.
+- Token usage: active goal counter reported 12,553,182 tokens used; Codex SQLite token sampler remains unavailable.
