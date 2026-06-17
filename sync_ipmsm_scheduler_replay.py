@@ -171,7 +171,8 @@ def failed_case_numbers(rows: Iterable[dict[str, str]]) -> list[int]:
 
 def read_tasks_from_db(db_path: Path, name_glob: str) -> list[TaskRow]:
     uri = f"file:{db_path}?mode=ro&immutable=1"
-    with sqlite3.connect(uri, uri=True, timeout=1) as connection:
+    connection = sqlite3.connect(uri, uri=True, timeout=1)
+    try:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
             """
@@ -182,6 +183,8 @@ def read_tasks_from_db(db_path: Path, name_glob: str) -> list[TaskRow]:
             """,
             (name_glob,),
         ).fetchall()
+    finally:
+        connection.close()
     return [
         TaskRow(
             id=int(row["id"]),
@@ -349,6 +352,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", type=Path, default=Path("simul_log_smoke"))
     parser.add_argument("--result-batch", type=int, default=3)
     parser.add_argument("--refill-batch", type=int, default=4)
+    parser.add_argument(
+        "--active-task-glob",
+        default="ipmsm-batch%-fea-%",
+        help="SQLite LIKE pattern for tasks counted against --active-cap.",
+    )
     parser.add_argument("--active-cap", type=int, default=200)
     parser.add_argument("--refill-case-limit", type=int, default=200)
     parser.add_argument("--refill-case-numbers", default="", help="Explicit comma/range case numbers to refill instead of max-case planning.")
@@ -379,8 +387,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--refill-cases is required when writing or submitting refill tasks")
     result_tasks = read_tasks_from_db(args.db, f"ipmsm-batch{args.result_batch}-fea-%")
     refill_tasks = read_tasks_from_db(args.db, f"ipmsm-batch{args.refill_batch}-fea-%")
-    all_tasks = result_tasks + refill_tasks + read_tasks_from_db(args.db, "ipmsm-batch2-fea-%")
-    active = nonterminal_count(all_tasks)
+    active_tasks = read_tasks_from_db(args.db, args.active_task_glob)
+    active = nonterminal_count(active_tasks)
     missing = missing_completed_tasks(result_tasks, local_probe_cases(args.root, args.result_batch))
     if args.refill_case_numbers:
         refill_cases = parse_case_numbers(args.refill_case_numbers)
@@ -394,6 +402,8 @@ def main(argv: list[str] | None = None) -> int:
 
     result: dict[str, object] = {
         "active_nonterminal": active,
+        "active_task_glob": args.active_task_glob,
+        "active_status_counts": status_counts(active_tasks),
         "result_batch": args.result_batch,
         "result_status_counts": status_counts(result_tasks),
         "refill_batch": args.refill_batch,

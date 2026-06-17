@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from argparse import Namespace
+import contextlib
 import csv
+import io
+import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 
@@ -41,6 +45,51 @@ class SyncIpmsmSchedulerReplayTests(unittest.TestCase):
         self.assertEqual(sync.planned_refill_cases(145, 198, 200, 200), [146, 147])
         self.assertEqual(sync.planned_refill_cases(199, 190, 200, 200), [200])
         self.assertEqual(sync.planned_refill_cases(145, 200, 200, 200), [])
+
+    def test_main_active_glob_counts_previous_refill_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "scheduler.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute(
+                    "create table tasks (id integer primary key, name text, status text, node_name text, remote_cwd text)"
+                )
+                connection.executemany(
+                    "insert into tasks (id,name,status,node_name,remote_cwd) values (?,?,?,?,?)",
+                    [
+                        (1, "ipmsm-batch3-fea-001-n107_b3_001", "running", "n107", "/work"),
+                        (2, "ipmsm-batch4-fea-199-n108_b4_199", "running", "n108", "/work"),
+                        (3, "ipmsm-batch4-fea-200-n109_b4_200", "queued", "n109", "/work"),
+                        (4, "unrelated-task", "running", "n110", "/work"),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = sync.main(
+                    [
+                        "--db",
+                        str(db_path),
+                        "--root",
+                        str(root),
+                        "--result-batch",
+                        "3",
+                        "--refill-batch",
+                        "5",
+                        "--active-cap",
+                        "3",
+                    ]
+                )
+            output = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output["active_nonterminal"], 3)
+        self.assertEqual(output["active_status_counts"], {"queued": 1, "running": 2})
+        self.assertEqual(output["planned_refill_cases"], [])
 
     def test_parse_case_numbers_accepts_ranges_and_deduplicates(self) -> None:
         self.assertEqual(sync.parse_case_numbers("81-83,83,90"), [81, 82, 83, 90])
