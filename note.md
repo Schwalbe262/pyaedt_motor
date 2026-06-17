@@ -2669,3 +2669,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no selector-safe exclusion rule is confirmed, and the R2 target remains unmet from the prior retrain.
 - Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and retrain after a larger ok-row increase.
 - Token usage: active goal counter reported 22,917,780 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 12:36:45 +09:00 - Loop 204
+
+- Part: batch3 partial049, seven-slot batch4 refill, and updated deterministic retraining.
+- Goal: keep the FEA pool at the clarified 200 active cap while refreshing model-quality evidence after a material ok-row increase.
+- Hypothesis: the newly completed batch3 ok rows can further falsify candidate geometry rules, and partial049 is enough of an increment over partial038 to refresh the retraining baseline.
+- Actions: fetched batch3 case061, then cases007/008/020/025/042/047 through `/api/tasks/{id}/remote-file`; built batch3 partial043 and partial049 selected CSVs; evaluated failure rules in-process with exact computed failed indexes; dry-ran and submitted batch4 cases042-048 as tasks 9196-9202; filtered `partial219_bomfix` + batch2 partial199 + batch3 partial049; ran dataset quality and deterministic LightGBM disable-tuning.
+- Candidates/options: promote the current height/setback/shield rule versus keep it diagnostic. Chose diagnostic because the narrow rule still matches 2 ok rows and the broader height/setback rule matches 8 ok rows.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=49/queued=16/running=135, batch4 queued=48, total nonterminal FEA=200; batch3 partial049 result_rows=49, ok=40, failed=9, duplicates=0, physical_sanity_violations=0; combined filter rows_read=13,632, kept=13,617, rejected=15, duplicate_case_id_rows=0; latest retrain has invalid_training_rows=0, removed_output_outliers=3,426, failures=8/8, min_R2=0.722702960359, avg_R2=0.820181849085.
+- Result: active FEA is back at 200 with batch4 through case048 queued; no missing completed batch2/batch3/batch4 result files remain locally.
+- Failure reason: R2 remains below 0.95 and no selector-safe exclusion rule is confirmed.
+- Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and wait for stronger evidence before changing selection rules.
+- Token usage: active goal counter reported 23,122,145 tokens used; Codex SQLite token sampler remains unavailable.
