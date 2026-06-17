@@ -2539,3 +2539,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: current evidence still cannot separate invalid geometry from valid-but-historically-ok high-risk geometry strongly enough for a confirmed selector rule.
 - Next action: fetch more batch3/batch4 completions as they finish, especially pending batch3 candidate-hit cases072/158/169/175, before changing batch4 selection rules.
 - Token usage: active goal counter reported 22,302,368 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:32:39 +09:00 - Loop 194
+
+- Part: batch3 partial011 and one-slot batch4 refill.
+- Goal: keep the active FEA campaign at 200 while continuing sparse failure-rule validation.
+- Hypothesis: another completed batch3 row can either strengthen or falsify the partial010 candidate rule, and a single batch4 row can refill the opened active slot.
+- Actions: fetched batch3 case139 through `/api/tasks/{id}/remote-file`, recomputed batch3 partial011, evaluated candidate rules, dry-ran and submitted batch4 case008 as task 9141, and confirmed no missing completed result files remained.
+- Candidates/options: keep lowering/relaxing the candidate rule versus wait for more completed cases. Chose to wait because case139 is failed but outside the shield-thickness candidate, and broader rules would match ok rows.
+- Metrics: batch3 partial011 result_rows=11, ok=5, failed=6, physical_sanity_violations=0; current scheduler counts are batch2 completed=224/running=3/cancelled=3, batch3 completed=11/queued=48/running=141, batch4 queued=8, total nonterminal FEA=200.
+- Result: batch4 case008 is queued and the active FEA pool is back at 200; no new exclusion rule was promoted.
+- Failure reason: candidate rules remain unstable under new failed rows and are not yet safe for batch4 plan mutation.
+- Next action: poll for the next completed rows, fetch only missing summaries, and submit further batch4 rows only when total nonterminal FEA drops below 200.
+- Token usage: active goal counter reported 22,327,989 tokens used; Codex SQLite token sampler remains unavailable.
