@@ -2513,3 +2513,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still running and batch3 evidence is too sparse to promote a new exclusion rule or justify batch4 submission.
 - Next action: poll batch2/batch3, fetch only missing completed result summaries, recompute explicit partial gates, then prepare/submit batch4+ only when active queued/running FEA count drops below 200.
 - Token usage: active goal counter reported 22,010,995 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:22:59 +09:00 - Loop 192
+
+- Part: batch4 plan generation and active-cap backfill.
+- Goal: continue the simulation campaign under the clarified active 200-concurrent cap without reusing prior source geometries.
+- Hypothesis: a batch4 plan excluding batch1/batch2/batch3 source IDs and only confirmed conservative rules can be prepared now, while submissions should only fill open active slots.
+- Actions: built a 600-source exclusion file from batch1/batch2 and batch3 plans; generated `replay_quality_cases_mesh_time_fine_batch4_excluding_batch1_batch2_batch3_conservative_rule_200.csv`; verified 200 unique sources, 0 prior overlap, and 0 conservative-rule rows; queried `/api/task-capacity`; dry-ran and submitted batch4 cases001-006 as `/tasks` 9130-9133 and 9135-9136; fetched batch3 cases005/006 and recomputed batch3 partial009.
+- Candidates/options: submit all 200 batch4 rows versus fill only open capacity. Chose capacity fill because batch2/batch3 still have many queued/running tasks and the user limit is active concurrency.
+- Metrics: selector scanned 13,748 rows, excluded 600 prior source IDs and 2,927 conservative-rule rows, leaving 9,677 candidates; batch3 partial009 result_rows=9, ok=5, failed=4; scheduler counts are batch2 completed=224/running=3/cancelled=3, batch3 completed=9/queued=64/running=127, batch4 queued=6, total nonterminal FEA=200.
+- Result: batch4 is ready for continued 200-case-wave submission, and the active queued/running FEA count is exactly at the clarified cap.
+- Failure reason: no new exclusion rule is confirmed; batch3 candidate rules now either miss failed case109 or match at least one ok row.
+- Next action: poll for completed batch2/batch3/batch4 rows, fetch only missing result summaries, then submit more batch4 rows only when active nonterminal FEA drops below 200.
+- Token usage: active goal counter reported 22,155,992 tokens used; Codex SQLite token sampler remains unavailable.
