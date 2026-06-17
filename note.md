@@ -2981,3 +2981,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet; replay drift is high for several targets and replacement did not improve it.
 - Next action: run broader targeted tests, commit/push this diagnostic tooling, continue filtered polling/refill at batch5 case087+, and analyze target-specific outlier/noise patterns before changing simulation selection rules.
 - Token usage: active goal counter reported 27,389,541 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 17:02:30 +09:00 - Loop 228
+
+- Part: batch4 partial092 catch-up and batch5 refill through case091.
+- Goal: keep the clarified 200-concurrent FEA cap filled while folding the next completed batch4 rows into strict quality evidence.
+- Hypothesis: newly completed batch4 rows should mostly be ok and can safely update the combined training-ready gate without another retrain immediately after the p077 drift/replacement checks.
+- Actions: sampled scheduler DB read-only after pushing drift diagnostics; fetched batch4 cases052/076/107/125/139; submitted batch5 cases087-091 through `/api/tasks`; filtered and quality-gated `training_ready_physical_plus_mtf200_batch2p199_batch3p200_batch4p092.csv`.
+- Candidates/options considered: retrain p092 versus defer. Chose defer because p092 adds only five ok rows beyond p087 and p077/p077-replacement retrains were just completed.
+- Metrics: post-refill active_nonterminal=200 with queued=5/running=195; batch4 completed=92/failed=15/cancelled=94/running=108; batch5 submitted through case091; batch4 partial092 result_rows=92, ok=81, failed=11; p092 filter kept_rows=13,849, rejected_rows=11, duplicate_case_id_rows=76; quality rows=13,849, duplicates=0, missing_required=0, failed=0, physical_sanity_violations=0.
+- Result: active FEA is back at 200, batch5 has advanced through case091, and the latest combined training-ready gate passed.
+- Failure reason: R2 target remains unmet from p077/p077-replacement retraining evidence.
+- Next action: continue filtered polling/refill at batch5 case092+, and use replay drift evidence for target-specific noise/outlier analysis before changing simulation selection rules.
+- Token usage: active goal counter reported 28,167,971 tokens used; Codex SQLite token sampler remains unavailable.
