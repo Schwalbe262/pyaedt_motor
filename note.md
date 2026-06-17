@@ -3033,3 +3033,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet, and batch5 has not yet contributed ok rows.
 - Next action: continue filtered polling/refill at batch5 case098+, and investigate repeated missing-transient-output failures once batch5 has enough failures for a stable pattern.
 - Token usage: active goal counter reported 28,223,478 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 17:19:45 +09:00 - Loop 232
+
+- Part: batch4 partial098 catch-up and batch5 refill through case100.
+- Goal: restore the 200-concurrent FEA cap and update the combined quality gate after the next batch4 completions.
+- Hypothesis: batch4 ok rows can continue improving dataset coverage while batch5 early failures remain excluded until ok rows arrive.
+- Actions: sampled scheduler DB read-only; fetched batch4 cases102/126/133; submitted batch5 cases098-100 through `/api/tasks`; filtered and quality-gated `training_ready_physical_plus_mtf200_batch2p199_batch3p200_batch4p098.csv`.
+- Candidates/options considered: include batch5 partial003 versus keep it failure-only. Chose failure-only because it has 0 ok rows.
+- Metrics: post-refill active_nonterminal=200 with queued=3/running=197; batch4 completed=98/failed=15/cancelled=94/running=102, partial098 result_rows=98, ok=87, failed=11; batch5 submitted through case100; p098 filter kept_rows=13,855, rejected_rows=11, duplicate_case_id_rows=84; p098 quality rows=13,855, duplicates=0, missing_required=0, failed=0, physical_sanity_violations=0.
+- Result: active FEA is back at 200, batch5 has advanced through case100, and p098 quality passed.
+- Failure reason: R2 target remains unmet, and batch5 still has no ok rows in fetched partial evidence.
+- Next action: continue filtered polling/refill at batch5 case101+ and only retrain after a material ok-row increase.
+- Token usage: active goal counter reported 28,236,174 tokens used; Codex SQLite token sampler remains unavailable.
