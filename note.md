@@ -2799,3 +2799,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: none for this catch-up loop; R2 target remains unmet from partial119 retraining.
 - Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and retrain after the next substantial ok-row increment.
 - Token usage: active goal counter reported 24,515,391 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 13:58:16 +09:00 - Loop 214
+
+- Part: partial138 catch-up, batch4 refill through case138, and updated deterministic retraining.
+- Goal: continue folding completed FEA rows into quality/model evidence while preserving the 200 active queued/running cap.
+- Hypothesis: the three new batch3 rows will likely be ok contrast rows, and retraining on partial138 can test whether the partial119 R2 improvement persists.
+- Actions: sampled scheduler DB read-only; submitted batch4 cases136-138 as `/tasks` 9315-9317; fetched missing batch3 cases082/124/167 through `/api/tasks/{id}/remote-file`; built partial138 selected/training-ready/quality artifacts; evaluated failure rules; ran deterministic LightGBM disable-tuning on `batch2p199_batch3p138`.
+- Candidates/options: defer retraining versus refresh after partial138. Chose retraining because partial138 adds 19 ok rows beyond the last retrained partial119, enough to update model evidence.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=138/running=62, batch4 completed=1/queued=74/running=63, total nonterminal FEA=200; batch3 partial138 result_rows=138, ok=129, failed=9, duplicates=0, physical_sanity_violations=0; batch2p199+batch3p138 keeps 13,706 quality-passing rows; partial138 retrain has invalid_training_rows=0, removed_output_outliers=3,450, failures=8/8, min_R2=0.72288624746, avg_R2=0.822089378838.
+- Result: active FEA is back at 200; partial138 quality gate passed, but retraining regressed versus partial119 and remains far below `R^2 >= 0.95`.
+- Failure reason: R2 remains below 0.95 and no selector-safe exclusion rule is confirmed.
+- Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and investigate why added ok rows do not consistently improve R2.
+- Token usage: active goal counter reported 24,605,208 tokens used; Codex SQLite token sampler remains unavailable.
