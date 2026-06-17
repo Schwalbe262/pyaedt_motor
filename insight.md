@@ -622,3 +622,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: failed row indexes are parsed from `case_id` as original replay case numbers, and rules use `magnet_height_ratio`, `magnet_setback_ratio`, and `magnet_shield_thick` when passed to `analyze_ipmsm_failure_patterns.py`.
 - Evidence: partial107 stable failed cases are 29/43/50/109/134/139/147/158/169; corrected rule evaluation reports narrow rule 8 failed + 5 ok and broad rule 9 failed + 26 ok, while the prefixed-rule run matched zero rows.
 - Remaining risk: the analyzer still trusts caller-provided failed row indexes; future automation should derive them from `case_id` directly when both files are available.
+
+## 2026-06-17 14:15:48 +09:00 - Insight 67
+
+- Source loop: `note.md` Loop 216.
+- Improvement: repeated scheduler replay polling should be driven by a deterministic sync helper instead of hand-written DB/fetch/refill snippets.
+- Before: each loop manually queried scheduler SQLite, compared completed tasks to local probe files, fetched remote result CSVs, rebuilt selected partial CSVs, and hand-built exact-slot batch4 submissions.
+- After: `sync_ipmsm_scheduler_replay.py` performs the read-only DB comparison, missing-result fetch, partial selected CSV generation, and exact-slot batch4 refill submissions using the existing scheduler policy.
+- Evidence: the helper detected missing cases153/181 and then case075, generated partial152/153 outputs, submitted batch4 cases151-153, and targeted sync/summarizer/submit tests passed 17/17.
+- Remaining risk: the helper still relies on operator-supplied DB, base-training, and case-plan paths; full quality filtering and retraining remain explicit follow-up commands.

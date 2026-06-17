@@ -2825,3 +2825,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet from partial138 retraining, and no selector-safe exclusion rule is confirmed.
 - Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and investigate why added ok rows do not consistently improve R2.
 - Token usage: active goal counter reported 24,850,743 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 14:15:48 +09:00 - Loop 216
+
+- Part: sync helper, partial153 catch-up, and batch4 refill through case153.
+- Goal: reduce repeated manual scheduler polling/fetch/refill steps while continuing the 200-active FEA campaign.
+- Hypothesis: the recurring loop can be made deterministic enough to lower operator error without changing scheduler policy or simulation behavior.
+- Actions: added `sync_ipmsm_scheduler_replay.py` plus focused tests; submitted batch4 cases146-150 manually, fetched partial150, then used the new sync helper to fetch missing cases153/181 and case075, write partial152/153 outputs, and submit batch4 cases151-153; ran partial153 filter/quality gates and failure-rule evaluation.
+- Candidates/options: keep driving the loop manually versus add automation. Chose automation because the same read-only DB comparison, missing probe fetch, partial CSV creation, and exact-slot refill sequence had repeated many times.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=153/running=47, batch4 completed=1/queued=70/running=82, total nonterminal FEA=200; batch3 partial153 result_rows=153, ok=144, failed=9, duplicates=0, physical_sanity_violations=0; batch2p199+batch3p153 keeps 13,721 quality-passing rows; targeted sync/summarizer/submit tests passed 17/17.
+- Result: active FEA is back at 200, partial153 quality gate passed, and the next polling/refill loop has a tested deterministic helper.
+- Failure reason: R2 target remains unmet from partial138 retraining, and no selector-safe exclusion rule is confirmed.
+- Next action: use `sync_ipmsm_scheduler_replay.py` for the next filtered polling/fetch/refill loop, then retrain after the next substantial ok-row increment.
+- Token usage: active goal counter reported 24,952,735 tokens used; Codex SQLite token sampler remains unavailable.
