@@ -2955,3 +2955,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet, and batch4 missing-transient-output failures are not yet a confirmed selector rule.
 - Next action: continue filtered polling, fetch only completed result summaries, refill batch5 case066+ when active drops below 200, and investigate target-specific simulation/output noise before changing selector rules.
 - Token usage: active goal counter reported 27,187,564 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 16:24:10 +09:00 - Loop 226
+
+- Part: batch3 final catch-up, batch4 partial077, batch5 refill through case076, and retraining check.
+- Goal: keep the 200-concurrent FEA cap filled while converting completed batch3/batch4 rows into filtered regression evidence.
+- Hypothesis: the final batch3 rows plus the next batch4 ok rows are enough of an increment over the latest p047 retrain to justify one disable-tuning LightGBM check.
+- Actions: sampled scheduler DB read-only; fetched batch3 cases177/195 and batch4 cases015/026/064/068/070/095/097/109/121; wrote `batch3_partial200_selected_results.csv` and `batch4_partial077_selected_results.csv`; submitted batch5 cases066-076 through `/api/tasks`; filtered and quality-gated `training_ready_physical_plus_mtf200_batch2p199_batch3p200_batch4p077.csv`; reran LightGBM after correcting the CLI output argument from `--output-metrics` to `--verification-output`.
+- Candidates/options considered: defer retraining versus run one deterministic retrain. Chose retrain because p077 adds about 27 ok rows beyond the latest p047 retrain checkpoint.
+- Metrics: post-refill active_nonterminal=200; batch3 completed=200 with partial200 ok=191/failed=9; batch4 completed=77/failed=15/cancelled=94/running=123 with partial077 ok=66/failed=11; batch5 submitted through case076 with queued=67/running=9; filter kept_rows=13,834, rejected_rows=20, duplicate_case_id_rows=246; quality rows=13,834, duplicates=0, missing_required=0, failed=0, physical_sanity_violations=0; retrain valid_rows=10,341, removed_output_outliers=3,493, failures=8/8, min_R2=0.723311248898, avg_R2=0.821010077138.
+- Result: active FEA is back at the clarified 200 cap, batch3 is fully fetched, batch5 has advanced through case076, and the newest combined dataset passed strict quality gates. R2 improved versus p047 but remains below the recent partial174 best and far below 0.95.
+- Failure reason: R2 target remains unmet, and added high-quality rows alone are not closing the model gap.
+- Next action: continue filtered polling, refill batch5 case077+ when active drops below 200, and start target-specific noise/drift analysis before changing selector rules.
+- Token usage: active goal counter reported 27,287,769 tokens used; Codex SQLite token sampler remains unavailable.
