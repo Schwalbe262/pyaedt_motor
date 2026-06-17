@@ -102,14 +102,14 @@
 - Future result rows now report AEDT `analysis=False` as the root failure before attempting report export, so retry triage can separate solver/validation failures from report parser/export failures.
 - Retry1 of the 20 failed first-batch geometries used `/tasks/git` tasks 8358-8361 and completed 20/20 with repeated AEDT `analysis=False`; next work should diagnose or avoid that geometry set before scaling more <=200-concurrent batches.
 - `analyze_ipmsm_failure_patterns.py` now makes the retry1 `analysis=False` geometry signature reproducible: `magnet_height_ratio` is the strongest separated feature and the current two-rule OR covers 20/20 failed rows plus 14 ok rows.
-- The replay selector can exclude previous source IDs and numeric high-risk rules; batch2 `mesh_time_fine` has 200 unique new source cases, excludes retry1 high-risk rules, and is partially submitted through `/jobs dynamic_packed_srun` jobs 62-71 for simulations 1-169.
-- Packed jobs 62-71 were cancelled before Slurm submission because `cpu2` had no strict idle node; batch2 execution is now using `/tasks` with `scheduling_profile=fea_bursty`, and tasks 8448-8463 attached to allocation 64 / Slurm 680569 for the first 16 cases.
-- Node-pinned n114 tasks 8472-8479 for batch2 cases 17-24 completed with infrastructure failures `AEDT is not installed on your system`; do not count those rows as simulation-quality failures or send more analyze work to n114 until setup-only smoke passes.
-- n107 diagnostics tasks 8489/8491 showed active `solver2d` processes for the long-running n107 wave, so wrapper logs stopping after `Solving design setup` is not by itself a cancellation signal.
-- n107 first wave tasks 8448-8463 completed with 15/16 `ok` and one AEDT `analysis=False`; module-missing retry tasks 8513-8520 proved `env_profile=pyaedt2026v1` alone is insufficient, while module smoke task 8522 passed and corrected module retry tasks 8524-8531 are running.
-- n114 module setup-only smoke task 8545 passed 1/1 `ok`; module-corrected n114 analyze tasks 8546-8553 for batch2 cases 25-32 are running, so earlier n114 failures are infrastructure-only evidence from missing module setup.
+- The replay selector can exclude previous source IDs and numeric high-risk rules; batch2 `mesh_time_fine` has all 200 cases submitted through `/tasks`, with explicit partial183 evidence at result_rows=183, ok=177, failed=6, duplicate source cases137/138 excluded from gate math, and zero physical-sanity violations.
+- Batch3 `mesh_time_fine` has 200 unique new source cases, excludes the 400 batch1/batch2 source IDs plus the conservative rule `magnet_height_ratio>=0.942,magnet_setback_ratio>=0.121`, and has 0 overlap with prior batches.
+- Batch3 cases001-200 were submitted as `/tasks` 8908-9113 with `scheduling_profile=fea_bursty`, explicit `module load ansys-electronics/v252`, `env_profile=pyaedt2026v1`, and node-pinned distribution across validated nodes.
+- Latest scheduler sample after batch3 submission: batch2 has completed=211, running=16, cancelled=3; batch3 has queued=157, attaching=1, running=41, completed=1; batch3 case029 failed with `analysis_returned_false=True` in 79.974s.
+- n107/n108/n109/n110/n114/n115 have all run module-corrected PyAEDT tasks; earlier missing-module n114 failures remain infrastructure-only evidence and should not count as simulation-quality failures.
+- Wrapper logs stopping after `Solving design setup` is not by itself a cancellation signal; use scheduler status, result CSVs, and filtered solver diagnostics before intervening.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
-- Next focus is polling corrected module tasks 8524-8531 and 8546-8553, summarizing result CSVs, then choosing the next `fea_bursty` wave size from runtime/failure evidence.
+- Next focus is polling batch2/batch3 tasks, fetching completed result CSV summaries only, updating partial gates, and retraining only after enough fetched rows justify it.
 
 ## Later Milestones
 

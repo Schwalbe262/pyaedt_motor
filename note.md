@@ -2422,3 +2422,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: batch2 has no unsubmitted tail left, so falling active count now requires a new non-overlapping batch plan rather than another batch2 backfill.
 - Next action: poll active tasks with filtered result evidence, then generate batch3 excluding prior source IDs and high-risk rules before any new submissions.
 - Token usage: active goal counter reported 21,312,649 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 10:35:55 +09:00 - Loop 185
+
+- Part: batch3 selection/submission and batch2 partial183 checkpoint.
+- Goal: continue the 200-concurrent/batch simulation campaign without reusing batch1/batch2 source geometries.
+- Hypothesis: a conservative failure rule plus prior-source exclusion can produce a valid non-overlapping batch3 plan, and `/tasks` can queue the full 200-case batch while current batch2 tasks finish.
+- Actions: created a 400-row batch1/batch2 source-id exclusion file, generated `replay_quality_cases_mesh_time_fine_batch3_excluding_batch1_batch2_conservative_rule_200.csv`, verified 200 unique source IDs with 0 prior overlap and 0 conservative-rule rows, submitted batch3 cases001-200 as tasks 8908-9113 in four 50-task chunks, fetched 21 newly completed batch2 rows, computed explicit partial183, fetched completed batch3 case029, and sampled scheduler counts.
+- Candidates: recover the exact historical high-risk rule versus use a new conservative rule. Chose the conservative rule `magnet_height_ratio>=0.942,magnet_setback_ratio>=0.121` because the exact previous rule string was not persisted and this rule covers the known 20/20 retry1 failures.
+- Metrics: batch3 selector scanned 13,748 rows, excluded 198 status rows, 346 physical-sanity rows, 400 prior source IDs, and 2,927 conservative-rule rows; candidates=9,877; partial183 result_rows=183, ok=177, failed=6, duplicates=0, physical_sanity_violations=0; batch2 counts completed=211/running=16/cancelled=3; batch3 counts queued=157/attaching=1/running=41/completed=1; batch3 case029 failed `analysis_returned_false=True` in 79.974s.
+- Result: batch3 is fully submitted through `/tasks`, and generated result probes remain ignored under `simul_log_smoke`.
+- Failure reason: batch2/batch3 are still running, and retraining remains premature until more completed result rows are fetched and filtered.
+- Next action: poll batch2/batch3 with filtered status/result fields, fetch completed CSV summaries only, recompute explicit partial gates, and avoid broad globs over stale probes.
+- Token usage: active goal counter reported 21,534,976 tokens used; Codex SQLite token sampler remains unavailable.

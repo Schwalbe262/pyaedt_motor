@@ -82,7 +82,7 @@
 - 2026-06-17: cases 092, 094, and 095 completed `ok`; explicit partial95 summary is result_rows=95, ok=91, failed=4, duplicates=0, physical_sanity_violations=0; cases 101-103 are running on n107.
 - 2026-06-17: n108/n109/n110/n115 setup-only module smokes 8765-8768 passed `ok`; production was expanded to 25 running FEA tasks across n107/n108/n109/n110/n114/n115, with case113 already failed `analysis_returned_false=True`.
 - 2026-06-17: case096 completed `ok` in 3908.615s and was backfilled by case122 task 8792 on n107; explicit partial97 summary is result_rows=97, ok=92, failed=5, duplicates=0, physical_sanity_violations=0.
-- 2026-06-17: production has 38 running tasks across n107/n108/n109/n110/n114/n115 after batch2 tail submission; explicit partial162 summary is result_rows=162, ok=156, failed=6, duplicates=0, physical_sanity_violations=0; duplicate source cases137/138 had multiple n115 task files but only one per case was selected for gate math.
+- 2026-06-17: batch2 has explicit partial183 summary at result_rows=183, ok=177, failed=6, duplicates=0, physical_sanity_violations=0; batch3 cases001-200 were submitted as tasks 8908-9113, with case029 already failed `analysis_returned_false=True` in 79.974s.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -105,7 +105,7 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is a per-batch/concurrency cap, so more batches may be submitted, but each batch still needs dry-run manifests, filtered result evidence, and no accidental duplicate case plans.
-- Batch2 is running through attached `fea_bursty` tasks after packed jobs 62-71 were cancelled before Slurm submission; all batch2 cases 001-200 have now been submitted, and current active production tasks are 8806, 8830, 8832-8833, 8854, 8858, 8861, 8863-8864, 8866-8873, 8876-8877, 8881-8883, 8885-8889, 8892-8896, and 8898-8903.
+- Batch2 all cases001-200 are submitted; latest counts are completed=211, running=16, cancelled=3. Batch3 all cases001-200 are submitted; latest counts are queued=157, attaching=1, running=41, completed=1.
 - Fallback allocations n108/n109/n110/n115 also run unrelated `crypto-sweep` tasks, but explicit-module setup-only smokes passed and production FEA now uses their remaining scheduler capacity.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
 - n114/allocation 42 failed earlier without the Ansys module, but module setup-only smoke task 8545 passed; use n114 only with explicit module env setup and filtered result evidence.
@@ -113,10 +113,10 @@
 
 ## Next steps
 
-1. Poll active production tasks 8806, 8830, 8832-8833, 8854, 8858, 8861, 8863-8864, 8866-8873, 8876-8877, 8881-8883, 8885-8889, 8892-8896, and 8898-8903 with filtered fields; fetch result CSV row/status summaries only. Batch2 has no unsubmitted cases left, so generate a new non-overlapping batch3 plan before sending more work.
+1. Poll batch2/batch3 tasks with filtered fields; fetch completed result CSV row/status summaries only, then recompute explicit partial gates without broad globs.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
-4. Submit any new batch3 or later cases as `/tasks` only with explicit Ansys module env setup, non-overlapping source IDs, and setup-only smoke before using any new node.
+4. Submit any new batch4 or later cases as `/tasks` only with explicit Ansys module env setup, non-overlapping source IDs, and setup-only smoke before using any new node.
 5. Fetch scheduler results through safe relative `/api/jobs/{id}/remote-file` or `/api/tasks/{id}/remote-file` paths and summarize rows/statuses only; do not dump full CSVs.
 6. Before retraining, run `filter_ipmsm_training_dataset.py`, filtered quality checks, and `.venv\Scripts\python.exe train_ipmsm_lightgbm.py` with the current combined CSV.
 7. Next simulation-quality work should diagnose or avoid the repeated `analysis=False` geometry set, then plan the next <=200-concurrent batch.
@@ -148,7 +148,7 @@
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
 - Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating, Ansys module guards, and per-wave filtered result probes.
-- Partial batch2 evidence is now result_rows=162, ok=156, failed=6, duplicates=0; recently fetched cases135/137/150/158/162-164/167 are `ok`, cases190-200 were submitted, and active production is 38 running tasks because batch2 has no unsubmitted tail left.
+- Partial batch2 evidence is now result_rows=183, ok=177, failed=6, duplicates=0; batch3 plan selected 200 unique new sources with 0 prior overlap and 0 conservative-rule rows, and tasks 8908-9113 were submitted through `/tasks`.
 
 ## Risks and gotchas
 
