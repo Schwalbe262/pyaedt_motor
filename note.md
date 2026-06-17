@@ -2461,3 +2461,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still running, and no batch3 ok evidence exists yet.
 - Next action: poll batch3 until at least some ok rows exist, then run targeted failure-pattern analysis before planning batch4.
 - Token usage: active goal counter reported 21,811,573 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 10:56:08 +09:00 - Loop 188
+
+- Part: batch2 partial192 and combined dataset gate.
+- Goal: keep batch2 evidence current and verify that the enlarged combined dataset remains training-ready.
+- Hypothesis: the two newly completed batch2 rows can advance the quality gate without justifying another LightGBM run yet.
+- Actions: confirmed repo state and scheduler upstream `1c493ad8`, fetched batch2 cases187/192, recomputed batch2 partial192 and batch3 partial3, wrote `batch2_partial192_selected_results.csv`, ran combined filter and dataset quality gates against first-batch `partial219_bomfix` plus batch2 partial192.
+- Candidates: rerun LightGBM immediately versus wait for more material data. Chose to wait because partial192 adds only five ok rows beyond the last partial187 retrain and batch3 still has no ok rows.
+- Metrics: partial192 result_rows=192, ok=186, failed=6, duplicates=0, physical_sanity_violations=0; combined filter rows_read=13,576, kept=13,570, rejected=6, duplicate_case_id_rows=0; dataset quality rows=13,570, missing_required=0, duplicates=0, physical_sanity_violations=0; latest counts are batch2 completed=219/running=8/cancelled=3 and batch3 queued=112/running=85/completed=3.
+- Result: combined partial192 dataset is training-ready, but no new retraining was run in this loop.
+- Failure reason: active rows are still running, and batch3 has only failed completed rows so far.
+- Next action: poll for batch3 ok rows, then run failure-pattern analysis and retraining once the evidence set changes materially.
+- Token usage: active goal counter reported 21,847,044 tokens used; Codex SQLite token sampler remains unavailable.
