@@ -3007,3 +3007,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet, and replay-only valid row count is too small for reliable model performance.
 - Next action: continue filtered polling/refill at batch5 case092+, then rerun replay-only and combined retraining after batch5 contributes a material number of ok rows.
 - Token usage: active goal counter reported 28,184,126 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 17:12:05 +09:00 - Loop 230
+
+- Part: target-level output outlier diagnostics.
+- Goal: identify which output targets drive LightGBM's IQR output-outlier row removal on combined and replay-only datasets.
+- Hypothesis: target-specific outlier counts will show whether the row removal is broad random noise or concentrated in a few outputs that need simulation/output extraction attention.
+- Actions: added `analyze_ipmsm_output_outliers.py` plus tests; ran it on `batch2p199_batch3p200_batch4p092` combined data and on replay-only batch2p199+batch3p200+batch4p092 data using the same IQR rule as training.
+- Candidates/options considered: use ad hoc pandas snippets versus a deterministic CLI. Chose a CLI because outlier attribution will be needed repeatedly as batch5 and later waves complete.
+- Metrics: combined rows=13,849, rows_with_any_output_outlier=3,494, rows_without_output_outliers=10,355; top combined metric outlier counts were efficiency=1,332, torque_max=997, solidloss=829, torque_avg=748, coreloss=471, total_loss=396, Lq=135, Ld=96. Replay-only rows=465, rows_with_any_output_outlier=145, rows_without_output_outliers=320; top replay-only counts were efficiency=50, torque_max=47, solidloss=35, torque_avg=31.
+- Result: output outliers are concentrated in efficiency and torque-related targets, with solid loss next; target-specific simulation/output extraction checks should prioritize those targets before changing geometry selector rules.
+- Failure reason: R2 target remains unmet; outlier attribution is diagnostic and does not by itself improve the model.
+- Next action: continue batch5 polling/refill at case092+, then compare target distributions after batch5 adds enough ok replay rows.
+- Token usage: active goal counter reported 28,207,716 tokens used; Codex SQLite token sampler remains unavailable.

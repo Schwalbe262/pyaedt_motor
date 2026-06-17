@@ -667,3 +667,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `analyze_ipmsm_replay_drift.py` compares replay rows to `input_source_case_id`, and `filter_ipmsm_training_dataset.py --drop-replayed-source-rows` can test source replacement without changing default preprocessing.
 - Evidence: p077 drift analysis matched 630/630 replay rows and exposed large torque/solidloss/efficiency drift; replay-source replacement passed quality gates but worsened disable-tuning retrain to min R2 0.709893143232 and avg R2 0.818927270778.
 - Remaining risk: drift analysis identifies label disagreement but does not yet distinguish true mesh/time correction from source noise, target extraction defects, or output outlier policy effects.
+
+## 2026-06-17 17:12:05 +09:00 - Insight 72
+
+- Source loop: `note.md` Loop 230.
+- Improvement: attribute output-outlier row removal by target before changing selector or training policy.
+- Before: LightGBM reported only total removed output-outlier rows, making it unclear whether removals were broad noise or concentrated in specific outputs.
+- After: `analyze_ipmsm_output_outliers.py` applies the same IQR rule per target and writes metric-level counts plus combined row counts.
+- Evidence: p092 combined and replay-only runs matched training removal counts exactly, and both showed removals dominated by efficiency and torque targets, with solid loss next.
+- Remaining risk: target attribution does not identify whether the root cause is simulation physics, report extraction, operating point physics, or model/outlier policy.
