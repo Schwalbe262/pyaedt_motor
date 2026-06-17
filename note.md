@@ -2396,3 +2396,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll the active task set, fetch completed row summaries, and backfill case180 when the next production slot opens.
 - Token usage: active goal counter reported 21,006,327 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 09:58:00 +09:00 - Loop 183
+
+- Part: cases 138/140/142-145/147/153-154/157/166 completion and cases 180-189 backfill.
+- Goal: keep the expanded production pool saturated under the clarified 200-concurrent cap while preserving case-level result accounting.
+- Hypothesis: completed rows can be fetched through filtered `/api/tasks/{id}/remote-file` calls, duplicate source case138 can be excluded from gate math by explicit case-level selection, and opened slots can be refilled on already validated nodes.
+- Actions: rechecked scheduler upstream HEAD at `1c493ad8`, confirmed `/api/health`, submitted cases180-181 as tasks 8876-8877, fetched cases142/143/145/147/153/157, computed explicit partial146, fetched duplicate-source case138 plus cases140/154/166, computed explicit partial150, submitted cases182-189 as tasks 8881-8883 and 8885-8889, and confirmed all 41 active production tasks reached running.
+- Candidates: commit after partial140 versus first reconciling newly completed tasks. Chose to reconcile because DB status showed active concurrency had fallen below target and several completed result files were not yet fetched.
+- Metrics: partial150 result_rows=150, ok=144, failed=6, duplicates=0, physical_sanity_violations=0, combined_kept=144, combined_rejected=6; newly fetched ok elapsed range was 1216.935-3278.004s; duplicate source case138 had three completed n115 result files and one selected summary input; active production task count is 41 running.
+- Result: active production tasks are 8806-8809, 8811, 8814, 8830-8833, 8838, 8842-8843, 8847-8848, 8850, 8853-8854, 8857-8858, 8861, 8863-8864, 8866-8873, 8876-8877, 8881-8883, and 8885-8889.
+- Failure reason: active rows are still solving, and combined retraining remains premature until the current batch has enough fetched rows and duplicate-source evidence is excluded.
+- Next action: poll the active task set with filtered fields, fetch completed result CSV summaries only, and backfill case190 when the next production slot opens.
+- Token usage: active goal counter reported 21,223,607 tokens used; Codex SQLite token sampler remains unavailable.
