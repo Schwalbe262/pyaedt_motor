@@ -2864,3 +2864,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet; remaining cancelled batch4 cases185-189 still need corrected resubmission when slots open.
 - Next action: continue filtered polling, explicitly refill corrected cases185-189 before advancing to new batch4 case numbers, and do not count old cases081-095 as simulation-quality failures.
 - Token usage: active goal counter reported 25,423,771 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 14:51:50 +09:00 - Loop 219
+
+- Part: corrected batch4 repair completion through case193 and batch3 partial183 quality update.
+- Goal: finish repairing the cancelled no-bootstrap batch4 task range before advancing to new batch4 case numbers, while folding the latest batch3 completions into model evidence.
+- Hypothesis: corrected per-case bootstrap submissions should prevent the previous `remote/cases.csv` failure class, and added batch3 ok rows may improve regression evidence only if the new rows reduce noise rather than add distribution drift.
+- Actions: verified scheduler upstream still at `1c493ad8`; fetched batch3 cases111/117/176/180/182 and then cases197/198; built partial181 and partial183 selected/training-ready/quality artifacts; submitted corrected batch4 cases185-189 and new cases190-193 through `/api/tasks` with per-case bootstrapped CSV manifests; ran deterministic LightGBM disable-tuning on `batch2p199_batch3p181`.
+- Candidates/options: fill open slots with case190 versus finish corrected case185-189 first. Chose corrected case185-189 to complete the repaired cancelled range before advancing.
+- Metrics: latest scheduler counts are batch3 completed=183/running=17 and batch4 completed=11/failed=15/cancelled=94/queued=89/running=93, with one batch2 task still running and total active FEA=200; batch3 partial183 result_rows=183, ok=174, failed=9; combined filter kept_rows=13,751, rejected_rows=9, duplicate_case_id_rows=63; quality gate rows=13,751, duplicates=0, missing_required=0, failed=0; partial181 retrain invalid_training_rows=0, removed_output_outliers=3,461, failures=8/8, min_R2=0.700211567668, avg_R2=0.813982163291.
+- Result: active FEA is back at 200, corrected batch4 cases081-189 are resubmitted, and batch4 has advanced through case193; partial183 quality passed, but latest retraining regressed versus partial174.
+- Failure reason: R2 target remains unmet, and the newest ok rows did not improve the deterministic LightGBM split.
+- Next action: continue filtered polling; when slots open, advance to batch4 case194+ with per-case bootstrap; investigate model-quality issues beyond simply increasing ok-row count.
+- Token usage: active goal counter reported 25,523,110 tokens used; Codex SQLite token sampler remains unavailable.
