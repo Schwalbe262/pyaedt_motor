@@ -2994,3 +2994,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet from p077/p077-replacement retraining evidence.
 - Next action: continue filtered polling/refill at batch5 case092+, and use replay drift evidence for target-specific noise/outlier analysis before changing simulation selection rules.
 - Token usage: active goal counter reported 28,167,971 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 17:07:40 +09:00 - Loop 229
+
+- Part: replay-only retraining check.
+- Goal: distinguish whether the R2 ceiling is mainly from old/replay mixed-fidelity data or from insufficient/noisy replay-only evidence.
+- Hypothesis: if replay-only mesh_time_fine rows are already learnable, old source labels are the main bottleneck; if not, more high-quality replay rows and target-specific noise work are still needed.
+- Actions: built `training_ready_mtf_replay_only_batch2p199_batch3p200_batch4p092.csv` from batch2 partial199, batch3 partial200, and batch4 partial092 selected results; ran strict dataset quality gate; ran deterministic LightGBM disable-tuning retraining.
+- Candidates/options considered: train replay-only now versus wait for batch5 results. Chose now because it is cheap and provides a directional bound, but interpreted cautiously because the replay-only set is small.
+- Metrics: replay-only filter rows_read=491, kept_rows=465, rejected_rows=26, duplicate_case_id_rows=0; quality rows=465, duplicates=0, missing_required=0, failed=0, physical_sanity_violations=0; retrain valid_rows=320 after removing 145 output outliers, failures=7/8, min_R2=0.543859475103, avg_R2=0.718521259918, with only Lq passing 0.95.
+- Result: replay-only evidence is still data-limited and not yet sufficient for the 0.95 target; continue accumulating 200-concurrent replay waves before drawing final high-quality-only model conclusions.
+- Failure reason: R2 target remains unmet, and replay-only valid row count is too small for reliable model performance.
+- Next action: continue filtered polling/refill at batch5 case092+, then rerun replay-only and combined retraining after batch5 contributes a material number of ok rows.
+- Token usage: active goal counter reported 28,184,126 tokens used; Codex SQLite token sampler remains unavailable.

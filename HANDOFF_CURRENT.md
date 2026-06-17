@@ -151,7 +151,7 @@
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
 - Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating, Ansys module guards, and per-wave filtered result probes.
-- Partial batch2 evidence is result_rows=199, ok=193, failed=6, duplicates=0; batch3 partial200 is 191 ok / 9 failed; batch4 partial092 is 81 ok / 11 failed; `batch2p199_batch3p200_batch4p092` quality passed with 13,849 rows; p077 retrain still fails 8/8 targets with min R2 0.723311248898 and avg R2 0.821010077138; replay/source drift analysis found 630/630 matched replay rows and high torque/solidloss/efficiency drift; batch5 cases001-091 submitted.
+- Partial batch2 evidence is result_rows=199, ok=193, failed=6, duplicates=0; batch3 partial200 is 191 ok / 9 failed; batch4 partial092 is 81 ok / 11 failed; `batch2p199_batch3p200_batch4p092` quality passed with 13,849 rows; p077 retrain still fails 8/8 targets with min R2 0.723311248898 and avg R2 0.821010077138; replay-only p092 retrain has only 465 rows/320 valid rows and fails 7/8 targets with min R2 0.543859475103, so continue accumulating 200-wave replay data; batch5 cases001-091 submitted.
 
 ## Risks and gotchas
 
