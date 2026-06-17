@@ -2786,3 +2786,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 remains below 0.95 and no selector-safe exclusion rule is confirmed.
 - Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and retrain after the next substantial ok-row increment.
 - Token usage: active goal counter reported 24,488,673 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 13:52:16 +09:00 - Loop 213
+
+- Part: partial135 catch-up and refill through batch4 case135.
+- Goal: close the post-push completion gap without exceeding the 200 active queued/running cap.
+- Hypothesis: batch3 is completing quickly enough that refill and result folding should be done in small exact-slot increments.
+- Actions: after push, observed active FEA drop to 197, submitted batch4 cases130-132, observed another drop to 197, submitted cases133-135, fetched missing batch3 cases087/100/126/144/161/162, and built partial135 selected/training-ready/quality artifacts.
+- Candidates/options: keep chasing completions versus stop after cap recovery. Chose one extra fetch/fold cycle because active had returned to 200 and the completed rows were easy to fetch exactly.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=135/running=65, batch4 completed=1/queued=78/running=56, total nonterminal FEA=200; batch3 partial135 result_rows=135, ok=126, failed=9, duplicates=0, physical_sanity_violations=0; batch2p199+batch3p135 keeps 13,703 quality-passing rows.
+- Result: active FEA is back at 200 and partial135 quality gate passed.
+- Failure reason: none for this catch-up loop; R2 target remains unmet from partial119 retraining.
+- Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and retrain after the next substantial ok-row increment.
+- Token usage: active goal counter reported 24,515,391 tokens used; Codex SQLite token sampler remains unavailable.
