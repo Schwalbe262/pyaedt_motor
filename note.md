@@ -2526,3 +2526,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no new exclusion rule is confirmed; batch3 candidate rules now either miss failed case109 or match at least one ok row.
 - Next action: poll for completed batch2/batch3/batch4 rows, fetch only missing result summaries, then submit more batch4 rows only when active nonterminal FEA drops below 200.
 - Token usage: active goal counter reported 22,155,992 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:29:29 +09:00 - Loop 193
+
+- Part: batch3 partial010 triage and one-slot batch4 refill.
+- Goal: keep the active FEA pool at the clarified cap while improving evidence for `analysis=False` geometry triage.
+- Hypothesis: a new completed batch3 row can test whether the partial009 candidate rule is robust, and only one batch4 case should be submitted if active FEA drops to 199.
+- Actions: waited 60s, found batch3 case134 completed, fetched only its result summary through `/api/tasks/{id}/remote-file`, recomputed batch3 partial010, evaluated candidate rules against partial010 plus historical raw ok rows and batch3/batch4 plans, dry-ran and submitted batch4 case007 as task 9139.
+- Candidates/options: promote `magnet_height_ratio>=0.926,magnet_setback_ratio>=0.118,magnet_shield_thick<=2.514` as an exclusion rule versus keep it diagnostic. Chose diagnostic because it matches many historical ok rows despite matching 5/5 failures in partial010.
+- Metrics: batch3 partial010 result_rows=10, ok=5, failed=5, physical_sanity_violations=0; candidate rule matched 5/5 failed and 0/5 ok in partial010 but also matched 718 and 732 historical ok rows in `ipmsm_simulation_results1.csv` and `ipmsm_simulation_results2.csv`; scheduler counts after refill are batch2 completed=224/running=3/cancelled=3, batch3 completed=10/queued=48/running=142, batch4 queued=7, total nonterminal FEA=200.
+- Result: batch4 case007 is queued and the active FEA pool is back at 200; no new exclusion rule was promoted.
+- Failure reason: current evidence still cannot separate invalid geometry from valid-but-historically-ok high-risk geometry strongly enough for a confirmed selector rule.
+- Next action: fetch more batch3/batch4 completions as they finish, especially pending batch3 candidate-hit cases072/158/169/175, before changing batch4 selection rules.
+- Token usage: active goal counter reported 22,302,368 tokens used; Codex SQLite token sampler remains unavailable.
