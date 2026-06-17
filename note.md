@@ -2565,3 +2565,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no failure selector rule is confirmed, and retraining remains premature until more batch3/batch4 ok rows arrive.
 - Next action: fetch the remaining batch2 completion and additional batch3/batch4 results as they finish, then submit further batch4 rows only when total nonterminal FEA drops below 200.
 - Token usage: active goal counter reported 22,350,624 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:39:04 +09:00 - Loop 196
+
+- Part: batch3 partial013 and one-slot batch4 refill.
+- Goal: ingest another completed batch3 row and maintain the active FEA cap without over-submitting.
+- Hypothesis: case147 can test whether the height/setback/shield candidate should be relaxed, but any relaxed rule must still avoid ok false positives.
+- Actions: fetched batch3 case147 through `/api/tasks/{id}/remote-file`, built `batch3_partial013_selected_results.csv`, reran candidate-rule checks, dry-ran and submitted batch4 case012 as task 9147, and confirmed no missing completed result files remained.
+- Candidates/options: relax the candidate height threshold to cover case147 versus keep waiting. Chose to wait because relaxed rules still do not explain all failures cleanly and broader rules match ok rows.
+- Metrics: batch3 partial013 result_rows=13, ok=6, failed=7, physical_sanity_violations=0; scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=13/queued=42/running=145, batch4 queued=12, total nonterminal FEA=200.
+- Result: batch4 case012 is queued and active FEA is back at 200; no new exclusion rule was promoted.
+- Failure reason: the failure cluster remains real but not yet distilled into a selector-safe deterministic rule.
+- Next action: continue polling/fetching filtered results and refill batch4 only when nonterminal FEA drops below 200; retrain when the ok-row increase is material.
+- Token usage: active goal counter reported 22,372,064 tokens used; Codex SQLite token sampler remains unavailable.
