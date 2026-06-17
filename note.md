@@ -2929,3 +2929,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet; latest retrain is below the recent partial174 best and far below 0.95.
 - Next action: continue filtered polling, fetch batch3 final two rows and batch4/batch5 completions, refill batch5 case050+ when active drops below 200, and investigate target-specific simulation/output noise before changing selector rules.
 - Token usage: active goal counter reported 26,574,686 tokens used; `codex_ops.py record-current-codex-thread-usage` failed because the default Codex SQLite DB was not found.
+
+## 2026-06-17 16:08:52 +09:00 - Loop 224
+
+- Part: batch4 partial065 catch-up and batch5 refill through case062.
+- Goal: keep active FEA at 200 while folding newly completed batch4 rows into filtered regression evidence.
+- Hypothesis: most newly completed batch4 rows should be ok, but failed transient-output rows should be rejected cleanly without reducing the training-ready kept-row count.
+- Actions: sampled scheduler state; fetched batch4 cases169/174, then 078/091, then 016/020/022/032/034/038/040/044/058; built batch4 partial054, partial056, and partial065 selected results; incrementally filtered and quality-gated combined datasets through `batch2p199_batch3p198_batch4p065`; submitted batch5 cases050-062 through `/api/tasks`.
+- Candidates/options considered: retrain after partial065 versus wait. Chose wait because the latest retrain was just completed this loop family and partial065 adds mainly incremental ok rows while R2 remains far from target.
+- Metrics: final scheduler sample active_nonterminal=200; batch3 completed=198/running=2; batch4 completed=65/failed=15/cancelled=94/queued=15/running=120; batch5 queued=62; batch4 partial065 result_rows=65, ok=57, failed=8; latest quality gate rows=13,823, duplicates=0, missing_required=0, failed=0, physical_sanity_violations=0; targeted sync/submit tests were last run this turn family and passed 18/18.
+- Result: active FEA is back at 200, batch5 has advanced through case062, and the latest combined dataset quality gate passed.
+- Failure reason: R2 target remains unmet; batch4 failures remain transient-output-missing rows and are not yet a confirmed selector rule.
+- Next action: continue filtered polling, fetch batch3 final two rows and batch4/batch5 completions, refill batch5 case063+ when active drops below 200, and investigate target-specific simulation/output noise before changing selector rules.
+- Token usage: active goal counter reported 26,863,314 tokens used; `codex_ops.py record-current-codex-thread-usage` failed because the default Codex SQLite DB was not found.
