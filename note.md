@@ -2487,3 +2487,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still running, and batch3 has only failed completed rows so far.
 - Next action: fetch the remaining batch2 completions as they finish, and wait for batch3 ok rows before failure-pattern analysis.
 - Token usage: active goal counter reported 21,882,791 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:04:55 +09:00 - Loop 190
+
+- Part: scheduler progress poll with no new result fetch.
+- Goal: verify whether batch2 or batch3 produced new completed rows ready for filtered result ingestion.
+- Hypothesis: with batch3 at high running concurrency, new completions may be available after a short wait.
+- Actions: confirmed repo state, confirmed `slurm_scheduler` upstream remains `1c493ad8`, sampled scheduler DB read-only, compared completed task cases against local result probes for batch2 and batch3, waited 60s, and sampled scheduler counts again.
+- Candidates: append no journal entry versus record the no-progress monitoring loop. Chose to record it because this is part of the long-running simulation execution trace.
+- Metrics: no missing completed result CSVs were found; counts stayed batch2 completed=221/running=6/cancelled=3 and batch3 completed=3/queued=96/running=101.
+- Result: no result files were fetched and no gates changed.
+- Failure reason: active rows are still running, and no batch3 ok evidence exists yet.
+- Next action: poll later for new batch2/batch3 completions, fetch only missing result CSV summaries, and recompute partial gates after new rows arrive.
+- Token usage: active goal counter reported 21,912,777 tokens used; Codex SQLite token sampler remains unavailable.
