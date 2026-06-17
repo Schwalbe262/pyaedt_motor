@@ -2344,3 +2344,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll active production tasks, fetch completed row summaries, and backfill case123 when the next slot opens.
 - Token usage: active goal counter reported 20,392,097 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 09:06:50 +09:00 - Loop 179
+
+- Part: expanded production backfill to 41 running tasks.
+- Goal: use validated spare scheduler capacity under the 200-concurrency allowance while preserving exact completed-file accounting.
+- Hypothesis: n108/n109/n110/n115 can each run up to eight active FEA tasks after module-smoke validation, while n114 can keep one task in its remaining scheduler slot.
+- Actions: submitted cases123-138, recovered two local scheduler API timeouts by restarting only the WSL web process, fetched completed cases097/098/099/100/102/104-108/112/114-121, submitted cases139-157 as backfills, and confirmed all queued/attaching production work reached running state.
+- Candidates: stop at 25 running tasks versus fill validated per-node spare capacity. Chose expansion because all extra nodes had passed setup-only smoke and the user clarified 200 is a concurrency cap.
+- Metrics: fetched cases097/098/099/100/102/104-108/112/114-121 were all `ok`; case104 elapsed 1684.087s, case117 elapsed 1261.087s, and case121 elapsed 1571.241s; explicit partial summary reached result_rows=116, ok=111, failed=5, duplicates=0, physical_sanity_violations=0; production concurrency reached 41 running tasks.
+- Result: active production tasks are 8757/8760, 8775-8777, 8792, 8795-8808, 8814-8815, 8818, 8821-8833, and 8835-8839.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll the active task set, fetch completed row summaries, and backfill case158 when the next production slot opens.
+- Token usage: active goal counter reported 20,534,709 tokens used; Codex SQLite token sampler remains unavailable.
