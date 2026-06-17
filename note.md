@@ -2604,3 +2604,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving and no completed result file is missing locally.
 - Next action: poll again later, fetch only missing completed result summaries, and submit batch4 rows only when nonterminal FEA drops below 200.
 - Token usage: active goal counter reported 22,495,991 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:54:41 +09:00 - Loop 199
+
+- Part: batch3 partial019 and two-slot batch4 refill.
+- Goal: ingest newly completed batch3 rows and keep active FEA at the clarified 200 cap.
+- Hypothesis: new ok rows can strengthen contrast for the `analysis=False` cluster, and only opened active slots should be refilled.
+- Actions: fetched batch3 cases041/003 through `/api/tasks/{id}/remote-file`, built `batch3_partial018_selected_results.csv` and `batch3_partial019_selected_results.csv`, reran failure-pattern checks with corrected failed-row indexes, dry-ran and submitted batch4 cases017-018 as tasks 9156 and 9158, and confirmed no missing completed result files remained.
+- Candidates/options: promote the current candidate rule versus keep it diagnostic. Chose diagnostic because `input_magnet_height_ratio>=0.921,input_magnet_setback_ratio>=0.118,input_magnet_shield_thick<=2.514` still covers only 7/8 failed rows despite 0 ok matches in partial019.
+- Metrics: batch3 partial019 result_rows=19, ok=11, failed=8, physical_sanity_violations=0; scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=19/queued=32/running=149, batch4 queued=18, total nonterminal FEA=200.
+- Result: batch3 ok contrast improved and two new batch4 rows are queued under the cap.
+- Failure reason: no selector-safe failure rule is confirmed, and retraining remains premature until more ok replay rows are available.
+- Next action: continue polling, fetch only missing completed result summaries, and refill batch4 only when nonterminal FEA drops below 200.
+- Token usage: active goal counter reported 22,538,206 tokens used; Codex SQLite token sampler remains unavailable.
