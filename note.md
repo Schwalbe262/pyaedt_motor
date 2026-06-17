@@ -2409,3 +2409,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, and combined retraining remains premature until the current batch has enough fetched rows and duplicate-source evidence is excluded.
 - Next action: poll the active task set with filtered fields, fetch completed result CSV summaries only, and backfill case190 when the next production slot opens.
 - Token usage: active goal counter reported 21,223,607 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 10:07:18 +09:00 - Loop 184
+
+- Part: batch2 tail submission and partial162 checkpoint.
+- Goal: finish submitting the current 200-row batch2 plan while keeping completed-result evidence case-level and duplicate-safe.
+- Hypothesis: once batch2 tail cases are queued, the next saturation step should generate a fresh non-overlapping batch instead of reusing exhausted batch2 rows.
+- Actions: fetched cases156/159/161 and computed partial153; fetched cases136/158 and computed partial155; submitted cases190-194 as tasks 8892-8896; fetched duplicate-source case137 plus cases162/163 and computed partial158; submitted remaining cases195-200 as tasks 8898-8903; fetched cases135/150/164/167 and computed explicit partial162.
+- Candidates: keep backfilling only to 41 versus queue the remaining batch2 tail. Chose to submit the whole remaining tail because the user clarified the 200 figure is a concurrent cap, batch2 had only six unsubmitted cases left, and future work should move to batch3 planning.
+- Metrics: partial162 result_rows=162, ok=156, failed=6, duplicates=0, physical_sanity_violations=0, combined_kept=156, combined_rejected=6; duplicate source cases are 137 and 138; latest active sample is 38 running tasks across n107/n108/n109/n110/n114/n115.
+- Result: all batch2 cases001-200 have been submitted; active production tasks are 8806, 8830, 8832-8833, 8854, 8858, 8861, 8863-8864, 8866-8873, 8876-8877, 8881-8883, 8885-8889, 8892-8896, and 8898-8903.
+- Failure reason: batch2 has no unsubmitted tail left, so falling active count now requires a new non-overlapping batch plan rather than another batch2 backfill.
+- Next action: poll active tasks with filtered result evidence, then generate batch3 excluding prior source IDs and high-risk rules before any new submissions.
+- Token usage: active goal counter reported 21,312,649 tokens used; Codex SQLite token sampler remains unavailable.
