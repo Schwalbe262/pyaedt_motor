@@ -2435,3 +2435,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: batch2/batch3 are still running, and retraining remains premature until more completed result rows are fetched and filtered.
 - Next action: poll batch2/batch3 with filtered status/result fields, fetch completed CSV summaries only, recompute explicit partial gates, and avoid broad globs over stale probes.
 - Token usage: active goal counter reported 21,534,976 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 10:46:00 +09:00 - Loop 186
+
+- Part: batch2 partial189 fetch and partial187 retraining check.
+- Goal: convert newly completed scheduler rows into filtered evidence and verify whether the additional batch2 data improves regression enough to change direction.
+- Hypothesis: batch2 partial187 should be large enough for a deterministic retraining smoke, but batch3 early failures need separate diagnosis before selecting another batch.
+- Actions: fetched batch2 cases173/195/199/200 and computed partial187; built `batch2_partial187_selected_results.csv`; combined it with `training_ready_physical_plus_mtf200_partial219_bomfix.csv`; ran filter, quality, and deterministic LightGBM retraining; fetched batch3 cases043/050; fetched batch2 cases185/186; computed batch2 partial189 and batch3 partial3.
+- Candidates: rerun training after partial189 versus wait for more rows. Chose to keep the partial187 training evidence because partial189 added only two ok rows and active tasks are still completing.
+- Metrics: partial189 result_rows=189, ok=183, failed=6, duplicates=0, physical_sanity_violations=0; combined filter kept 13,565 rows and rejected 6 failed rows; retraining still failed 8/8 targets with min R2=0.717265212042 and avg R2=0.817150750416; batch3 partial3 is 0 ok / 3 failed, all `analysis_returned_false=True`; latest counts are batch2 completed=216/running=11/cancelled=3 and batch3 queued=133/attaching=1/running=63/completed=3.
+- Result: more batch2 data modestly improved the weakest target versus first-batch partial219, but it did not move the project near the `R^2 >= 0.95` target; batch3 needs failure-pattern triage.
+- Failure reason: active rows are still running, and batch3's first completed rows are all geometry/analysis failures.
+- Next action: keep polling with filtered result evidence, then run a targeted batch3 failure-pattern analysis once enough failed/ok batch3 rows exist.
+- Token usage: active goal counter reported 21,744,174 tokens used; Codex SQLite token sampler remains unavailable.
