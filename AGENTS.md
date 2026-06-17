@@ -65,6 +65,12 @@ git diff -- path/to/file
 - `note.md` is the chronological execution journal.
 - `insight.md` is only for confirmed reusable improvements.
 
+## Simulation Scheduler Policy
+
+- The 200-simulation limit is an active concurrency cap, not a lifetime total; continue 200-case batches as needed while keeping queued/running FEA tasks at or below the cap.
+- Use the current `slurm_scheduler` policy for remote FEA: `/tasks` with `scheduling_profile=fea_bursty`, `required_capability=conda:pyaedt2026v1`, `env_profile=pyaedt2026v1`, and explicit `module load ansys-electronics/v252`.
+- Before each new batch, generate a non-overlapping case plan, apply confirmed exclusion rules only, dry-run or smoke new nodes, and fetch only filtered result summaries.
+
 ## Journal Rules
 
 Append to `note.md` for each meaningful execution loop:

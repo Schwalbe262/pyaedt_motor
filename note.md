@@ -2500,3 +2500,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still running, and no batch3 ok evidence exists yet.
 - Next action: poll later for new batch2/batch3 completions, fetch only missing result CSV summaries, and recompute partial gates after new rows arrive.
 - Token usage: active goal counter reported 21,912,777 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:13:29 +09:00 - Loop 191
+
+- Part: 200-concurrent policy correction, batch3 partial007 fetch, and handoff refresh.
+- Goal: apply the user's clarification that 200 simulations is an active concurrency cap, not a total solve cap, while keeping current scheduler evidence accurate.
+- Hypothesis: newly completed batch3 rows can be ingested with filtered remote-file fetches, and project memory can prevent future sessions from stopping after only one 200-case batch.
+- Actions: checked `slurm_scheduler` upstream `1c493ad8` and current README/API policy; sampled the scheduler DB read-only; fetched batch3 cases004/010, then batch2 case193 and batch3 case109 through `/api/tasks/{id}/remote-file`; built explicit `batch2_partial197_selected_results.csv` and `batch3_partial007_selected_results.csv`; reran batch3 failure-pattern checks with result-CSV `input_` column names; updated `AGENTS.md`, `goal.md`, and `HANDOFF_CURRENT.md`.
+- Candidates/options: submit batch4 immediately versus keep current active set under the clarified cap. Chose not to submit because batch2 running=3 plus batch3 queued/running=193 already leaves only four open active slots.
+- Metrics: batch2 counts completed=224/running=3/cancelled=3; batch3 counts completed=7/queued=72/running=121; batch2 partial197 result_rows=197, ok=191, failed=6, combined_kept=13,575; batch3 partial007 result_rows=7, ok=3, failed=4; `input_rotator_gap<=1.64` and the three-rule conjunction matched 3/4 failed and 0/3 ok rows on the seven-row sample.
+- Result: project memory now states that 200 is an active queued/running concurrency cap and that 200-case waves may continue as capacity opens; batch3 now has early ok contrast but the candidate failure rule remains diagnostic and incomplete.
+- Failure reason: active rows are still running and batch3 evidence is too sparse to promote a new exclusion rule or justify batch4 submission.
+- Next action: poll batch2/batch3, fetch only missing completed result summaries, recompute explicit partial gates, then prepare/submit batch4+ only when active queued/running FEA count drops below 200.
+- Token usage: active goal counter reported 22,010,995 tokens used; Codex SQLite token sampler remains unavailable.

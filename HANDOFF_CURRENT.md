@@ -48,7 +48,7 @@
 - 2026-06-16: job 58 was cancelled after producing only invalid-source partial rows with out-of-range efficiency; jobs 60/61 remain queued on valid old-plan sources.
 - 2026-06-16: setup-only dynamic packed probe job 59 selected the expected one-row `SIMULATION_ID=1` CSV and wrote 1/1 `ok` row for baseline setup in 49.888s; scheduler status is now `completed`.
 - 2026-06-16: submitted next fixed replay window rows 13-20 via `dynamic_packed_srun`; scheduler created partial child coverage jobs 60/61 for 2/8 rows on `cpu2` nodes `n115`/`n110`, still queued without Slurm ids as of 09:02 KST.
-- 2026-06-17: latest `slurm_scheduler` main is still `1c493ad8`; current policy is `/tasks` with `fea_bursty` for existing remote FEA work, `/tasks/git` or `/api/tasks/git` for Git work, and `/jobs dynamic_packed_srun` for packed many-case FEA.
+- 2026-06-17: latest `slurm_scheduler` main is still `1c493ad8`; current policy is `/tasks` with `fea_bursty` for existing remote FEA, `/tasks/git` or `/api/tasks/git` for Git work, `/api/task-capacity` for capacity checks, and `/jobs dynamic_packed_srun` for packed many-case FEA.
 - 2026-06-16: submitted additional non-overlapping `/tasks` replay groups: 6205 rows 1-4, 6207 rows 13-16, 6208 rows 17-20, and 6209 rows 9-12; cancelled 6206 before start because it reused task 6106 result paths.
 - 2026-06-16: earlier local scheduler checkout was `ae5298f`; WSL checkout had local dirty scheduler files, so verify live API health and upstream policy before submissions.
 - 2026-06-16: scheduler API hung, was restarted locally, and `/api/health` recovered; avoid broad `/api/tasks` dumps because it returned 200 records despite a `limit` query.
@@ -82,7 +82,7 @@
 - 2026-06-17: cases 092, 094, and 095 completed `ok`; explicit partial95 summary is result_rows=95, ok=91, failed=4, duplicates=0, physical_sanity_violations=0; cases 101-103 are running on n107.
 - 2026-06-17: n108/n109/n110/n115 setup-only module smokes 8765-8768 passed `ok`; production was expanded to 25 running FEA tasks across n107/n108/n109/n110/n114/n115, with case113 already failed `analysis_returned_false=True`.
 - 2026-06-17: case096 completed `ok` in 3908.615s and was backfilled by case122 task 8792 on n107; explicit partial97 summary is result_rows=97, ok=92, failed=5, duplicates=0, physical_sanity_violations=0.
-- 2026-06-17: batch2 has explicit partial194 summary at result_rows=194, ok=188, failed=6, duplicates=0, physical_sanity_violations=0; batch3 partial3 is 0 ok / 3 failed, all `analysis_returned_false=True`.
+- 2026-06-17: batch2 has explicit partial197 summary at result_rows=197, ok=191, failed=6, combined_kept=13,575, duplicates=0, physical_sanity_violations=0; batch3 partial007 is 3 ok / 4 failed.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -104,8 +104,8 @@
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
-- The 200 figure is a per-batch/concurrency cap, so more batches may be submitted, but each batch still needs dry-run manifests, filtered result evidence, and no accidental duplicate case plans.
-- Batch2 all cases001-200 are submitted; latest counts are completed=221, running=6, cancelled=3. Batch3 all cases001-200 are submitted; latest counts are queued=104, running=93, completed=3.
+- The 200 figure is an active queued/running concurrency cap, not a total simulation cap; keep submitting 200-case waves as capacity opens, with non-overlapping plans and filtered evidence.
+- Batch2 all cases001-200 are submitted; latest counts are completed=224, running=3, cancelled=3. Batch3 all cases001-200 are submitted; latest counts are queued=72, running=121, completed=7.
 - Fallback allocations n108/n109/n110/n115 also run unrelated `crypto-sweep` tasks, but explicit-module setup-only smokes passed and production FEA now uses their remaining scheduler capacity.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
 - n114/allocation 42 failed earlier without the Ansys module, but module setup-only smoke task 8545 passed; use n114 only with explicit module env setup and filtered result evidence.
@@ -113,13 +113,13 @@
 
 ## Next steps
 
-1. Poll batch2/batch3 tasks with filtered fields; fetch completed result CSV row/status summaries only, then recompute explicit partial gates without broad globs.
+1. Poll batch2/batch3 tasks with filtered fields; fetch completed result CSV row/status summaries only, then recompute explicit partial gates without broad globs while keeping active FEA queued/running count <=200.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
-4. Submit any new batch4 or later cases as `/tasks` only with explicit Ansys module env setup, non-overlapping source IDs, and setup-only smoke before using any new node.
+4. Prepare batch4+ as non-overlapping 200-case waves, but submit through `/tasks` only when capacity opens under the active concurrency cap and with explicit Ansys module env setup.
 5. Fetch scheduler results through safe relative `/api/jobs/{id}/remote-file` or `/api/tasks/{id}/remote-file` paths and summarize rows/statuses only; do not dump full CSVs.
 6. Before retraining, run `filter_ipmsm_training_dataset.py`, filtered quality checks, and `.venv\Scripts\python.exe train_ipmsm_lightgbm.py` with the current combined CSV.
-7. Next simulation-quality work should diagnose the batch3 `analysis=False` cluster before planning batch4; early failed batch3 cases are 029, 043, and 050.
+7. Diagnose the batch3 `analysis=False` cluster before promoting a batch4 exclusion rule; `input_rotator_gap<=1.64` and the three-rule conjunction currently match 3/4 failed and 0/3 ok rows, but only on seven rows.
 
 ## Token/context policy
 
@@ -148,7 +148,7 @@
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
 - Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating, Ansys module guards, and per-wave filtered result probes.
-- Partial batch2 evidence is now result_rows=194, ok=188, failed=6, duplicates=0; combined partial194 filter/quality gates kept 13,572 rows with 0 duplicates, 0 missing required outputs, and 0 physical-sanity violations.
+- Partial batch2 evidence is now result_rows=197, ok=191, failed=6, duplicates=0; combined partial197 filter/quality gates kept 13,575 rows with 0 duplicates, 0 missing required outputs, and 0 physical-sanity violations.
 
 ## Risks and gotchas
 
