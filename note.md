@@ -2383,3 +2383,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll the active task set, fetch completed row summaries, and backfill case164 when the next production slot opens.
 - Token usage: active goal counter reported 20,704,572 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 09:42:22 +09:00 - Loop 182
+
+- Part: cases 122-132/139/141/146/148 completion and cases 164-179 backfill.
+- Goal: keep the expanded 41-task production pool saturated while increasing completed batch2 evidence.
+- Hypothesis: opened slots on validated nodes can be refilled immediately if duplicate checks are clean and each completed row is fetched before gate updates.
+- Actions: fetched completed cases131/133/139, 122/127, 132, and 123/124/126/128/129/141/146/148; submitted cases164-179 as backfills; confirmed cases164-179 reached running; recomputed explicit partial138 summary.
+- Candidates: wait for a larger completion wave versus backfill in smaller waves. Chose incremental backfill because scheduler/API was healthy and it preserves the target concurrency.
+- Metrics: fetched cases were all `ok`; elapsed range was 1479.579-2943.906s; explicit partial summary reached result_rows=138, ok=132, failed=6, duplicates=0, physical_sanity_violations=0; active production concurrency is 41 running tasks.
+- Result: active production tasks are 8806-8808, 8814-8815, 8821, 8823-8826, 8828, 8830-8833, 8835-8839, 8842-8843, 8847-8848, 8850, 8853-8855, 8857-8858, 8861, 8863-8864, and 8866-8873.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll the active task set, fetch completed row summaries, and backfill case180 when the next production slot opens.
+- Token usage: active goal counter reported 21,006,327 tokens used; Codex SQLite token sampler remains unavailable.
