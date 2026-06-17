@@ -2877,3 +2877,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet, and the newest ok rows did not improve the deterministic LightGBM split.
 - Next action: continue filtered polling; when slots open, advance to batch4 case194+ with per-case bootstrap; investigate model-quality issues beyond simply increasing ok-row count.
 - Token usage: active goal counter reported 25,523,110 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 14:59:34 +09:00 - Loop 220
+
+- Part: batch4 refill through case197 and batch3 partial184 quality gate.
+- Goal: keep active FEA at the clarified 200 cap while folding the next batch3 completion into quality evidence.
+- Hypothesis: the per-case bootstrap repair is stable enough to continue filling slots with new batch4 case numbers after the corrected case081-189 range.
+- Actions: sampled scheduler DB read-only; submitted batch4 cases194-195, then fetched batch3 case190 and submitted batch4 cases196-197; verified submit manifests use `/api/tasks`, deterministic dedupe keys, and unique `remote/batch4_cases/case_XXX_node.csv` bootstrap paths; filtered and quality-gated batch3 partial184.
+- Candidates/options: retrain partial184 versus defer. Chose defer because partial184 adds only one ok row beyond the latest partial183 quality gate and three ok rows beyond the latest partial181 retrain.
+- Metrics: latest scheduler counts are batch3 completed=184/running=16 and batch4 completed=14/failed=15/cancelled=94/queued=85/running=98, with one batch2 task still running and total active FEA=200; batch3 partial184 result_rows=184, ok=175, failed=9; combined filter kept_rows=13,752, rejected_rows=9, duplicate_case_id_rows=63; quality gate rows=13,752, duplicates=0, missing_required=0, failed=0.
+- Result: active FEA is back at 200; batch4 has advanced through case197 with per-case bootstrap; partial184 quality passed.
+- Failure reason: R2 target remains unmet from partial181/partial174 retraining evidence.
+- Next action: continue filtered polling; when slots open, advance to batch4 case198+ with per-case bootstrap and retrain only after a material ok-row increase or a model-quality investigation.
+- Token usage: active goal counter reported 25,602,089 tokens used; Codex SQLite token sampler remains unavailable.
