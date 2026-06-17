@@ -108,6 +108,10 @@ def local_probe_path(root: Path, batch: int, case_number: int, node_name: str) -
     return root / f"batch{batch}_fea_task_{case_number:03d}_{node_name}_b{batch}_{case_number:03d}_results_probe.csv"
 
 
+def remote_case_csv_path(batch: int, case_number: int, node_name: str) -> str:
+    return f"remote/batch{batch}_cases/case_{case_number:03d}_{node_name}.csv"
+
+
 def normalize_header(fieldnames: list[str] | None) -> list[str]:
     return [field.lstrip("\ufeff") if index == 0 else field for index, field in enumerate(fieldnames or [])]
 
@@ -229,6 +233,9 @@ def build_refill_argv(args: argparse.Namespace, case_number: int, node_name: str
         str(case_number),
         "--case-limit",
         "1",
+        "--remote-cases",
+        remote_case_csv_path(args.refill_batch, case_number, node_name),
+        "--bootstrap-remote-cases",
         "--remote-cwd",
         args.remote_cwd,
         "--task-name",
@@ -281,6 +288,31 @@ def build_refill_argv(args: argparse.Namespace, case_number: int, node_name: str
     return argv
 
 
+def parse_case_numbers(raw: str) -> list[int]:
+    cases: list[int] = []
+    seen: set[int] = set()
+    for part in raw.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if "-" in token:
+            start_text, end_text = token.split("-", 1)
+            start = int(start_text)
+            end = int(end_text)
+            if end < start:
+                raise ValueError(f"invalid descending case range: {token}")
+            values = range(start, end + 1)
+        else:
+            values = (int(token),)
+        for value in values:
+            if value < 1:
+                raise ValueError("case numbers must be >= 1")
+            if value not in seen:
+                seen.add(value)
+                cases.append(value)
+    return cases
+
+
 def submit_refill_cases(args: argparse.Namespace, cases: Iterable[int]) -> list[dict[str, object]]:
     submitted = []
     nodes = tuple(args.nodes.split(","))
@@ -319,6 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--refill-batch", type=int, default=4)
     parser.add_argument("--active-cap", type=int, default=200)
     parser.add_argument("--refill-case-limit", type=int, default=200)
+    parser.add_argument("--refill-case-numbers", default="", help="Explicit comma/range case numbers to refill instead of max-case planning.")
     parser.add_argument("--base-training", type=Path)
     parser.add_argument("--remote-cwd", default="/home1/r1jae262/ipmsm_pyaedt_motor_work")
     parser.add_argument("--refill-cases", type=Path)
@@ -349,7 +382,15 @@ def main(argv: list[str] | None = None) -> int:
     all_tasks = result_tasks + refill_tasks + read_tasks_from_db(args.db, "ipmsm-batch2-fea-%")
     active = nonterminal_count(all_tasks)
     missing = missing_completed_tasks(result_tasks, local_probe_cases(args.root, args.result_batch))
-    refill_cases = planned_refill_cases(max_case_number(refill_tasks), active, args.active_cap, args.refill_case_limit)
+    if args.refill_case_numbers:
+        refill_cases = parse_case_numbers(args.refill_case_numbers)
+        open_slots = args.active_cap - active
+        if len(refill_cases) > open_slots:
+            raise SystemExit(
+                f"--refill-case-numbers requests {len(refill_cases)} case(s) but only {open_slots} active slot(s) are open"
+            )
+    else:
+        refill_cases = planned_refill_cases(max_case_number(refill_tasks), active, args.active_cap, args.refill_case_limit)
 
     result: dict[str, object] = {
         "active_nonterminal": active,

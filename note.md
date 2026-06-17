@@ -2851,3 +2851,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet and no selector-safe exclusion rule is confirmed.
 - Next action: continue filtered polling with `sync_ipmsm_scheduler_replay.py`, fetch only missing completed result summaries, refill batch4 only when active FEA drops below 200, and investigate model-quality causes beyond simply adding more ok rows.
 - Token usage: active goal counter reported 25,137,768 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 14:43:40 +09:00 - Loop 218
+
+- Part: per-case remote CSV bootstrap repair, batch3 partial176, and corrected batch4 resubmission.
+- Goal: prevent shared remote-cwd refill tasks from failing or racing on `remote/cases.csv` while continuing the 200-active FEA campaign.
+- Hypothesis: batch4 failed cases081-095 are submission plumbing failures, not simulation-quality failures, and per-case bootstrapped CSV paths will make concurrent `/api/tasks` replay deterministic.
+- Actions: inspected failed batch4 tasks9254/9268 with filtered stderr and confirmed `FileNotFoundError: remote/cases.csv`; updated `sync_ipmsm_scheduler_replay.py` to pass unique `remote/batch4_cases/case_XXX_node.csv` paths plus `--bootstrap-remote-cases`, and added explicit case-number refill parsing; cancelled 94 bad nonterminal no-bootstrap tasks cases096-189; fetched batch3 cases099/166/172/191/199 and then cases170/178; resubmitted corrected batch4 cases081-184 through `/api/tasks`; filtered and quality-gated partial176; retrained partial174.
+- Candidates/options: leave queued no-bootstrap tasks to fail versus cancel and resubmit. Chose cancel/resubmit because a shared `remote/cases.csv` is either missing or race-prone under concurrent remote-cwd tasks.
+- Metrics: latest scheduler counts are batch3 completed=176/running=24 and batch4 completed=9/failed=15/cancelled=94/queued=96/running=79, with one batch2 task still running and total active FEA=200; batch3 partial176 result_rows=176, ok=167, failed=9; combined filter kept_rows=13,744, rejected_rows=9, duplicate_case_id_rows=63; quality gate rows=13,744, duplicates=0, missing_required=0, failed=0; partial174 retrain invalid_training_rows=0, removed_output_outliers=3,459, failures=8/8, min_R2=0.727178725767, avg_R2=0.828310891005.
+- Result: active FEA is back at 200, corrected manifests for cases081/181/182/184 show per-case bootstrap, and partial174 improved R2 modestly but remains below target.
+- Failure reason: R2 target remains unmet; remaining cancelled batch4 cases185-189 still need corrected resubmission when slots open.
+- Next action: continue filtered polling, explicitly refill corrected cases185-189 before advancing to new batch4 case numbers, and do not count old cases081-095 as simulation-quality failures.
+- Token usage: active goal counter reported 25,423,771 tokens used; Codex SQLite token sampler remains unavailable.

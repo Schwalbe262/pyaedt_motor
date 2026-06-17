@@ -640,3 +640,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `submit_ipmsm_scheduler_task.py` defaults to `/api/tasks`, keeps legacy `/tasks` as an explicit compatibility option, and `sync_ipmsm_scheduler_replay.py` assigns stable batch/case dedupe keys while leaving `max_workers_per_node` uncapped by default.
 - Evidence: latest `slurm_scheduler` HEAD `1c493ad8` documents `/api/tasks` for service clients and `dedupe_key` support; targeted submit/sync tests passed 16/16; batch4 cases163-185 were submitted through `/api/tasks` with non-deduped queued responses and stable dedupe keys.
 - Remaining risk: live scheduler admission still depends on warm allocation capacity and `fea_bursty` memory/load gates; dedupe prevents duplicate active tasks but does not validate simulation quality.
+
+## 2026-06-17 14:43:40 +09:00 - Insight 69
+
+- Source loop: `note.md` Loop 218.
+- Improvement: concurrent remote-cwd FEA tasks must bootstrap a unique per-task case CSV path, not share `remote/cases.csv`.
+- Before: batch4 refill tasks referenced `remote/cases.csv` without embedding it; cases081-095 failed with `FileNotFoundError`, and later queued tasks would either fail the same way or race on a shared file.
+- After: `sync_ipmsm_scheduler_replay.py` builds `remote/batchN_cases/case_XXX_node.csv`, passes `--bootstrap-remote-cases`, and supports explicit case-number refills for repaired resubmissions.
+- Evidence: filtered stderr for tasks9254/9268 showed missing `remote/cases.csv`; 94 bad nonterminal tasks were cancelled; corrected case081, case181, case182, and case184 manifests contain `IPMSM_CASES_CSV` bootstrap and unique remote case paths; targeted sync/submit tests passed 17/17.
+- Remaining risk: already-cancelled cases185-189 still require explicit corrected resubmission when active slots open.

@@ -42,6 +42,11 @@ class SyncIpmsmSchedulerReplayTests(unittest.TestCase):
         self.assertEqual(sync.planned_refill_cases(199, 190, 200, 200), [200])
         self.assertEqual(sync.planned_refill_cases(145, 200, 200, 200), [])
 
+    def test_parse_case_numbers_accepts_ranges_and_deduplicates(self) -> None:
+        self.assertEqual(sync.parse_case_numbers("81-83,83,90"), [81, 82, 83, 90])
+        with self.assertRaisesRegex(ValueError, "descending"):
+            sync.parse_case_numbers("5-3")
+
     def test_build_selected_results_normalizes_double_bom_and_failed_case_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -99,6 +104,9 @@ class SyncIpmsmSchedulerReplayTests(unittest.TestCase):
         self.assertIn("--env-setup", argv)
         self.assertIn(sync.ANSYS_ELECTRONICS_MODULE, argv)
         self.assertIn("ipmsm-batch4-fea-146-n108_b4_146", argv)
+        self.assertIn("--remote-cases", argv)
+        self.assertIn("remote/batch4_cases/case_146_n108.csv", argv)
+        self.assertIn("--bootstrap-remote-cases", argv)
         self.assertIn("--dedupe-key", argv)
         self.assertIn("ipmsm-batch4-case146", argv)
         self.assertIn("--task-endpoint", argv)
