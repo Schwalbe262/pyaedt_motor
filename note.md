@@ -2617,3 +2617,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no selector-safe failure rule is confirmed, and retraining remains premature until more ok replay rows are available.
 - Next action: continue polling, fetch only missing completed result summaries, and refill batch4 only when nonterminal FEA drops below 200.
 - Token usage: active goal counter reported 22,538,206 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:58:38 +09:00 - Loop 200
+
+- Part: batch3 partial020 and one-slot batch4 refill.
+- Goal: convert the next completed batch3 row into evidence and keep the active FEA pool at 200.
+- Hypothesis: the next completed row can improve ok/failed contrast while the active cap permits exactly one replacement submission.
+- Actions: fetched batch3 case022 through `/api/tasks/{id}/remote-file`, built `batch3_partial020_selected_results.csv`, reran failure-pattern checks with exact failed-row indexes, dry-ran and submitted batch4 case019 as task 9160, and confirmed no missing completed result files remained.
+- Candidates/options: promote the current candidate rule versus keep it diagnostic. Chose diagnostic because the best narrow rule still covers only 7/8 failed rows in partial020.
+- Metrics: batch3 partial020 result_rows=20, ok=12, failed=8, physical_sanity_violations=0; scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=20/queued=30/running=150, batch4 queued=19, total nonterminal FEA=200.
+- Result: batch3 ok contrast improved and batch4 case019 is queued under the active cap.
+- Failure reason: failure-pattern evidence is still not strong enough for a confirmed selector rule, and retraining is still waiting for more completed ok rows.
+- Next action: continue filtered polling and refill batch4 only when nonterminal FEA drops below 200.
+- Token usage: active goal counter reported 22,582,726 tokens used; Codex SQLite token sampler remains unavailable.
