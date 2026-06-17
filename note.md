@@ -2448,3 +2448,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still running, and batch3's first completed rows are all geometry/analysis failures.
 - Next action: keep polling with filtered result evidence, then run a targeted batch3 failure-pattern analysis once enough failed/ok batch3 rows exist.
 - Token usage: active goal counter reported 21,744,174 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 10:51:31 +09:00 - Loop 187
+
+- Part: batch2 partial190 and early batch3 failure triage.
+- Goal: keep result evidence current while avoiding premature conclusions from sparse batch3 outcomes.
+- Hypothesis: newly completed batch2 rows can advance the partial gate, while batch3's early all-failed sample should be treated as diagnostic evidence only until ok rows arrive.
+- Actions: rechecked repo/scheduler state, confirmed `slurm_scheduler` upstream remains `1c493ad8`, fetched batch2 case180, recomputed batch2 partial190 and batch3 partial3, and compared batch3 failed cases029/043/050 against the full batch3 plan.
+- Candidates: rerun retraining immediately versus wait. Chose to wait because partial190 added only one ok row beyond the last retrain dataset and batch3 has no ok rows yet.
+- Metrics: partial190 result_rows=190, ok=184, failed=6, duplicates=0, physical_sanity_violations=0; batch3 partial3 result_rows=3, ok=0, failed=3; latest counts are batch2 completed=217/running=10/cancelled=3 and batch3 queued=127/attaching=1/running=70/completed=3; early failed batch3 cases all satisfy `magnet_shield_thick<=2.514`, `rotator_gap<=1.64`, and `magnet_height_ratio>=0.929`.
+- Result: batch2 quality evidence advanced by one ok row; batch3 still needs ok-row contrast before a reliable exclusion rule can be promoted.
+- Failure reason: active rows are still running, and no batch3 ok evidence exists yet.
+- Next action: poll batch3 until at least some ok rows exist, then run targeted failure-pattern analysis before planning batch4.
+- Token usage: active goal counter reported 21,811,573 tokens used; Codex SQLite token sampler remains unavailable.
