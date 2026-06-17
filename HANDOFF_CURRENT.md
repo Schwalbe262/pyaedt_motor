@@ -105,7 +105,7 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is an active queued/running concurrency cap, not a total simulation cap; keep submitting 200-case waves as capacity opens, with non-overlapping plans and filtered evidence.
-- Batch2 all cases001-200 are submitted; latest counts are completed=226, running=1, cancelled=3. Batch3 all cases001-200 are submitted; latest counts are queued=40, running=143, completed=17. Batch4 cases001-016 are submitted and queued.
+- Batch2 all cases001-200 are submitted; latest counts are completed=226, running=1, cancelled=3. Batch3 all cases001-200 are submitted; latest counts are queued=36, running=147, completed=17. Batch4 cases001-016 are submitted and queued.
 - Fallback allocations n108/n109/n110/n115 also run unrelated `crypto-sweep` tasks, but explicit-module setup-only smokes passed and production FEA now uses their remaining scheduler capacity.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
 - n114/allocation 42 failed earlier without the Ansys module, but module setup-only smoke task 8545 passed; use n114 only with explicit module env setup and filtered result evidence.

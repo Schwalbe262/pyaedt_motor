@@ -2591,3 +2591,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: no selector-safe rule is confirmed, and retraining remains premature with only nine batch3 ok rows.
 - Next action: fetch the remaining batch2 completion and more batch3/batch4 results as they finish; continue batch4 refills only when nonterminal FEA drops below 200.
 - Token usage: active goal counter reported 22,401,208 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:47:34 +09:00 - Loop 198
+
+- Part: scheduler progress poll with no new result fetch.
+- Goal: verify whether the active 200-FEA pool produced new completed rows ready for filtered ingestion.
+- Hypothesis: a short wait may expose new batch2/batch3/batch4 completions, but no submission should occur while nonterminal FEA remains at 200.
+- Actions: confirmed repo state and scheduler upstream `1c493ad8`, sampled the scheduler DB read-only, compared completed task cases against local result probes, waited 60s, and repeated the filtered missing-result check.
+- Candidates/options: keep waiting versus record the no-fetch loop. Chose to record it because no result files were missing and active FEA remained at the clarified cap.
+- Metrics: counts stayed batch2 completed=226/running=1/cancelled=3, batch4 queued=16, and total nonterminal FEA=200; batch3 shifted from queued=40/running=143 to queued=36/running=147 with completed=17; missing completed result files remained 0.
+- Result: no result files were fetched, no batch4 rows were submitted, and no partial gates changed.
+- Failure reason: active rows are still solving and no completed result file is missing locally.
+- Next action: poll again later, fetch only missing completed result summaries, and submit batch4 rows only when nonterminal FEA drops below 200.
+- Token usage: active goal counter reported 22,495,991 tokens used; Codex SQLite token sampler remains unavailable.
