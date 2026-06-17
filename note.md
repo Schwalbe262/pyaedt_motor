@@ -2474,3 +2474,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still running, and batch3 has only failed completed rows so far.
 - Next action: poll for batch3 ok rows, then run failure-pattern analysis and retraining once the evidence set changes materially.
 - Token usage: active goal counter reported 21,847,044 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:00:43 +09:00 - Loop 189
+
+- Part: batch2 partial194 and combined dataset gate.
+- Goal: keep batch2 evidence current while batch3 continues to run.
+- Hypothesis: newly completed batch2 cases187/192 should increase the filtered training-ready pool without changing the current retraining decision.
+- Actions: confirmed repo state and scheduler upstream `1c493ad8`, fetched batch2 cases187/192, recomputed batch2 partial194 and batch3 partial3, wrote `batch2_partial194_selected_results.csv`, and ran combined filter plus dataset quality gates against first-batch `partial219_bomfix` plus batch2 partial194.
+- Candidates: rerun LightGBM immediately versus wait. Chose to wait because partial194 adds only two ok rows beyond partial192 and batch3 still has no ok completed rows.
+- Metrics: partial194 result_rows=194, ok=188, failed=6, duplicates=0, physical_sanity_violations=0; combined filter rows_read=13,578, kept=13,572, rejected=6, duplicate_case_id_rows=0; dataset quality rows=13,572, missing_required=0, duplicates=0, physical_sanity_violations=0; latest counts are batch2 completed=221/running=6/cancelled=3 and batch3 queued=104/running=93/completed=3.
+- Result: combined partial194 dataset is training-ready, but retraining is deferred until a material evidence change.
+- Failure reason: active rows are still running, and batch3 has only failed completed rows so far.
+- Next action: fetch the remaining batch2 completions as they finish, and wait for batch3 ok rows before failure-pattern analysis.
+- Token usage: active goal counter reported 21,882,791 tokens used; Codex SQLite token sampler remains unavailable.
