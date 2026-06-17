@@ -2942,3 +2942,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet; batch4 failures remain transient-output-missing rows and are not yet a confirmed selector rule.
 - Next action: continue filtered polling, fetch batch3 final two rows and batch4/batch5 completions, refill batch5 case063+ when active drops below 200, and investigate target-specific simulation/output noise before changing selector rules.
 - Token usage: active goal counter reported 26,863,314 tokens used; `codex_ops.py record-current-codex-thread-usage` failed because the default Codex SQLite DB was not found.
+
+## 2026-06-17 16:15:36 +09:00 - Loop 225
+
+- Part: batch4 partial068 fetch and batch5 refill through case065.
+- Goal: apply the user's clarification that 200 is a concurrent active-task cap, not a total simulation count, while staying aligned with the updated scheduler `/api/tasks` policy.
+- Hypothesis: if active nonterminal FEA drops below 200, exact-slot batch5 refills can continue safely in 200-case waves without changing the current training-ready dataset unless new ok rows arrive.
+- Actions: rechecked latest `slurm_scheduler` docs for `/api/tasks` JSON policy; sampled scheduler DB read-only for batch3/batch4/batch5; fetched batch4 completed cases176/181/185; wrote `batch4_partial068_selected_results.csv`; submitted batch5 cases063-065 through `/api/tasks` with per-case bootstrapped CSVs, deterministic dedupe keys, and `max_workers_per_node=200`.
+- Candidates/options considered: rebuild training-ready data after partial068 versus defer. Chose defer because all three newly fetched batch4 rows were failed rows with missing required transient output metrics, so ok rows stayed at 57 and the current `batch2p199_batch3p198_batch4p065` gate remains the latest useful training-ready evidence.
+- Metrics: active_nonterminal moved from 197 to 200; batch3 completed=198/running=2; batch4 completed=68/failed=15/cancelled=94/running=132; batch5 submitted through case065 with queued=56/running=9 at the first post-refill sample; batch4 partial068 result_rows=68, ok=57, failed=11.
+- Result: active FEA is back at the clarified 200 cap, batch5 has advanced through case065, and partial068 failure evidence is captured without polluting training-ready data.
+- Failure reason: R2 target remains unmet, and batch4 missing-transient-output failures are not yet a confirmed selector rule.
+- Next action: continue filtered polling, fetch only completed result summaries, refill batch5 case066+ when active drops below 200, and investigate target-specific simulation/output noise before changing selector rules.
+- Token usage: active goal counter reported 27,187,564 tokens used; Codex SQLite token sampler remains unavailable.
