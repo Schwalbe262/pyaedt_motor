@@ -2760,3 +2760,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 remains below 0.95 and no selector-safe exclusion rule is confirmed.
 - Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and investigate quality causes beyond the current height/setback rules.
 - Token usage: active goal counter reported 24,320,853 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 13:35:36 +09:00 - Loop 211
+
+- Part: post-push batch4 refill through case118.
+- Goal: restore the clarified active FEA cap after batch3 completed additional rows during the previous closeout.
+- Hypothesis: newly opened slots should be filled with non-overlapping batch4 cases, while result fetching can remain the next filtered operation.
+- Actions: sampled scheduler DB read-only after push, observed active FEA dropped to 188, then submitted batch4 cases107-118 as `/tasks` 9282-9293 with `fea_bursty`, explicit Ansys module setup, node pinning, and per-case manifests.
+- Candidates/options: fetch newly completed batch3 results first versus refill slots first. Chose refill first because active concurrency had dropped below the allowed cap and result fetching is read-only follow-up work.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=119/running=81, batch4 queued=85/running=33, total nonterminal FEA=200; batch4 max submitted case is 118.
+- Result: active FEA is back at 200; partial107 remains the latest locally folded batch3 quality/training evidence, and DB completion has advanced to 119 for the next fetch loop.
+- Failure reason: none for refill; R2 target remains unmet from partial107 retraining.
+- Next action: fetch only the missing batch3 completed result CSVs since partial107, recompute partial119, and refill again only if active FEA drops below 200.
+- Token usage: active goal counter reported 24,351,286 tokens used; Codex SQLite token sampler remains unavailable.

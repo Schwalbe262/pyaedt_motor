@@ -105,7 +105,7 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is an active queued/running concurrency cap, not a total simulation cap; keep submitting 200-case waves as capacity opens, with non-overlapping plans and filtered evidence.
-- Batch2 all cases001-200 are submitted; latest counts are completed=226, running=1, cancelled=3. Batch3 all cases001-200 are submitted; latest counts are running=93, completed=107. Batch4 cases001-106 are submitted with queued=79/running=27; total active FEA is 200.
+- Batch2 all cases001-200 are submitted; latest counts are completed=226, running=1, cancelled=3. Batch3 all cases001-200 are submitted; latest counts are running=81, completed=119. Batch4 cases001-118 are submitted with queued=85/running=33; total active FEA is 200.
 - Fallback allocations n108/n109/n110/n115 also run unrelated `crypto-sweep` tasks, but explicit-module setup-only smokes passed and production FEA now uses their remaining scheduler capacity.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
 - n114/allocation 42 failed earlier without the Ansys module, but module setup-only smoke task 8545 passed; use n114 only with explicit module env setup and filtered result evidence.
@@ -148,7 +148,7 @@
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
 - Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating, Ansys module guards, and per-wave filtered result probes.
-- Partial batch2 evidence is result_rows=199, ok=193, failed=6, duplicates=0; batch3 partial107 is 98 ok / 9 failed; batch4 plan excludes 600 prior source IDs and 2,927 conservative-rule rows, has 200 unique sources, and cases001-106 are queued/running under the 200 active cap.
+- Partial batch2 evidence is result_rows=199, ok=193, failed=6, duplicates=0; batch3 partial107 is 98 ok / 9 failed, while DB completion has advanced to 119 and needs the next filtered fetch; batch4 plan excludes 600 prior source IDs and 2,927 conservative-rule rows, has 200 unique sources, and cases001-118 are queued/running under the 200 active cap.
 
 ## Risks and gotchas
 
