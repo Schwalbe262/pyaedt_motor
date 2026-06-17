@@ -2552,3 +2552,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: candidate rules remain unstable under new failed rows and are not yet safe for batch4 plan mutation.
 - Next action: poll for the next completed rows, fetch only missing summaries, and submit further batch4 rows only when total nonterminal FEA drops below 200.
 - Token usage: active goal counter reported 22,327,989 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:35:58 +09:00 - Loop 195
+
+- Part: batch2 partial199, batch3 partial012, and three-slot batch4 refill.
+- Goal: convert newly completed rows into filtered evidence and refill only the opened active FEA slots.
+- Hypothesis: batch2 tail completions can advance the combined gate, while a new batch3 ok row can improve contrast for failure triage without promoting a premature rule.
+- Actions: fetched batch2 cases190/197 and batch3 case023 through `/api/tasks/{id}/remote-file`; built `batch2_partial199_selected_results.csv` and `batch3_partial012_selected_results.csv`; reran batch3 failure-pattern checks; dry-ran and submitted batch4 cases009-011 as tasks 9143-9145; confirmed no missing completed result files remained.
+- Candidates/options: retrain immediately versus wait for a material data change. Chose to wait because partial199 adds only six ok rows beyond the last partial187 retraining dataset and batch3 has only six ok rows.
+- Metrics: batch2 partial199 result_rows=199, ok=193, failed=6, combined_kept=13,577; batch3 partial012 result_rows=12, ok=6, failed=6; scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=12/queued=42/running=146, batch4 queued=11, total nonterminal FEA=200.
+- Result: batch2 is nearly fully ingested, batch3 has balanced early ok/failed contrast, and active FEA is back at the 200 cap.
+- Failure reason: no failure selector rule is confirmed, and retraining remains premature until more batch3/batch4 ok rows arrive.
+- Next action: fetch the remaining batch2 completion and additional batch3/batch4 results as they finish, then submit further batch4 rows only when total nonterminal FEA drops below 200.
+- Token usage: active goal counter reported 22,350,624 tokens used; Codex SQLite token sampler remains unavailable.
