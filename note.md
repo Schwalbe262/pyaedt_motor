@@ -2578,3 +2578,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: the failure cluster remains real but not yet distilled into a selector-safe deterministic rule.
 - Next action: continue polling/fetching filtered results and refill batch4 only when nonterminal FEA drops below 200; retrain when the ok-row increase is material.
 - Token usage: active goal counter reported 22,372,064 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 11:43:52 +09:00 - Loop 197
+
+- Part: batch3 partial017 and four-slot batch4 refill.
+- Goal: ingest the next batch3 completion wave and keep the active FEA pool at the 200 cap.
+- Hypothesis: candidate-hit batch3 cases can validate or weaken the current analysis-false rule candidates, and newly opened active slots can be refilled without exceeding the cap.
+- Actions: fetched batch3 cases012/016/017 and candidate-hit case158 through `/api/tasks/{id}/remote-file`; built `batch3_partial016_selected_results.csv` then `batch3_partial017_selected_results.csv`; reran failure-pattern checks; dry-ran and submitted batch4 cases013-016 as tasks 9149-9151 and 9153; confirmed no missing completed result files remained.
+- Candidates/options: promote the height/setback/shield rule after case158 failed versus keep it diagnostic. Chose diagnostic because the rule still misses failed case139 and broader variants match ok rows.
+- Metrics: batch3 partial017 result_rows=17, ok=9, failed=8, physical_sanity_violations=0; scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=17/queued=40/running=143, batch4 queued=16, total nonterminal FEA=200.
+- Result: four new batch4 rows are queued, and batch3 now has stronger ok contrast without a confirmed exclusion rule.
+- Failure reason: no selector-safe rule is confirmed, and retraining remains premature with only nine batch3 ok rows.
+- Next action: fetch the remaining batch2 completion and more batch3/batch4 results as they finish; continue batch4 refills only when nonterminal FEA drops below 200.
+- Token usage: active goal counter reported 22,401,208 tokens used; Codex SQLite token sampler remains unavailable.
