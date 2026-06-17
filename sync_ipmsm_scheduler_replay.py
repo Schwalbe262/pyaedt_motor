@@ -267,6 +267,14 @@ def build_refill_argv(args: argparse.Namespace, case_number: int, node_name: str
         "fea_bursty",
         "--max-workers-per-node",
         str(args.max_workers_per_node),
+        "--priority",
+        str(args.priority),
+        "--timeout-seconds",
+        str(args.task_timeout_seconds),
+        "--dedupe-key",
+        f"ipmsm-batch{args.refill_batch}-case{case_number:03d}",
+        "--task-endpoint",
+        args.task_endpoint,
         "--timeout",
         str(args.timeout),
     ]
@@ -320,7 +328,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nodes", default=",".join(DEFAULT_NODES))
     parser.add_argument("--cpus", type=int, default=4)
     parser.add_argument("--memory-mb", type=int, default=32768)
-    parser.add_argument("--max-workers-per-node", type=int, default=8)
+    parser.add_argument("--max-workers-per-node", type=int, default=0)
+    parser.add_argument("--priority", type=int, default=0)
+    parser.add_argument("--task-timeout-seconds", type=int, default=0)
+    parser.add_argument("--task-endpoint", choices=("/api/tasks", "/tasks"), default="/api/tasks")
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--fetch-missing", action="store_true")
     parser.add_argument("--write-partial", action="store_true")

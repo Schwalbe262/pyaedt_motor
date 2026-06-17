@@ -48,6 +48,9 @@ def build_task_payload(args: argparse.Namespace) -> dict[str, Any]:
         "memory_mb": args.memory_mb,
         "scheduling_profile": args.scheduling_profile,
         "max_workers_per_node": args.max_workers_per_node,
+        "priority": args.priority,
+        "timeout_seconds": args.timeout_seconds,
+        "dedupe_key": args.dedupe_key,
         "gpus": args.gpus,
         "gpu_model": args.gpu_model,
     }
@@ -70,13 +73,24 @@ def validate_task_request(args: argparse.Namespace) -> None:
         raise RuntimeError("--case-limit must be >= 0")
 
 
-def post_scheduler_task(scheduler_url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
-    url = scheduler_url.rstrip("/") + "/tasks"
-    encoded = parse.urlencode(payload).encode("utf-8")
+def post_scheduler_task(
+    scheduler_url: str,
+    payload: dict[str, Any],
+    timeout: float,
+    task_endpoint: str = "/api/tasks",
+) -> dict[str, Any]:
+    endpoint = task_endpoint if task_endpoint.startswith("/") else f"/{task_endpoint}"
+    url = scheduler_url.rstrip("/") + endpoint
+    if endpoint == "/api/tasks":
+        encoded = json.dumps(payload).encode("utf-8")
+        content_type = "application/json"
+    else:
+        encoded = parse.urlencode(payload).encode("utf-8")
+        content_type = "application/x-www-form-urlencoded"
     req = request.Request(
         url,
         data=encoded,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={"Content-Type": content_type},
         method="POST",
     )
     with request.urlopen(req, timeout=timeout) as response:
@@ -187,9 +201,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--memory-mb", type=int, default=16_384)
     parser.add_argument("--scheduling-profile", choices=("standard", "fea_bursty"), default="standard")
     parser.add_argument("--max-workers-per-node", type=int, default=0)
+    parser.add_argument("--priority", type=int, default=0)
+    parser.add_argument("--timeout-seconds", type=int, default=0)
+    parser.add_argument("--dedupe-key", default="")
     parser.add_argument("--gpus", type=int, default=0)
     parser.add_argument("--gpu-model", default="")
     parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument("--task-endpoint", choices=("/api/tasks", "/tasks"), default="/api/tasks")
     parser.add_argument("--check-health", action="store_true")
     parser.add_argument("--write-manifest", type=Path, help="Write the review JSON payload to this local path.")
     parser.add_argument("--show-env-setup", action="store_true", help="Print full env_setup in stdout instead of redacting it.")
@@ -210,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = build_task_payload(args)
     output: dict[str, Any] = {
         "submitted": False,
-        "task_endpoint": "/tasks",
+        "task_endpoint": args.task_endpoint,
         "task_name": args.task_name,
         "validated_cases": len(validated_rows),
         "case_count": len(rows),
@@ -227,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             output["pre_submit_task_lookup_error"] = str(exc)
         output["submitted"] = True
-        output["response"] = post_scheduler_task(args.scheduler_url, payload, args.timeout)
+        output["response"] = post_scheduler_task(args.scheduler_url, payload, args.timeout, args.task_endpoint)
         try:
             submitted_task = find_submitted_task(
                 get_scheduler_tasks(args.scheduler_url, args.timeout),

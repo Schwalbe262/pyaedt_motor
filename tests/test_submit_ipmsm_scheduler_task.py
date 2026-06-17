@@ -50,9 +50,13 @@ def task_args(**overrides: object) -> Namespace:
         "memory_mb": 16384,
         "scheduling_profile": "standard",
         "max_workers_per_node": 0,
+        "priority": 0,
+        "timeout_seconds": 0,
+        "dedupe_key": "",
         "gpus": 0,
         "gpu_model": "",
         "timeout": 10.0,
+        "task_endpoint": "/api/tasks",
         "check_health": False,
         "write_manifest": None,
         "show_env_setup": False,
@@ -81,6 +85,9 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         self.assertEqual(payload["memory_mb"], 16384)
         self.assertEqual(payload["scheduling_profile"], "standard")
         self.assertEqual(payload["max_workers_per_node"], 0)
+        self.assertEqual(payload["priority"], 0)
+        self.assertEqual(payload["timeout_seconds"], 0)
+        self.assertEqual(payload["dedupe_key"], "")
 
     def test_build_task_payload_supports_fea_bursty_profile(self) -> None:
         payload = scheduler_task.build_task_payload(
@@ -89,6 +96,39 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
 
         self.assertEqual(payload["scheduling_profile"], "fea_bursty")
         self.assertEqual(payload["max_workers_per_node"], 200)
+
+    def test_post_scheduler_task_defaults_to_json_api(self) -> None:
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self) -> "FakeResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return b'{"id": 7, "deduped": false}'
+
+        def fake_urlopen(req: object, timeout: float) -> FakeResponse:
+            captured["full_url"] = req.full_url
+            captured["headers"] = dict(req.header_items())
+            captured["data"] = req.data
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        with mock.patch.object(scheduler_task.request, "urlopen", side_effect=fake_urlopen):
+            response = scheduler_task.post_scheduler_task(
+                "http://scheduler",
+                {"name": "ipmsm-task", "dedupe_key": "ipmsm-batch4-case001"},
+                5.0,
+            )
+
+        self.assertEqual(response["id"], 7)
+        self.assertEqual(captured["full_url"], "http://scheduler/api/tasks")
+        self.assertEqual(captured["headers"]["Content-type"], "application/json")
+        self.assertIn('"dedupe_key": "ipmsm-batch4-case001"', captured["data"].decode("utf-8"))
+        self.assertEqual(captured["timeout"], 5.0)
 
     def test_validate_task_request_requires_remote_cwd(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "--remote-cwd"):
@@ -244,6 +284,7 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         output = json.loads(stdout.getvalue())
         self.assertTrue(output["submitted"])
+        self.assertEqual(output["task_endpoint"], "/api/tasks")
         self.assertEqual(output["submitted_task"]["id"], 9)
 
 

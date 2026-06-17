@@ -84,7 +84,10 @@ class SyncIpmsmSchedulerReplayTests(unittest.TestCase):
             account_name="r1jae262",
             cpus=4,
             memory_mb=32768,
-            max_workers_per_node=8,
+            max_workers_per_node=0,
+            priority=0,
+            task_timeout_seconds=0,
+            task_endpoint="/api/tasks",
             timeout=60,
         )
 
@@ -96,6 +99,10 @@ class SyncIpmsmSchedulerReplayTests(unittest.TestCase):
         self.assertIn("--env-setup", argv)
         self.assertIn(sync.ANSYS_ELECTRONICS_MODULE, argv)
         self.assertIn("ipmsm-batch4-fea-146-n108_b4_146", argv)
+        self.assertIn("--dedupe-key", argv)
+        self.assertIn("ipmsm-batch4-case146", argv)
+        self.assertIn("--task-endpoint", argv)
+        self.assertIn("/api/tasks", argv)
 
 
 if __name__ == "__main__":

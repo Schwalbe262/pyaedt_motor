@@ -631,3 +631,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `sync_ipmsm_scheduler_replay.py` performs the read-only DB comparison, missing-result fetch, partial selected CSV generation, and exact-slot batch4 refill submissions using the existing scheduler policy.
 - Evidence: the helper detected missing cases153/181 and then case075, generated partial152/153 outputs, submitted batch4 cases151-153, and targeted sync/summarizer/submit tests passed 17/17.
 - Remaining risk: the helper still relies on operator-supplied DB, base-training, and case-plan paths; full quality filtering and retraining remain explicit follow-up commands.
+
+## 2026-06-17 14:28:23 +09:00 - Insight 68
+
+- Source loop: `note.md` Loop 217.
+- Improvement: automated scheduler refills should use `/api/tasks` JSON with deterministic `dedupe_key`s instead of legacy `/tasks` form posts.
+- Before: `/tasks` form submissions were valid for remote-cwd FEA but ignored newer service-client fields such as `dedupe_key`, `priority`, `timeout_seconds`, and `max_workers_per_node`.
+- After: `submit_ipmsm_scheduler_task.py` defaults to `/api/tasks`, keeps legacy `/tasks` as an explicit compatibility option, and `sync_ipmsm_scheduler_replay.py` assigns stable batch/case dedupe keys while leaving `max_workers_per_node` uncapped by default.
+- Evidence: latest `slurm_scheduler` HEAD `1c493ad8` documents `/api/tasks` for service clients and `dedupe_key` support; targeted submit/sync tests passed 16/16; batch4 cases163-185 were submitted through `/api/tasks` with non-deduped queued responses and stable dedupe keys.
+- Remaining risk: live scheduler admission still depends on warm allocation capacity and `fea_bursty` memory/load gates; dedupe prevents duplicate active tasks but does not validate simulation quality.

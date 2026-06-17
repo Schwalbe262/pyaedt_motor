@@ -2838,3 +2838,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet from partial138 retraining, and no selector-safe exclusion rule is confirmed.
 - Next action: use `sync_ipmsm_scheduler_replay.py` for the next filtered polling/fetch/refill loop, then retrain after the next substantial ok-row increment.
 - Token usage: active goal counter reported 24,952,735 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 14:28:23 +09:00 - Loop 217
+
+- Part: scheduler `/api/tasks` policy update, batch3 partial169 catch-up, and batch4 refill through case185.
+- Goal: align automated FEA refill submissions with the updated scheduler service-client policy while preserving the clarified 200 active queued/attaching/running cap.
+- Hypothesis: using `/api/tasks` JSON with deterministic `dedupe_key` will avoid duplicate refill submissions without imposing a hidden total-simulation or per-node parallel cap.
+- Actions: checked latest `slurm_scheduler` upstream HEAD `1c493ad8` and exact docs/source ranges for `/api/tasks`; updated `submit_ipmsm_scheduler_task.py` and `sync_ipmsm_scheduler_replay.py` to default automated submissions to `/api/tasks`, expose `priority`/`timeout_seconds`/`dedupe_key`, and default `max_workers_per_node=0`; ran targeted py_compile/unit tests; fetched batch3 completed cases through partial169; submitted batch4 cases163-185 through `/api/tasks`; filtered and quality-gated partial169; retrained partial157 then partial163.
+- Candidates/options: keep legacy `/tasks` form posting versus switch automated refills to `/api/tasks`. Chose `/api/tasks` because scheduler docs now describe it for service-to-service clients and it supports dedupe keys; retained legacy `/tasks` as a compatibility option.
+- Metrics: latest scheduler counts are batch3 completed=169/running=31 and batch4 completed=6/failed=11/queued=90/running=78, with one batch2 task still running and total active FEA=200; batch3 partial169 result_rows=169, ok=160, failed=9; combined filter kept_rows=13,737, rejected_rows=9, duplicate_case_id_rows=63; quality gate rows=13,737, duplicates=0, missing_required=0, failed=0; latest retrain remains partial163 with invalid_training_rows=0, removed_output_outliers=3,457, failures=8/8, min_R2=0.715060465762, avg_R2=0.822021723141.
+- Result: active FEA is back at 200 with batch4 cases001-185 submitted; batch4 automated refill now uses scheduler `/api/tasks` JSON manifests with deterministic case dedupe keys; partial169 quality passed, and latest retrain remains below target.
+- Failure reason: R2 target remains unmet and no selector-safe exclusion rule is confirmed.
+- Next action: continue filtered polling with `sync_ipmsm_scheduler_replay.py`, fetch only missing completed result summaries, refill batch4 only when active FEA drops below 200, and investigate model-quality causes beyond simply adding more ok rows.
+- Token usage: active goal counter reported 25,137,768 tokens used; Codex SQLite token sampler remains unavailable.
