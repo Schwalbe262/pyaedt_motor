@@ -105,14 +105,14 @@
 - The replay selector can exclude previous source IDs and numeric high-risk rules; batch2 `mesh_time_fine` has all 200 cases submitted through `/tasks`, with explicit partial199 evidence at result_rows=199, ok=193, failed=6, combined_kept=13,577, duplicate source cases137/138 excluded from gate math, and zero physical-sanity violations.
 - Batch3 `mesh_time_fine` has 200 unique new source cases, excludes the 400 batch1/batch2 source IDs plus the conservative rule `magnet_height_ratio>=0.942,magnet_setback_ratio>=0.121`, and has 0 overlap with prior batches.
 - Batch3 cases001-200 were submitted as `/tasks` 8908-9113 with `scheduling_profile=fea_bursty`, explicit `module load ansys-electronics/v252`, `env_profile=pyaedt2026v1`, and node-pinned distribution across validated nodes.
-- Latest scheduler sample: batch2 has completed=226, running=1, cancelled=3; batch3 has queued=30, running=150, completed=20; batch4 has queued=19, so active queued/running FEA is at the clarified cap of 200.
-- Batch3 partial020 is ok=12/failed=8, with failed cases029/043/050/109/134/139/147/158 all `analysis_returned_false=True`; current candidate rules remain diagnostic because they either miss failed rows or match too many historical ok rows.
-- Batch4 `mesh_time_fine` plan has 200 unique new source cases, excludes batch1/batch2/batch3 source IDs plus the conservative rule `magnet_height_ratio>=0.942,magnet_setback_ratio>=0.121`, and cases001-019 were submitted as `/tasks` 9130-9133, 9135-9136, 9139, 9141, 9143-9145, 9147, 9149-9151, 9153, 9156, 9158, and 9160.
-- LightGBM retraining on first-batch `partial219_bomfix` plus batch2 partial187 keeps 13,565 rows with no invalid training rows, but still misses the target with min R2 0.717265212042 and avg R2 0.817150750416.
+- Latest scheduler sample: batch2 has completed=226, running=1, cancelled=3; batch3 has queued=24, running=145, completed=31; batch4 has queued=30, so active queued/running FEA is at the clarified cap of 200.
+- Batch3 partial031 is ok=22/failed=9, with failed cases029/043/050/109/134/139/147/158/169 all `analysis_returned_false=True`; current candidate rules remain diagnostic because the narrow height/setback/shield rule covers 8/9 failed and 0 ok, while broader rules match ok rows.
+- Batch4 `mesh_time_fine` plan has 200 unique new source cases, excludes batch1/batch2/batch3 source IDs plus the conservative rule `magnet_height_ratio>=0.942,magnet_setback_ratio>=0.121`, and cases001-030 are queued as `/tasks` 9130-9133, 9135-9136, 9139, 9141, 9143-9145, 9147, 9149-9151, 9153, 9156, 9158, 9160, 9166-9173, and 9176-9178.
+- LightGBM retraining on `partial219_bomfix` plus batch2 partial199 and batch3 partial028 keeps 13,596 rows with no invalid training rows, but still misses the target with min R2 0.713976169532 and avg R2 0.819531215683.
 - n107/n108/n109/n110/n114/n115 have all run module-corrected PyAEDT tasks; earlier missing-module n114 failures remain infrastructure-only evidence and should not count as simulation-quality failures.
 - Wrapper logs stopping after `Solving design setup` is not by itself a cancellation signal; use scheduler status, result CSVs, and filtered solver diagnostics before intervening.
 - A deterministic workflow plan JSON can now link scheduler setup dry-runs, quality analysis, dataset filtering, gates, and retraining commands for Git or scheduler `remote_path` modes.
-- Next focus is polling batch2/batch3 tasks, fetching completed result CSV summaries only, updating partial gates, and retraining only after enough fetched rows justify it.
+- Next focus is polling batch2/batch3/batch4 tasks, fetching completed result CSV summaries only, updating partial gates, and retraining only after enough fetched rows justify it.
 
 ## Later Milestones
 

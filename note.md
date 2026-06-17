@@ -2630,3 +2630,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: failure-pattern evidence is still not strong enough for a confirmed selector rule, and retraining is still waiting for more completed ok rows.
 - Next action: continue filtered polling and refill batch4 only when nonterminal FEA drops below 200.
 - Token usage: active goal counter reported 22,582,726 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 12:16:48 +09:00 - Loop 201
+
+- Part: batch3 partial031, batch4 active-cap refill, and updated retraining evidence.
+- Goal: apply the clarified 200-concurrent policy by ingesting completed result summaries, refilling only opened active slots, and keeping R2 evidence current.
+- Hypothesis: newly completed batch3 rows can improve failure-rule contrast, and batch4 can continue as a non-overlapping 200-case wave without exceeding 200 queued/running FEA tasks.
+- Actions: confirmed `slurm_scheduler` upstream remains `1c493ad8`; fetched batch3 cases002/030/034/169/024/028/035/037/018/032/038 through `/api/tasks/{id}/remote-file`; built batch3 partial023/024/028/031 selected CSVs; reran failure-pattern checks with corrected exact row indexes after catching one stale-index run; filtered `partial219_bomfix` + batch2 partial199 + batch3 partial028 into a 13,596-row training-ready CSV; reran deterministic LightGBM disable-tuning; dry-ran and submitted batch4 cases020-030 as tasks 9166-9173 and 9176-9178.
+- Candidates/options: promote the height/setback/shield candidate rule versus keep it diagnostic; chose diagnostic because the narrow rule still covers only 8/9 failed rows and broader rules match ok rows. Repeated retraining after partial031 was deferred because partial028 retraining had just run and only three additional ok rows arrived.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=31/queued=24/running=145, batch4 queued=30, total nonterminal FEA=200; batch3 partial031 result_rows=31, ok=22, failed=9, duplicates=0, physical_sanity_violations=0; combined filter rows_read=13,611, kept=13,596, rejected=15, duplicate_case_id_rows=0; latest retrain has invalid_training_rows=0, removed_output_outliers=3,420, failures=8/8, min_R2=0.713976169532, avg_R2=0.819531215683.
+- Result: active FEA returned to the clarified 200 cap with batch4 through case030 queued; no missing completed batch2/batch3/batch4 result files remain locally.
+- Failure reason: R2 remains below 0.95 and no selector-safe exclusion rule is confirmed.
+- Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and retrain after a larger ok-row increase or a rule-quality change.
+- Token usage: active goal counter reported 22,720,650 tokens used; Codex SQLite token sampler remains unavailable.
