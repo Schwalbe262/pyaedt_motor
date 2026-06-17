@@ -2357,3 +2357,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: active rows are still solving, so combined retraining remains premature.
 - Next action: poll the active task set, fetch completed row summaries, and backfill case158 when the next production slot opens.
 - Token usage: active goal counter reported 20,534,709 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 09:16:13 +09:00 - Loop 180
+
+- Part: cases 101/109/110 completion and cases 158-160 backfill.
+- Goal: keep the 41-task expanded production pool saturated with exact non-contiguous summary accounting.
+- Hypothesis: n107/n109 opened slots can be refilled immediately because their allocations and module setup are already validated.
+- Actions: fetched completed cases109, 110, and 101; submitted cases158, 159, and 160 as backfills; confirmed task 8842, 8843, and 8845 reached running; recomputed explicit partial119 summary.
+- Candidates: wait for multiple completions versus backfill each open slot. Chose immediate backfill because the scheduler was healthy and duplicate checks were clean.
+- Metrics: case101 `ok` in 3381.462s, case109 `ok` in 2348.721s, and case110 `ok` in 2500.103s; explicit partial summary reached result_rows=119, ok=114, failed=5, duplicates=0, physical_sanity_violations=0; active production concurrency is 41 running tasks.
+- Result: active production tasks are 8760, 8777, 8792, 8795-8808, 8814-8815, 8818, 8821-8833, 8835-8839, 8842-8843, and 8845.
+- Failure reason: active rows are still solving, so combined retraining remains premature.
+- Next action: poll the active task set, fetch completed row summaries, and backfill case161 when the next production slot opens.
+- Token usage: active goal counter reported 20,580,049 tokens used; Codex SQLite token sampler remains unavailable.
