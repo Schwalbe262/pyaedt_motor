@@ -83,8 +83,8 @@
 - 2026-06-17: cases 092, 094, and 095 completed `ok`; explicit partial95 summary is result_rows=95, ok=91, failed=4, duplicates=0, physical_sanity_violations=0; cases 101-103 are running on n107.
 - 2026-06-17: n108/n109/n110/n115 setup-only module smokes 8765-8768 passed `ok`; production was expanded to 25 running FEA tasks across n107/n108/n109/n110/n114/n115, with case113 already failed `analysis_returned_false=True`.
 - 2026-06-17: case096 completed `ok` in 3908.615s and was backfilled by case122 task 8792 on n107; explicit partial97 summary is result_rows=97, ok=92, failed=5, duplicates=0, physical_sanity_violations=0.
-- 2026-06-17: batch2 has explicit partial199 summary at result_rows=199, ok=193, failed=6, combined_kept=13,577, duplicates=0, physical_sanity_violations=0; batch3 partial153 is 144 ok / 9 failed.
-- 2026-06-17: batch3 partial184 keeps 13,752 quality-passing rows; latest retrain partial181 still fails `R^2 >= 0.95` with 8/8 target failures, min R2 0.700211567668, avg R2 0.813982163291; best recent retrain remains partial174 at min R2 0.727178725767, avg R2 0.828310891005; corrected batch4 cases081-189 and new cases190-197 are submitted with per-case bootstrapped CSVs.
+- 2026-06-17: batch2 has explicit partial199 summary at result_rows=199, ok=193, failed=6, combined_kept=13,577, duplicates=0, physical_sanity_violations=0; batch3 partial193 is 184 ok / 9 failed.
+- 2026-06-17: batch3 partial193 keeps 13,761 quality-passing rows; latest retrain partial181 still fails `R^2 >= 0.95` with 8/8 target failures, min R2 0.700211567668, avg R2 0.813982163291; best recent retrain remains partial174 at min R2 0.727178725767, avg R2 0.828310891005; batch5 cases001-028 are submitted with per-case bootstrapped CSVs.
 - 2026-06-16: `summarize_ipmsm_partial_replay.py` matched live partial46 gate math (`combined_kept=13244`, `new_kept=40`) and `python -m unittest discover -s tests` passed 173 tests.
 - 2026-06-16: `analyze_ipmsm_quality_results.py --complete-groups-only` now permits explicitly scoped interim analysis of complete fixed-geometry groups while rejecting files with no complete groups.
 - 2026-06-16: GitHub push path recovered before this loop; verify `origin/chore/codex-context-budget` after each checkpoint push.
@@ -99,7 +99,7 @@
 - 2026-06-16: Python 3.11 isolated retraining on `training_ready_physical_sanity.csv` still fails R2: disable tuning with outlier removal min R2 0.7155, avg R2 0.8185; 20-trial tuning min R2 0.7272, avg R2 0.8208.
 - 2026-06-15: import probe found `pyaedt_module=False` and no `ansys` package.
 - 2026-06-15: generated 4-row ignored smoke CSV at `simul_log_smoke/quality_cases_smoke.csv`.
-- Token command ran at closeout; default Codex SQLite DB was not found, so no live token sample was available.
+- Token command ran at closeout on 2026-06-17 15:23 KST; default Codex SQLite DB was not found, so no live token sample was available.
 - First successful AEDT setup, solve, fixed-geometry 4-profile comparison, and dynamic packed row-dispatch evidence exists; multi-geometry valid-source replay is still incomplete; latest retraining improved slightly but remains far below `R^2 >= 0.95`.
 
 ## Current blocker
@@ -107,7 +107,7 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is an active queued/running concurrency cap, not a total simulation cap; keep submitting 200-case waves as capacity opens, with non-overlapping plans and filtered evidence.
-- Batch2 still has one running task. Batch3 all cases001-200 are submitted with completed=184/running=16. Batch4 has completed=14/failed=15/cancelled=94/queued=85/running=98 after cancelling bad no-bootstrap cases096-189, resubmitting corrected cases081-189, and submitting cases190-197; total active FEA is 200.
+- Batch3 all cases001-200 are submitted with completed=193/running=7. Batch4 has completed/failed/cancelled terminal history including 15 old no-bootstrap plumbing failures and corrected submissions through case200. Batch5 has cases001-028 queued after a non-overlapping 200-case plan; total active FEA is 200.
 - Fallback allocations n108/n109/n110/n115 also run unrelated `crypto-sweep` tasks, but explicit-module setup-only smokes passed and production FEA now uses their remaining scheduler capacity.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
 - n114/allocation 42 failed earlier without the Ansys module, but module setup-only smoke task 8545 passed; use n114 only with explicit module env setup and filtered result evidence.
@@ -115,13 +115,13 @@
 
 ## Next steps
 
-1. Poll batch2/batch3/batch4 tasks with filtered fields; fetch completed result CSV row/status summaries only, then recompute explicit partial gates without broad globs while keeping active FEA queued/running count <=200.
+1. Poll batch3/batch4/batch5 tasks with filtered fields; fetch completed result CSV row/status summaries only, then recompute explicit partial gates without broad globs while keeping active FEA queued/running count <=200.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
-4. With corrected batch4 cases081-189 resubmitted and cases190-197 submitted, future refill can advance to case198+ when slots open; automated refills must use `/api/tasks`, deterministic `dedupe_key`, explicit Ansys module env setup, and per-case bootstrapped remote CSV paths.
+4. With batch5 cases001-028 submitted, future refill can advance to batch5 case029+ when slots open; automated refills must use `/api/tasks`, deterministic `dedupe_key`, explicit Ansys module env setup, and per-case bootstrapped remote CSV paths.
 5. Fetch scheduler results through safe relative `/api/jobs/{id}/remote-file` or `/api/tasks/{id}/remote-file` paths and summarize rows/statuses only; do not dump full CSVs.
 6. Before retraining, run `filter_ipmsm_training_dataset.py`, filtered quality checks, and `.venv\Scripts\python.exe train_ipmsm_lightgbm.py` with the current combined CSV.
-7. Diagnose the batch3 `analysis=False` cluster before promoting a new exclusion rule; partial153 has 144 ok / 9 failed, and the narrow height/setback/shield rule still has five ok false positives.
+7. Diagnose the batch3 `analysis=False` cluster before promoting a new exclusion rule; partial193 still has the same failed cases029/043/050/109/134/139/147/158/169, and the narrow height/setback/shield rule still has known ok false positives.
 
 ## Token/context policy
 
@@ -150,7 +150,7 @@
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
 - Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating, Ansys module guards, and per-wave filtered result probes.
-- Partial batch2 evidence is result_rows=199, ok=193, failed=6, duplicates=0; batch3 partial184 is 175 ok / 9 failed and `batch2p199_batch3p184` quality passed with 13,752 rows; batch4 old cases081-095 are plumbing failures, corrected cases081-189 plus cases190-197 are submitted, and case028 failed `analysis_returned_false=True`.
+- Partial batch2 evidence is result_rows=199, ok=193, failed=6, duplicates=0; batch3 partial193 is 184 ok / 9 failed and `batch2p199_batch3p193` quality passed with 13,761 rows; batch5 plan has 200 unique sources with 0 overlap against batch1-4 and cases001-028 submitted.
 
 ## Risks and gotchas
 

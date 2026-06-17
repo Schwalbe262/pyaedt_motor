@@ -649,3 +649,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `sync_ipmsm_scheduler_replay.py` builds `remote/batchN_cases/case_XXX_node.csv`, passes `--bootstrap-remote-cases`, and supports explicit case-number refills for repaired resubmissions.
 - Evidence: filtered stderr for tasks9254/9268 showed missing `remote/cases.csv`; 94 bad nonterminal tasks were cancelled; corrected case081, case181, case182, and case184 manifests contain `IPMSM_CASES_CSV` bootstrap and unique remote case paths; targeted sync/submit tests passed 17/17.
 - Remaining risk: already-cancelled cases185-189 still require explicit corrected resubmission when active slots open.
+
+## 2026-06-17 15:23:10 +09:00 - Insight 70
+
+- Source loop: `note.md` Loop 221.
+- Improvement: scheduler refill active-cap accounting must count every nonterminal `ipmsm-batch%-fea-%` task, not only the current result/refill batches plus a hard-coded batch2.
+- Before: moving from batch4 to batch5 could omit still-running batch4 tasks from the active count and overfill the 200-concurrent FEA cap; read-only SQLite samples also relied on a context manager that did not close connections on Windows.
+- After: `sync_ipmsm_scheduler_replay.py` counts active tasks with configurable `--active-task-glob` defaulting to `ipmsm-batch%-fea-%`, reports `active_status_counts`, and explicitly closes scheduler DB connections.
+- Evidence: targeted sync/submit tests passed 18/18; live scheduler sampling counted batch3/batch4/batch5 together and held active FEA at 200 after batch5 cases001-028 were submitted.
+- Remaining risk: non-IPMSM FEA tasks are intentionally outside this cap and must be accounted separately if future workflows share the same allocations.

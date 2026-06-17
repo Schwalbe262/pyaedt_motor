@@ -2890,3 +2890,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet from partial181/partial174 retraining evidence.
 - Next action: continue filtered polling; when slots open, advance to batch4 case198+ with per-case bootstrap and retrain only after a material ok-row increase or a model-quality investigation.
 - Token usage: active goal counter reported 25,602,089 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 15:23:10 +09:00 - Loop 221
+
+- Part: scheduler policy recheck, all-batch active-cap accounting, batch3 partial193, and batch5 refill start.
+- Goal: honor the clarified 200-concurrent FEA cap while continuing non-overlapping mesh_time_fine replay waves under the updated scheduler `/api/tasks` policy.
+- Hypothesis: the sync helper must count every nonterminal IPMSM FEA task before batch5 submission; otherwise batch4 tasks could be omitted when `--refill-batch 5` is used.
+- Actions: verified `slurm_scheduler` upstream remains `1c493ad8` and `/api/tasks` policy includes `fea_bursty`, `required_capability`, `env_profile`, `dedupe_key`, `timeout_seconds`, and `max_workers_per_node`; updated `sync_ipmsm_scheduler_replay.py` to count `ipmsm-batch%-fea-%` active tasks and close SQLite connections; fetched batch3 cases184/196/159/141/186/192/194; built partial188/189/192/193 selected, filtered, and quality artifacts; generated batch5 200-case plan excluding batch1-4 source IDs plus the conservative height/setback rule; submitted batch5 cases001-028 through `/api/tasks` with per-case bootstrapped CSVs and `max_workers_per_node=200`.
+- Candidates/options considered: continue batch4 only versus start batch5 after batch4 case200. Chose batch5 because batch4 reached its 200-case plan limit and active slots were open; kept the same conservative exclusion rule and verified source overlap before submission.
+- Metrics: targeted sync/submit tests passed 18/18; `batch2p199_batch3p193` filter kept_rows=13,761 with rejected_rows=0 for the incremental update and quality rows=13,761, duplicates=0, missing_required=0, failed=0, physical_sanity_violations=0; batch5 plan rows=200, unique_source=200, batch5_prior_overlap=0; final scheduler sample active_nonterminal=200 with batch3 completed=193/running=7 and batch5 queued=28.
+- Result: active FEA is back at the clarified 200 cap, batch5 is underway with non-overlapping sources, and partial193 quality passed. R2 was not retrained this loop because the new rows are still a small increment beyond partial181/184 evidence.
+- Failure reason: R2 target remains unmet; Codex SQLite token sampler still cannot find a local Codex DB.
+- Next action: continue filtered polling, fetch completed batch3/batch4/batch5 result rows, refill batch5 case024+ only when active_nonterminal drops below 200, and retrain after a material ok-row increase or model-quality investigation.
+- Token usage: `codex_ops.py record-current-codex-thread-usage` failed because the default Codex SQLite DB was not found; no live token sample available.
