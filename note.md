@@ -2916,3 +2916,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet; batch4 failure pattern is based on only six failures, and the existing conservative rule matched 0 batch4 rows.
 - Next action: continue filtered polling, fetch batch3 final two rows and batch4/batch5 completions, refill batch5 case045+ when active drops below 200, and investigate model-quality/outlier behavior before promoting any new exclusion rule.
 - Token usage: active goal counter reported 26,269,924 tokens used; `codex_ops.py record-current-codex-thread-usage` failed because the default Codex SQLite DB was not found.
+
+## 2026-06-17 15:56:33 +09:00 - Loop 223
+
+- Part: latest dataset retraining baseline, outlier comparison, batch4 partial050, and batch5 refill through case047.
+- Goal: verify whether output-outlier handling is limiting R2 while keeping the 200-concurrent FEA cap filled.
+- Hypothesis: if output-outlier removal is hiding useful high-quality rows, keeping outliers should improve or at least not drastically reduce R2; otherwise the main issue remains simulation/output noise and data distribution rather than that filter.
+- Actions: sampled scheduler state; retrained deterministic LightGBM on `batch2p199_batch3p198_batch4p047` with output-outlier removal; retrained the same dataset with `--keep-output-outliers`; fetched batch4 cases030/072/085; built batch4 partial050 selected results; filtered and quality-gated `batch2p199_batch3p198_batch4p050`; submitted batch5 cases045-047 through `/api/tasks`.
+- Candidates/options considered: tune LightGBM versus test the existing outlier gate first. Chose the outlier comparison because it directly tests whether the current preprocessing is blocking progress and runs faster than tuning.
+- Metrics: remove-outlier retrain valid_rows=10,322, removed_output_outliers=3,485, failures=8/8, min_R2=0.712941986612, avg_R2=0.824314927334; keep-outlier retrain valid_rows=13,807, failures=8/8, min_R2=0.307913855989, avg_R2=0.689162366840; latest quality gate rows=13,810, duplicates=0, missing_required=0, failed=0, physical_sanity_violations=0; final scheduler sample active_nonterminal=200, batch3 completed=198/running=2, batch4 completed=50/failed=15/cancelled=94/queued=33/running=117, batch5 queued=47.
+- Result: output-outlier removal is not the cause of the R2 ceiling; disabling it badly hurts torque and efficiency targets. Active FEA is back at 200 and batch5 has advanced through case047.
+- Failure reason: R2 target remains unmet; latest retrain is below the recent partial174 best and far below 0.95.
+- Next action: continue filtered polling, fetch batch3 final two rows and batch4/batch5 completions, refill batch5 case048+ when active drops below 200, and investigate target-specific simulation/output noise before changing selector rules.
+- Token usage: active goal counter reported 26,552,519 tokens used; `codex_ops.py record-current-codex-thread-usage` failed because the default Codex SQLite DB was not found.
