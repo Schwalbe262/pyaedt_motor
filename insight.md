@@ -613,3 +613,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: aggregation enumerates the active case ranges and exact per-wave filename patterns, producing result_rows=33, ok=30, failed=3, duplicates=0, and physical_sanity_violations=0 for the current evidence set.
 - Evidence: the stale glob run reported duplicate rows; the explicit rerun immediately removed duplicates and matched the intended current case set.
 - Remaining risk: future wave tags must still be added deliberately to the explicit list before summarizing.
+
+## 2026-06-17 13:31:59 +09:00 - Insight 66
+
+- Source loop: `note.md` Loop 210.
+- Improvement: failure-pattern rule evaluation must use original case-plan row numbers and case-plan column names, not partial-selected CSV row positions or `input_` result headers.
+- Before: partial-selected row indexes shifted as missing completed cases were fetched out of order, and `input_`-prefixed rule strings evaluate to zero matches against the original cases CSV.
+- After: failed row indexes are parsed from `case_id` as original replay case numbers, and rules use `magnet_height_ratio`, `magnet_setback_ratio`, and `magnet_shield_thick` when passed to `analyze_ipmsm_failure_patterns.py`.
+- Evidence: partial107 stable failed cases are 29/43/50/109/134/139/147/158/169; corrected rule evaluation reports narrow rule 8 failed + 5 ok and broad rule 9 failed + 26 ok, while the prefixed-rule run matched zero rows.
+- Remaining risk: the analyzer still trusts caller-provided failed row indexes; future automation should derive them from `case_id` directly when both files are available.
