@@ -21,8 +21,10 @@ SUMMARY_FIELDNAMES = (
     "nonfinite_input_rows",
     "nonfinite_output_rows",
     "physical_sanity_rejected_rows",
+    "replayed_source_rows_removed",
 )
 EFFICIENCY_COLUMNS = ("output_efficiency_last_pct", "output_efficiency_last_pc")
+SOURCE_ID_COLUMNS = ("input_source_case_id", "source_case_id")
 
 
 def normalize_fieldname(fieldname: str | None) -> str:
@@ -45,6 +47,18 @@ def is_status_ok(row: dict[str, str], has_status_column: bool) -> bool:
     if not has_status_column:
         return True
     return str(row.get("status", "")).strip().lower() == "ok"
+
+
+def first_value(row: dict[str, str], *names: str) -> str:
+    for name in names:
+        value = row.get(name, "")
+        if value not in ("", None):
+            return str(value)
+    return ""
+
+
+def replay_source_case_id(row: dict[str, str]) -> str:
+    return first_value(row, *SOURCE_ID_COLUMNS)
 
 
 def has_physical_sanity(row: dict[str, str], available_columns: set[str]) -> bool:
@@ -94,6 +108,7 @@ def filter_training_rows(
     fieldnames: Iterable[str],
     *,
     drop_duplicate_case_id: bool = True,
+    drop_replayed_source_rows: bool = False,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     available_columns = set(fieldnames)
     output_columns, _ = trainer.resolve_output_columns(available_columns)
@@ -107,12 +122,34 @@ def filter_training_rows(
         rows_after_dedup, duplicate_case_id_rows = drop_duplicate_case_ids(rows)
 
     has_status_column = "status" in available_columns
+    replayed_source_case_ids: set[str] = set()
+    if drop_replayed_source_rows:
+        for row in rows_after_dedup:
+            source_case_id = replay_source_case_id(row)
+            if not source_case_id:
+                continue
+            if (
+                is_status_ok(row, has_status_column)
+                and is_finite_row(row, trainer.RAW_INPUT_COLUMNS)
+                and is_finite_row(row, output_columns)
+                and has_physical_sanity(row, available_columns)
+            ):
+                replayed_source_case_ids.add(source_case_id)
+
     kept_rows: list[dict[str, str]] = []
     status_rejected_rows = 0
     nonfinite_input_rows = 0
     nonfinite_output_rows = 0
     physical_sanity_rejected_rows = 0
+    replayed_source_rows_removed = 0
     for row in rows_after_dedup:
+        if (
+            drop_replayed_source_rows
+            and not replay_source_case_id(row)
+            and row.get("case_id", "") in replayed_source_case_ids
+        ):
+            replayed_source_rows_removed += 1
+            continue
         status_ok = is_status_ok(row, has_status_column)
         finite_inputs = is_finite_row(row, trainer.RAW_INPUT_COLUMNS)
         finite_outputs = is_finite_row(row, output_columns)
@@ -138,6 +175,7 @@ def filter_training_rows(
         "nonfinite_input_rows": nonfinite_input_rows,
         "nonfinite_output_rows": nonfinite_output_rows,
         "physical_sanity_rejected_rows": physical_sanity_rejected_rows,
+        "replayed_source_rows_removed": replayed_source_rows_removed,
     }
     return kept_rows, summary
 
@@ -191,6 +229,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary-output", type=Path, help="Optional one-row filter audit CSV.")
     parser.add_argument("--keep-duplicate-case-id", dest="drop_duplicate_case_id", action="store_false")
     parser.set_defaults(drop_duplicate_case_id=True)
+    parser.add_argument(
+        "--drop-replayed-source-rows",
+        action="store_true",
+        help="Remove original source rows when a valid replay row references their case_id.",
+    )
     parser.add_argument("--min-kept-rows", type=nonnegative_int, default=1)
     parser.add_argument("--max-rejected-rows", type=nonnegative_int)
     parser.add_argument("--max-duplicate-case-id-rows", type=nonnegative_int)
@@ -207,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
             rows,
             fieldnames,
             drop_duplicate_case_id=args.drop_duplicate_case_id,
+            drop_replayed_source_rows=args.drop_replayed_source_rows,
         )
     except ValueError as exc:
         parser.error(str(exc))

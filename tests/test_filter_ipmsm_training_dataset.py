@@ -67,6 +67,25 @@ class FilterIpmsmTrainingDatasetTests(unittest.TestCase):
         self.assertEqual([row["case_id"] for row in kept_rows], ["ok_alias"])
         self.assertEqual(summary["physical_sanity_rejected_rows"], 1)
 
+    def test_filter_training_rows_can_drop_valid_replayed_source_rows(self) -> None:
+        rows = [
+            self.training_row(case_id="source_1"),
+            self.training_row(case_id="replay_1", input_source_case_id="source_1"),
+            self.training_row(case_id="source_2"),
+            self.training_row(case_id="failed_replay", status="failed", input_source_case_id="source_2"),
+        ]
+        fieldnames = list(rows[0]) + ["input_source_case_id"]
+
+        kept_rows, summary = training_filter.filter_training_rows(
+            rows,
+            fieldnames,
+            drop_replayed_source_rows=True,
+        )
+
+        self.assertEqual([row["case_id"] for row in kept_rows], ["replay_1", "source_2"])
+        self.assertEqual(summary["replayed_source_rows_removed"], 1)
+        self.assertEqual(summary["status_rejected_rows"], 1)
+
     def test_filter_training_rows_reports_missing_input_columns(self) -> None:
         rows = [self.training_row()]
         fieldnames = [column for column in rows[0] if column != "input_slot_num"]

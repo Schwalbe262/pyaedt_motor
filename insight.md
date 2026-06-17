@@ -658,3 +658,12 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `sync_ipmsm_scheduler_replay.py` counts active tasks with configurable `--active-task-glob` defaulting to `ipmsm-batch%-fea-%`, reports `active_status_counts`, and explicitly closes scheduler DB connections.
 - Evidence: targeted sync/submit tests passed 18/18; live scheduler sampling counted batch3/batch4/batch5 together and held active FEA at 200 after batch5 cases001-028 were submitted.
 - Remaining risk: non-IPMSM FEA tasks are intentionally outside this cap and must be accounted separately if future workflows share the same allocations.
+
+## 2026-06-17 16:46:20 +09:00 - Insight 71
+
+- Source loop: `note.md` Loop 227.
+- Improvement: measure replay/source label drift before interpreting R2 changes, and keep replay-source replacement as an opt-in diagnostic rather than a default filter.
+- Before: added mesh_time_fine replay rows were folded into training-ready data without direct target-by-target comparison to their source rows, so poor R2 movement could be misread as simply needing more rows.
+- After: `analyze_ipmsm_replay_drift.py` compares replay rows to `input_source_case_id`, and `filter_ipmsm_training_dataset.py --drop-replayed-source-rows` can test source replacement without changing default preprocessing.
+- Evidence: p077 drift analysis matched 630/630 replay rows and exposed large torque/solidloss/efficiency drift; replay-source replacement passed quality gates but worsened disable-tuning retrain to min R2 0.709893143232 and avg R2 0.818927270778.
+- Remaining risk: drift analysis identifies label disagreement but does not yet distinguish true mesh/time correction from source noise, target extraction defects, or output outlier policy effects.

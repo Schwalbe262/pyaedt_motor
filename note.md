@@ -2968,3 +2968,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet, and added high-quality rows alone are not closing the model gap.
 - Next action: continue filtered polling, refill batch5 case077+ when active drops below 200, and start target-specific noise/drift analysis before changing selector rules.
 - Token usage: active goal counter reported 27,287,769 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 16:46:20 +09:00 - Loop 227
+
+- Part: replay/source drift diagnostics, replay replacement filter option, batch4 partial087, and batch5 refill through case086.
+- Goal: determine whether newly added mesh_time_fine replay rows are conflicting with source labels or otherwise explaining the persistent R2 ceiling.
+- Hypothesis: if replay rows and original source rows with the same geometry/input carry conflicting labels, measuring and optionally replacing source rows should clarify whether mixed fidelity is a primary bottleneck.
+- Actions: added `analyze_ipmsm_replay_drift.py` plus tests; added `filter_ipmsm_training_dataset.py --drop-replayed-source-rows` plus tests; ran drift analysis on `batch2p199_batch3p200_batch4p077`; built and quality-gated a replay-replaces-source dataset; retrained that replacement dataset; fetched batch4 cases046/050/074/083/089/101/113/115/119/127; submitted batch5 cases077-086 through `/api/tasks`; filtered and quality-gated `batch2p199_batch3p200_batch4p087`.
+- Candidates/options considered: make replay replacement the default versus keep it opt-in. Chose opt-in because the replacement retrain was worse, so it is diagnostic evidence rather than a confirmed default preprocessing improvement.
+- Metrics: drift analysis rows=13,834, replay_rows=630, matched_replay_rows=630, records=5,040; p077 mean_abs_pct_delta was torque_avg=194.95%, torque_max=153.92%, solidloss=75.73%, efficiency=27.03%, coreloss=8.46%, Lq=5.76%, total_loss=4.88%, Ld=4.71%; replacement filter removed 630 source rows and kept 13,204 rows with zero quality violations; replacement retrain valid_rows=9,940, removed_output_outliers=3,264, failures=8/8, min_R2=0.709893143232, avg_R2=0.818927270778; final scheduler sample active_nonterminal=200 with batch4 completed=87/running=113 and batch5 submitted through case086; latest p087 quality rows=13,844, duplicates=0, missing_required=0, failed=0, physical_sanity_violations=0.
+- Result: target drift is now directly measurable, simple source-row replacement is rejected as a default, active FEA is back at 200, and p087 quality passed. The next model-quality work should analyze target-specific noise/outliers rather than assume more rows or source replacement alone will reach R2 0.95.
+- Failure reason: R2 target remains unmet; replay drift is high for several targets and replacement did not improve it.
+- Next action: run broader targeted tests, commit/push this diagnostic tooling, continue filtered polling/refill at batch5 case087+, and analyze target-specific outlier/noise patterns before changing simulation selection rules.
+- Token usage: active goal counter reported 27,389,541 tokens used; Codex SQLite token sampler remains unavailable.
