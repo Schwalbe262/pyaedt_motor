@@ -109,7 +109,7 @@
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
 - The 200 figure is an active queued/running concurrency cap, not a total simulation cap; keep submitting 200-case waves as capacity opens, with non-overlapping plans and filtered evidence.
-- Batch3 all cases001-200 completed. Batch4 has completed=92/failed=15/cancelled=94/running=108, including 15 old no-bootstrap plumbing failures and corrected submissions through case200. Batch5 has cases001-091 submitted after a non-overlapping 200-case plan; total active FEA is 200.
+- Batch3 all cases001-200 completed. Batch4 has completed=95/failed=15/cancelled=94/running=105, including 15 old no-bootstrap plumbing failures and corrected submissions through case200. Batch5 has cases001-097 submitted after a non-overlapping 200-case plan; total active FEA is 200, with first completed batch5 cases040/059/070 failed missing transient outputs.
 - Fallback allocations n108/n109/n110/n115 also run unrelated `crypto-sweep` tasks, but explicit-module setup-only smokes passed and production FEA now uses their remaining scheduler capacity.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
 - n114/allocation 42 failed earlier without the Ansys module, but module setup-only smoke task 8545 passed; use n114 only with explicit module env setup and filtered result evidence.
@@ -120,7 +120,7 @@
 1. Poll batch3/batch4/batch5 tasks with filtered fields; fetch completed result CSV row/status summaries only, then recompute explicit partial gates without broad globs while keeping active FEA queued/running count <=200.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
-4. With batch5 cases001-091 submitted, future refill can advance to batch5 case092+ when slots open; automated refills must use `/api/tasks`, deterministic `dedupe_key`, explicit Ansys module env setup, and per-case bootstrapped remote CSV paths.
+4. With batch5 cases001-097 submitted, future refill can advance to batch5 case098+ when slots open; automated refills must use `/api/tasks`, deterministic `dedupe_key`, explicit Ansys module env setup, and per-case bootstrapped remote CSV paths.
 5. Fetch scheduler results through safe relative `/api/jobs/{id}/remote-file` or `/api/tasks/{id}/remote-file` paths and summarize rows/statuses only; do not dump full CSVs.
 6. Before retraining, run `filter_ipmsm_training_dataset.py`, filtered quality checks, and `.venv\Scripts\python.exe train_ipmsm_lightgbm.py` with the current combined CSV.
 7. Diagnose target-specific replay/source label drift before changing selector rules; batch3 partial200 failed cases029/043/050/109/134/139/147/158/169, and batch4 partial087 failed cases028/075/108/118/132/136/169/174/176/181/185 with missing transient output metrics.
@@ -152,7 +152,7 @@
 - `mesh_time_fine` remains the selected profile from fixed-geometry evidence, but combined `partial219_bomfix` still misses `R^2 >= 0.95`.
 - Git bootstrap validation now rejects relative `--remote-cases` for `/tasks/git` when embedding case CSVs.
 - Replay selector, failure-pattern analyzer, and task submit helper now support exact source/rule evidence plus `fea_bursty` task submissions with node-specific smoke gating, Ansys module guards, and per-wave filtered result probes.
-- Partial batch2 evidence is result_rows=199, ok=193, failed=6, duplicates=0; batch3 partial200 is 191 ok / 9 failed; batch4 partial092 is 81 ok / 11 failed; `batch2p199_batch3p200_batch4p092` quality passed with 13,849 rows; p077 retrain still fails 8/8 targets with min R2 0.723311248898 and avg R2 0.821010077138; replay-only p092 has 465 rows/320 valid rows and fails 7/8 targets; output outlier removal is driven mostly by efficiency and torque targets; batch5 cases001-091 submitted.
+- Partial batch2 evidence is result_rows=199, ok=193, failed=6, duplicates=0; batch3 partial200 is 191 ok / 9 failed; batch4 partial095 is 84 ok / 11 failed; `batch2p199_batch3p200_batch4p095` quality passed with 13,852 rows; p077 retrain still fails 8/8 targets with min R2 0.723311248898 and avg R2 0.821010077138; replay-only p092 has 465 rows/320 valid rows and fails 7/8 targets; output outlier removal is driven mostly by efficiency and torque targets; batch5 cases001-097 submitted.
 
 ## Risks and gotchas
 

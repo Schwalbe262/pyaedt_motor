@@ -3020,3 +3020,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet; outlier attribution is diagnostic and does not by itself improve the model.
 - Next action: continue batch5 polling/refill at case092+, then compare target distributions after batch5 adds enough ok replay rows.
 - Token usage: active goal counter reported 28,207,716 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 17:16:25 +09:00 - Loop 231
+
+- Part: batch4 partial095 catch-up, first batch5 completions, and batch5 refill through case097.
+- Goal: maintain the 200-concurrent FEA cap while incorporating the next batch4 rows and checking first batch5 result quality.
+- Hypothesis: batch5 should continue the same result/failure pattern as batch4 until enough ok rows are available for replay-only retraining.
+- Actions: sampled scheduler DB read-only; fetched batch4 cases056/084/088 and batch5 cases040/059/070; submitted batch5 cases092-097 through `/api/tasks`; filtered and quality-gated `training_ready_physical_plus_mtf200_batch2p199_batch3p200_batch4p095.csv`.
+- Candidates/options considered: include batch5 partial003 in training versus exclude. Chose exclude because all three batch5 rows failed with missing required transient output metrics.
+- Metrics: final active_nonterminal=200 with queued=2/running=198; batch4 completed=95/failed=15/cancelled=94/running=105, partial095 result_rows=95, ok=84, failed=11; batch5 partial003 result_rows=3, ok=0, failed=3; p095 filter kept_rows=13,852, rejected_rows=11, duplicate_case_id_rows=81; p095 quality rows=13,852, duplicates=0, missing_required=0, failed=0, physical_sanity_violations=0.
+- Result: active FEA is back at 200, batch5 has advanced through case097, and p095 quality passed. First batch5 completions are failures and should be used for failure-pattern evidence only.
+- Failure reason: R2 target remains unmet, and batch5 has not yet contributed ok rows.
+- Next action: continue filtered polling/refill at batch5 case098+, and investigate repeated missing-transient-output failures once batch5 has enough failures for a stable pattern.
+- Token usage: active goal counter reported 28,223,478 tokens used; Codex SQLite token sampler remains unavailable.
