@@ -2902,4 +2902,4 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Result: active FEA is back at the clarified 200 cap, batch5 is underway with non-overlapping sources, and partial193 quality passed. R2 was not retrained this loop because the new rows are still a small increment beyond partial181/184 evidence.
 - Failure reason: R2 target remains unmet; Codex SQLite token sampler still cannot find a local Codex DB.
 - Next action: continue filtered polling, fetch completed batch3/batch4/batch5 result rows, refill batch5 case024+ only when active_nonterminal drops below 200, and retrain after a material ok-row increase or model-quality investigation.
-- Token usage: `codex_ops.py record-current-codex-thread-usage` failed because the default Codex SQLite DB was not found; no live token sample available.
+- Token usage: active goal counter reported 26,069,247 tokens used; `codex_ops.py record-current-codex-thread-usage` failed because the default Codex SQLite DB was not found.
