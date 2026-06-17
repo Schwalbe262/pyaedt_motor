@@ -2656,3 +2656,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 remains below 0.95 and current geometry rules are not safe for exclusion.
 - Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and defer rule promotion until failed coverage has no ok false positives.
 - Token usage: active goal counter reported 22,890,253 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 12:29:20 +09:00 - Loop 203
+
+- Part: batch3 partial042 and four-slot batch4 refill.
+- Goal: close out newly completed rows that appeared after the checkpoint push and restore the active FEA pool to the 200 cap.
+- Hypothesis: the four new batch3 completions can further test current failure-rule candidates, and only four replacement batch4 tasks are needed.
+- Actions: fetched batch3 cases001/026/046/072 through `/api/tasks/{id}/remote-file`; built batch3 partial042 selected CSV; evaluated failure rules in-process with exact computed failed indexes; dry-ran and submitted batch4 cases038-041 as tasks 9190-9193.
+- Candidates/options: retrain immediately versus wait. Chose to wait because the just-completed partial038 retrain already refreshed model evidence, and partial042 added only four ok rows.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=42/queued=18/running=140, batch4 queued=41, total nonterminal FEA=200; batch3 partial042 result_rows=42, ok=33, failed=9, duplicates=0, physical_sanity_violations=0; narrow height/setback/shield rule now matches 8/9 failed and 2 ok rows.
+- Result: active FEA is back at 200 with batch4 through case041 queued; no missing completed batch2/batch3/batch4 result files remain locally.
+- Failure reason: no selector-safe exclusion rule is confirmed, and the R2 target remains unmet from the prior retrain.
+- Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and retrain after a larger ok-row increase.
+- Token usage: active goal counter reported 22,917,780 tokens used; Codex SQLite token sampler remains unavailable.
