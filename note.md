@@ -2734,3 +2734,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 remains below 0.95 and no selector-safe exclusion rule is confirmed.
 - Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and investigate broader quality causes beyond the current height/setback rules.
 - Token usage: active goal counter reported 23,791,483 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 13:11:53 +09:00 - Loop 209
+
+- Part: batch3 partial081 and three-slot batch4 refill.
+- Goal: keep active FEA at the clarified 200 cap while incorporating the newest completed batch3 rows.
+- Hypothesis: the new rows are likely further ok contrast, so failure-rule promotion should remain conservative and batch4 should fill only opened slots.
+- Actions: fetched batch3 case102, then cases060/074 through `/api/tasks/{id}/remote-file`; built batch3 partial079 and partial081 selected CSVs; evaluated failure rules with exact computed failed indexes; submitted batch4 cases078-080 as tasks 9245-9247.
+- Candidates/options: retrain immediately versus defer. Chose to defer because partial072 retraining just ran and partial081 adds only three ok rows.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=81/running=119, batch4 queued=65/running=15, total nonterminal FEA=200; batch3 partial081 result_rows=81, ok=72, failed=9, duplicates=0, physical_sanity_violations=0; broad height/setback rule still matches 9/9 failed and 12 ok rows.
+- Result: active FEA is back at 200 with batch4 through case080 queued/running; no missing completed batch2/batch3/batch4 result files remain locally.
+- Failure reason: no selector-safe exclusion rule is confirmed, and the R2 target remains unmet from partial072 retraining.
+- Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and investigate broader quality causes beyond the current height/setback rules.
+- Token usage: active goal counter reported 24,050,048 tokens used; Codex SQLite token sampler remains unavailable.
