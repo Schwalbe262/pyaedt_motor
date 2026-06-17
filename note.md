@@ -2812,3 +2812,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 remains below 0.95 and no selector-safe exclusion rule is confirmed.
 - Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and investigate why added ok rows do not consistently improve R2.
 - Token usage: active goal counter reported 24,605,208 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 14:04:43 +09:00 - Loop 215
+
+- Part: partial145 catch-up and batch4 refill through case145.
+- Goal: keep the 200 active queued/running cap while folding the next completed batch3 rows into quality evidence.
+- Hypothesis: the new batch3 rows should continue to add ok contrast rows without making the current height/setback rule safe to promote.
+- Actions: sampled scheduler DB read-only; submitted batch4 cases139-143, fetched missing batch3 cases045/081/128/140/150/175/179, built partial145 selected/training-ready/quality artifacts, evaluated failure rules, then submitted batch4 cases144-145 after active FEA dropped to 198.
+- Candidates/options: retrain after partial145 versus defer. Chose to defer because partial145 adds only seven ok rows beyond the already-retrained partial138.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=145/running=55, batch4 completed=1/queued=74/running=70, total nonterminal FEA=200; batch3 partial145 result_rows=145, ok=136, failed=9, duplicates=0, physical_sanity_violations=0; batch2p199+batch3p145 keeps 13,713 quality-passing rows; narrow failure rule remains 8 failed + 5 ok and broad rule remains 9 failed + 26 ok.
+- Result: active FEA is back at 200 and partial145 quality gate passed.
+- Failure reason: R2 target remains unmet from partial138 retraining, and no selector-safe exclusion rule is confirmed.
+- Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and investigate why added ok rows do not consistently improve R2.
+- Token usage: active goal counter reported 24,850,743 tokens used; Codex SQLite token sampler remains unavailable.
