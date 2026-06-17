@@ -2773,3 +2773,16 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: none for refill; R2 target remains unmet from partial107 retraining.
 - Next action: fetch only the missing batch3 completed result CSVs since partial107, recompute partial119, and refill again only if active FEA drops below 200.
 - Token usage: active goal counter reported 24,351,286 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 13:47:33 +09:00 - Loop 212
+
+- Part: batch3 partial129, partial119 retraining, first batch4 result, and active-cap refill.
+- Goal: fold the newest completed FEA evidence into quality/model metrics while keeping the clarified 200 active queued/running cap.
+- Hypothesis: additional completed batch3 rows will mostly add ok contrast rows and may improve regression evidence without making the current height/setback exclusion safe.
+- Actions: fetched missing batch3 completed results through partial119, built partial119 selected/training-ready/quality artifacts, evaluated failure rules, ran deterministic LightGBM disable-tuning, refilled batch4 cases119-129 as `/tasks` through 9306, fetched first completed batch4 case028 result, then fetched additional batch3 results through partial129 and rebuilt partial125/partial129 quality artifacts.
+- Candidates/options: retrain only partial119 versus retrain again after partial129. Chose partial119 retrain because it added 12 ok rows beyond partial107 and partial129 added only four more ok rows after that.
+- Metrics: latest scheduler counts are batch2 completed=226/running=1/cancelled=3, batch3 completed=129/running=71, batch4 completed=1/queued=80/running=48, total nonterminal FEA=200; batch3 partial129 result_rows=129, ok=120, failed=9, duplicates=0, physical_sanity_violations=0; batch2p199+batch3p129 keeps 13,697 quality-passing rows; partial119 retrain has invalid_training_rows=0, removed_output_outliers=3,447, failures=8/8, min_R2=0.736707011342, avg_R2=0.824018421209.
+- Result: active FEA is back at 200; partial129 quality gate passed; first batch4 completed row, case028/task9176, failed with `analysis_returned_false=True`.
+- Failure reason: R2 remains below 0.95 and no selector-safe exclusion rule is confirmed.
+- Next action: continue filtered polling, fetch only missing completed result summaries, refill batch4 only when nonterminal FEA drops below 200, and retrain after the next substantial ok-row increment.
+- Token usage: active goal counter reported 24,488,673 tokens used; Codex SQLite token sampler remains unavailable.
