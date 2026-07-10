@@ -254,6 +254,19 @@ def get_scheduler_project_summary(
     return {**data, "total_count": total_count}
 
 
+def require_scheduler_project_cap(project_summary: dict[str, Any], expected_cap: int) -> int:
+    raw = project_summary.get("max_active_tasks")
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise RuntimeError("scheduler project does not expose a valid integer max_active_tasks")
+    server_cap = raw
+    if server_cap != expected_cap:
+        raise RuntimeError(
+            "scheduler project active cap does not match campaign policy: "
+            f"server={server_cap} requested={expected_cap}"
+        )
+    return server_cap
+
+
 def _existing_record(task: CampaignTask, history_task: dict[str, Any]) -> dict[str, Any]:
     return {
         "case_id": task.case_id,
@@ -417,6 +430,10 @@ def main(argv: list[str] | None = None) -> int:
             f"cannot verify scheduler project history coverage; no task was submitted: "
             f"project={args.project!r}: {exc}"
         ) from exc
+    server_project_cap = require_scheduler_project_cap(
+        project_summary,
+        args.project_active_cap,
+    )
     history_project_tasks = sum(1 for task in history if task_belongs_to_project(task, args.project))
     project_total_count = int(project_summary["total_count"])
     history_saturated = len(history) >= args.history_limit
@@ -476,6 +493,7 @@ def main(argv: list[str] | None = None) -> int:
         "submitted": len(submissions),
         "project": args.project,
         "project_active_cap": args.project_active_cap,
+        "project_server_active_cap": server_project_cap,
         "project_active_initial": active_initial,
         "open_slots_initial": open_slots,
         "history_limit": args.history_limit,
