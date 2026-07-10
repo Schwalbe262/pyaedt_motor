@@ -71,6 +71,7 @@ def zero_result(speed: float, zero_deg: float, amplitude: float = 100.0) -> dict
         "geometry_group_id": "geometry-v2",
         "design_hash": "hash-v2",
         "input_source_case_id": "source-v2",
+        "input_dataset_schema_version": calibration.DATASET_SCHEMA_VERSION,
         "input_operation": "no_load",
         "input_i_peak_a": "0",
         "input_base_rpm": str(speed),
@@ -80,12 +81,22 @@ def zero_result(speed: float, zero_deg: float, amplitude: float = 100.0) -> dict
         "input_beta_convention": calibration.BETA_CONVENTION,
         "input_electrical_zero_deg": "0",
         "input_quality_profile": "reference_ultra",
+        "input_setup_fingerprint": "setup-v2",
         "input_material_fingerprint": "materials-v2",
         "input_aedt_version": "2025.2",
         "input_initial_position_deg": "-22.5",
         "output_back_emf_phasea_h1_cos_peak_v": str(-amplitude * math.sin(angle)),
         "output_back_emf_phasea_h1_sin_peak_v": str(-amplitude * math.cos(angle)),
     }
+
+
+def zero_manifest(zero_deg: float = 30.0) -> dict:
+    return calibration.analyze_zero_calibration_rows(
+        [
+            zero_result(600.0, zero_deg, amplitude=50.0),
+            zero_result(1200.0, zero_deg, amplitude=100.0),
+        ]
+    )
 
 
 class SimpleFrame(dict[str, list[float]]):
@@ -110,7 +121,7 @@ class CalibrateIpmsmBetaTests(unittest.TestCase):
         self.assertGreater(first["phase_resistance_ohm"], 0.0)
 
     def test_apply_zero_manifest_makes_spec_optimization_ready(self) -> None:
-        manifest = calibration.analyze_zero_calibration_rows([zero_result(1200.0, 30.0)])
+        manifest = zero_manifest()
 
         updated = calibration.apply_zero_manifest_to_spec(motor_spec_mapping(), manifest)
 
@@ -191,11 +202,88 @@ class CalibrateIpmsmBetaTests(unittest.TestCase):
                 max_circular_deviation_deg=3.0,
             )
 
+    def test_zero_analysis_requires_two_distinct_successful_speeds(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at least 2 distinct successful speeds"):
+            calibration.analyze_zero_calibration_rows(
+                [zero_result(600.0, 30.0), zero_result(600.0, 30.0)]
+            )
+
+    def test_zero_analysis_rejects_nonpositive_min_distinct_speeds(self) -> None:
+        with self.assertRaisesRegex(ValueError, "positive integer"):
+            calibration.analyze_zero_calibration_rows(
+                [zero_result(600.0, 30.0), zero_result(1200.0, 30.0)],
+                min_distinct_speeds=0,
+            )
+
+    def test_zero_analysis_requires_v2_schema_and_nonblank_fingerprints(self) -> None:
+        rows = [zero_result(600.0, 30.0), zero_result(1200.0, 30.0)]
+        rows[1]["input_dataset_schema_version"] = "legacy"
+        with self.assertRaisesRegex(ValueError, "input_dataset_schema_version"):
+            calibration.analyze_zero_calibration_rows(rows)
+
+        for column in (
+            "design_hash",
+            "input_quality_profile",
+            "input_setup_fingerprint",
+            "input_material_fingerprint",
+            "input_aedt_version",
+        ):
+            with self.subTest(column=column):
+                rows = [zero_result(600.0, 30.0), zero_result(1200.0, 30.0)]
+                rows[1].pop(column)
+                with self.assertRaisesRegex(ValueError, f"nonblank {column}"):
+                    calibration.analyze_zero_calibration_rows(rows)
+
+    def test_zero_analysis_requires_finite_homogeneous_initial_position(self) -> None:
+        rows = [zero_result(600.0, 30.0), zero_result(1200.0, 30.0)]
+        rows[1]["input_initial_position_deg"] = "nan"
+        with self.assertRaisesRegex(ValueError, "finite input_initial_position_deg"):
+            calibration.analyze_zero_calibration_rows(rows)
+
+        rows = [zero_result(600.0, 30.0), zero_result(1200.0, 30.0)]
+        rows[1]["input_initial_position_deg"] = "-22.5000000005"
+        manifest = calibration.analyze_zero_calibration_rows(rows)
+        self.assertEqual(manifest["initial_position_deg"], -22.5)
+
+        rows = [zero_result(600.0, 30.0), zero_result(1200.0, 30.0)]
+        rows[1]["input_initial_position_deg"] = "-20"
+        with self.assertRaisesRegex(ValueError, "input_initial_position_deg"):
+            calibration.analyze_zero_calibration_rows(rows)
+
+    def test_zero_analyze_cli_defaults_to_two_distinct_speeds(self) -> None:
+        args = calibration.build_parser().parse_args(
+            ["zero-analyze", "--results", "results.csv", "--manifest", "manifest.json"]
+        )
+
+        self.assertEqual(args.min_distinct_speeds, 2)
+
+    def test_zero_analyze_cli_forwards_min_distinct_speeds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp) / "results.csv"
+            manifest = Path(tmp) / "manifest.json"
+            calibration.write_rows(
+                results,
+                [zero_result(600.0, 30.0), zero_result(1200.0, 30.0)],
+            )
+
+            with self.assertRaisesRegex(ValueError, "at least 3 distinct successful speeds"):
+                calibration.main(
+                    [
+                        "zero-analyze",
+                        "--results",
+                        str(results),
+                        "--manifest",
+                        str(manifest),
+                        "--min-distinct-speeds",
+                        "3",
+                    ]
+                )
+
     def test_loaded_beta_sweep_keeps_zero_fixed_and_finds_mtpa(self) -> None:
-        zero_manifest = calibration.analyze_zero_calibration_rows([zero_result(1200.0, 30.0)])
+        manifest = zero_manifest()
         cases = calibration.generate_beta_sweep_rows(
             source_row(),
-            zero_manifest,
+            manifest,
             rpm=1200.0,
             current_peak_a=100.0,
             beta_values=(-10.0, 0.0, 20.0, 40.0),
@@ -224,16 +312,16 @@ class CalibrateIpmsmBetaTests(unittest.TestCase):
                 }
             )
 
-        summary = calibration.analyze_beta_sweep_rows(results, zero_manifest)
+        summary = calibration.analyze_beta_sweep_rows(results, manifest)
 
         self.assertEqual({case["electrical_zero_deg"] for case in cases}, {30.0})
-        self.assertEqual({case["beta_calibration_id"] for case in cases}, {zero_manifest["calibration_id"]})
+        self.assertEqual({case["beta_calibration_id"] for case in cases}, {manifest["calibration_id"]})
         self.assertEqual(summary["electrical_zero_deg"], 30.0)
         self.assertEqual(summary["best_beta_dq_deg"], 20.0)
         self.assertTrue(summary["sweep_id"].startswith("beta-mtpa:sha256:"))
 
     def test_loaded_beta_sweep_rejects_tampered_zero_manifest(self) -> None:
-        manifest = calibration.analyze_zero_calibration_rows([zero_result(1200.0, 30.0)])
+        manifest = zero_manifest()
         manifest["electrical_zero_deg"] = 45.0
 
         with self.assertRaisesRegex(ValueError, "does not match calibration_id"):

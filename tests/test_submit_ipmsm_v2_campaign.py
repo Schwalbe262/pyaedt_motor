@@ -59,10 +59,28 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         self.assertIn("case_id,beta_dq_deg", env_setup)
         self.assertIn("Beta Zero / 001,0", env_setup)
         self.assertNotIn("unselected-case", env_setup)
+        self.assertIn(
+            "rm -f -- simul_log_scheduler/ipmsm_v2_campaign_results/beta-zero---001.csv",
+            env_setup,
+        )
         self.assertEqual(task.remote_cases, "remote/ipmsm_v2_campaign_cases/beta-zero---001.csv")
         self.assertIn("--cases remote/ipmsm_v2_campaign_cases/beta-zero---001.csv", task.payload["command"])
         self.assertIn("--max-cases 1", task.payload["command"])
         self.assertIn("--analyze", task.payload["command"])
+
+    def test_remote_campaign_paths_must_stay_relative(self) -> None:
+        for option, value in (
+            ("--result-dir", "../outside"),
+            ("--remote-cases-dir", "/tmp/cases"),
+            ("--simulation-dir", "safe/../../outside"),
+        ):
+            with self.subTest(option=option):
+                with self.assertRaisesRegex(RuntimeError, "safe relative paths"):
+                    campaign.build_campaign_task(
+                        parsed_args(option, value),
+                        {"case_id": "case-001"},
+                        row_number=1,
+                    )
 
     def test_paths_and_dedupe_are_unique_and_deterministic(self) -> None:
         args = parsed_args()

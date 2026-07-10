@@ -106,6 +106,24 @@ python submit_ipmsm_v2_campaign.py `
 재실행하면 남은 case만 최대 100개까지 채운다. `reference_ultra`의 기존 평균
 runtime이 6시간을 넘으므로 6시간 timeout을 재사용하지 않는다.
 
+선택한 window의 모든 task가 성공 종료된 뒤 동일 identity 인자로 결과를 회수한다.
+collector는 scheduler history coverage, task exit code, case ID, design hash, control
+입력, setup/material/AEDT fingerprint를 먼저 검증하고 전부 유효할 때만 로컬
+directory와 plan-order merged CSV를 만든다.
+
+```powershell
+python collect_ipmsm_v2_campaign.py `
+  --cases ipmsm_v2_foundation_cases.csv `
+  --project PYAEDT_MOTOR_IPMSM_V2 `
+  --start 1 --limit 196 `
+  --task-prefix ipmsm-v2-foundation-w1 `
+  --remote-cases-dir remote/ipmsm_v2_foundation_w1 `
+  --result-dir simul_log/ipmsm_v2_foundation_w1 `
+  --simulation-dir simulation/ipmsm_v2_foundation_w1 `
+  --output-dir collected/ipmsm_v2_foundation_w1 `
+  --merged-output merged_results.csv
+```
+
 ## 4. 데이터 gate와 surrogate 학습
 
 모든 batch를 case ID 중복 없이 하나의 성공 결과 CSV로 합친 뒤 검증한다. merge는

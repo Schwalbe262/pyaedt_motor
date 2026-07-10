@@ -1,0 +1,306 @@
+from __future__ import annotations
+
+import contextlib
+import csv
+import io
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest import mock
+
+import collect_ipmsm_v2_campaign as collector
+import submit_ipmsm_v2_campaign as submit_campaign
+
+
+def collector_args(output_dir: Path, *extra: str) -> object:
+    return collector.build_parser().parse_args(
+        [
+            "--cases",
+            "cases.csv",
+            "--project",
+            "pyaedt_motor",
+            "--output-dir",
+            str(output_dir),
+            *extra,
+        ]
+    )
+
+
+def valid_result(case_id: str, design_hash: str, value: str = "") -> str:
+    row = {
+        "case_id": case_id,
+        "status": "ok",
+        "missing_required_outputs": "",
+        "input_dataset_schema_version": "ipmsm_v2",
+        "input_model_extent": "full_360",
+        "input_symmetry_factor": "1",
+        "input_use_periodic_boundary": "False",
+        "input_beta_convention": "dq_current_advance_v2",
+        "input_quality_profile": "reference_ultra",
+        "input_setup_fingerprint": "setup-v2",
+        "input_material_fingerprint": "material-v2",
+        "input_aedt_version": "2025.2",
+        "design_hash": design_hash,
+        "value": value,
+    }
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=list(row))
+    writer.writeheader()
+    writer.writerow(row)
+    return stream.getvalue()
+
+
+def campaign_tasks(args: object, rows: list[dict[str, str]]) -> list[submit_campaign.CampaignTask]:
+    identity = collector.build_identity_args(args)
+    return submit_campaign.build_campaign_tasks(identity, rows, first_row_number=args.case_start_index)
+
+
+def completed_history(
+    tasks: list[submit_campaign.CampaignTask],
+    *,
+    first_id: int = 100,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "id": first_id + index,
+            "project": "pyaedt_motor",
+            "status": "completed",
+            "exit_code": 0,
+            "dedupe_key": task.dedupe_key,
+        }
+        for index, task in enumerate(tasks)
+    ]
+
+
+class CollectIpmsmV2CampaignTests(unittest.TestCase):
+    def test_successful_collection_merges_in_selected_plan_order(self) -> None:
+        rows = [
+            {"case_id": "case-b", "design_hash": "hash-b"},
+            {"case_id": "case-a", "design_hash": "hash-a"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "collected"
+            args = collector_args(output_dir)
+            tasks = campaign_tasks(args, rows)
+            history = completed_history(tasks)
+            payload_by_id = {
+                100: valid_result("case-b", "hash-b", "2"),
+                101: valid_result("case-a", "hash-a", "1"),
+            }
+            stdout = io.StringIO()
+            with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
+                with mock.patch.object(submit_campaign, "get_scheduler_task_history", return_value=history):
+                    with mock.patch.object(submit_campaign, "get_scheduler_project_summary", return_value={"total_count": 2}):
+                        with mock.patch.object(
+                            collector,
+                            "fetch_task_remote_file",
+                            side_effect=lambda _url, task_id, _path, _base, _timeout: payload_by_id[task_id],
+                        ) as fetch:
+                            with contextlib.redirect_stdout(stdout):
+                                result = collector.main(
+                                    [
+                                        "--cases",
+                                        "cases.csv",
+                                        "--project",
+                                        "pyaedt_motor",
+                                        "--output-dir",
+                                        str(output_dir),
+                                    ]
+                                )
+
+            with (output_dir / "merged_results.csv").open("r", encoding="utf-8-sig", newline="") as file:
+                merged = list(csv.DictReader(file))
+            summary = json.loads(stdout.getvalue())
+
+        self.assertEqual(result, 0)
+        self.assertEqual([row["case_id"] for row in merged], ["case-b", "case-a"])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertTrue(all(call.args[3] == "remote_cwd" for call in fetch.call_args_list))
+        self.assertTrue(all(call.args[4] == 60.0 for call in fetch.call_args_list))
+        self.assertEqual(summary["collected_results"], 2)
+        self.assertEqual(len(summary["tasks"]), 2)
+        self.assertNotIn("input_dataset_schema_version", stdout.getvalue())
+
+    def test_wrong_case_id_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "case_id"):
+            collector._one_remote_result(valid_result("other", "hash-a"), "case-a", "hash-a")
+
+    def test_non_ok_missing_outputs_and_fingerprint_contract_are_rejected(self) -> None:
+        mutations = {
+            "non_ok": ("status", "failed"),
+            "missing_outputs": ("missing_required_outputs", "output_lq_last_avg_h"),
+            "schema": ("input_dataset_schema_version", "legacy"),
+            "extent": ("input_model_extent", "sector_90"),
+            "symmetry": ("input_symmetry_factor", "4"),
+            "periodic": ("input_use_periodic_boundary", "True"),
+            "periodic_blank": ("input_use_periodic_boundary", ""),
+            "beta": ("input_beta_convention", "legacy_phase_offset"),
+            "setup_fingerprint": ("input_setup_fingerprint", ""),
+            "design": ("design_hash", "other-hash"),
+        }
+        original = valid_result("case-a", "hash-a")
+        for label, (column, value) in mutations.items():
+            with self.subTest(label=label):
+                reader = csv.DictReader(io.StringIO(original))
+                row = next(reader)
+                row[column] = value
+                stream = io.StringIO(newline="")
+                writer = csv.DictWriter(stream, fieldnames=list(row))
+                writer.writeheader()
+                writer.writerow(row)
+                with self.assertRaisesRegex(RuntimeError, "contract failed"):
+                    collector._one_remote_result(stream.getvalue(), "case-a", "hash-a")
+
+    def test_result_controls_must_match_plan_and_fingerprints_must_be_homogeneous(self) -> None:
+        reader = csv.DictReader(io.StringIO(valid_result("case-a", "hash-a")))
+        result = next(reader)
+        result["input_base_rpm"] = "1200"
+        with self.assertRaisesRegex(RuntimeError, "input_base_rpm"):
+            collector.validate_result_matches_plan(
+                {"case_id": "case-a", "base_rpm": "600"},
+                result,
+            )
+
+        result["input_i_peak_a"] = "100"
+        with self.assertRaisesRegex(RuntimeError, "input_i_peak_a"):
+            collector.validate_result_matches_plan(
+                {"case_id": "case-a", "i_peak_a": 0.0},
+                result,
+            )
+
+        other = dict(result)
+        other["input_setup_fingerprint"] = "setup-other"
+        with self.assertRaisesRegex(RuntimeError, "mix or omit input_setup_fingerprint"):
+            collector.validate_homogeneous_fingerprints([result, other])
+
+    def test_incomplete_active_failed_and_ambiguous_history_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collector_args(Path(tmp) / "out")
+            rows = [{"case_id": "case-a", "design_hash": "hash-a"}]
+            task = campaign_tasks(args, rows)[0]
+            variants = {
+                "missing": ([], "missing scheduler task"),
+                "active": (
+                    [{"id": 1, "project": "pyaedt_motor", "status": "running", "dedupe_key": task.dedupe_key}],
+                    "active scheduler task",
+                ),
+                "failed": (
+                    [{"id": 1, "project": "pyaedt_motor", "status": "failed", "dedupe_key": task.dedupe_key}],
+                    "no successful completed task",
+                ),
+                "ambiguous": (
+                    [{"id": 1, "project": "pyaedt_motor", "status": "mystery", "dedupe_key": task.dedupe_key}],
+                    "ambiguous scheduler status",
+                ),
+            }
+            for label, (history, message) in variants.items():
+                with self.subTest(label=label):
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        collector.resolve_successful_history_tasks([task], history, "pyaedt_motor")
+
+    def test_latest_successful_task_is_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collector_args(Path(tmp) / "out")
+            row = {"case_id": "case-a", "design_hash": "hash-a"}
+            task = campaign_tasks(args, [row])[0]
+            history = [
+                {"id": 10, "project": "pyaedt_motor", "status": "completed", "exit_code": 0, "dedupe_key": task.dedupe_key},
+                {"id": 12, "project": "pyaedt_motor", "status": "failed", "exit_code": 1, "dedupe_key": task.dedupe_key},
+                {"id": 11, "project": "pyaedt_motor", "status": "completed", "return_code": 0, "dedupe_key": task.dedupe_key},
+            ]
+
+            resolved = collector.resolve_successful_history_tasks([task], history, "pyaedt_motor")
+
+        self.assertEqual(resolved[0][1]["id"], 11)
+
+    def test_history_and_project_lookup_failures_write_nothing(self) -> None:
+        rows = [{"case_id": "case-a", "design_hash": "hash-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for label in ("history", "project"):
+                output_dir = root / label
+                with self.subTest(label=label):
+                    with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
+                        history_patch = mock.patch.object(
+                            submit_campaign,
+                            "get_scheduler_task_history",
+                            side_effect=OSError("offline") if label == "history" else [],
+                        )
+                        project_patch = mock.patch.object(
+                            submit_campaign,
+                            "get_scheduler_project_summary",
+                            side_effect=OSError("offline") if label == "project" else {"total_count": 0},
+                        )
+                        with history_patch, project_patch:
+                            with mock.patch.object(collector, "fetch_task_remote_file") as fetch:
+                                with self.assertRaisesRegex(RuntimeError, "no files were written"):
+                                    collector.main(
+                                        [
+                                            "--cases",
+                                            "cases.csv",
+                                            "--project",
+                                            "pyaedt_motor",
+                                            "--output-dir",
+                                            str(output_dir),
+                                        ]
+                                    )
+                    fetch.assert_not_called()
+                    self.assertFalse(output_dir.exists())
+
+    def test_no_final_writes_before_all_remote_payloads_validate(self) -> None:
+        rows = [
+            {"case_id": "case-a", "design_hash": "hash-a"},
+            {"case_id": "case-b", "design_hash": "hash-b"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "collected"
+            args = collector_args(output_dir)
+            tasks = campaign_tasks(args, rows)
+            history = completed_history(tasks)
+            payloads = [valid_result("case-a", "hash-a"), valid_result("wrong-case", "hash-b")]
+            with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
+                with mock.patch.object(submit_campaign, "get_scheduler_task_history", return_value=history):
+                    with mock.patch.object(submit_campaign, "get_scheduler_project_summary", return_value={"total_count": 2}):
+                        with mock.patch.object(collector, "fetch_task_remote_file", side_effect=payloads):
+                            with self.assertRaisesRegex(RuntimeError, "case_id"):
+                                collector.main(
+                                    [
+                                        "--cases",
+                                        "cases.csv",
+                                        "--project",
+                                        "pyaedt_motor",
+                                        "--output-dir",
+                                        str(output_dir),
+                                    ]
+                                )
+
+            self.assertFalse(output_dir.exists())
+            self.assertEqual(list(Path(tmp).glob(".collected.staging-*")), [])
+
+    def test_incomplete_project_history_coverage_writes_nothing(self) -> None:
+        rows = [{"case_id": "case-a", "design_hash": "hash-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "collected"
+            with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
+                with mock.patch.object(submit_campaign, "get_scheduler_task_history", return_value=[]):
+                    with mock.patch.object(submit_campaign, "get_scheduler_project_summary", return_value={"total_count": 1}):
+                        with mock.patch.object(collector, "fetch_task_remote_file") as fetch:
+                            with self.assertRaisesRegex(RuntimeError, "coverage is incomplete"):
+                                collector.main(
+                                    [
+                                        "--cases",
+                                        "cases.csv",
+                                        "--project",
+                                        "pyaedt_motor",
+                                        "--output-dir",
+                                        str(output_dir),
+                                    ]
+                                )
+
+            fetch.assert_not_called()
+            self.assertFalse(output_dir.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

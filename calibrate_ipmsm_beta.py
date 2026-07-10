@@ -248,10 +248,13 @@ def analyze_zero_calibration_rows(
     rows: Iterable[dict[str, str]],
     *,
     max_circular_deviation_deg: float = 3.0,
+    min_distinct_speeds: int = 2,
 ) -> dict[str, Any]:
     """Infer physical ElectricalZero from signed no-load Phase-A back EMF."""
     if not math.isfinite(max_circular_deviation_deg) or max_circular_deviation_deg < 0.0:
         raise ValueError("max_circular_deviation_deg must be finite and nonnegative")
+    if type(min_distinct_speeds) is not int or min_distinct_speeds < 1:
+        raise ValueError("min_distinct_speeds must be a positive integer")
     successful = [row for row in rows if str(row.get("status") or "").strip().lower() == "ok"]
     if not successful:
         raise ValueError("zero calibration needs at least one successful no-load speed")
@@ -264,7 +267,22 @@ def analyze_zero_calibration_rows(
         "input_material_fingerprint": set(),
         "input_aedt_version": set(),
     }
+    initial_positions_deg: list[float] = []
     for row in successful:
+        if str(row.get("input_dataset_schema_version") or "").strip() != DATASET_SCHEMA_VERSION:
+            raise ValueError(
+                f"zero calibration requires input_dataset_schema_version={DATASET_SCHEMA_VERSION!r}"
+            )
+        for column, values in homogeneous.items():
+            value = str(row.get(column) or "").strip()
+            if not value:
+                raise ValueError(f"zero calibration requires nonblank {column}")
+            values.add(value)
+        initial_position_deg = finite_float(row.get("input_initial_position_deg"))
+        if not math.isfinite(initial_position_deg):
+            raise ValueError("zero calibration requires finite input_initial_position_deg")
+        initial_positions_deg.append(initial_position_deg)
+
         operation = str(row_value(row, "input_operation", "operation")).strip().lower().replace("-", "_")
         current = finite_float(row_value(row, "input_i_peak_a", "i_peak_a"))
         if operation not in {"no_load", "noload", "back_emf", "backemf"} or not math.isclose(
@@ -297,14 +315,22 @@ def analyze_zero_calibration_rows(
                 "inferred_zero_deg": inferred_zero,
             }
         )
-        for column, values in homogeneous.items():
-            value = str(row.get(column) or "").strip()
-            if value:
-                values.add(value)
 
     mixed = [column for column, values in homogeneous.items() if len(values) > 1]
+    initial_reference_deg = initial_positions_deg[0]
+    if any(
+        not math.isclose(value, initial_reference_deg, rel_tol=0.0, abs_tol=1e-9)
+        for value in initial_positions_deg[1:]
+    ):
+        mixed.append("input_initial_position_deg")
     if mixed:
         raise ValueError("zero calibration mixes incompatible rows: " + ", ".join(mixed))
+    successful_speeds = sorted({observation["speed_rpm"] for observation in observations})
+    if len(successful_speeds) < min_distinct_speeds:
+        raise ValueError(
+            "zero calibration needs at least "
+            f"{min_distinct_speeds} distinct successful speeds; got {len(successful_speeds)}"
+        )
     electrical_zero_deg, resultant = circular_mean_degrees(
         observation["inferred_zero_deg"] for observation in observations
     )
@@ -327,17 +353,13 @@ def analyze_zero_calibration_rows(
         "source_case_id": str(row_value(first, "input_source_case_id", "source_case_id", "case_id")),
         "design_hash": str(row_value(first, "design_hash", "input_design_hash")),
         "quality_profile": str(row_value(first, "input_quality_profile", "quality_profile")),
-        "initial_position_deg": finite_float(
-            row_value(first, "input_initial_position_deg", "initial_position_deg")
-        ),
+        "initial_position_deg": initial_reference_deg,
         "successful_rows": len(observations),
-        "successful_speeds_rpm": sorted({observation["speed_rpm"] for observation in observations}),
+        "successful_speeds_rpm": successful_speeds,
         "circular_resultant": resultant,
         "max_circular_deviation_deg": max_deviation,
         "observations": observations,
     }
-    if not math.isfinite(payload["initial_position_deg"]):
-        payload["initial_position_deg"] = None
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     payload["calibration_id"] = f"beta-calibration:sha256:{hashlib.sha256(encoded).hexdigest()}"
     return payload
@@ -555,6 +577,7 @@ def build_parser() -> argparse.ArgumentParser:
     zero_analyze.add_argument("--results", type=Path, required=True)
     zero_analyze.add_argument("--manifest", type=Path, required=True)
     zero_analyze.add_argument("--max-circular-deviation-deg", type=float, default=3.0)
+    zero_analyze.add_argument("--min-distinct-speeds", type=int, default=2)
 
     beta_generate = subparsers.add_parser("beta-generate", help="Generate a loaded fixed-zero MTPA sweep.")
     beta_source = beta_generate.add_mutually_exclusive_group(required=True)
@@ -636,6 +659,7 @@ def main(argv: list[str] | None = None) -> int:
             manifest = analyze_zero_calibration_rows(
                 csv.DictReader(file),
                 max_circular_deviation_deg=args.max_circular_deviation_deg,
+                min_distinct_speeds=args.min_distinct_speeds,
             )
         write_json_object(args.manifest, manifest)
         print(

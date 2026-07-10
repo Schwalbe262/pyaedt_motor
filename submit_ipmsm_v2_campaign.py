@@ -7,7 +7,8 @@ from dataclasses import dataclass
 import hashlib
 import json
 import posixpath
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import shlex
 from types import SimpleNamespace
 from typing import Any, Iterable
 from urllib import parse, request
@@ -104,7 +105,17 @@ def _remote_path(directory: str, name: str) -> str:
     normalized = str(directory or "").strip().replace("\\", "/").rstrip("/")
     if not normalized:
         raise RuntimeError("remote path directory must not be blank")
-    return posixpath.join(normalized, name)
+    path = posixpath.join(normalized, name)
+    if path.startswith("/") or ".." in PurePosixPath(path).parts:
+        raise RuntimeError(f"remote campaign paths must be safe relative paths: {path!r}")
+    return path
+
+
+def result_cleanup_command(result_csv: str) -> str:
+    """Remove only this case's stale append-only result before a retry."""
+    return "rm -f -- " + " ".join(
+        shlex.quote(path) for path in (result_csv, result_csv + ".lock")
+    )
 
 
 def build_campaign_task(
@@ -128,6 +139,7 @@ def build_campaign_task(
         args.bootstrap_max_bytes,
     )
     env_setup = append_env_setup(args.env_setup, bootstrap)
+    env_setup = append_env_setup(env_setup, result_cleanup_command(result_csv))
     task_args = SimpleNamespace(
         entrypoint=args.entrypoint,
         remote_cases=remote_cases,
