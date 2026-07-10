@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "operating_points": [
+    {
+      "name": "torque_point",
+      "speed_rpm": 1200.0,
+      "target_torque_nm": 40.0,
+      "duty_weight": 0.4
+    },
+    {
+      "name": "rated_power",
+      "speed_rpm": 3000.0,
+      "target_power_w": 5000.0,
+      "duty_weight": 0.6
+    }
+  ],
+  "stack_length_bounds_mm": [40.0, 60.0],
+  "inverter": {
+    "vdc_v": 300.0,
+    "phase_peak_current_limit_a": 140.0,
+    "voltage_utilization": 0.95
+  },
+  "winding": {
+    "series_turns_per_phase": 48,
+    "turns_per_coil_side": 12,
+    "coils_per_phase": 4,
+    "parallel_branches": 1,
+    "strand_area_mm2": 0.5,
+    "strands_per_turn": 4,
+    "fill_factor": 0.8,
+    "end_turn_factor": 1.2,
+    "overhang_mm": 5.0,
+    "winding_temperature_c": 100.0
+  },
+  "constraints": {
+    "current_density_limit_a_per_mm2": 20.0
+  },
+  "control": {
+    "beta_bounds_deg": [0.0, 80.0],
+    "current_grid_points": 33,
+    "coarse_beta_step_deg": 10.0,
+    "beta_refinement_steps_deg": [2.0, 0.25],
+    "current_refinement_denominators": [64, 256]
+  },
+  "nsga2": {
+    "population_size": 160,
+    "max_generations": 300,
+    "seeds": [42, 43, 44],
+    "max_fea_candidates": 12
+  }
+}

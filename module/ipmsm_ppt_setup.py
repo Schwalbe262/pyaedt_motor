@@ -30,6 +30,15 @@ DEFAULT_CORE_LOSS_COEFFICIENTS = {
 }
 DEFAULT_CORE_BH_CURVE_CSV = "30PNF1600_BH.csv"
 
+MODEL_EXTENT_FULL_360 = "full_360"
+MODEL_EXTENT_SECTOR_90 = "sector_90"
+BETA_CONVENTION_DQ_CURRENT_ADVANCE_V2 = "dq_current_advance_v2"
+BETA_CONVENTION_LEGACY_PHASE_OFFSET_V1 = "legacy_phase_offset_v1"
+SUPPORTED_BETA_CONVENTIONS = (
+    BETA_CONVENTION_DQ_CURRENT_ADVANCE_V2,
+    BETA_CONVENTION_LEGACY_PHASE_OFFSET_V1,
+)
+
 PPT_REPORT_DEFS = {
     "PPT_Phase_Currents": ["InputCurrent(PhaseA)", "InputCurrent(PhaseB)", "InputCurrent(PhaseC)"],
     "PPT_Torque": ["Moving1.Torque"],
@@ -48,9 +57,9 @@ PPT_REPORT_DEFS = {
     ],
     "PPT_PhaseA_Voltage_Limit": ["mag(InducedVoltage(PhaseA)+R_phase*InputCurrent(PhaseA))"],
     "PPT_Phase_Voltages": [
-        "mag(InducedVoltage(PhaseA)+R_phase*InputCurrent(PhaseA))",
-        "mag(InducedVoltage(PhaseB)+R_phase*InputCurrent(PhaseB))",
-        "mag(InducedVoltage(PhaseC)+R_phase*InputCurrent(PhaseC))",
+        "InducedVoltage(PhaseA)+R_phase*InputCurrent(PhaseA)",
+        "InducedVoltage(PhaseB)+R_phase*InputCurrent(PhaseB)",
+        "InducedVoltage(PhaseC)+R_phase*InputCurrent(PhaseC)",
     ],
     "PPT_Losses": ["CoreLoss", "SolidLoss"],
 }
@@ -60,10 +69,13 @@ PPT_REPORT_DEFS = {
 class IPMSMPPTSpec:
     pole_number: int = 8
     slot_number: int = 12
+    model_extent: str = MODEL_EXTENT_FULL_360
     symmetry_factor: int = 1
     base_rpm: float = 1200.0
     i_peak_a: float = 137.8
     beta_deg: float = 30.0
+    beta_convention: str = BETA_CONVENTION_DQ_CURRENT_ADVANCE_V2
+    electrical_zero_deg: float = 0.0
     series_turns_per_phase: int = 48
     turns_per_coil_side: int = 12
     stack_length_mm: float = 49.45
@@ -88,6 +100,109 @@ class IPMSMPPTSpec:
             "band": 1000,
         }
     )
+
+
+def canonical_dq_current_components(i_peak_a: float, beta_dq_deg: float) -> tuple[float, float]:
+    """Return ``(Id, Iq)`` for the v2 current-advance convention.
+
+    Positive beta advances the current into negative d-axis current. Therefore
+    beta=0 has Id=0 and Iq=+Ipeak, which is the canonical convention used by
+    new datasets and optimization code.
+    """
+    peak = float(i_peak_a)
+    beta = float(beta_dq_deg)
+    if not math.isfinite(peak) or peak < 0.0:
+        raise ValueError("i_peak_a must be finite and >= 0")
+    if not math.isfinite(beta):
+        raise ValueError("beta_dq_deg must be finite")
+    beta_rad = math.radians(beta)
+    return -peak * math.sin(beta_rad), peak * math.cos(beta_rad)
+
+
+def inverse_park_phase_currents(
+    id_a: float,
+    iq_a: float,
+    electrical_angle_deg: float,
+) -> dict[str, float]:
+    """Convert dq currents to balanced PhaseA/B/C instantaneous currents."""
+    values = (float(id_a), float(iq_a), float(electrical_angle_deg))
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("Id, Iq, and electrical angle must be finite")
+    id_value, iq_value, angle_deg = values
+    phase_axes_deg = {"PhaseA": 0.0, "PhaseB": -120.0, "PhaseC": 120.0}
+    return {
+        phase: id_value * math.cos(math.radians(angle_deg + axis_deg))
+        - iq_value * math.sin(math.radians(angle_deg + axis_deg))
+        for phase, axis_deg in phase_axes_deg.items()
+    }
+
+
+def canonical_phase_currents(
+    i_peak_a: float,
+    beta_dq_deg: float,
+    electrical_angle_deg: float,
+    electrical_zero_deg: float = 0.0,
+) -> dict[str, float]:
+    """Evaluate the canonical v2 three-phase excitation at one angle."""
+    id_a, iq_a = canonical_dq_current_components(i_peak_a, beta_dq_deg)
+    return inverse_park_phase_currents(id_a, iq_a, electrical_angle_deg + electrical_zero_deg)
+
+
+def commanded_dq_current_components(spec: IPMSMPPTSpec) -> tuple[float, float]:
+    """Return dq components represented by the selected excitation convention."""
+    if spec.beta_convention == BETA_CONVENTION_DQ_CURRENT_ADVANCE_V2:
+        return canonical_dq_current_components(spec.i_peak_a, spec.beta_deg)
+    if spec.beta_convention == BETA_CONVENTION_LEGACY_PHASE_OFFSET_V1:
+        # Legacy Ia=+I*sin(theta+beta) is the sign-reversed q-axis form under
+        # the v2 Park transform. Keep it available only by its explicit name.
+        legacy_id, legacy_iq = canonical_dq_current_components(spec.i_peak_a, spec.beta_deg)
+        return -legacy_id, -legacy_iq
+    raise ValueError(f"unsupported beta_convention: {spec.beta_convention!r}")
+
+
+def phase_current_expressions(spec: IPMSMPPTSpec) -> dict[str, str]:
+    """Return AEDT winding expressions for the explicitly selected convention."""
+    if spec.beta_convention == BETA_CONVENTION_DQ_CURRENT_ADVANCE_V2:
+        angle = "2*pi*frq*time + ElectricalZero"
+        return {
+            "PhaseA": f"IdCommand*cos({angle}) - IqCommand*sin({angle})",
+            "PhaseB": f"IdCommand*cos({angle} - 120deg) - IqCommand*sin({angle} - 120deg)",
+            "PhaseC": f"IdCommand*cos({angle} + 120deg) - IqCommand*sin({angle} + 120deg)",
+        }
+    if spec.beta_convention == BETA_CONVENTION_LEGACY_PHASE_OFFSET_V1:
+        return {
+            "PhaseA": "Imax*sin(2*pi*frq*time + Beta)",
+            "PhaseB": "Imax*sin(2*pi*frq*time - 120deg + Beta)",
+            "PhaseC": "Imax*sin(2*pi*frq*time - 240deg + Beta)",
+        }
+    raise ValueError(f"unsupported beta_convention: {spec.beta_convention!r}")
+
+
+def validate_ppt_spec_contract(
+    spec: IPMSMPPTSpec,
+    use_periodic_boundary: bool = False,
+) -> None:
+    """Fail closed on model-extent, symmetry, periodic, and beta mismatches."""
+    if spec.model_extent not in {MODEL_EXTENT_FULL_360, MODEL_EXTENT_SECTOR_90}:
+        raise ValueError(
+            f"model_extent must be {MODEL_EXTENT_FULL_360!r} or {MODEL_EXTENT_SECTOR_90!r}"
+        )
+    if spec.model_extent == MODEL_EXTENT_SECTOR_90:
+        raise ValueError(
+            "model_extent='sector_90' is unavailable until a real sector geometry builder exists"
+        )
+    if int(spec.symmetry_factor) != 1:
+        raise ValueError("model_extent='full_360' requires symmetry_factor=1")
+    if use_periodic_boundary:
+        raise ValueError("periodic boundary is invalid for model_extent='full_360'")
+    if spec.beta_convention not in SUPPORTED_BETA_CONVENTIONS:
+        raise ValueError(
+            "beta_convention must be explicitly set to one of "
+            + ", ".join(repr(value) for value in SUPPORTED_BETA_CONVENTIONS)
+        )
+    canonical_dq_current_components(spec.i_peak_a, spec.beta_deg)
+    if not math.isfinite(float(spec.electrical_zero_deg)):
+        raise ValueError("electrical_zero_deg must be finite")
 
 
 DEFAULT_12S8P_SECTOR_COIL_SIDE_MAP = [
@@ -587,6 +702,7 @@ def ensure_ppt_materials(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
 
 def apply_ppt_design_variables(design: Any, spec: IPMSMPPTSpec) -> None:
     """Apply the numeric parameters stated in the practice deck."""
+    validate_ppt_spec_contract(spec)
     pole_expr = "pole_num" if _has_design_variable(design, "pole_num") else str(spec.pole_number)
     slot_expr = "slot_num" if _has_design_variable(design, "slot_num") else str(spec.slot_number)
     initial_wrapped_deg = spec.initial_position_deg % 360.0
@@ -597,6 +713,13 @@ def apply_ppt_design_variables(design: Any, spec: IPMSMPPTSpec) -> None:
     _set_var(design, "MachineRPM", f"{spec.base_rpm:g}rpm")
     _set_var(design, "Imax", f"{spec.i_peak_a:g}A")
     _set_var(design, "Beta", f"{spec.beta_deg:g}deg")
+    _set_var(design, "ElectricalZero", f"{spec.electrical_zero_deg:g}deg")
+    if spec.beta_convention == BETA_CONVENTION_DQ_CURRENT_ADVANCE_V2:
+        _set_var(design, "IdCommand", "-Imax*sin(Beta)")
+        _set_var(design, "IqCommand", "Imax*cos(Beta)")
+    else:
+        _set_var(design, "IdCommand", "Imax*sin(Beta)")
+        _set_var(design, "IqCommand", "-Imax*cos(Beta)")
     _set_var(design, "StackLength", f"{spec.stack_length_mm:g}mm")
     _set_var(design, "R_phase", f"{spec.phase_resistance_ohm:g}ohm")
     _set_var(design, "Vdc", f"{spec.vdc_v:g}V")
@@ -926,6 +1049,7 @@ def assign_boundaries_and_motion(
     use_periodic_boundary: bool = False,
 ) -> dict[str, Any]:
     """Assign outer vector potential, optional periodic boundaries, and band motion."""
+    validate_ppt_spec_contract(spec, use_periodic_boundary=use_periodic_boundary)
     m2d = _m2d(design)
     region = _get_group(m2d, object_groups, "region", ("Region",))
     band = _get_group(m2d, object_groups, "band", ("Band",))
@@ -948,32 +1072,6 @@ def assign_boundaries_and_motion(
             )
         except Exception as exc:
             result["vector_potential"] = f"skipped: {exc}"
-
-    if use_periodic_boundary and region and spec.symmetry_factor > 1:
-        try:
-            radius = "rotor_radius + rotator_gap/2"
-            master_edge = m2d.modeler.get_edgeid_from_position(
-                position=[radius, 0, 0],
-                assignment=region[0],
-            )
-            slave_edge = m2d.modeler.get_edgeid_from_position(
-                position=[
-                    f"{radius}*cos(360deg/SymmetryFactor)",
-                    f"{radius}*sin(360deg/SymmetryFactor)",
-                    0,
-                ],
-                assignment=region[0],
-            )
-            result["periodic"] = m2d.assign_master_slave(
-                independent=master_edge,
-                dependent=slave_edge,
-                reverse_master=False,
-                reverse_slave=True,
-                same_as_master=False,
-                boundary="Matching",
-            )
-        except Exception as exc:
-            result["periodic"] = f"skipped: {exc}"
 
     if band:
         try:
@@ -1050,11 +1148,7 @@ def assign_three_phase_windings(
             "objects": winding_names,
         }
 
-    phase_current = {
-        "PhaseA": "Imax*sin(2*pi*frq*time + Beta)",
-        "PhaseB": "Imax*sin(2*pi*frq*time - 120deg + Beta)",
-        "PhaseC": "Imax*sin(2*pi*frq*time - 240deg + Beta)",
-    }
+    phase_current = phase_current_expressions(spec)
     phase_coils = {phase: [] for phase in phase_current}
 
     for side_index, (obj_name, (phase, polarity)) in enumerate(zip(winding_names, coil_side_map), start=1):
@@ -1152,6 +1246,7 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
 
 def create_ppt_transient_setup(design: Any, spec: IPMSMPPTSpec) -> Any:
     """Create a transient setup with a fixed number of steps per electrical period."""
+    validate_ppt_spec_contract(spec)
     m2d = _m2d(design)
     try:
         m2d.model_depth = "StackLength"
@@ -1222,6 +1317,7 @@ def configure_ipmsm_from_ppt(
 ) -> dict[str, Any]:
     """Run the full post-modeling setup flow from the practice deck."""
     spec = spec or IPMSMPPTSpec()
+    validate_ppt_spec_contract(spec, use_periodic_boundary=use_periodic_boundary)
     apply_ppt_design_variables(design, spec)
     set_operation_current(design, spec, operation=operation)
     cleanup = clear_previous_ppt_setup(design, spec) if clear_existing else "skipped"

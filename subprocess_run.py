@@ -199,6 +199,12 @@ def build_command(args: argparse.Namespace, process_index: int, count: int | Non
         str(args.result_csv),
         "--symmetry-factor",
         str(args.symmetry_factor),
+        "--model-extent",
+        str(args.model_extent),
+        "--beta-convention",
+        str(args.beta_convention),
+        "--electrical-zero-deg",
+        str(args.electrical_zero_deg),
     ]
 
     if args.analyze:
@@ -247,8 +253,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-dir", type=Path, default=BASE_DIR / "simul_log")
     parser.add_argument("--log-prefix", default=os.environ.get("LOG_PREFIX", ""))
     parser.add_argument("--stagger-seconds", type=float, default=float(os.environ.get("STAGGER_SECONDS", "30")))
-    parser.add_argument("--symmetry-factor", type=int, default=int_env("SYMMETRY_FACTOR", 4))
+    parser.add_argument("--symmetry-factor", type=int, default=int_env("SYMMETRY_FACTOR", 1))
     parser.add_argument("--periodic-boundary", action="store_true", default=os.environ.get("PERIODIC_BOUNDARY", "").lower() in {"1", "true", "yes"})
+    parser.add_argument("--model-extent", choices=("full_360", "sector_90"), default=os.environ.get("MODEL_EXTENT", "full_360"))
+    parser.add_argument(
+        "--beta-convention",
+        choices=("dq_current_advance_v2", "legacy_phase_offset_v1"),
+        default=os.environ.get("BETA_CONVENTION", "dq_current_advance_v2"),
+    )
+    parser.add_argument("--electrical-zero-deg", type=float, default=float(os.environ.get("ELECTRICAL_ZERO_DEG", "0")))
     parser.add_argument("--analyze", dest="analyze", action="store_true", default=os.environ.get("SETUP_ONLY", "").lower() not in {"1", "true", "yes"})
     parser.add_argument("--setup-only", dest="analyze", action="store_false")
     parser.add_argument("--non-graphical", action="store_true", default=(platform.system() != "Windows"))

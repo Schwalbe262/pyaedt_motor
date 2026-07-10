@@ -22,6 +22,8 @@ import contextlib
 import csv
 from dataclasses import asdict, dataclass
 from datetime import datetime
+import hashlib
+import json
 import logging
 import math
 import multiprocessing as mp
@@ -36,6 +38,9 @@ from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_MAX_CASES = 200
+DATASET_SCHEMA_VERSION = "ipmsm_v2"
+DEFAULT_MODEL_EXTENT = "full_360"
+DEFAULT_BETA_CONVENTION = "dq_current_advance_v2"
 
 
 def safe_path_exists(path: Path) -> bool:
@@ -104,6 +109,8 @@ TIME_DOMAIN_OUTPUT_METRICS = (
     ("phaseb_current", "a"),
     ("phasec_current", "a"),
     ("phase_current", "a"),
+    ("id_current", "a"),
+    ("iq_current", "a"),
     ("back_emf_phasea", "v"),
     ("back_emf_phaseb", "v"),
     ("back_emf_phasec", "v"),
@@ -132,12 +139,17 @@ DERIVED_OUTPUT_COLUMNS = (
 HARMONIC_OUTPUT_COLUMNS = (
     *(f"output_back_emf_phasea_h{harmonic}_rms_v" for harmonic in BACK_EMF_HARMONICS),
     *(f"output_back_emf_phasea_h{harmonic}_pct" for harmonic in BACK_EMF_HARMONICS),
+    "output_back_emf_phasea_h1_cos_peak_v",
+    "output_back_emf_phasea_h1_sin_peak_v",
+    "output_back_emf_phasea_h1_phase_deg",
     "output_back_emf_phasea_thd_pct",
 )
 OUTPUT_SUMMARY_COLUMNS = (
     "output_electric_frequency_hz",
     "output_period_s",
     "output_stop_time_s",
+    "output_phase_current_source",
+    "output_phase_voltage_source",
     *(
         f"output_{metric}_{window}_{stat}_{unit}"
         for metric, unit in TIME_DOMAIN_OUTPUT_METRICS
@@ -151,12 +163,19 @@ OUTPUT_SUMMARY_COLUMNS = (
 ARTIFACT_COLUMNS = tuple(f"artifact_report_{name}" for name in REPORT_NAMES)
 
 INPUT_SPEC_COLUMNS = (
+    "input_dataset_schema_version",
     "input_pole_number",
     "input_slot_number",
+    "input_model_extent",
     "input_symmetry_factor",
     "input_base_rpm",
     "input_i_peak_a",
+    "input_beta_dq_deg",
     "input_beta_deg",
+    "input_beta_convention",
+    "input_electrical_zero_deg",
+    "input_commanded_id_peak_a",
+    "input_commanded_iq_peak_a",
     "input_series_turns_per_phase",
     "input_turns_per_coil_side",
     "input_stack_length_mm",
@@ -223,6 +242,10 @@ INPUT_CORE_COLUMNS = (
 
 INPUT_RUN_COLUMNS = (
     "input_quality_profile",
+    "input_setup_fingerprint",
+    "input_material_fingerprint",
+    "input_aedt_version",
+    "input_beta_calibration_id",
     "input_geometry_mode",
     "input_source_case_id",
     "input_source_result_path",
@@ -231,6 +254,9 @@ INPUT_RUN_COLUMNS = (
 )
 
 RUN_METADATA_COLUMNS = (
+    "execution_host",
+    "slurm_job_id",
+    "slurm_array_task_id",
     "error",
     "simulation_name",
     "project_path",
@@ -242,10 +268,23 @@ RUN_METADATA_COLUMNS = (
     "finished_at",
 )
 
+CASE_METADATA_COLUMNS = (
+    "geometry_group_id",
+    "design_hash",
+    "operating_point_id",
+    "doe_split",
+    "repeat_of_case_id",
+    "beta_calibration_id",
+    "optimization_run_id",
+    "candidate_id",
+    "control_source",
+)
+
 RESULT_COLUMN_ORDER = (
     "case_id",
     "status",
     "started_at",
+    *CASE_METADATA_COLUMNS,
     *INPUT_SPEC_COLUMNS,
     *INPUT_GEOMETRY_COLUMNS,
     *INPUT_CORE_COLUMNS,
@@ -266,6 +305,9 @@ class RunnerOptions:
     symmetry_factor: int
     use_periodic_boundary: bool
     cores: int
+    model_extent: str = DEFAULT_MODEL_EXTENT
+    beta_convention: str = DEFAULT_BETA_CONVENTION
+    electrical_zero_deg: float = 0.0
 
 
 class Simulation:
@@ -371,6 +413,91 @@ def case_bool(case: dict[str, Any], *names: str, default: bool = False) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def stable_fingerprint(namespace: str, payload: dict[str, Any]) -> str:
+    """Return a deterministic, human-identifiable SHA-256 fingerprint."""
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return f"{namespace}:sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def setup_fingerprint(
+    spec: Any,
+    quality_profile: str,
+    operation: str,
+    use_periodic_boundary: bool,
+) -> str:
+    return stable_fingerprint(
+        "setup_v2",
+        {
+            "model_extent": spec.model_extent,
+            "symmetry_factor": int(spec.symmetry_factor),
+            "beta_convention": spec.beta_convention,
+            "electrical_zero_deg": float(spec.electrical_zero_deg),
+            "series_turns_per_phase": int(spec.series_turns_per_phase),
+            "turns_per_coil_side": int(spec.turns_per_coil_side),
+            "transient_periods": int(spec.transient_periods),
+            "steps_per_period": int(spec.steps_per_period),
+            "mesh_elements": {key: int(value) for key, value in sorted(spec.mesh_elements.items())},
+            "setup_name": spec.setup_name,
+            "quality_profile": quality_profile,
+            "operation": operation,
+            "use_periodic_boundary": bool(use_periodic_boundary),
+        },
+    )
+
+
+def material_fingerprint(
+    spec: Any,
+    core_loss_coefficients: dict[str, Any],
+    core_material_properties: dict[str, Any],
+) -> str:
+    return stable_fingerprint(
+        "materials_v2",
+        {
+            "core_material": spec.core_material,
+            "core_material_fallbacks": list(spec.core_material_fallbacks),
+            "magnet_material": spec.magnet_material,
+            "winding_material": spec.winding_material,
+            "shaft_material": spec.shaft_material,
+            "air_material": spec.air_material,
+            "core_loss_coefficients": core_loss_coefficients,
+            "core_material_properties": core_material_properties,
+        },
+    )
+
+
+def planned_aedt_version(case: dict[str, Any]) -> str:
+    explicit = str(case_value(case, "aedt_version", "input_aedt_version", default="")).strip()
+    if explicit:
+        return explicit
+    environment_version = os.environ.get("AEDT_VERSION", "").strip()
+    if environment_version:
+        return environment_version
+    roots = sorted((key for key in os.environ if key.startswith("ANSYSEM_ROOT")), reverse=True)
+    if roots:
+        suffix = roots[0].removeprefix("ANSYSEM_ROOT")
+        if len(suffix) == 3 and suffix.isdigit():
+            return f"20{suffix[:2]}.{suffix[2:]}"
+        return suffix or roots[0]
+    return "auto"
+
+
+def detected_aedt_version(desktop: Any, fallback: str) -> str:
+    """Best-effort readback without depending on one PyAEDT wrapper version."""
+    for source in (desktop, getattr(desktop, "desktop", None)):
+        if source is None:
+            continue
+        for attribute in ("aedt_version", "desktop_version", "version"):
+            value = getattr(source, attribute, None)
+            if callable(value):
+                try:
+                    value = value()
+                except Exception:
+                    continue
+            if value not in (None, ""):
+                return str(value)
+    return fallback
 
 
 def build_mesh_elements(case: dict[str, Any], defaults: Any) -> dict[str, int]:
@@ -620,18 +747,54 @@ def extract_fixed_geometry(case: dict[str, Any]) -> dict[str, float]:
     }
 
 
-def build_spec(case: dict[str, Any], default_symmetry_factor: int = 4) -> Any:
+def build_spec(
+    case: dict[str, Any],
+    default_symmetry_factor: int = 1,
+    default_model_extent: str = DEFAULT_MODEL_EXTENT,
+    default_beta_convention: str = DEFAULT_BETA_CONVENTION,
+    default_electrical_zero_deg: float = 0.0,
+) -> Any:
     """Build the PPT setup spec from one CSV/default case row."""
-    from module.ipmsm_ppt_setup import IPMSMPPTSpec
+    from module.ipmsm_ppt_setup import IPMSMPPTSpec, validate_ppt_spec_contract
 
     defaults = IPMSMPPTSpec()
     spec = IPMSMPPTSpec(
         pole_number=case_int(case, "pole_number", "pole_num", default=8),
         slot_number=case_int(case, "slot_number", "slot_num", default=12),
-        symmetry_factor=case_int(case, "symmetry_factor", default=default_symmetry_factor),
+        model_extent=str(
+            case_value(case, "model_extent", "input_model_extent", default=default_model_extent)
+        ).strip(),
+        symmetry_factor=case_int(
+            case,
+            "symmetry_factor",
+            "input_symmetry_factor",
+            default=default_symmetry_factor,
+        ),
         base_rpm=case_float(case, "base_rpm", "rpm", default=1200.0),
         i_peak_a=case_float(case, "i_peak_a", "i_peak", "current_peak_a", default=137.8),
-        beta_deg=case_float(case, "beta_deg", "beta", default=defaults.beta_deg),
+        beta_deg=case_float(
+            case,
+            "beta_dq_deg",
+            "input_beta_dq_deg",
+            "beta_deg",
+            "input_beta_deg",
+            "beta",
+            default=defaults.beta_deg,
+        ),
+        beta_convention=str(
+            case_value(
+                case,
+                "beta_convention",
+                "input_beta_convention",
+                default=default_beta_convention,
+            )
+        ).strip(),
+        electrical_zero_deg=case_float(
+            case,
+            "electrical_zero_deg",
+            "input_electrical_zero_deg",
+            default=default_electrical_zero_deg,
+        ),
         series_turns_per_phase=case_int(case, "series_turns_per_phase", default=48),
         turns_per_coil_side=case_int(case, "turns_per_coil_side", default=12),
         stack_length_mm=case_float(case, "stack_length_mm", default=49.45),
@@ -645,6 +808,7 @@ def build_spec(case: dict[str, Any], default_symmetry_factor: int = 4) -> Any:
         mesh_elements=build_mesh_elements(case, defaults),
     )
     validate_transient_spec(spec)
+    validate_ppt_spec_contract(spec)
     return spec
 
 
@@ -676,17 +840,48 @@ def duplicate_case_ids(cases: list[dict[str, Any]]) -> list[str]:
     return duplicates
 
 
-def validate_case_inputs(cases: list[dict[str, Any]]) -> None:
+def validate_case_inputs(
+    cases: list[dict[str, Any]],
+    default_symmetry_factor: int = 1,
+    default_model_extent: str = DEFAULT_MODEL_EXTENT,
+    default_beta_convention: str = DEFAULT_BETA_CONVENTION,
+    default_electrical_zero_deg: float = 0.0,
+    default_use_periodic_boundary: bool = False,
+) -> None:
+    from module.ipmsm_ppt_setup import validate_ppt_spec_contract
+
     for index, case in enumerate(cases, start=1):
         case_id = str(case_value(case, "case_id", "id", default=f"case_{index:04d}"))
         try:
-            build_spec(case)
+            spec = build_spec(
+                case,
+                default_symmetry_factor=default_symmetry_factor,
+                default_model_extent=default_model_extent,
+                default_beta_convention=default_beta_convention,
+                default_electrical_zero_deg=default_electrical_zero_deg,
+            )
+            use_periodic_boundary = case_bool(
+                case,
+                "use_periodic_boundary",
+                "input_use_periodic_boundary",
+                default=default_use_periodic_boundary,
+            )
+            validate_ppt_spec_contract(spec, use_periodic_boundary=use_periodic_boundary)
             extract_fixed_geometry(case)
         except Exception as exc:
             raise RuntimeError(f"case plan row {case_id} has invalid inputs: {exc}") from exc
 
 
-def validate_case_plan(cases: list[dict[str, Any]], max_cases: int, allow_over_budget: bool = False) -> None:
+def validate_case_plan(
+    cases: list[dict[str, Any]],
+    max_cases: int,
+    allow_over_budget: bool = False,
+    default_symmetry_factor: int = 1,
+    default_model_extent: str = DEFAULT_MODEL_EXTENT,
+    default_beta_convention: str = DEFAULT_BETA_CONVENTION,
+    default_electrical_zero_deg: float = 0.0,
+    default_use_periodic_boundary: bool = False,
+) -> None:
     if not cases:
         raise RuntimeError("No cases to run.")
     duplicates = duplicate_case_ids(cases)
@@ -700,7 +895,14 @@ def validate_case_plan(cases: list[dict[str, Any]], max_cases: int, allow_over_b
             f"case plan has {len(cases)} rows, exceeding --max-cases={max_cases}; "
             "pass --allow-over-budget only for an intentional approved run."
         )
-    validate_case_inputs(cases)
+    validate_case_inputs(
+        cases,
+        default_symmetry_factor=default_symmetry_factor,
+        default_model_extent=default_model_extent,
+        default_beta_convention=default_beta_convention,
+        default_electrical_zero_deg=default_electrical_zero_deg,
+        default_use_periodic_boundary=default_use_periodic_boundary,
+    )
 
 
 def dataframe_first_row(df: Any) -> dict[str, Any]:
@@ -967,6 +1169,87 @@ def summarize_metric(
     return result
 
 
+def summarize_sampled_values(
+    time_values_s: list[float],
+    values: list[float],
+    output_prefix: str,
+    period_s: float,
+    stop_s: float,
+    unit_suffix: str,
+) -> dict[str, float]:
+    """Summarize already-converted samples with the standard time windows."""
+    pairs = [
+        (time_s, value)
+        for time_s, value in zip(time_values_s, values)
+        if math.isfinite(time_s) and math.isfinite(value)
+    ]
+    eps = max(period_s, stop_s, 1.0) * 1e-9
+    windows = {
+        "first": [value for time_s, value in pairs if -eps <= time_s <= period_s + eps],
+        "last": [value for time_s, value in pairs if stop_s - period_s - eps <= time_s <= stop_s + eps],
+        "all": [value for _, value in pairs],
+    }
+    result: dict[str, float] = {}
+    for window_name, selected in windows.items():
+        stats = series_stats(selected or windows["all"])
+        for stat in TIME_DOMAIN_STATS:
+            result[f"{output_prefix}_{window_name}_{stat}_{unit_suffix}"] = stats[stat]
+    return result
+
+
+def canonical_electrical_frame_angle_rad(spec: Any, time_s: float) -> float:
+    """Return the calibrated rotor-dq electrical angle used by v2 excitation.
+
+    ``ElectricalZero`` is calibrated at the configured rotor start position,
+    so it already contains the fixed rotor/winding-axis offset.  Adding the
+    mechanical initial position again would rotate measured dq values twice.
+    """
+    frequency_hz = float(spec.base_rpm) * float(spec.pole_number) / 120.0
+    time_value = float(time_s)
+    electrical_zero_deg = float(spec.electrical_zero_deg)
+    if not all(math.isfinite(value) for value in (frequency_hz, time_value, electrical_zero_deg)):
+        raise ValueError("electrical-frame inputs must be finite")
+    return 2.0 * math.pi * frequency_hz * time_value + math.radians(electrical_zero_deg)
+
+
+def summarize_dq_current_report(
+    df: Any,
+    phase_columns: tuple[str, str, str],
+    spec: Any,
+    period_s: float,
+    stop_s: float,
+) -> dict[str, float]:
+    """Transform signed measured phase currents into the canonical dq frame."""
+    time_column = find_column(list(df.columns), ("time",)) or df.columns[0]
+    time_unit = extract_column_unit(time_column)
+    current_units = tuple(extract_column_unit(column) for column in phase_columns)
+    time_values: list[float] = []
+    id_values: list[float] = []
+    iq_values: list[float] = []
+    for raw_time, raw_a, raw_b, raw_c in zip(
+        df[time_column],
+        df[phase_columns[0]],
+        df[phase_columns[1]],
+        df[phase_columns[2]],
+    ):
+        time_s = parse_time_seconds(raw_time, time_unit)
+        currents = (
+            parse_report_value(raw_a, current_units[0], "a"),
+            parse_report_value(raw_b, current_units[1], "a"),
+            parse_report_value(raw_c, current_units[2], "a"),
+        )
+        theta = canonical_electrical_frame_angle_rad(spec, time_s)
+        angles = (theta, theta - 2.0 * math.pi / 3.0, theta + 2.0 * math.pi / 3.0)
+        id_a = (2.0 / 3.0) * sum(current * math.cos(angle) for current, angle in zip(currents, angles))
+        iq_a = -(2.0 / 3.0) * sum(current * math.sin(angle) for current, angle in zip(currents, angles))
+        time_values.append(time_s)
+        id_values.append(id_a)
+        iq_values.append(iq_a)
+    result = summarize_sampled_values(time_values, id_values, "output_id_current", period_s, stop_s, "a")
+    result.update(summarize_sampled_values(time_values, iq_values, "output_iq_current", period_s, stop_s, "a"))
+    return result
+
+
 def report_time_value_pairs(df: Any, value_column: str, unit_suffix: str) -> list[tuple[float, float]]:
     """Return finite ``(time_s, value_base_unit)`` pairs from an exported AEDT report."""
     time_column = find_column(list(df.columns), ("time",)) or df.columns[0]
@@ -1016,10 +1299,16 @@ def summarize_last_cycle_harmonics(
     for harmonic in BACK_EMF_HARMONICS:
         cos_sum = sum(value * math.cos(harmonic * omega * time_s) for time_s, value in selected)
         sin_sum = sum(value * math.sin(harmonic * omega * time_s) for time_s, value in selected)
-        peak = 2.0 * math.sqrt(cos_sum * cos_sum + sin_sum * sin_sum) / count
+        cos_peak = 2.0 * cos_sum / count
+        sin_peak = 2.0 * sin_sum / count
+        peak = math.hypot(cos_peak, sin_peak)
         rms = peak / math.sqrt(2.0)
         harmonic_rms[harmonic] = rms
         result[f"{output_prefix}_h{harmonic}_rms_{unit_suffix}"] = rms
+        if harmonic == 1:
+            result[f"{output_prefix}_h1_cos_peak_{unit_suffix}"] = cos_peak
+            result[f"{output_prefix}_h1_sin_peak_{unit_suffix}"] = sin_peak
+            result[f"{output_prefix}_h1_phase_deg"] = math.degrees(math.atan2(cos_peak, sin_peak))
 
     fundamental_rms = harmonic_rms.get(1, math.nan)
     for harmonic, rms in harmonic_rms.items():
@@ -1057,10 +1346,6 @@ def summarize_inductance_matrix(df: Any, spec: Any, period_s: float, stop_s: flo
 
     time_column = find_column(columns, ("time",)) or df.columns[0]
     time_unit = extract_column_unit(time_column)
-    omega_mech = 2.0 * math.pi * float(spec.base_rpm) / 60.0
-    pole_pairs = float(spec.pole_number) / 2.0
-    initial_mech_rad = math.radians(float(spec.initial_position_deg))
-
     ld_values: list[float] = []
     lq_values: list[float] = []
     saliency_values: list[float] = []
@@ -1081,7 +1366,7 @@ def summarize_inductance_matrix(df: Any, spec: Any, period_s: float, stop_s: flo
             [values["ba"], values["bb"], values["bc"]],
             [values["ca"], values["cb"], values["cc"]],
         ]
-        theta = pole_pairs * (initial_mech_rad + omega_mech * time_s)
+        theta = canonical_electrical_frame_angle_rad(spec, time_s)
         angles = (theta, theta - 2.0 * math.pi / 3.0, theta + 2.0 * math.pi / 3.0)
 
         park = [
@@ -1253,7 +1538,36 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
         if column:
             result.update(summarize_metric(df, column, "output_cogging_torque", period_s, stop_s, "nm"))
 
-    populate_commanded_current_metrics(result, spec, operation)
+    current_path = exported_reports.get("artifact_report_PPT_Phase_Currents")
+    measured_current = False
+    if current_path and Path(current_path).exists():
+        df = read_report_csv(current_path)
+        data_columns = non_time_columns(list(df.columns))
+        phase_columns: list[str | None] = []
+        for index, phase in enumerate(("a", "b", "c")):
+            column = find_column(list(df.columns), (f"phase{phase}",))
+            if not column and index < len(data_columns):
+                column = data_columns[index]
+            phase_columns.append(column)
+            if column:
+                result.update(
+                    summarize_metric(df, column, f"output_phase{phase}_current", period_s, stop_s, "a")
+                )
+        if all(phase_columns):
+            measured_current = True
+            measured_columns = (str(phase_columns[0]), str(phase_columns[1]), str(phase_columns[2]))
+            summarize_phase_envelope(
+                result,
+                ("output_phasea_current", "output_phaseb_current", "output_phasec_current"),
+                "output_phase_current",
+                "a",
+            )
+            result.update(summarize_dq_current_report(df, measured_columns, spec, period_s, stop_s))
+    if not measured_current:
+        populate_commanded_current_metrics(result, spec, operation)
+        result["output_phase_current_source"] = "commanded_fallback"
+    else:
+        result["output_phase_current_source"] = "measured_three_phase"
 
     back_emf_path = exported_reports.get("artifact_report_PPT_Back_EMF")
     if back_emf_path and Path(back_emf_path).exists():
@@ -1295,11 +1609,13 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
     if voltage_path and Path(voltage_path).exists():
         df = read_report_csv(voltage_path)
         data_columns = non_time_columns(list(df.columns))
+        voltage_phase_count = 0
         for index, phase in enumerate(("a", "b", "c")):
             column = find_column(list(df.columns), (f"phase{phase}",))
             if not column and index < len(data_columns):
                 column = data_columns[index]
             if column:
+                voltage_phase_count += 1
                 result.update(
                     summarize_metric(df, column, f"output_phase{phase}_voltage", period_s, stop_s, "v")
                 )
@@ -1308,6 +1624,9 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
             ("output_phasea_voltage", "output_phaseb_voltage", "output_phasec_voltage"),
             "output_phase_voltage",
             "v",
+        )
+        result["output_phase_voltage_source"] = (
+            "measured_three_phase" if voltage_phase_count == 3 else "incomplete_phase_report"
         )
     else:
         voltage_a_path = exported_reports.get("artifact_report_PPT_PhaseA_Voltage_Limit")
@@ -1323,6 +1642,7 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
                         if key.startswith("output_phasea_voltage")
                     }
                 )
+                result["output_phase_voltage_source"] = "phasea_fallback"
 
     losses_path = exported_reports.get("artifact_report_PPT_Losses")
     if losses_path and Path(losses_path).exists():
@@ -1453,13 +1773,39 @@ def export_ppt_reports(design: Any, project_path: Path, case_id: str, setup_name
     return exported
 
 
-def missing_required_output_metrics(output_summary: dict[str, Any]) -> list[str]:
+def missing_required_output_metrics(
+    output_summary: dict[str, Any],
+    *,
+    require_v2: bool = False,
+    operation: str = "sin_current",
+) -> list[str]:
     """Return required transient metrics that were not exported/summarized."""
     required = [
         "output_torque_all_avg_nm",
         "output_coreloss_all_avg_w",
         "output_solidloss_all_avg_w",
     ]
+    if require_v2:
+        required.extend(
+            [
+                "output_phase_voltage_last_peak_abs_v",
+                "output_phasea_voltage_last_peak_abs_v",
+                "output_phaseb_voltage_last_peak_abs_v",
+                "output_phasec_voltage_last_peak_abs_v",
+                "output_ld_last_avg_h",
+                "output_lq_last_avg_h",
+            ]
+        )
+        if is_current_driven_operation(operation):
+            required.extend(
+                [
+                    "output_phase_current_last_rms_a",
+                    "output_id_current_last_avg_a",
+                    "output_iq_current_last_avg_a",
+                ]
+            )
+        else:
+            required.append("output_back_emf_phasea_h1_rms_v")
     missing = []
     for key in required:
         value = output_summary.get(key)
@@ -1471,6 +1817,14 @@ def missing_required_output_metrics(output_summary: dict[str, Any]) -> list[str]
                 missing.append(key)
         except Exception:
             pass
+    if require_v2 and output_summary.get("output_phase_voltage_source") != "measured_three_phase":
+        missing.append("output_phase_voltage_source")
+    if (
+        require_v2
+        and is_current_driven_operation(operation)
+        and output_summary.get("output_phase_current_source") != "measured_three_phase"
+    ):
+        missing.append("output_phase_current_source")
     return missing
 
 
@@ -1512,27 +1866,87 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         "case_id": case_id,
         "status": "started",
         "started_at": start_dt.isoformat(timespec="seconds"),
+        "execution_host": (
+            os.environ.get("SLURMD_NODENAME")
+            or os.environ.get("HOSTNAME")
+            or os.environ.get("COMPUTERNAME")
+            or "unknown"
+        ),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
+        "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID", ""),
     }
+    for metadata_column in CASE_METADATA_COLUMNS:
+        row[metadata_column] = case_value(
+            case,
+            metadata_column,
+            f"input_{metadata_column}",
+            default="",
+        )
 
     try:
-        spec = build_spec(case, default_symmetry_factor=options.symmetry_factor)
+        spec = build_spec(
+            case,
+            default_symmetry_factor=options.symmetry_factor,
+            default_model_extent=options.model_extent,
+            default_beta_convention=options.beta_convention,
+            default_electrical_zero_deg=options.electrical_zero_deg,
+        )
         fixed_geometry = extract_fixed_geometry(case)
         use_periodic_boundary = case_bool(
             case,
             "use_periodic_boundary",
+            "input_use_periodic_boundary",
             default=options.use_periodic_boundary,
         )
         operation = str(case_value(case, "operation", default="sin_current"))
 
-        from module.ipmsm_ppt_setup import get_core_loss_coefficients, get_core_material_properties
+        from module.ipmsm_ppt_setup import (
+            commanded_dq_current_components,
+            get_core_loss_coefficients,
+            get_core_material_properties,
+            validate_ppt_spec_contract,
+        )
+
+        validate_ppt_spec_contract(spec, use_periodic_boundary=use_periodic_boundary)
+        core_loss_coefficients = get_core_loss_coefficients()
+        core_material_properties = get_core_material_properties()
+        quality_profile = str(
+            case_value(case, "quality_profile", "input_quality_profile", default="default")
+        ).strip() or "default"
+        aedt_version = planned_aedt_version(case)
+        commanded_id_a, commanded_iq_a = commanded_dq_current_components(spec)
+        if not is_current_driven_operation(operation):
+            commanded_id_a = 0.0
+            commanded_iq_a = 0.0
 
         input_data = {}
         input_data.update(asdict(spec))
         input_data.update(transient_setup_metadata(spec))
         input_data.update({f"mesh_{key}_elements": spec.mesh_elements.get(key, "") for key in MESH_ELEMENT_KEYS})
-        input_data.update({f"coreloss_{key}": value for key, value in get_core_loss_coefficients().items()})
-        input_data.update({f"core_{key}": value for key, value in get_core_material_properties().items()})
-        input_data["quality_profile"] = case_value(case, "quality_profile", default="")
+        input_data.update({f"coreloss_{key}": value for key, value in core_loss_coefficients.items()})
+        input_data.update({f"core_{key}": value for key, value in core_material_properties.items()})
+        input_data["dataset_schema_version"] = DATASET_SCHEMA_VERSION
+        input_data["beta_dq_deg"] = (
+            spec.beta_deg if spec.beta_convention == DEFAULT_BETA_CONVENTION else ""
+        )
+        input_data["commanded_id_peak_a"] = commanded_id_a
+        input_data["commanded_iq_peak_a"] = commanded_iq_a
+        input_data["quality_profile"] = quality_profile
+        input_data["setup_fingerprint"] = setup_fingerprint(
+            spec,
+            quality_profile=quality_profile,
+            operation=operation,
+            use_periodic_boundary=use_periodic_boundary,
+        )
+        input_data["material_fingerprint"] = material_fingerprint(
+            spec,
+            core_loss_coefficients=core_loss_coefficients,
+            core_material_properties=core_material_properties,
+        )
+        input_data["aedt_version"] = aedt_version
+        input_data["beta_calibration_id"] = case_value(
+            case, "beta_calibration_id", "input_beta_calibration_id", default=""
+        )
         input_data["geometry_mode"] = "fixed" if fixed_geometry else "random"
         input_data["source_case_id"] = case_value(case, "source_case_id", default="")
         input_data["source_result_path"] = case_value(case, "source_result_path", default="")
@@ -1562,6 +1976,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 close_on_exit=True,
                 new_desktop=True,
             )
+            row["input_aedt_version"] = detected_aedt_version(desktop, aedt_version)
         except AttributeError as exc:
             if "EnableAutoSave" in str(exc):
                 raise RuntimeError(
@@ -1616,7 +2031,15 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         output_summary = summarize_transient_outputs(exported, spec, operation=operation) if options.analyze else {}
         row.update(prefixed_row(output_summary, ""))
         row.update(exported)
-        missing_outputs = missing_required_output_metrics(output_summary) if options.analyze else []
+        missing_outputs = (
+            missing_required_output_metrics(
+                output_summary,
+                require_v2=spec.beta_convention == DEFAULT_BETA_CONVENTION,
+                operation=operation,
+            )
+            if options.analyze
+            else []
+        )
         row["missing_required_outputs"] = ";".join(missing_outputs)
         if missing_outputs:
             raise RuntimeError(f"Missing required transient output metrics: {missing_outputs}")
@@ -1659,8 +2082,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-over-budget", action="store_true", help="Allow planned case rows above --max-cases for an intentional approved run.")
     parser.add_argument("--workers", type=int, default=1, help="Number of parallel AEDT worker processes.")
     parser.add_argument("--cores", type=int, default=4, help="AEDT solver cores per worker.")
-    parser.add_argument("--symmetry-factor", type=int, default=4, help="AEDT design symmetry multiplier.")
-    parser.add_argument("--periodic-boundary", action="store_true", help="Assign periodic matching boundary for a sector model.")
+    parser.add_argument(
+        "--model-extent",
+        choices=("full_360", "sector_90"),
+        default=DEFAULT_MODEL_EXTENT,
+        help="Geometry extent contract. sector_90 is reserved until a real sector builder is available.",
+    )
+    parser.add_argument("--symmetry-factor", type=int, default=1, help="AEDT design symmetry multiplier.")
+    parser.add_argument("--periodic-boundary", action="store_true", help="Request a periodic matching boundary.")
+    parser.add_argument(
+        "--beta-convention",
+        choices=(DEFAULT_BETA_CONVENTION, "legacy_phase_offset_v1"),
+        default=DEFAULT_BETA_CONVENTION,
+        help="Current-angle convention; legacy behavior must be requested explicitly.",
+    )
+    parser.add_argument("--electrical-zero-deg", type=float, default=0.0)
     parser.add_argument("--simulation-dir", default=str(BASE_DIR / "simulation"), help="Directory for per-case AEDT projects.")
     parser.add_argument("--result-csv", default=str(BASE_DIR / "ipmsm_simulation_results.csv"), help="Shared CSV result file.")
     parser.add_argument("--analyze", dest="analyze", action="store_true", default=True, help="Run the transient solve.")
@@ -1679,7 +2115,16 @@ def main() -> int:
     )
     args = parse_args()
     cases = load_cases(args.cases, args.count)
-    validate_case_plan(cases, args.max_cases, allow_over_budget=args.allow_over_budget)
+    validate_case_plan(
+        cases,
+        args.max_cases,
+        allow_over_budget=args.allow_over_budget,
+        default_symmetry_factor=args.symmetry_factor,
+        default_model_extent=args.model_extent,
+        default_beta_convention=args.beta_convention,
+        default_electrical_zero_deg=args.electrical_zero_deg,
+        default_use_periodic_boundary=args.periodic_boundary,
+    )
 
     options = RunnerOptions(
         simulation_dir=args.simulation_dir,
@@ -1690,16 +2135,22 @@ def main() -> int:
         symmetry_factor=args.symmetry_factor,
         use_periodic_boundary=args.periodic_boundary,
         cores=args.cores,
+        model_extent=args.model_extent,
+        beta_convention=args.beta_convention,
+        electrical_zero_deg=args.electrical_zero_deg,
     )
     payloads = [(case, asdict(options)) for case in cases]
 
     logging.info(
-        "Starting %d case(s), workers=%d, analyze=%s, symmetry_factor=%s, periodic_boundary=%s",
+        "Starting %d case(s), workers=%d, analyze=%s, model_extent=%s, symmetry_factor=%s, "
+        "periodic_boundary=%s, beta_convention=%s",
         len(payloads),
         args.workers,
         args.analyze,
+        args.model_extent,
         args.symmetry_factor,
         args.periodic_boundary,
+        args.beta_convention,
     )
     if args.workers <= 1:
         for payload in payloads:

@@ -11,6 +11,19 @@ import unittest
 import train_ipmsm_lightgbm as trainer
 
 
+class FakeColumns:
+    def __init__(self, values: dict[str, list[object]]) -> None:
+        self.values = values
+        self.columns = tuple(values)
+
+    def __getitem__(self, column: str) -> list[object]:
+        return self.values[column]
+
+    def __setitem__(self, column: str, values: list[object]) -> None:
+        self.values[column] = values
+        self.columns = tuple(self.values)
+
+
 class TrainIpmsmLightgbmTests(unittest.TestCase):
     def test_stable_target_seed_is_deterministic(self) -> None:
         target = "output_torque_last_avg_nm"
@@ -107,6 +120,275 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
         )
 
         self.assertNotIn("input_slot_opening_ratio", columns)
+
+    def test_v2_requires_all_conditional_inputs(self) -> None:
+        available = {*trainer.INPUT_COLUMNS, *trainer.V2_REQUIRED_CONDITIONAL_INPUT_COLUMNS}
+
+        columns = trainer.select_v2_training_input_columns(available)
+
+        self.assertIn("input_stack_length_mm", columns)
+        self.assertIn("input_base_rpm", columns)
+        self.assertIn("input_i_peak_a", columns)
+        self.assertIn("input_beta_dq_deg", columns)
+        self.assertIn("input_phase_resistance_ohm", columns)
+        with self.assertRaisesRegex(ValueError, "input_beta_dq_deg"):
+            trainer.select_v2_training_input_columns(available - {"input_beta_dq_deg"})
+
+    def test_v2_fingerprints_are_single_valued_and_strict(self) -> None:
+        values = {
+            column: ["value", "value"]
+            for column in trainer.V2_FINGERPRINT_COLUMNS
+        }
+        values["input_dataset_schema_version"] = [trainer.V2_DATASET_SCHEMA_VERSION] * 2
+        values["input_beta_convention"] = [trainer.V2_BETA_CONVENTION] * 2
+        frame = FakeColumns(values)
+
+        fingerprints = trainer.validate_v2_fingerprints(frame, {"input_quality_profile": "value"})
+
+        self.assertEqual(fingerprints["input_dataset_schema_version"], "ipmsm_v2")
+        values["input_quality_profile"][1] = "other"
+        with self.assertRaisesRegex(ValueError, "mixed v2 fingerprint"):
+            trainer.validate_v2_fingerprints(frame)
+
+    def test_v2_legacy_beta_alias_is_guarded_by_convention(self) -> None:
+        frame = FakeColumns({"input_beta_deg": [10.0, 20.0]})
+
+        column = trainer.ensure_v2_canonical_beta_column(
+            frame,
+            {"input_beta_convention": trainer.V2_BETA_CONVENTION},
+        )
+
+        self.assertEqual(column, "input_beta_dq_deg")
+        self.assertEqual(frame["input_beta_dq_deg"], [10.0, 20.0])
+        with self.assertRaisesRegex(ValueError, "only accepted"):
+            trainer.ensure_v2_canonical_beta_column(
+                FakeColumns({"input_beta_deg": [30.0]}),
+                {"input_beta_convention": "legacy_phase_offset"},
+            )
+
+    def test_v2_geometry_identity_mapping_must_be_one_to_one(self) -> None:
+        frame = FakeColumns(
+            {
+                "geometry_group_id": ["g1", "g1", "g2"],
+                "design_hash": ["h1", "h1", "h2"],
+            }
+        )
+        self.assertEqual(trainer.resolve_v2_geometry_group_column(frame), "geometry_group_id")
+
+        frame.values["design_hash"][1] = "other"
+        with self.assertRaisesRegex(ValueError, "one-to-one"):
+            trainer.resolve_v2_geometry_group_column(frame)
+
+    def test_deterministic_group_partitions_prevent_group_leakage(self) -> None:
+        groups = [f"geometry-{index}" for index in range(10) for _ in range(3)]
+
+        first = trainer.deterministic_group_partitions(groups, test_size=0.2, val_size=0.2, seed=42)
+        second = trainer.deterministic_group_partitions(reversed(groups), test_size=0.2, val_size=0.2, seed=42)
+
+        self.assertEqual(first, second)
+        self.assertEqual(set(first.values()), {"train", "calibration", "test"})
+        self.assertEqual(len([value for value in first.values() if value == "test"]), 2)
+        self.assertEqual(len([value for value in first.values() if value == "calibration"]), 2)
+
+    def test_preassigned_doe_split_is_stable_and_rejects_group_leakage(self) -> None:
+        assignments = trainer.validated_preassigned_group_partitions(
+            ["g-train", "g-train", "g-cal", "g-test"],
+            ["train", "train", "calibration", "test"],
+        )
+        self.assertEqual(
+            assignments,
+            {"g-train": "train", "g-cal": "calibration", "g-test": "test"},
+        )
+        with self.assertRaisesRegex(ValueError, "crosses doe_split"):
+            trainer.validated_preassigned_group_partitions(
+                ["g1", "g1", "g2", "g3"],
+                ["train", "test", "calibration", "test"],
+            )
+
+    def test_model_selection_partitions_are_inside_outer_train_groups(self) -> None:
+        groups = [f"geometry-{index}" for index in range(10) for _ in range(2)]
+
+        roles = trainer.deterministic_model_selection_partitions(groups, seed=42)
+
+        self.assertEqual(set(roles), {f"geometry-{index}" for index in range(10)})
+        self.assertEqual(set(roles.values()), {"fit", "model_selection"})
+        self.assertEqual(len([role for role in roles.values() if role == "model_selection"]), 2)
+
+    def test_v2_training_never_fits_on_outer_calibration(self) -> None:
+        class FakeRegressor:
+            def __init__(self, owner: object, params: dict[str, object]) -> None:
+                self.owner = owner
+                self.params = params
+                self.best_iteration_ = None
+                self.fit_x = None
+                self.fit_kwargs: dict[str, object] = {}
+                owner.instances.append(self)
+
+            def fit(self, x: object, y: list[float], **kwargs: object) -> None:
+                self.fit_x = x
+                self.fit_kwargs = kwargs
+                self.value = sum(y) / len(y)
+                if "eval_set" in kwargs:
+                    self.best_iteration_ = 3
+
+            def predict(self, x: list[object], **kwargs: object) -> list[float]:
+                return [self.value] * len(x)
+
+        class FakeLightGbm:
+            def __init__(self) -> None:
+                self.instances: list[FakeRegressor] = []
+
+            def LGBMRegressor(self, **params: object) -> FakeRegressor:
+                return FakeRegressor(self, params)
+
+            @staticmethod
+            def early_stopping(*args: object, **kwargs: object) -> object:
+                return object()
+
+            @staticmethod
+            def log_evaluation(*args: object, **kwargs: object) -> object:
+                return object()
+
+        target = "target"
+        outer = trainer.SplitData(
+            x_train=["outer-train-1", "outer-train-2"],
+            x_val=["outer-calibration"],
+            x_test=["outer-test"],
+            y_train={target: [1.0, 3.0]},
+            y_val={target: [2.0]},
+            y_test={target: [4.0]},
+        )
+        inner = trainer.SplitData(
+            x_train=["inner-fit"],
+            x_val=["inner-model-selection"],
+            x_test=outer.x_test,
+            y_train={target: [1.0]},
+            y_val={target: [3.0]},
+            y_test=outer.y_test,
+        )
+        fake_lgb = FakeLightGbm()
+        deps = trainer.TrainingDependencies(np=None, pd=None, train_test_split=lambda *args: None, lgb=fake_lgb)
+
+        _, params, metrics, _ = trainer.train_one_target_v2(
+            deps,
+            outer,
+            inner,
+            target,
+            False,
+            0,
+            42,
+            1,
+            5,
+        )
+
+        self.assertEqual(len(fake_lgb.instances), 2)
+        self.assertIs(fake_lgb.instances[0].fit_x, inner.x_train)
+        self.assertIs(fake_lgb.instances[0].fit_kwargs["eval_set"][0][0], inner.x_val)
+        self.assertIs(fake_lgb.instances[1].fit_x, outer.x_train)
+        self.assertEqual(fake_lgb.instances[1].fit_kwargs, {})
+        self.assertNotIn(outer.x_val, [model.fit_x for model in fake_lgb.instances])
+        self.assertEqual(params["n_estimators"], 3)
+        self.assertEqual([row["split"] for row in metrics], ["train", "calibration", "test"])
+
+    def test_v2_derived_outputs_use_copper_loss_and_mechanical_power(self) -> None:
+        derived = trainer.derive_v2_outputs(
+            torque_avg_nm=10.0,
+            core_loss_w=20.0,
+            solid_loss_w=5.0,
+            i_peak_a=10.0,
+            phase_resistance_ohm=0.1,
+            rpm=600.0,
+        )
+
+        expected_loss = 20.0 + 5.0 + 1.5 * 0.1 * 10.0**2
+        expected_power = 10.0 * 2.0 * math.pi * 600.0 / 60.0
+        self.assertAlmostEqual(derived["output_total_loss_last_avg_w"], expected_loss)
+        self.assertAlmostEqual(
+            derived["output_efficiency_last_pct"],
+            expected_power / (expected_power + expected_loss) * 100.0,
+        )
+
+    def test_v2_auxiliary_voltage_target_is_separate_from_primary_gate(self) -> None:
+        self.assertEqual(
+            trainer.V2_AUXILIARY_OUTPUT_COLUMNS,
+            ("output_phase_voltage_last_peak_abs_v",),
+        )
+        self.assertEqual(
+            len((*trainer.V2_PRIMITIVE_OUTPUT_COLUMNS, *trainer.V2_DERIVED_OUTPUT_COLUMNS)),
+            8,
+        )
+        with self.assertRaisesRegex(ValueError, "output_phase_voltage_last_peak_abs_v"):
+            trainer.resolve_output_columns(set(), requested_columns=trainer.V2_AUXILIARY_OUTPUT_COLUMNS)
+
+    def test_primary_test_r2_map_excludes_calibration_and_auxiliary_rows(self) -> None:
+        rows = [
+            {"target": "primary", "split": "calibration", "R2": 0.1},
+            {"target": "primary", "split": "test", "R2": 0.96},
+        ]
+
+        self.assertEqual(trainer.primary_test_r2_by_target(rows), {"primary": 0.96})
+
+    def test_predict_model_averages_v2_ensemble_members(self) -> None:
+        class ConstantModel:
+            def __init__(self, value: float) -> None:
+                self.value = value
+
+            def predict(self, rows: list[object]) -> list[float]:
+                return [self.value] * len(rows)
+
+        predictions = trainer.predict_model(
+            (ConstantModel(1.0), ConstantModel(3.0), ConstantModel(5.0)),
+            ["a", "b"],
+        )
+
+        self.assertEqual(predictions, [3.0, 3.0])
+
+    def test_split_conformal_uses_finite_sample_corrected_absolute_quantile(self) -> None:
+        result = trainer.split_conformal_absolute_residual(
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 2.0, 3.0],
+            coverage=0.75,
+        )
+
+        self.assertEqual(result["calibration_rows"], 4)
+        self.assertEqual(result["rank"], 4)
+        self.assertEqual(result["quantile_abs"], 3.0)
+
+    def test_split_conformal_ignores_nonfinite_pairs_deterministically(self) -> None:
+        result = trainer.split_conformal_absolute_residual(
+            [1.0, math.nan, 5.0],
+            [2.0, 100.0, 8.0],
+            coverage=0.5,
+        )
+
+        self.assertEqual(result["calibration_rows"], 2)
+        self.assertEqual(result["rank"], 2)
+        self.assertEqual(result["quantile_abs"], 3.0)
+
+    def test_feature_min_max_bounds_are_per_input(self) -> None:
+        bounds = trainer.feature_min_max_bounds(
+            FakeColumns({"a": [3.0, -1.0, 2.0], "b": [10.0, 20.0, 15.0]}),
+            ("a", "b"),
+        )
+
+        self.assertEqual(bounds, {"a": {"min": -1.0, "max": 3.0}, "b": {"min": 10.0, "max": 20.0}})
+
+    def test_v2_is_opt_in_and_expected_fingerprints_require_v2(self) -> None:
+        legacy = trainer.build_parser().parse_args([])
+        self.assertFalse(legacy.v2)
+        self.assertTrue(legacy.remove_output_outliers)
+
+        args = trainer.build_parser().parse_args(
+            ["--expected-fingerprint", "input_quality_profile=reference_ultra"]
+        )
+        with self.assertRaisesRegex(ValueError, "requires --v2"):
+            trainer.validate_training_options(args)
+
+    def test_validate_training_options_rejects_invalid_conformal_coverage(self) -> None:
+        args = trainer.build_parser().parse_args(["--conformal-coverage", "1"])
+
+        with self.assertRaisesRegex(ValueError, "--conformal-coverage"):
+            trainer.validate_training_options(args)
 
     def test_sample_params_uses_each_search_space_key(self) -> None:
         rng = __import__("random").Random(7)

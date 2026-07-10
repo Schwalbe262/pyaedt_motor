@@ -62,6 +62,30 @@ class GenerateIpmsmQualityCasesTests(unittest.TestCase):
         self.assertEqual(profile.mesh_elements["rotor"], 625)
         self.assertEqual(profile.mesh_elements["band"], 1250)
 
+    def test_stage_a_profiles_include_reference_and_new_candidates(self) -> None:
+        profiles = quality_cases.parse_profiles(",".join(quality_cases.STAGE_A_PROFILE_NAMES))
+        by_name = {profile.name: profile for profile in profiles}
+
+        self.assertEqual(len(profiles), 6)
+        self.assertEqual(by_name["mesh_loss_fine"].steps_per_period, 120)
+        self.assertEqual(by_name["mesh_loss_fine"].mesh_elements["stator"], 900)
+        self.assertEqual(by_name["time_150"].steps_per_period, 150)
+        self.assertEqual(by_name["reference_ultra"].transient_periods, 12)
+        self.assertEqual(by_name["reference_ultra"].steps_per_period, 150)
+        self.assertEqual(by_name["reference_ultra"].mesh_elements["band"], 2000)
+
+    def test_second_pass_profiles_cover_time_and_loss_mesh_variants(self) -> None:
+        profiles = quality_cases.parse_profiles("time_180_finemesh,time_180_lossmesh,time_210_lossmesh")
+        by_name = {profile.name: profile for profile in profiles}
+
+        self.assertEqual(by_name["time_180_finemesh"].steps_per_period, 180)
+        self.assertEqual(by_name["time_180_finemesh"].mesh_elements["rotor"], 750)
+        self.assertEqual(by_name["time_180_lossmesh"].steps_per_period, 180)
+        self.assertEqual(by_name["time_180_lossmesh"].mesh_elements["stator"], 900)
+        self.assertEqual(by_name["time_180_lossmesh"].mesh_elements["winding"], 90)
+        self.assertEqual(by_name["time_210_lossmesh"].steps_per_period, 210)
+        self.assertEqual(by_name["time_210_lossmesh"].mesh_elements["band"], 1500)
+
     def test_cli_rejects_batches_above_max_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "too_many.csv"

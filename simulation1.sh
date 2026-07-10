@@ -29,6 +29,10 @@ export SIMULATION_DIR="${SIMULATION_DIR:-simulation}"
 export STAGGER_SECONDS="${STAGGER_SECONDS:-30}"
 export MAX_CASES="${MAX_CASES:-200}"
 export ALLOW_OVER_BUDGET="${ALLOW_OVER_BUDGET:-0}"
+export MODEL_EXTENT="${MODEL_EXTENT:-full_360}"
+export SYMMETRY_FACTOR="${SYMMETRY_FACTOR:-1}"
+export BETA_CONVENTION="${BETA_CONVENTION:-dq_current_advance_v2}"
+export ELECTRICAL_ZERO_DEG="${ELECTRICAL_ZERO_DEG:-0}"
 
 export OMP_NUM_THREADS="${CORES_PER_PROCESS}"
 export MKL_NUM_THREADS="${CORES_PER_PROCESS}"
@@ -43,6 +47,10 @@ echo "TOTAL_COUNT=${TOTAL_COUNT}"
 echo "RESULT_CSV=${RESULT_CSV}"
 echo "SIMULATION_DIR=${SIMULATION_DIR}"
 echo "MAX_CASES=${MAX_CASES}"
+echo "MODEL_EXTENT=${MODEL_EXTENT}"
+echo "SYMMETRY_FACTOR=${SYMMETRY_FACTOR}"
+echo "BETA_CONVENTION=${BETA_CONVENTION}"
+echo "ELECTRICAL_ZERO_DEG=${ELECTRICAL_ZERO_DEG}"
 
 cmd=(
   python subprocess_run.py
@@ -53,6 +61,10 @@ cmd=(
   --simulation-dir "${SIMULATION_DIR}"
   --result-csv "${RESULT_CSV}"
   --stagger-seconds "${STAGGER_SECONDS}"
+  --model-extent "${MODEL_EXTENT}"
+  --symmetry-factor "${SYMMETRY_FACTOR}"
+  --beta-convention "${BETA_CONVENTION}"
+  --electrical-zero-deg "${ELECTRICAL_ZERO_DEG}"
   --analyze
   --non-graphical
   --cleanup-linux

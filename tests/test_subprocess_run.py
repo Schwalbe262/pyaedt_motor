@@ -3,12 +3,37 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 import subprocess_run
 
 
 class SubprocessRunTests(unittest.TestCase):
+    def test_build_command_forwards_full_model_and_canonical_beta_contract(self) -> None:
+        args = SimpleNamespace(
+            python="python",
+            script=Path("run_ipmsm_batch.py"),
+            cores_per_process=4,
+            simulation_dir=Path("simulation"),
+            result_csv=Path("results.csv"),
+            symmetry_factor=1,
+            model_extent="full_360",
+            beta_convention="dq_current_advance_v2",
+            electrical_zero_deg=7.5,
+            analyze=False,
+            non_graphical=True,
+            cleanup_linux=False,
+            periodic_boundary=False,
+        )
+
+        command = subprocess_run.build_command(args, process_index=1, count=1, cases_path=None)
+
+        self.assertEqual(command[command.index("--symmetry-factor") + 1], "1")
+        self.assertEqual(command[command.index("--model-extent") + 1], "full_360")
+        self.assertEqual(command[command.index("--beta-convention") + 1], "dq_current_advance_v2")
+        self.assertEqual(command[command.index("--electrical-zero-deg") + 1], "7.5")
+
     def test_validate_explicit_case_plan_rejects_duplicate_ids_before_split(self) -> None:
         rows = [
             {"case_id": "dup"},

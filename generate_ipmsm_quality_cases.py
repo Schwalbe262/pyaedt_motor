@@ -36,6 +36,29 @@ MID_MESH_ELEMENTS = {
     "winding": 62,
     "band": 1250,
 }
+LOSS_FINE_MESH_ELEMENTS = {
+    "magnet": 75,
+    "rotor": 900,
+    "stator": 900,
+    "winding": 90,
+    "band": 1500,
+}
+ULTRA_MESH_ELEMENTS = {
+    "magnet": 100,
+    "rotor": 1000,
+    "stator": 1000,
+    "winding": 100,
+    "band": 2000,
+}
+STAGE_A_PROFILE_NAMES = (
+    "baseline",
+    "mesh_time_mid",
+    "mesh_time_fine",
+    "mesh_loss_fine",
+    "time_150",
+    "reference_ultra",
+)
+REFERENCE_PROFILE_NAME = "reference_ultra"
 
 
 @dataclass(frozen=True)
@@ -52,6 +75,45 @@ QUALITY_PROFILES = {
     "time_fine": QualityProfile("time_fine", transient_periods=10, steps_per_period=120, mesh_elements=BASELINE_MESH_ELEMENTS),
     "mesh_time_fine": QualityProfile("mesh_time_fine", transient_periods=10, steps_per_period=120, mesh_elements=FINE_MESH_ELEMENTS),
     "mesh_time_mid": QualityProfile("mesh_time_mid", transient_periods=10, steps_per_period=105, mesh_elements=MID_MESH_ELEMENTS),
+    "mesh_loss_fine": QualityProfile(
+        "mesh_loss_fine",
+        transient_periods=10,
+        steps_per_period=120,
+        mesh_elements=LOSS_FINE_MESH_ELEMENTS,
+    ),
+    "time_150": QualityProfile("time_150", transient_periods=10, steps_per_period=150, mesh_elements=BASELINE_MESH_ELEMENTS),
+    "time_180": QualityProfile("time_180", transient_periods=10, steps_per_period=180, mesh_elements=BASELINE_MESH_ELEMENTS),
+    "time_210": QualityProfile("time_210", transient_periods=10, steps_per_period=210, mesh_elements=BASELINE_MESH_ELEMENTS),
+    "time_180_midmesh": QualityProfile(
+        "time_180_midmesh",
+        transient_periods=10,
+        steps_per_period=180,
+        mesh_elements=MID_MESH_ELEMENTS,
+    ),
+    "time_180_finemesh": QualityProfile(
+        "time_180_finemesh",
+        transient_periods=10,
+        steps_per_period=180,
+        mesh_elements=FINE_MESH_ELEMENTS,
+    ),
+    "time_180_lossmesh": QualityProfile(
+        "time_180_lossmesh",
+        transient_periods=10,
+        steps_per_period=180,
+        mesh_elements=LOSS_FINE_MESH_ELEMENTS,
+    ),
+    "time_210_lossmesh": QualityProfile(
+        "time_210_lossmesh",
+        transient_periods=10,
+        steps_per_period=210,
+        mesh_elements=LOSS_FINE_MESH_ELEMENTS,
+    ),
+    "reference_ultra": QualityProfile(
+        "reference_ultra",
+        transient_periods=12,
+        steps_per_period=150,
+        mesh_elements=ULTRA_MESH_ELEMENTS,
+    ),
 }
 
 
@@ -131,8 +193,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, required=True, help="CSV path for generated case rows.")
     parser.add_argument(
         "--profiles",
-        default="baseline,mesh_fine,time_fine,mesh_time_fine",
-        help="Comma-separated profiles: baseline, mesh_fine, time_fine, mesh_time_fine, mesh_time_mid.",
+        default=",".join(STAGE_A_PROFILE_NAMES),
+        help="Comma-separated profiles. Default is the Stage A mesh/time convergence set.",
     )
     parser.add_argument("--beta-deg-values", default="30", help="Comma-separated beta angle values.")
     parser.add_argument("--base-rpm", type=float, default=1200.0)

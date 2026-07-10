@@ -67,6 +67,58 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
         self.assertIn("input_transient_stop_time_s", run_ipmsm_batch.RESULT_COLUMN_ORDER)
         self.assertIn("input_transient_time_step_s", run_ipmsm_batch.RESULT_COLUMN_ORDER)
 
+    def test_result_schema_includes_v2_contract_and_fingerprints(self) -> None:
+        for column in (
+            "input_dataset_schema_version",
+            "input_model_extent",
+            "input_beta_dq_deg",
+            "input_beta_convention",
+            "input_electrical_zero_deg",
+            "input_commanded_id_peak_a",
+            "input_commanded_iq_peak_a",
+            "input_setup_fingerprint",
+            "input_material_fingerprint",
+            "input_aedt_version",
+        ):
+            self.assertIn(column, run_ipmsm_batch.RESULT_COLUMN_ORDER)
+
+    def test_result_schema_preserves_geometry_and_operating_point_identity(self) -> None:
+        for column in (
+            "geometry_group_id",
+            "design_hash",
+            "operating_point_id",
+            "doe_split",
+        ):
+            self.assertIn(column, run_ipmsm_batch.RESULT_COLUMN_ORDER)
+
+    def test_build_spec_defaults_to_full_360_canonical_v2(self) -> None:
+        spec = run_ipmsm_batch.build_spec({})
+
+        self.assertEqual(spec.model_extent, "full_360")
+        self.assertEqual(spec.symmetry_factor, 1)
+        self.assertEqual(spec.beta_convention, "dq_current_advance_v2")
+
+    def test_build_spec_prefers_canonical_beta_column(self) -> None:
+        spec = run_ipmsm_batch.build_spec(
+            {"beta_dq_deg": "42", "beta_deg": "7", "electrical_zero_deg": "12.5"}
+        )
+
+        self.assertEqual(spec.beta_deg, 42.0)
+        self.assertEqual(spec.electrical_zero_deg, 12.5)
+
+    def test_build_spec_rejects_unsafe_extent_combinations(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires symmetry_factor=1"):
+            run_ipmsm_batch.build_spec({"model_extent": "full_360", "symmetry_factor": "4"})
+        with self.assertRaisesRegex(ValueError, "real sector geometry builder"):
+            run_ipmsm_batch.build_spec({"model_extent": "sector_90", "symmetry_factor": "4"})
+
+    def test_case_plan_rejects_periodic_boundary_on_full_model(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "periodic boundary is invalid"):
+            run_ipmsm_batch.validate_case_plan(
+                [{"case_id": "bad_periodic", "use_periodic_boundary": "true"}],
+                max_cases=200,
+            )
+
     def test_build_spec_accepts_mesh_override_columns(self) -> None:
         spec = run_ipmsm_batch.build_spec(
             {
@@ -168,6 +220,132 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
             missing,
             ["output_torque_all_avg_nm", "output_solidloss_all_avg_w"],
         )
+
+    def test_v2_required_output_gate_includes_measured_dq_and_voltage(self) -> None:
+        missing = run_ipmsm_batch.missing_required_output_metrics(
+            {
+                "output_torque_all_avg_nm": 10.0,
+                "output_coreloss_all_avg_w": 20.0,
+                "output_solidloss_all_avg_w": 2.0,
+            },
+            require_v2=True,
+            operation="sin_current",
+        )
+
+        self.assertIn("output_phase_voltage_last_peak_abs_v", missing)
+        self.assertIn("output_id_current_last_avg_a", missing)
+        self.assertIn("output_iq_current_last_avg_a", missing)
+        self.assertIn("output_phase_current_source", missing)
+        self.assertIn("output_phase_voltage_source", missing)
+
+    def test_v2_required_output_gate_rejects_numeric_fallback_reports(self) -> None:
+        values = {
+            "output_torque_all_avg_nm": 10.0,
+            "output_coreloss_all_avg_w": 20.0,
+            "output_solidloss_all_avg_w": 2.0,
+            "output_phase_voltage_last_peak_abs_v": 100.0,
+            "output_phasea_voltage_last_peak_abs_v": 100.0,
+            "output_phaseb_voltage_last_peak_abs_v": 100.0,
+            "output_phasec_voltage_last_peak_abs_v": 100.0,
+            "output_ld_last_avg_h": 0.003,
+            "output_lq_last_avg_h": 0.004,
+            "output_phase_current_last_rms_a": 10.0,
+            "output_id_current_last_avg_a": -2.0,
+            "output_iq_current_last_avg_a": 13.0,
+            "output_phase_current_source": "commanded_fallback",
+            "output_phase_voltage_source": "phasea_fallback",
+        }
+
+        missing = run_ipmsm_batch.missing_required_output_metrics(
+            values, require_v2=True, operation="sin_current"
+        )
+
+        self.assertEqual(
+            missing,
+            ["output_phase_voltage_source", "output_phase_current_source"],
+        )
+
+    def test_measured_phase_currents_round_trip_to_canonical_dq(self) -> None:
+        import pandas as pd
+        from module.ipmsm_ppt_setup import inverse_park_phase_currents
+
+        spec = types.SimpleNamespace(
+            pole_number=4,
+            base_rpm=60.0,
+            initial_position_deg=-22.5,
+            electrical_zero_deg=17.0,
+        )
+        times = [index / 360.0 for index in range(361)]
+        phase_rows = [
+            inverse_park_phase_currents(
+                -10.0,
+                20.0,
+                math.degrees(4.0 * math.pi * time_s) + spec.electrical_zero_deg,
+            )
+            for time_s in times
+        ]
+        df = pd.DataFrame(
+            {
+                "Time [s]": times,
+                "InputCurrent(PhaseA) [A]": [row["PhaseA"] for row in phase_rows],
+                "InputCurrent(PhaseB) [A]": [row["PhaseB"] for row in phase_rows],
+                "InputCurrent(PhaseC) [A]": [row["PhaseC"] for row in phase_rows],
+            }
+        )
+
+        summary = run_ipmsm_batch.summarize_dq_current_report(
+            df,
+            (
+                "InputCurrent(PhaseA) [A]",
+                "InputCurrent(PhaseB) [A]",
+                "InputCurrent(PhaseC) [A]",
+            ),
+            spec,
+            period_s=0.5,
+            stop_s=1.0,
+        )
+
+        self.assertAlmostEqual(summary["output_id_current_last_avg_a"], -10.0, places=9)
+        self.assertAlmostEqual(summary["output_iq_current_last_avg_a"], 20.0, places=9)
+
+    def test_inductance_matrix_uses_same_calibrated_dq_frame(self) -> None:
+        import pandas as pd
+
+        spec = types.SimpleNamespace(
+            pole_number=4,
+            base_rpm=60.0,
+            initial_position_deg=-22.5,
+            electrical_zero_deg=17.0,
+        )
+        time_s = 0.25
+        theta = run_ipmsm_batch.canonical_electrical_frame_angle_rad(spec, time_s)
+        angles = (theta, theta - 2.0 * math.pi / 3.0, theta + 2.0 * math.pi / 3.0)
+        park = [
+            [(2.0 / 3.0) * math.cos(angle) for angle in angles],
+            [-(2.0 / 3.0) * math.sin(angle) for angle in angles],
+        ]
+        inverse_park = [[math.cos(angle), -math.sin(angle)] for angle in angles]
+        ld_h, lq_h = 0.003, 0.007
+        labc = [
+            [
+                inverse_park[i][0] * ld_h * park[0][j]
+                + inverse_park[i][1] * lq_h * park[1][j]
+                for j in range(3)
+            ]
+            for i in range(3)
+        ]
+        phases = ("PhaseA", "PhaseB", "PhaseC")
+        data = {"Time [s]": [time_s]}
+        for i, source in enumerate(phases):
+            for j, target in enumerate(phases):
+                data[f"L({source},{target}) [H]"] = [labc[i][j]]
+
+        summary = run_ipmsm_batch.summarize_inductance_matrix(
+            pd.DataFrame(data), spec, period_s=0.25, stop_s=0.25
+        )
+
+        self.assertAlmostEqual(summary["output_ld_last_avg_h"], ld_h, places=12)
+        self.assertAlmostEqual(summary["output_lq_last_avg_h"], lq_h, places=12)
 
     def test_derived_motor_efficiency_is_nan_for_negative_mechanical_power(self) -> None:
         spec = types.SimpleNamespace(base_rpm=1200.0, phase_resistance_ohm=0.01, vdc_v=200.0)
@@ -312,7 +490,7 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
                 analyze=False,
                 non_graphical=True,
                 cleanup_linux=False,
-                symmetry_factor=4,
+                symmetry_factor=1,
                 use_periodic_boundary=False,
                 cores=1,
             )
@@ -332,6 +510,13 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
         self.assertIn("input_quality_profile", rows[0])
         self.assertEqual(rows[0]["input_transient_total_steps"], "900")
         self.assertEqual(rows[0]["input_electric_frequency_hz"], "80.0")
+        self.assertEqual(rows[0]["input_dataset_schema_version"], "ipmsm_v2")
+        self.assertEqual(rows[0]["input_model_extent"], "full_360")
+        self.assertEqual(rows[0]["input_beta_convention"], "dq_current_advance_v2")
+        self.assertEqual(rows[0]["input_beta_dq_deg"], "30.0")
+        self.assertTrue(rows[0]["input_setup_fingerprint"].startswith("setup_v2:sha256:"))
+        self.assertTrue(rows[0]["input_material_fingerprint"].startswith("materials_v2:sha256:"))
+        self.assertNotEqual(rows[0]["input_aedt_version"], "")
 
     def test_run_one_case_writes_clear_error_when_desktop_startup_returns_none(self) -> None:
         core_module = types.ModuleType("pyaedt_module.core")
@@ -354,7 +539,7 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
                 analyze=False,
                 non_graphical=True,
                 cleanup_linux=False,
-                symmetry_factor=4,
+                symmetry_factor=1,
                 use_periodic_boundary=False,
                 cores=1,
             )
@@ -415,7 +600,7 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
                 analyze=True,
                 non_graphical=True,
                 cleanup_linux=False,
-                symmetry_factor=4,
+                symmetry_factor=1,
                 use_periodic_boundary=False,
                 cores=1,
             )
