@@ -136,7 +136,7 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         self.assertIn('"dedupe_key": "ipmsm-batch4-case001"', captured["data"].decode("utf-8"))
         self.assertEqual(captured["timeout"], 5.0)
 
-    def test_get_scheduler_tasks_requests_explicit_large_limit(self) -> None:
+    def test_get_scheduler_tasks_uses_active_task_merged_endpoint(self) -> None:
         captured = {}
 
         class FakeResponse:
@@ -158,10 +158,7 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
             tasks = scheduler_task.get_scheduler_tasks("http://scheduler", 5.0)
 
         self.assertEqual(len(tasks), 1)
-        self.assertEqual(
-            captured["url"],
-            f"http://scheduler/api/tasks?limit={scheduler_task.SCHEDULER_TASK_QUERY_LIMIT}",
-        )
+        self.assertEqual(captured["url"], "http://scheduler/api/tasks")
 
     def test_validate_task_request_requires_remote_cwd(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "--remote-cwd"):
@@ -198,9 +195,17 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
             {"project": "pyaedt_motor", "status": "completed"},
             {"project": "IPMSM", "status": "running"},
             {"project": "", "status": "running"},
+            {
+                "remote_cwd": "$HOME/slurm_scheduler/projects/pyaedt_motor/repo",
+                "status": "queued",
+            },
+            {
+                "remote_cwd": "$HOME/slurm_scheduler/projects/pyaedt_motor_extra/repo",
+                "status": "running",
+            },
         ]
 
-        self.assertEqual(scheduler_task.project_active_task_count(tasks, "pyaedt_motor"), 3)
+        self.assertEqual(scheduler_task.project_active_task_count(tasks, "pyaedt_motor"), 4)
         self.assertEqual(scheduler_task.project_active_task_count(tasks, "IPMSM"), 1)
         self.assertEqual(scheduler_task.project_active_task_count(tasks, ""), 0)
 

@@ -28,7 +28,6 @@ from submit_ipmsm_scheduler_job import (
 
 ANSYS_ELECTRONICS_MODULE = "module load ansys-electronics/v252"
 PROJECT_ACTIVE_STATUSES = frozenset({"queued", "attaching", "running"})
-SCHEDULER_TASK_QUERY_LIMIT = 10_000
 
 
 def build_task_command(args: argparse.Namespace) -> str:
@@ -140,8 +139,9 @@ def post_scheduler_task(
 
 
 def get_scheduler_tasks(scheduler_url: str, timeout: float) -> list[dict[str, Any]]:
-    query = parse.urlencode({"limit": SCHEDULER_TASK_QUERY_LIMIT})
-    url = scheduler_url.rstrip("/") + "/api/tasks?" + query
+    # The unbounded endpoint intentionally returns the newest rows plus every
+    # active task.  Supplying ``limit`` disables that active-task merge.
+    url = scheduler_url.rstrip("/") + "/api/tasks"
     with request.urlopen(url, timeout=timeout) as response:
         body = response.read().decode("utf-8")
     data = json.loads(body)
@@ -150,14 +150,27 @@ def get_scheduler_tasks(scheduler_url: str, timeout: float) -> list[dict[str, An
     return [task for task in data if isinstance(task, dict)]
 
 
-def project_active_task_count(tasks: list[dict[str, Any]], project: str) -> int:
+def task_belongs_to_project(task: dict[str, Any], project: str) -> bool:
     project_name = str(project or "").strip()
     if not project_name:
-        return 0
+        return False
+    exposed_project = str(task.get("project") or "").strip()
+    if exposed_project:
+        return exposed_project == project_name
+
+    # Current scheduler versions persist ``project`` in SQLite but omit it
+    # from task_json.  Project expansion still exposes the canonical worktree
+    # path, so use that exact path component as a compatibility fallback.
+    remote_cwd = str(task.get("remote_cwd") or "").replace("\\", "/").rstrip("/")
+    marker = f"/slurm_scheduler/projects/{project_name}/"
+    return marker in f"{remote_cwd}/"
+
+
+def project_active_task_count(tasks: list[dict[str, Any]], project: str) -> int:
     return sum(
         1
         for task in tasks
-        if str(task.get("project") or "") == project_name
+        if task_belongs_to_project(task, project)
         and str(task.get("status") or "").lower() in PROJECT_ACTIVE_STATUSES
     )
 
