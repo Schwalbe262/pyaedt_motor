@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shlex
@@ -26,17 +27,45 @@ from submit_ipmsm_scheduler_job import (
 )
 
 ANSYS_ELECTRONICS_MODULE = "module load ansys-electronics/v252"
+PROJECT_ACTIVE_STATUSES = frozenset({"queued", "attaching", "running"})
+SCHEDULER_TASK_QUERY_LIMIT = 10_000
 
 
 def build_task_command(args: argparse.Namespace) -> str:
     return shlex.join(["python", args.entrypoint]) + " " + build_subprocess_arguments(args)
 
 
+def safe_dedupe_part(value: object) -> str:
+    text = str(value or "").strip().lower()
+    return "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in text).strip("-")
+
+
+def default_dedupe_key(args: argparse.Namespace, command: str) -> str:
+    digest_text = "|".join(
+        [
+            str(getattr(args, "project", "") or ""),
+            str(getattr(args, "remote_cwd", "") or ""),
+            str(getattr(args, "task_name", "") or ""),
+            str(getattr(args, "remote_cases", "") or ""),
+            str(getattr(args, "result_csv", "") or ""),
+            str(getattr(args, "case_start_index", "") or ""),
+            str(getattr(args, "case_limit", "") or ""),
+            command,
+        ]
+    )
+    digest = hashlib.sha256(digest_text.encode("utf-8")).hexdigest()[:12]
+    prefix = safe_dedupe_part(args.task_name) or "ipmsm-task"
+    return f"{prefix}-{digest}"
+
+
 def build_task_payload(args: argparse.Namespace) -> dict[str, Any]:
+    command = build_task_command(args)
     return {
         "name": args.task_name,
-        "remote_cwd": args.remote_cwd,
-        "command": build_task_command(args),
+        "remote_cwd": str(args.remote_cwd or ""),
+        "command": command,
+        "project": str(args.project or ""),
+        "entrypoint": str(args.entrypoint or ""),
         "env_setup": args.env_setup,
         "required_capability": args.required_capability,
         "env_profile": args.env_profile,
@@ -50,13 +79,16 @@ def build_task_payload(args: argparse.Namespace) -> dict[str, Any]:
         "max_workers_per_node": args.max_workers_per_node,
         "priority": args.priority,
         "timeout_seconds": args.timeout_seconds,
-        "dedupe_key": args.dedupe_key,
+        "dedupe_key": args.dedupe_key or default_dedupe_key(args, command),
         "gpus": args.gpus,
         "gpu_model": args.gpu_model,
     }
 
 
 def validate_task_request(args: argparse.Namespace) -> None:
+    project = str(getattr(args, "project", "") or "").strip()
+    remote_cwd = str(getattr(args, "remote_cwd", "") or "").strip()
+    project_active_cap = int(getattr(args, "project_active_cap", 0) or 0)
     if args.submit and args.analyze and not args.confirm_analyze:
         raise RuntimeError("scheduler analyze task submission requires --confirm-analyze with --analyze")
     if (args.submit or args.analyze) and "pyaedt" in (args.env_profile + " " + args.required_capability).lower():
@@ -65,8 +97,14 @@ def validate_task_request(args: argparse.Namespace) -> None:
                 "scheduler PyAEDT task requires explicit env setup: "
                 f'--env-setup "{ANSYS_ELECTRONICS_MODULE}"'
             )
-    if not args.remote_cwd:
-        raise RuntimeError("--remote-cwd is required for scheduler task submission")
+    if not remote_cwd and not project:
+        raise RuntimeError("--remote-cwd is required unless --project is provided")
+    if project and args.task_endpoint != "/api/tasks":
+        raise RuntimeError("--project requires --task-endpoint /api/tasks")
+    if project_active_cap < 0:
+        raise RuntimeError("--project-active-cap must be >= 0")
+    if project_active_cap > 0 and not project:
+        raise RuntimeError("--project-active-cap requires --project")
     if args.case_start_index < 1:
         raise RuntimeError("--case-start-index must be >= 1")
     if args.case_limit < 0:
@@ -102,13 +140,26 @@ def post_scheduler_task(
 
 
 def get_scheduler_tasks(scheduler_url: str, timeout: float) -> list[dict[str, Any]]:
-    url = scheduler_url.rstrip("/") + "/api/tasks"
+    query = parse.urlencode({"limit": SCHEDULER_TASK_QUERY_LIMIT})
+    url = scheduler_url.rstrip("/") + "/api/tasks?" + query
     with request.urlopen(url, timeout=timeout) as response:
         body = response.read().decode("utf-8")
     data = json.loads(body)
     if not isinstance(data, list):
         raise RuntimeError("/api/tasks did not return a JSON list")
     return [task for task in data if isinstance(task, dict)]
+
+
+def project_active_task_count(tasks: list[dict[str, Any]], project: str) -> int:
+    project_name = str(project or "").strip()
+    if not project_name:
+        return 0
+    return sum(
+        1
+        for task in tasks
+        if str(task.get("project") or "") == project_name
+        and str(task.get("status") or "").lower() in PROJECT_ACTIVE_STATUSES
+    )
 
 
 def task_id_set(tasks: list[dict[str, Any]]) -> set[int]:
@@ -159,7 +210,11 @@ def find_submitted_task(
     new_tasks = [task for task in tasks if task_id(task) not in previous_ids]
     candidates = new_tasks or tasks
     for task in candidates:
-        if task.get("name") == args.task_name and task.get("remote_cwd") == args.remote_cwd:
+        if task.get("name") != args.task_name:
+            continue
+        if args.project and task.get("project") == args.project:
+            return task
+        if not args.project and task.get("remote_cwd") == args.remote_cwd:
             return task
     return candidates[0] if candidates else None
 
@@ -173,7 +228,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--bootstrap-max-bytes", type=int, default=DEFAULT_BOOTSTRAP_MAX_BYTES)
     parser.add_argument("--case-start-index", type=int, default=1, help="1-based first validated case row to submit.")
     parser.add_argument("--case-limit", type=int, default=0, help="Maximum selected case rows to submit; 0 means all rows from --case-start-index.")
-    parser.add_argument("--remote-cwd", required=True, help="Existing scheduler-accessible project directory.")
+    parser.add_argument("--remote-cwd", default="", help="Existing scheduler-accessible directory; optional with --project.")
+    parser.add_argument("--project", default="", help="Scheduler project name used to resolve the task working directory.")
+    parser.add_argument(
+        "--project-active-cap",
+        type=int,
+        default=0,
+        help="Refuse --submit when this project's queued/attaching/running task count reaches the cap; 0 disables.",
+    )
     parser.add_argument("--entrypoint", default="subprocess_run.py")
     parser.add_argument("--task-name", default="ipmsm-replay-setup-task")
     parser.add_argument("--processes", type=int, default=1)
@@ -189,17 +251,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--confirm-analyze", action="store_true", help="Allow --submit with --analyze.")
     parser.add_argument("--periodic-boundary", action="store_true")
     parser.add_argument("--keep-projects", action="store_true")
-    parser.add_argument("--env-setup", default="")
+    parser.add_argument("--env-setup", default=ANSYS_ELECTRONICS_MODULE)
     parser.add_argument("--env-setup-file", type=Path, default=None, help="Read additional scheduler env setup shell from a local file.")
-    parser.add_argument("--required-capability", default="")
-    parser.add_argument("--env-profile", default="")
+    parser.add_argument("--required-capability", default="conda:pyaedt2026v1")
+    parser.add_argument("--env-profile", default="pyaedt2026v1")
     parser.add_argument("--account-name", default="")
     parser.add_argument("--partition", default="auto")
     parser.add_argument("--node-name", default="")
     parser.add_argument("--exclusive-node", action="store_true")
     parser.add_argument("--cpus", type=int, default=4)
     parser.add_argument("--memory-mb", type=int, default=16_384)
-    parser.add_argument("--scheduling-profile", choices=("standard", "fea_bursty"), default="standard")
+    parser.add_argument("--scheduling-profile", choices=("standard", "fea_bursty"), default="fea_bursty")
     parser.add_argument("--max-workers-per-node", type=int, default=0)
     parser.add_argument("--priority", type=int, default=0)
     parser.add_argument("--timeout-seconds", type=int, default=0)
@@ -240,10 +302,27 @@ def main(argv: list[str] | None = None) -> int:
         output["health"] = get_scheduler_health(args.scheduler_url, args.timeout)
     if args.submit:
         pre_submit_task_ids: set[int] = set()
+        pre_submit_tasks: list[dict[str, Any]] | None = None
         try:
-            pre_submit_task_ids = task_id_set(get_scheduler_tasks(args.scheduler_url, args.timeout))
+            pre_submit_tasks = get_scheduler_tasks(args.scheduler_url, args.timeout)
+            pre_submit_task_ids = task_id_set(pre_submit_tasks)
         except Exception as exc:
+            if args.project_active_cap > 0:
+                raise RuntimeError(
+                    f"cannot enforce project active cap before POST: project={args.project!r} "
+                    f"cap={args.project_active_cap}: {exc}"
+                ) from exc
             output["pre_submit_task_lookup_error"] = str(exc)
+        if args.project_active_cap > 0:
+            assert pre_submit_tasks is not None
+            active_count = project_active_task_count(pre_submit_tasks, args.project)
+            output["project_active_count_before_submit"] = active_count
+            output["project_active_cap"] = args.project_active_cap
+            if active_count >= args.project_active_cap:
+                raise RuntimeError(
+                    "project active cap reached before POST: "
+                    f"project={args.project!r} active={active_count} cap={args.project_active_cap}"
+                )
         output["submitted"] = True
         output["response"] = post_scheduler_task(args.scheduler_url, payload, args.timeout, args.task_endpoint)
         try:

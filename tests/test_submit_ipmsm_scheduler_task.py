@@ -23,6 +23,8 @@ def task_args(**overrides: object) -> Namespace:
         "case_start_index": 1,
         "case_limit": 0,
         "remote_cwd": "/home/user/project",
+        "project": "",
+        "project_active_cap": 0,
         "entrypoint": "subprocess_run.py",
         "task_name": "ipmsm-task",
         "processes": 2,
@@ -38,9 +40,9 @@ def task_args(**overrides: object) -> Namespace:
         "confirm_analyze": False,
         "periodic_boundary": False,
         "keep_projects": False,
-        "env_setup": "",
+        "env_setup": scheduler_task.ANSYS_ELECTRONICS_MODULE,
         "env_setup_file": None,
-        "required_capability": "",
+        "required_capability": "conda:pyaedt2026v1",
         "env_profile": "pyaedt2026v1",
         "account_name": "r1jae262",
         "partition": "auto",
@@ -48,7 +50,7 @@ def task_args(**overrides: object) -> Namespace:
         "exclusive_node": False,
         "cpus": 8,
         "memory_mb": 16384,
-        "scheduling_profile": "standard",
+        "scheduling_profile": "fea_bursty",
         "max_workers_per_node": 0,
         "priority": 0,
         "timeout_seconds": 0,
@@ -80,14 +82,18 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
 
         self.assertEqual(payload["name"], "ipmsm-task")
         self.assertEqual(payload["remote_cwd"], "/home/user/project")
+        self.assertEqual(payload["project"], "")
+        self.assertEqual(payload["entrypoint"], "subprocess_run.py")
         self.assertEqual(payload["account_name"], "r1jae262")
         self.assertEqual(payload["env_profile"], "pyaedt2026v1")
+        self.assertEqual(payload["required_capability"], "conda:pyaedt2026v1")
+        self.assertIn("module load ansys-electronics/v252", payload["env_setup"])
         self.assertEqual(payload["memory_mb"], 16384)
-        self.assertEqual(payload["scheduling_profile"], "standard")
+        self.assertEqual(payload["scheduling_profile"], "fea_bursty")
         self.assertEqual(payload["max_workers_per_node"], 0)
         self.assertEqual(payload["priority"], 0)
         self.assertEqual(payload["timeout_seconds"], 0)
-        self.assertEqual(payload["dedupe_key"], "")
+        self.assertTrue(payload["dedupe_key"].startswith("ipmsm-task-"))
 
     def test_build_task_payload_supports_fea_bursty_profile(self) -> None:
         payload = scheduler_task.build_task_payload(
@@ -130,9 +136,73 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         self.assertIn('"dedupe_key": "ipmsm-batch4-case001"', captured["data"].decode("utf-8"))
         self.assertEqual(captured["timeout"], 5.0)
 
+    def test_get_scheduler_tasks_requests_explicit_large_limit(self) -> None:
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self) -> "FakeResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return b'[{"id": 1, "project": "pyaedt_motor", "status": "queued"}]'
+
+        def fake_urlopen(url: str, timeout: float) -> FakeResponse:
+            captured["url"] = url
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        with mock.patch.object(scheduler_task.request, "urlopen", side_effect=fake_urlopen):
+            tasks = scheduler_task.get_scheduler_tasks("http://scheduler", 5.0)
+
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(
+            captured["url"],
+            f"http://scheduler/api/tasks?limit={scheduler_task.SCHEDULER_TASK_QUERY_LIMIT}",
+        )
+
     def test_validate_task_request_requires_remote_cwd(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "--remote-cwd"):
             scheduler_task.validate_task_request(task_args(remote_cwd=""))
+
+        scheduler_task.validate_task_request(
+            task_args(remote_cwd=None, project="pyaedt_motor", project_active_cap=100)
+        )
+
+    def test_project_payload_and_default_dedupe_are_safe_without_remote_cwd(self) -> None:
+        args = task_args(remote_cwd=None, project="pyaedt_motor", project_active_cap=100)
+        first = scheduler_task.build_task_payload(args)
+        second = scheduler_task.build_task_payload(args)
+
+        self.assertEqual(first["remote_cwd"], "")
+        self.assertEqual(first["project"], "pyaedt_motor")
+        self.assertEqual(first["entrypoint"], "subprocess_run.py")
+        self.assertEqual(first["dedupe_key"], second["dedupe_key"])
+        self.assertTrue(first["dedupe_key"].startswith("ipmsm-task-"))
+
+    def test_validate_task_request_requires_project_for_active_cap(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "--project-active-cap requires --project"):
+            scheduler_task.validate_task_request(task_args(project_active_cap=100))
+        with self.assertRaisesRegex(RuntimeError, "--project-active-cap must be >= 0"):
+            scheduler_task.validate_task_request(
+                task_args(project="pyaedt_motor", project_active_cap=-1)
+            )
+
+    def test_project_active_task_count_uses_exact_project_and_nonterminal_statuses(self) -> None:
+        tasks = [
+            {"project": "pyaedt_motor", "status": "queued"},
+            {"project": "pyaedt_motor", "status": "attaching"},
+            {"project": "pyaedt_motor", "status": "running"},
+            {"project": "pyaedt_motor", "status": "completed"},
+            {"project": "IPMSM", "status": "running"},
+            {"project": "", "status": "running"},
+        ]
+
+        self.assertEqual(scheduler_task.project_active_task_count(tasks, "pyaedt_motor"), 3)
+        self.assertEqual(scheduler_task.project_active_task_count(tasks, "IPMSM"), 1)
+        self.assertEqual(scheduler_task.project_active_task_count(tasks, ""), 0)
 
     def test_validate_task_request_requires_confirm_for_analyze_submit(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "requires --confirm-analyze"):
@@ -140,9 +210,9 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
 
     def test_validate_task_request_requires_ansys_module_for_pyaedt_submit_or_analyze(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "module load ansys-electronics/v252"):
-            scheduler_task.validate_task_request(task_args(analyze=True, confirm_analyze=True))
+            scheduler_task.validate_task_request(task_args(analyze=True, confirm_analyze=True, env_setup=""))
         with self.assertRaisesRegex(RuntimeError, "module load ansys-electronics/v252"):
-            scheduler_task.validate_task_request(task_args(submit=True))
+            scheduler_task.validate_task_request(task_args(submit=True, env_setup=""))
 
         scheduler_task.validate_task_request(
             task_args(
@@ -286,6 +356,99 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         self.assertTrue(output["submitted"])
         self.assertEqual(output["task_endpoint"], "/api/tasks")
         self.assertEqual(output["submitted_task"]["id"], 9)
+
+    def test_main_refuses_post_when_project_active_cap_is_reached(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.csv"
+            with cases_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001"})
+            active_tasks = [
+                {
+                    "id": index,
+                    "project": "pyaedt_motor",
+                    "status": "queued" if index % 2 else "running",
+                }
+                for index in range(1, 101)
+            ]
+
+            with mock.patch.object(
+                scheduler_task,
+                "get_scheduler_tasks",
+                return_value=active_tasks,
+            ):
+                with mock.patch.object(scheduler_task, "post_scheduler_task") as post:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "project='pyaedt_motor' active=100 cap=100",
+                    ):
+                        scheduler_task.main(
+                            [
+                                "--cases",
+                                str(cases_path),
+                                "--project",
+                                "pyaedt_motor",
+                                "--project-active-cap",
+                                "100",
+                                "--submit",
+                            ]
+                        )
+
+        post.assert_not_called()
+
+    def test_main_project_cap_allows_post_below_limit_without_remote_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.csv"
+            with cases_path.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=["case_id"])
+                writer.writeheader()
+                writer.writerow({"case_id": "case_0001"})
+            active_tasks = [
+                {"id": index, "project": "pyaedt_motor", "status": "queued"}
+                for index in range(1, 100)
+            ]
+            submitted = {
+                "id": 100,
+                "name": "ipmsm-task",
+                "project": "pyaedt_motor",
+                "status": "queued",
+                "remote_cwd": "/expanded/project/path",
+            }
+            stdout = io.StringIO()
+
+            with mock.patch.object(
+                scheduler_task,
+                "get_scheduler_tasks",
+                side_effect=[active_tasks, [submitted, *active_tasks]],
+            ):
+                with mock.patch.object(
+                    scheduler_task,
+                    "post_scheduler_task",
+                    return_value={"id": 100},
+                ) as post:
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = scheduler_task.main(
+                            [
+                                "--cases",
+                                str(cases_path),
+                                "--project",
+                                "pyaedt_motor",
+                                "--project-active-cap",
+                                "100",
+                                "--task-name",
+                                "ipmsm-task",
+                                "--submit",
+                            ]
+                        )
+
+        self.assertEqual(exit_code, 0)
+        post.assert_called_once()
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["project_active_count_before_submit"], 99)
+        self.assertEqual(output["project_active_cap"], 100)
+        self.assertEqual(output["payload"]["project"], "pyaedt_motor")
+        self.assertEqual(output["submitted_task"]["id"], 100)
 
 
 if __name__ == "__main__":
