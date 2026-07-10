@@ -64,9 +64,10 @@ python calibrate_ipmsm_beta.py beta-analyze `
 
 ## 3. v2 foundation DOE와 FEA
 
-기본 계획은 160 geometry group, 운전점별 3개 control sample, 40 repeat로
-총 1,000개 부하 case다. geometry group 단위의 train/calibration/test split과 각
-split의 current/beta boundary anchor가 CSV에 미리 기록된다.
+기본 계획은 160 geometry group, 운전점별 3개 control sample, 40 repeat다.
+현재 2개 운전점 사양에서는 geometry마다 no-load 1개와 부하 6개가 생성되므로
+총 1,160 case다. geometry group 단위의 train/calibration/test split과 각 split의
+current/beta boundary anchor가 CSV에 미리 기록된다.
 
 ```powershell
 python generate_ipmsm_v2_cases.py `
@@ -79,30 +80,31 @@ python generate_ipmsm_v2_cases.py `
   --max-cases 1200
 ```
 
-FEA는 한 번에 최대 200개 active case만 유지한다. `/api/tasks`,
+FEA는 scheduler project `PYAEDT_MOTOR_IPMSM_V2`에서 한 번에 최대 100개
+queued/attaching/running case만 유지한다. `/api/tasks`,
 `scheduling_profile=fea_bursty`, `required_capability=conda:pyaedt2026v1`,
 `env_profile=pyaedt2026v1`, `module load ansys-electronics/v252`를 사용한다.
-각 200행 window는 서로 다른 `--remote-cases`, result path와 deterministic
-dedupe key를 사용하고, 먼저 `--submit` 없이 manifest를 확인한다.
+각 case는 독립 task, remote case CSV, result path와 deterministic dedupe key를
+사용한다. 동일 명령을 다시 실행하면 active/completed exact dedupe는 건너뛰고
+failed/cancelled case만 재시도한다. 먼저 `--submit` 없이 manifest를 확인한다.
 
 ```powershell
-python submit_ipmsm_scheduler_task.py `
+python submit_ipmsm_v2_campaign.py `
   --cases ipmsm_v2_foundation_cases.csv `
-  --case-start-index 1 --case-limit 200 `
-  --allow-over-budget --max-cases 200 `
-  --bootstrap-remote-cases --bootstrap-max-bytes 250000 `
-  --remote-cases remote/ipmsm_v2_foundation_001_200.csv `
-  --remote-cwd /ABSOLUTE/REMOTE/pyaedt_motor `
-  --result-csv simul_log/ipmsm_v2_foundation_001_200.csv `
-  --task-name ipmsm-v2-foundation-001-200 `
-  --analyze --confirm-analyze `
-  --task-endpoint /api/tasks `
-  --scheduling-profile fea_bursty `
-  --required-capability conda:pyaedt2026v1 `
-  --env-profile pyaedt2026v1 `
-  --env-setup "module load ansys-electronics/v252" `
-  --write-manifest simul_log/ipmsm_v2_foundation_001_200_manifest.json
+  --project PYAEDT_MOTOR_IPMSM_V2 `
+  --project-active-cap 100 `
+  --start 1 --limit 196 `
+  --task-prefix ipmsm-v2-foundation-w1 `
+  --remote-cases-dir remote/ipmsm_v2_foundation_w1 `
+  --result-dir simul_log/ipmsm_v2_foundation_w1 `
+  --simulation-dir simulation/ipmsm_v2_foundation_w1 `
+  --timeout-seconds 43200 `
+  --write-manifest simul_log/ipmsm_v2_foundation_w1_manifest.json
 ```
+
+검토 후 같은 명령 끝에 `--submit`을 붙인다. 활성 task가 끝날 때마다 같은 명령을
+재실행하면 남은 case만 최대 100개까지 채운다. `reference_ultra`의 기존 평균
+runtime이 6시간을 넘으므로 6시간 timeout을 재사용하지 않는다.
 
 ## 4. 데이터 gate와 surrogate 학습
 
