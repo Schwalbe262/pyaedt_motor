@@ -87,6 +87,7 @@ PROCESS_LABELS = {
     "stage3": "Stage 3 감시",
     "optimization": "NSGA-II / Pareto 감시",
     "speed": "속도 검증 감시",
+    "provisional_checkpoint": "60-design 조기 Surrogate 진단",
 }
 
 _DECISION_CACHE_LOCK = threading.Lock()
@@ -372,6 +373,113 @@ def inspect_pid_file(path: Path) -> str:
     if boot is not None and modified < boot - 2.0:
         return "unknown"
     return _pid_running_without_signal(pid)
+
+
+def _read_provisional_checkpoint_execution(
+    artifact_dir: Path,
+    *,
+    expected_contract_sha256: str,
+) -> dict[str, Any]:
+    """Read only the allow-listed execution state of the isolated 60-design watcher."""
+
+    root = artifact_dir / "foundation_stage1_provisional60_v1"
+    pid_path = artifact_dir / ".foundation_stage1_provisional60_v1.checkpoint.pid.json"
+    decision_path = root / "decision.json"
+    manifest_path = root / "manifest.json"
+    snapshot_manifest = root / "snapshot" / "snapshot_manifest.json"
+    validation_path = root / "validation.csv"
+    models_path = root / "models"
+    base = {
+        "status": "waiting",
+        "phase": "waiting",
+        "process_state": "stopped",
+        "decision_available": False,
+        "official_gate_eligible": False,
+        "primary_min_r2": None,
+        "primary_avg_r2": None,
+        "primary_passed_count": 0,
+        "voltage_r2": None,
+        "recommended_action": "",
+    }
+    if decision_path.is_file() and manifest_path.is_file():
+        try:
+            decision = read_json_file(decision_path, max_bytes=MAX_JSON_BYTES)
+            manifest = read_json_file(manifest_path, max_bytes=MAX_JSON_BYTES)
+            manifest_contract = manifest.get("contract")
+            manifest_decision = manifest.get("decision")
+            if (
+                decision.get("schema_version") != "ipmsm-v2-provisional-checkpoint-v1"
+                or decision.get("status") != "diagnostic_complete"
+                or decision.get("provisional") is not True
+                or decision.get("official_gate_eligible") is not False
+                or decision.get("contract_sha256") != expected_contract_sha256
+                or manifest.get("schema_version") != "ipmsm-v2-provisional-checkpoint-manifest-v1"
+                or manifest.get("status") != "complete"
+                or manifest.get("official_gate_eligible") is not False
+                or not isinstance(manifest_contract, Mapping)
+                or manifest_contract.get("canonical_sha256") != expected_contract_sha256
+                or not isinstance(manifest_decision, Mapping)
+                or manifest_decision.get("sha256") != _file_sha256(decision_path)
+            ):
+                raise DashboardDataError("provisional decision identity is invalid")
+            result = decision.get("result")
+            primary = result.get("primary_test_r2") if isinstance(result, Mapping) else None
+            failures = result.get("primary_failures") if isinstance(result, Mapping) else None
+            voltage = _safe_float(result.get("voltage_test_r2")) if isinstance(result, Mapping) else None
+            if not isinstance(primary, Mapping) or len(primary) != 8 or not isinstance(failures, list):
+                raise DashboardDataError("provisional decision R2 coverage is invalid")
+            primary_values = [_safe_float(value) for value in primary.values()]
+            if any(value is None for value in primary_values) or voltage is None:
+                raise DashboardDataError("provisional decision has nonfinite R2")
+            finite_primary = [float(value) for value in primary_values if value is not None]
+            return {
+                **base,
+                "status": "complete",
+                "phase": "complete",
+                "process_state": "stopped",
+                "decision_available": True,
+                "primary_min_r2": round(min(finite_primary), 6),
+                "primary_avg_r2": round(sum(finite_primary) / len(finite_primary), 6),
+                "primary_passed_count": len(finite_primary) - len(failures),
+                "voltage_r2": round(voltage, 6),
+                "recommended_action": _clip_text(decision.get("recommended_action"), 40),
+            }
+        except (DashboardDataError, OSError, UnicodeError, ValueError):
+            return {**base, "status": "unavailable", "phase": "artifact_audit_failed", "process_state": "unknown"}
+
+    process_state = "stopped"
+    if pid_path.is_file():
+        try:
+            marker = read_json_file(pid_path, max_bytes=64 * 1024)
+            if set(marker) != {"contract_sha256", "output_dir", "pid", "schema_version"}:
+                raise DashboardDataError("provisional PID marker keys changed")
+            pid = marker.get("pid")
+            if (
+                type(pid) is not int
+                or pid <= 0
+                or marker.get("schema_version") != "ipmsm-v2-provisional-checkpoint-pid-v1"
+                or marker.get("contract_sha256") != expected_contract_sha256
+                or Path(str(marker.get("output_dir") or "")).name != root.name
+            ):
+                raise DashboardDataError("provisional PID marker identity is invalid")
+            process_state = _pid_running_without_signal(pid)
+        except (DashboardDataError, OSError, UnicodeError, ValueError):
+            process_state = "unknown"
+    if process_state == "alive":
+        if decision_path.is_file():
+            phase = "finalizing"
+        elif models_path.is_dir():
+            phase = "model_audit"
+        elif validation_path.is_file():
+            phase = "training"
+        elif snapshot_manifest.is_file():
+            phase = "validation"
+        else:
+            phase = "snapshot_fetch"
+        return {**base, "status": "running", "phase": phase, "process_state": process_state}
+    if root.exists() or pid_path.exists():
+        return {**base, "status": "resume_required", "phase": "resume_required", "process_state": process_state}
+    return base
 
 
 def _argv_value(argv: Sequence[Any], option: str) -> str:
@@ -901,6 +1009,19 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
     else:
         processes.insert(0, supervisor_process)
 
+    checkpoint_execution = _read_provisional_checkpoint_execution(
+        artifact_dir,
+        expected_contract_sha256=str(contract_document.get("contract_sha256") or ""),
+    )
+    processes.append(
+        {
+            "role": "provisional_checkpoint",
+            "label": PROCESS_LABELS["provisional_checkpoint"],
+            "state": checkpoint_execution["process_state"],
+            "activity": "running" if checkpoint_execution["status"] == "running" else checkpoint_execution["status"],
+        }
+    )
+
     beta = _read_beta(artifact_dir)
     checkpoint_dir = _resolve(config.workdir, _argv_value(opt_argv, "--checkpoint-dir"))
     output_dir = _resolve(config.workdir, _argv_value(opt_argv, "--output-dir"))
@@ -976,6 +1097,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         "model": model,
         "beta": beta,
         "optimization": optimization_state,
+        "checkpoint_execution": checkpoint_execution,
         "speed": speed_state,
         "processes": processes,
         "alerts": alerts,
@@ -1592,7 +1714,11 @@ class DashboardStateStore:
         scheduler = dict(self._last_scheduler or {})
         scheduler_checkpoint = scheduler.get("checkpoint")
         if isinstance(scheduler_checkpoint, Mapping):
-            local["checkpoint"] = dict(scheduler_checkpoint)
+            checkpoint = dict(scheduler_checkpoint)
+            execution = local.get("checkpoint_execution")
+            if isinstance(execution, Mapping):
+                checkpoint["execution"] = dict(execution)
+            local["checkpoint"] = checkpoint
         campaign_status = scheduler.get("campaign_status")
         if isinstance(campaign_status, Mapping):
             speed_counts = campaign_status.get("speed")

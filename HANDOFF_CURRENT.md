@@ -201,7 +201,7 @@
 - Strict beta artifacts are under `simul_log_smoke/beta_zero_recovery_26092_26093`; sweep id is `6507d55e...64119` and the provisional PPT optimization spec remains assumption-marked.
 - Scheduler `54152b8` is pushed/deployed; live listener PID `213928` is healthy, ATTACHING restart recovery is token/CAS guarded, and no post-fix recovered/recovery_held events exist.
 - PyAEDT through `19a82bf` is pushed: Stage2 uses 66 untouched audit rows, speed ranking is strict-v2 paired, Pareto FEA validates beta +/-2 deg and publishes an FEA-filtered front, and audited non-reference profiles are explicit-only.
-- Dashboard is deployed read-only at `http://127.0.0.1:8765`; it now shows exact settled 60-design readiness/splits, distinguishes raw scheduler attempts from deduped results, uses latest-run ETA segments, and remains loopback GET/HEAD-only with CSP/no CORS.
+- Dashboard is deployed read-only at `http://127.0.0.1:8765`; it shows exact 60-design readiness plus live snapshot/validation/training/model-audit phase, distinguishes raw scheduler attempts from deduped results, and remains loopback GET/HEAD-only with CSP/no CORS.
 - Stage1 is homogeneous `reference_ultra`, 700 rows/112 geometries/28 repeats; stage2 is conditional non-overlapping 300 rows/48 geometries/12 repeats.
 - Stage1 r4 plan hash is `ab32f31a...2b1e`: 700 rows/112 designs/28 repeats, solve-only failure `v2s1_0049_rated_torque_01` and its dependent repeat both have fresh IDs, exactly three cells changed, and Stage2 design overlap remains zero.
 - Task `26141` remains the sole unknown SIGKILL (MaxRSS 2.08 GiB < 32 GiB, no OOM evidence); safe Windows PID probes replaced the `os.kill(pid,0)` pattern that accidentally stopped the first local runner.
@@ -211,7 +211,7 @@
 - Faster `time_150` remains screening-only because core-loss p90 error `5.533% > 5%`; mixed-fidelity v2 training is forbidden.
 - Next: monitor Stage1 at the dashboard; Stage2 failure routes through sealed Stage3 before NSGA-II, while a pass routes directly; beta-neighbor Pareto FEA and 12x2 strict-v2 speed remain cap-serialized.
 - Windows fresh-output publication now uses shared identity-checked no-replace logic: mapped `Y:` drives bypass hard links for atomic rename, WinError 50 falls back likewise, and optimizer pair recovery preserves a proof; focused 96/96 and full 511/511 tests pass without touching live tasks.
-- Dashboard enhancement passed 33 focused tests; checkpoint/resume provenance passed 37 focused tests and the final shared `.venv` suite passed 647/647, with dry-run writes/output/PID=0 before launch.
+- Dashboard execution-phase enhancement passed 35 focused tests; checkpoint/resume provenance passed 37 focused tests and the final shared `.venv` suite passed 649/649, with live API phase=`snapshot_fetch`, process alive, errors=0.
 - Rate-limited snapshot auditor `becd3d6` enforces max-in-flight 1, 10 reads/30s and 429 backoff; live mapped-drive publish classified 42 base-complete designs as `physics_only`, and its 6/6 v2 sample plus full 598 tests passed.
 - Complete-only learning checkpoint has 43 designs/258 rows (23/6/14 train/cal/test), validation 258/258, min/avg primary R² -0.105/0.353 and voltage R² 0.909; it is `physics_only` and optimizer loading correctly fails closed.
 - Checkpoint-43 residual coverage found no actionable Stage2 gap: the four largest-error groups are at <=55.4 distance percentile, and the sole 95.5-percentile watch has a closer remaining Stage1 train design (0.229 vs Stage2 0.290).

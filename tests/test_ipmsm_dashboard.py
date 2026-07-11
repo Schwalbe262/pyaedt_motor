@@ -399,6 +399,78 @@ class ArtifactTests(unittest.TestCase):
                 self.assertEqual(dashboard.inspect_pid_file(path), "unknown")
             probe.assert_not_called()
 
+    def test_provisional_checkpoint_execution_reports_live_snapshot_fetch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "foundation_stage1_provisional60_v1"
+            marker = root / ".foundation_stage1_provisional60_v1.checkpoint.pid.json"
+            marker.write_text(
+                json.dumps(
+                    {
+                        "contract_sha256": "a" * 64,
+                        "output_dir": str(output),
+                        "pid": 1234,
+                        "schema_version": "ipmsm-v2-provisional-checkpoint-pid-v1",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(dashboard, "_pid_running_without_signal", return_value="alive"):
+                result = dashboard._read_provisional_checkpoint_execution(
+                    root,
+                    expected_contract_sha256="a" * 64,
+                )
+        self.assertEqual(result["status"], "running")
+        self.assertEqual(result["phase"], "snapshot_fetch")
+        self.assertEqual(result["process_state"], "alive")
+
+    def test_provisional_checkpoint_execution_audits_published_r2_summary(self) -> None:
+        primary = {f"target-{index}": 0.90 + index / 100 for index in range(8)}
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = Path(tmp)
+            root = artifact / "foundation_stage1_provisional60_v1"
+            root.mkdir()
+            decision = root / "decision.json"
+            decision.write_text(
+                json.dumps(
+                    {
+                        "contract_sha256": "a" * 64,
+                        "official_gate_eligible": False,
+                        "provisional": True,
+                        "recommended_action": "continue_stage1",
+                        "result": {
+                            "primary_failures": ["target-0", "target-1", "target-2", "target-3", "target-4"],
+                            "primary_test_r2": primary,
+                            "voltage_test_r2": 0.97,
+                        },
+                        "schema_version": "ipmsm-v2-provisional-checkpoint-v1",
+                        "status": "diagnostic_complete",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "contract": {"canonical_sha256": "a" * 64},
+                        "decision": {"sha256": dashboard._file_sha256(decision)},
+                        "official_gate_eligible": False,
+                        "schema_version": "ipmsm-v2-provisional-checkpoint-manifest-v1",
+                        "status": "complete",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = dashboard._read_provisional_checkpoint_execution(
+                artifact,
+                expected_contract_sha256="a" * 64,
+            )
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["primary_passed_count"], 3)
+        self.assertEqual(result["primary_min_r2"], 0.9)
+        self.assertEqual(result["primary_avg_r2"], 0.935)
+        self.assertEqual(result["voltage_r2"], 0.97)
+
     def test_metadata_is_cross_checked_against_r2_gate(self) -> None:
         primary = {
             target: 0.96

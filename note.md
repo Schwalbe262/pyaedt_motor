@@ -3666,3 +3666,9 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: readiness=60 designs/360 base rows, split=35/10/15, scope=`provisional_minimum`; task/PID/lock are live, stderr=0, and the rate-limited snapshot fetch is running. Focused tests=37/37 and full `.venv` suite=647/647.
 - Failure/next: two independent reviews found and closed contract-resume and producer-resume provenance gaps before launch. Monitor atomic snapshot→validation→training→decision/manifest; official Stage1/Stage2/optimization artifacts remain untouched.
 - Token usage: unavailable; `codex_ops.py` had no local Codex SQLite database.
+
+## 2026-07-12 02:08:11 +09:00 - Provisional execution phase in dashboard
+- Part/goal: make the 60-design background diagnostic observable after readiness reaches 60/60.
+- Actions/result: added strict PID/decision/manifest readback and UI phases for snapshot fetch, validation, training, model audit, finalization, and completed R²; restarted only the dashboard task.
+- Metrics: live API reports `snapshot_fetch`, watcher process alive, active FEA=100, errors=0; dashboard focused tests=35/35 and full `.venv` suite=649/649.
+- Next: monitor the rate-limited atomic snapshot and interpret the guarded provisional R² when decision/manifest appear; official pipeline remains unchanged.

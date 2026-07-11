@@ -172,6 +172,7 @@ function renderScheduler(data) {
 
 function renderCheckpoint(data) {
   const checkpoint = data.checkpoint || data.scheduler?.checkpoint || {};
+  const execution = checkpoint.execution || {};
   const target = Math.max(1, integer(checkpoint.target_designs, 60));
   const complete = Math.max(0, integer(checkpoint.complete_designs));
   const settling = Math.max(0, integer(checkpoint.settling_designs));
@@ -187,17 +188,35 @@ function renderCheckpoint(data) {
   setText("checkpointTest", `${integer(splits.test)} / ${integer(requirements.test, 10)}`);
 
   const status = byId("checkpointStatus");
-  const statusKey = checkpoint.status || "unavailable";
+  const statusKey = execution.status === "running" || execution.status === "complete" || execution.status === "resume_required"
+    ? execution.status
+    : checkpoint.status || "unavailable";
+  const phaseLabel = {
+    snapshot_fetch: "360-row snapshot 수집",
+    validation: "데이터 검증",
+    training: "Surrogate 학습",
+    model_audit: "모델 감사",
+    finalizing: "결과 게시",
+  }[execution.phase] || "조기 진단 실행";
   const statusLabel = {
     ready: "최소 조건 충족",
+    running: phaseLabel,
+    complete: "조기 진단 완료",
+    resume_required: "재개 확인 필요",
     settling: "결과 안정화",
     waiting: "FEA 수집 중",
     unavailable: "확인 필요",
   }[statusKey] || "확인 필요";
   status.textContent = statusLabel;
-  status.className = `health-pill ${statusKey === "ready" ? "complete" : statusKey === "unavailable" ? "failed" : "warning"}`;
+  status.className = `health-pill ${["ready", "complete"].includes(statusKey) ? "complete" : ["unavailable", "resume_required"].includes(statusKey) ? "failed" : "warning"}`;
 
-  if (statusKey === "ready") {
+  if (statusKey === "complete") {
+    setText("checkpointNote", `primary R² 최소 ${decimal(execution.primary_min_r2, 4)} · 평균 ${decimal(execution.primary_avg_r2, 4)} · 통과 ${integer(execution.primary_passed_count)}/8 · 전압 ${decimal(execution.voltage_r2, 4)} · 공식 gate 아님`);
+  } else if (statusKey === "running") {
+    setText("checkpointNote", `${phaseLabel} 진행 중 · exact ${complete} designs / ${integer(checkpoint.complete_base_rows)} base rows · 공식 gate와 격리됨`);
+  } else if (statusKey === "resume_required") {
+    setText("checkpointNote", "부분 산출물 또는 PID marker를 감사한 뒤 안전하게 재개해야 합니다. 공식 gate는 영향받지 않습니다.");
+  } else if (statusKey === "ready") {
     setText("checkpointNote", `provisional 진단 최소 조건 충족 · ${integer(checkpoint.complete_base_rows)}개 base row · 공식 R² gate와 분리됨`);
   } else if (statusKey === "settling") {
     setText("checkpointNote", `${settling}개 완전 설계의 결과 안정화 확인 중 · ${remaining} designs remaining · 공식 gate 아님`);
