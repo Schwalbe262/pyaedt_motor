@@ -3710,3 +3710,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: focused 69/69 and shared `.venv` 728/728 pass; dashboard PID 169940 serves HTTP 200/CSP with Stage1=498/700, active=100/100, target-load=`waiting_for_surrogate_gate`, and pipeline PID 75444 unchanged.
 - Failure/next: in-app browser was unavailable and the v4 sidecar is correctly absent until upstream artifacts exist; finish Stage1 official gate/frozen-family confirmation, then freeze v4 root and execute target-load Pareto FEA.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-12 07:20:30 +09:00 - Crash-safe target-load v4 coordinator
+- Part/goal: implement the post-NSGA target-load FEA coordinator without disturbing the sealed Stage1 campaign.
+- Hypothesis/actions: froze exact scheduler/solver sources and payloads; added atomic attempt, dispatch, collection, observation, rejection, visibility, fixed-MTPA, summary, and signed-progress replay; enforced one tail attempt per probe and same-dedupe retries.
+- Candidates/options: reused one-row `subprocess_run.py` tasks and project #2; rejected seed-result relabeling, scheduler-exit-only evidence, unbounded empty-result waits, and submission while foreign project tasks are active.
+- Metrics/result: Stage1=507/700, active=100/100, errors=0; coordinator 15/15, related 105/105, shared `.venv` 744/744; tamper/retry/settle fuzz found no P0/P1. No v4 root/task was created before the official R²/Pareto gates.
+- Failure/next: system Python lacked pandas/scipy, while project `.venv` passed; queued-inclusive cap relies on serialized phases because the server lacks transactional queued-task CAS. Finish Stage1/gates, then initialize, import MTPA evidence, and launch `run --submit --watch`.
+- Token usage: unavailable; run `codex_ops.py` if a local Codex SQLite database becomes available.

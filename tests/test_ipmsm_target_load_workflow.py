@@ -264,9 +264,10 @@ def fixture_documents() -> tuple[dict[str, object], optimization.OptimizationSpe
         "model_metadata_json": metadata_json,
         "model_artifacts_by_basename": dict(MODEL_ARTIFACTS),
         "beta_calibration_manifest_json": canonical_bytes(calibration),
-        "matcher_source": Path(target_load_matching.__file__).read_bytes(),
-        "coordinator_source": Path(workflow.__file__).read_bytes(),
-        "validator_source": Path(pareto_validator.__file__).read_bytes(),
+        **{
+            field: path.read_bytes()
+            for field, path in workflow.RUNTIME_SOURCE_PATHS.items()
+        },
     }
     return documents, spec, candidate
 
@@ -281,9 +282,14 @@ def scheduler_contract() -> dict[str, object]:
         "required_capability": "conda:pyaedt2026v1",
         "env_profile": "pyaedt2026v1",
         "env_setup": "module load ansys-electronics/v252",
-        "resource_class": "cpu2",
+        "partition": "auto",
         "max_workers_per_node": 4,
-        "remote_root": "/home1/project/target-load-v4",
+        "remote_root": "$HOME/slurm_scheduler/projects/PYAEDT_MOTOR_IPMSM_V2/pyaedt_motor",
+        "entrypoint": "subprocess_run.py",
+        "cpus": 4,
+        "cores_per_process": 4,
+        "memory_mb": 32_768,
+        "task_timeout_seconds": 43_200,
     }
 
 
@@ -370,6 +376,40 @@ class RootManifestTests(unittest.TestCase):
         self.assertEqual(
             manifest["identity"]["source_hashes"]["seed_fea_plan_sha256"],
             hashlib.sha256(build_kwargs()["seed_fea_plan_csv"]).hexdigest(),
+        )
+        expected_source_paths = {
+            "matcher_source": "ipmsm_target_load_matching.py",
+            "workflow_source": "ipmsm_target_load_workflow.py",
+            "coordinator_source": "ipmsm_target_load_coordinator.py",
+            "validator_source": "validate_ipmsm_pareto_fea.py",
+            "submit_ipmsm_v2_campaign_source": "submit_ipmsm_v2_campaign.py",
+            "submit_ipmsm_scheduler_task_source": "submit_ipmsm_scheduler_task.py",
+            "submit_ipmsm_scheduler_job_source": "submit_ipmsm_scheduler_job.py",
+            "subprocess_run_source": "subprocess_run.py",
+            "run_ipmsm_batch_source": "run_ipmsm_batch.py",
+            "ipmsm_ppt_setup_source": "module/ipmsm_ppt_setup.py",
+            "ipmsm_geometry_source": "module/ipmsm_geometry.py",
+            "variable_source": "module/variable.py",
+            "pyaedt_core_source": "pyaedt_module/core/pydesktop.py",
+        }
+        source_paths = workflow.RUNTIME_SOURCE_PATHS
+        self.assertEqual(set(source_paths), set(expected_source_paths))
+        for field, suffix in expected_source_paths.items():
+            with self.subTest(runtime_path=field):
+                self.assertTrue(source_paths[field].as_posix().endswith(suffix))
+        embedded = manifest["identity"]["source_documents_base64"]
+        source_hashes = manifest["identity"]["source_hashes"]
+        for field, path in source_paths.items():
+            with self.subTest(field=field):
+                expected = path.read_bytes()
+                self.assertEqual(base64.b64decode(embedded[field]), expected)
+                self.assertEqual(
+                    source_hashes[f"{field}_sha256"],
+                    hashlib.sha256(expected).hexdigest(),
+                )
+        self.assertNotEqual(
+            source_hashes["workflow_source_sha256"],
+            source_hashes["coordinator_source_sha256"],
         )
 
     def test_spec_plan_and_beta_manifest_tamper_fail_closed(self) -> None:
@@ -469,9 +509,47 @@ class RootManifestTests(unittest.TestCase):
                 **{**kwargs, "model_metadata_json": canonical_bytes(incomplete_metadata)}  # type: ignore[arg-type]
             )
 
-        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "runtime source"):
+        for field in workflow.RUNTIME_SOURCE_PATHS:
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "runtime source"):
+                    workflow.build_root_manifest(
+                        **{**kwargs, field: f"stale {field}".encode("ascii")}  # type: ignore[arg-type]
+                    )
+
+    def test_scheduler_execution_resources_are_strict_and_frozen(self) -> None:
+        manifest = root_manifest()
+        self.assertEqual(
+            manifest["identity"]["scheduler_contract"],
+            {key: scheduler_contract()[key] for key in sorted(scheduler_contract())},
+        )
+        kwargs = build_kwargs()
+        invalid = (
+            ("entrypoint", "other.py", "subprocess_run.py"),
+            ("partition", "cpu2", "partition='auto'"),
+            ("cpus", 0, "cpus must be a positive integer"),
+            ("cores_per_process", 5, "cores_per_process must not exceed cpus"),
+            ("memory_mb", True, "memory_mb must be a positive integer"),
+            ("task_timeout_seconds", 43_199, "task_timeout_seconds must be >= 43200"),
+        )
+        for field, value, message in invalid:
+            with self.subTest(field=field):
+                changed = {**scheduler_contract(), field: value}
+                with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, message):
+                    workflow.build_root_manifest(
+                        **{**kwargs, "scheduler_contract": changed}  # type: ignore[arg-type]
+                    )
+        incomplete = scheduler_contract()
+        incomplete.pop("cpus")
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "scheduler contract differs"):
             workflow.build_root_manifest(
-                **{**kwargs, "matcher_source": b"stale matcher source"}  # type: ignore[arg-type]
+                **{**kwargs, "scheduler_contract": incomplete}  # type: ignore[arg-type]
+            )
+        legacy = scheduler_contract()
+        legacy["resource_class"] = "cpu2"
+        legacy.pop("partition")
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "scheduler contract differs"):
+            workflow.build_root_manifest(
+                **{**kwargs, "scheduler_contract": legacy}  # type: ignore[arg-type]
             )
 
     def test_policy_requires_full_range_one_percent_and_tight_identity(self) -> None:
@@ -512,6 +590,20 @@ class RootManifestTests(unittest.TestCase):
         changed_hash["identity"]["source_hashes"]["pareto_sha256"] = "0" * 64
         with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "embedded exact documents"):
             workflow.validate_root_manifest(rehash_root(changed_hash))
+
+        dropped_runtime_source = copy.deepcopy(root_manifest())
+        dropped_runtime_source["identity"]["source_documents_base64"].pop(
+            "ipmsm_ppt_setup_source"
+        )
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "source-document coverage"):
+            workflow.validate_root_manifest(rehash_root(dropped_runtime_source))
+
+        changed_runtime_hash = copy.deepcopy(root_manifest())
+        changed_runtime_hash["identity"]["source_hashes"][
+            "run_ipmsm_batch_source_sha256"
+        ] = "0" * 64
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "embedded exact documents"):
+            workflow.validate_root_manifest(rehash_root(changed_runtime_hash))
 
 
 def result_row_for_attempt(

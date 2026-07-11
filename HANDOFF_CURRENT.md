@@ -224,4 +224,7 @@
 - Dashboard timeline/card now covers target-load current matching, per-beta probes, fixed-current MTPA, and candidate volume/required-power efficiency via a hash-checked sidecar; absent sidecar truthfully renders upstream wait.
 - Target-load v4 freezes exact spec/Pareto/plan/beta/model/source documents, loads the real strict surrogate bundle, replays exact result bytes, and rejects rehashed root/result/MTPA evidence drift.
 - Constraint-aware matching now refines below an in-band voltage-failed point instead of prematurely declaring infeasible; focused 69/69 and shared `.venv` 728/728 pass.
-- Next: keep sealed Stage1 running to 700, execute the official 9-target R² gate/frozen-family confirmation, then create the v4 root/sidecar and run NSGA-II target-load FEA.
+- Target-load v4 now has a crash-safe `ipmsm_target_load_coordinator.py`: immutable attempt/dispatch/collection/observation journals, same-dedupe retry, result visibility evidence, fixed-MTPA import, candidate finalization, and signed progress regeneration.
+- Root execution identity pins 13 local/remote sources and exact scheduler payload/resources; every remote FEA preflights runner/setup/geometry sources and the resolved PyAEDT desktop wrapper before solve.
+- Coordinator 15/15, related 105/105, fuzz boundaries, and shared `.venv` 744/744 pass; no v4 root/task was created because Stage1=507/700 and Slurm remains 100/100 with errors=0.
+- Next: finish Stage1, run the official 9-target R² gate/frozen-family confirmation, then initialize the v4 root, import original per-case Pareto MTPA evidence, and run the coordinator with `--submit`.

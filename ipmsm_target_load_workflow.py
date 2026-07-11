@@ -19,6 +19,7 @@ import math
 from pathlib import Path
 import re
 import tempfile
+from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Sequence
 
 from calibrate_ipmsm_beta import validated_zero_manifest
@@ -53,6 +54,54 @@ FIXED_MTPA_EVIDENCE_SCHEMA_VERSION = "ipmsm-fixed-current-mtpa-evidence-v1"
 CANDIDATE_SUMMARY_SCHEMA_VERSION = "ipmsm-target-load-candidate-summary-v1"
 WORKFLOW_REVISION = "target-load-v4"
 TARGET_LOAD_CONTROL_SOURCE = "independent_target_load_efficiency"
+PROJECT_SOURCE_ROOT = Path(__file__).resolve().parent
+COORDINATOR_SOURCE_PATH = PROJECT_SOURCE_ROOT / "ipmsm_target_load_coordinator.py"
+PYAEDT_CORE_RELATIVE_PATH = Path("pyaedt_module/core/pydesktop.py")
+PYAEDT_CORE_SOURCE_CANDIDATES = tuple(
+    root / PYAEDT_CORE_RELATIVE_PATH
+    for root in (
+        Path("Y:/git/pyaedt_library/src"),
+        PROJECT_SOURCE_ROOT.parent / "pyaedt_library" / "src",
+        PROJECT_SOURCE_ROOT.parent / "git" / "pyaedt_library" / "src",
+        Path("/home1/r1jae262/jupyter/git/pyaedt_library/src"),
+        Path("/home1/dhj02/NEC/git/pyaedt_library/src"),
+        Path("/home1/dw16/NEC/git/pyaedt_library/src"),
+        Path("/home1/harry261/NEC/git/pyaedt_library/src"),
+        Path("/home1/hmlee31/NEC/git/pyaedt_library/src"),
+        Path("/home1/jji0930/NEC/git/pyaedt_library/src"),
+        Path("/home1/wjddn5916/NEC/git/pyaedt_library/src"),
+    )
+)
+PYAEDT_CORE_SOURCE_PATH = next(
+    (path.resolve() for path in PYAEDT_CORE_SOURCE_CANDIDATES if path.is_file()),
+    PYAEDT_CORE_SOURCE_CANDIDATES[0],
+)
+MIN_TASK_TIMEOUT_SECONDS = 43_200
+RUNTIME_SOURCE_PATHS = MappingProxyType({
+    "matcher_source": Path(target_load_matching.__file__).resolve(),
+    "workflow_source": Path(__file__).resolve(),
+    "coordinator_source": COORDINATOR_SOURCE_PATH,
+    "validator_source": Path(pareto_validator.__file__).resolve(),
+    "submit_ipmsm_v2_campaign_source": Path(__file__).resolve().with_name(
+        "submit_ipmsm_v2_campaign.py"
+    ),
+    "submit_ipmsm_scheduler_task_source": Path(__file__).resolve().with_name(
+        "submit_ipmsm_scheduler_task.py"
+    ),
+    "submit_ipmsm_scheduler_job_source": Path(__file__).resolve().with_name(
+        "submit_ipmsm_scheduler_job.py"
+    ),
+    "subprocess_run_source": Path(__file__).resolve().with_name("subprocess_run.py"),
+    "run_ipmsm_batch_source": Path(__file__).resolve().with_name("run_ipmsm_batch.py"),
+    "ipmsm_ppt_setup_source": Path(__file__).resolve().parent
+    / "module"
+    / "ipmsm_ppt_setup.py",
+    "ipmsm_geometry_source": Path(__file__).resolve().parent
+    / "module"
+    / "ipmsm_geometry.py",
+    "variable_source": Path(__file__).resolve().parent / "module" / "variable.py",
+    "pyaedt_core_source": PYAEDT_CORE_SOURCE_PATH,
+})
 REQUIRED_SOURCE_HASHES = frozenset(
     {
         "optimization_spec_sha256",
@@ -62,8 +111,18 @@ REQUIRED_SOURCE_HASHES = frozenset(
         "model_artifact_manifest_sha256",
         "beta_calibration_artifact_sha256",
         "matcher_source_sha256",
+        "workflow_source_sha256",
         "coordinator_source_sha256",
         "validator_source_sha256",
+        "submit_ipmsm_v2_campaign_source_sha256",
+        "submit_ipmsm_scheduler_task_source_sha256",
+        "submit_ipmsm_scheduler_job_source_sha256",
+        "subprocess_run_source_sha256",
+        "run_ipmsm_batch_source_sha256",
+        "ipmsm_ppt_setup_source_sha256",
+        "ipmsm_geometry_source_sha256",
+        "variable_source_sha256",
+        "pyaedt_core_source_sha256",
     }
 )
 REQUIRED_SCHEDULER_FIELDS = frozenset(
@@ -76,9 +135,14 @@ REQUIRED_SCHEDULER_FIELDS = frozenset(
         "required_capability",
         "env_profile",
         "env_setup",
-        "resource_class",
+        "partition",
         "max_workers_per_node",
         "remote_root",
+        "entrypoint",
+        "cpus",
+        "cores_per_process",
+        "memory_mb",
+        "task_timeout_seconds",
     }
 )
 SAFE_ID = re.compile(r"[^A-Za-z0-9_-]+")
@@ -95,8 +159,18 @@ ROOT_SOURCE_DOCUMENT_FIELDS = (
     "model_metadata_json",
     "beta_calibration_manifest_json",
     "matcher_source",
+    "workflow_source",
     "coordinator_source",
     "validator_source",
+    "submit_ipmsm_v2_campaign_source",
+    "submit_ipmsm_scheduler_task_source",
+    "submit_ipmsm_scheduler_job_source",
+    "subprocess_run_source",
+    "run_ipmsm_batch_source",
+    "ipmsm_ppt_setup_source",
+    "ipmsm_geometry_source",
+    "variable_source",
+    "pyaedt_core_source",
 )
 
 
@@ -105,12 +179,7 @@ class TargetLoadWorkflowError(RuntimeError):
 
 
 def _validate_runtime_source_documents(documents: Mapping[str, bytes]) -> None:
-    runtime_paths = {
-        "matcher_source": Path(target_load_matching.__file__),
-        "coordinator_source": Path(__file__),
-        "validator_source": Path(pareto_validator.__file__),
-    }
-    for field, path in runtime_paths.items():
+    for field, path in RUNTIME_SOURCE_PATHS.items():
         try:
             runtime_bytes = path.read_bytes()
         except OSError as exc:
@@ -379,13 +448,25 @@ def _validate_scheduler_contract(contract: Mapping[str, object]) -> dict[str, An
         raise TargetLoadWorkflowError("target-load automation requires pyaedt2026v1")
     if "module load ansys-electronics/v252" not in _text(contract["env_setup"], "env_setup"):
         raise TargetLoadWorkflowError("target-load automation requires the explicit Ansys module")
+    if _text(contract["entrypoint"], "scheduler entrypoint") != "subprocess_run.py":
+        raise TargetLoadWorkflowError("target-load automation requires subprocess_run.py")
+    if _text(contract["partition"], "scheduler partition") != "auto":
+        raise TargetLoadWorkflowError("target-load automation requires partition='auto'")
     project_id = contract["project_id"]
     server_cap = contract["server_cap"]
     max_workers = contract["max_workers_per_node"]
+    cpus = contract["cpus"]
+    cores_per_process = contract["cores_per_process"]
+    memory_mb = contract["memory_mb"]
+    task_timeout_seconds = contract["task_timeout_seconds"]
     for value, label in (
         (project_id, "project_id"),
         (server_cap, "server_cap"),
         (max_workers, "max_workers_per_node"),
+        (cpus, "cpus"),
+        (cores_per_process, "cores_per_process"),
+        (memory_mb, "memory_mb"),
+        (task_timeout_seconds, "task_timeout_seconds"),
     ):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise TargetLoadWorkflowError(f"{label} must be a positive integer")
@@ -393,7 +474,13 @@ def _validate_scheduler_contract(contract: Mapping[str, object]) -> dict[str, An
         raise TargetLoadWorkflowError("server_cap must not exceed the 200-task concurrency cap")
     if max_workers > server_cap:
         raise TargetLoadWorkflowError("max_workers_per_node must not exceed server_cap")
-    for field in ("project", "resource_class", "remote_root"):
+    if cores_per_process > cpus:
+        raise TargetLoadWorkflowError("cores_per_process must not exceed cpus")
+    if task_timeout_seconds < MIN_TASK_TIMEOUT_SECONDS:
+        raise TargetLoadWorkflowError(
+            f"task_timeout_seconds must be >= {MIN_TASK_TIMEOUT_SECONDS}"
+        )
+    for field in ("project", "remote_root"):
         _text(contract[field], f"scheduler {field}")
     return normalized
 
@@ -539,8 +626,18 @@ def _validated_root_documents(
     model_artifacts_by_basename: Mapping[str, bytes],
     beta_calibration_manifest_json: bytes,
     matcher_source: bytes,
+    workflow_source: bytes,
     coordinator_source: bytes,
     validator_source: bytes,
+    submit_ipmsm_v2_campaign_source: bytes,
+    submit_ipmsm_scheduler_task_source: bytes,
+    submit_ipmsm_scheduler_job_source: bytes,
+    subprocess_run_source: bytes,
+    run_ipmsm_batch_source: bytes,
+    ipmsm_ppt_setup_source: bytes,
+    ipmsm_geometry_source: bytes,
+    variable_source: bytes,
+    pyaedt_core_source: bytes,
 ) -> tuple[
     OptimizationSpec,
     dict[str, Any],
@@ -562,8 +659,39 @@ def _validated_root_documents(
             "beta calibration manifest",
         ),
         "matcher_source": _exact_bytes(matcher_source, "matcher source"),
+        "workflow_source": _exact_bytes(workflow_source, "workflow source"),
         "coordinator_source": _exact_bytes(coordinator_source, "coordinator source"),
         "validator_source": _exact_bytes(validator_source, "validator source"),
+        "submit_ipmsm_v2_campaign_source": _exact_bytes(
+            submit_ipmsm_v2_campaign_source,
+            "submit_ipmsm_v2_campaign source",
+        ),
+        "submit_ipmsm_scheduler_task_source": _exact_bytes(
+            submit_ipmsm_scheduler_task_source,
+            "submit_ipmsm_scheduler_task source",
+        ),
+        "submit_ipmsm_scheduler_job_source": _exact_bytes(
+            submit_ipmsm_scheduler_job_source,
+            "submit_ipmsm_scheduler_job source",
+        ),
+        "subprocess_run_source": _exact_bytes(
+            subprocess_run_source,
+            "subprocess_run source",
+        ),
+        "run_ipmsm_batch_source": _exact_bytes(
+            run_ipmsm_batch_source,
+            "run_ipmsm_batch source",
+        ),
+        "ipmsm_ppt_setup_source": _exact_bytes(
+            ipmsm_ppt_setup_source,
+            "ipmsm_ppt_setup source",
+        ),
+        "ipmsm_geometry_source": _exact_bytes(
+            ipmsm_geometry_source,
+            "ipmsm_geometry source",
+        ),
+        "variable_source": _exact_bytes(variable_source, "variable source"),
+        "pyaedt_core_source": _exact_bytes(pyaedt_core_source, "pyaedt core source"),
     }
     _validate_runtime_source_documents(exact_documents)
     spec_mapping = _strict_json_object(optimization_spec_json, "optimization spec")
@@ -607,8 +735,32 @@ def _validated_root_documents(
             exact_documents["beta_calibration_manifest_json"]
         ),
         "matcher_source_sha256": _sha256_bytes(exact_documents["matcher_source"]),
+        "workflow_source_sha256": _sha256_bytes(exact_documents["workflow_source"]),
         "coordinator_source_sha256": _sha256_bytes(exact_documents["coordinator_source"]),
         "validator_source_sha256": _sha256_bytes(exact_documents["validator_source"]),
+        "submit_ipmsm_v2_campaign_source_sha256": _sha256_bytes(
+            exact_documents["submit_ipmsm_v2_campaign_source"]
+        ),
+        "submit_ipmsm_scheduler_task_source_sha256": _sha256_bytes(
+            exact_documents["submit_ipmsm_scheduler_task_source"]
+        ),
+        "submit_ipmsm_scheduler_job_source_sha256": _sha256_bytes(
+            exact_documents["submit_ipmsm_scheduler_job_source"]
+        ),
+        "subprocess_run_source_sha256": _sha256_bytes(
+            exact_documents["subprocess_run_source"]
+        ),
+        "run_ipmsm_batch_source_sha256": _sha256_bytes(
+            exact_documents["run_ipmsm_batch_source"]
+        ),
+        "ipmsm_ppt_setup_source_sha256": _sha256_bytes(
+            exact_documents["ipmsm_ppt_setup_source"]
+        ),
+        "ipmsm_geometry_source_sha256": _sha256_bytes(
+            exact_documents["ipmsm_geometry_source"]
+        ),
+        "variable_source_sha256": _sha256_bytes(exact_documents["variable_source"]),
+        "pyaedt_core_source_sha256": _sha256_bytes(exact_documents["pyaedt_core_source"]),
     }
     provenance_context = {
         nsga2.OPTIMIZATION_SPEC_SHA256_FIELD: raw_source_hashes["optimization_spec_sha256"],
@@ -767,8 +919,18 @@ def build_root_manifest(
     model_artifacts_by_basename: Mapping[str, bytes],
     beta_calibration_manifest_json: bytes,
     matcher_source: bytes,
+    workflow_source: bytes,
     coordinator_source: bytes,
     validator_source: bytes,
+    submit_ipmsm_v2_campaign_source: bytes,
+    submit_ipmsm_scheduler_task_source: bytes,
+    submit_ipmsm_scheduler_job_source: bytes,
+    subprocess_run_source: bytes,
+    run_ipmsm_batch_source: bytes,
+    ipmsm_ppt_setup_source: bytes,
+    ipmsm_geometry_source: bytes,
+    variable_source: bytes,
+    pyaedt_core_source: bytes,
     scheduler_contract: Mapping[str, object],
     policy_template: MatchPolicyTemplate,
     task_retry_limit: int,
@@ -794,8 +956,18 @@ def build_root_manifest(
         model_artifacts_by_basename=model_artifacts_by_basename,
         beta_calibration_manifest_json=beta_calibration_manifest_json,
         matcher_source=matcher_source,
+        workflow_source=workflow_source,
         coordinator_source=coordinator_source,
         validator_source=validator_source,
+        submit_ipmsm_v2_campaign_source=submit_ipmsm_v2_campaign_source,
+        submit_ipmsm_scheduler_task_source=submit_ipmsm_scheduler_task_source,
+        submit_ipmsm_scheduler_job_source=submit_ipmsm_scheduler_job_source,
+        subprocess_run_source=subprocess_run_source,
+        run_ipmsm_batch_source=run_ipmsm_batch_source,
+        ipmsm_ppt_setup_source=ipmsm_ppt_setup_source,
+        ipmsm_geometry_source=ipmsm_geometry_source,
+        variable_source=variable_source,
+        pyaedt_core_source=pyaedt_core_source,
     )
     if not re.fullmatch(r"[A-Za-z0-9_-]+", revision):
         raise TargetLoadWorkflowError("revision must contain only letters, numbers, '_' or '-'")
@@ -926,8 +1098,24 @@ def _validate_embedded_root_documents(
             documents["beta_calibration_manifest_json"]
         ),
         "matcher_source_sha256": _sha256_bytes(documents["matcher_source"]),
+        "workflow_source_sha256": _sha256_bytes(documents["workflow_source"]),
         "coordinator_source_sha256": _sha256_bytes(documents["coordinator_source"]),
         "validator_source_sha256": _sha256_bytes(documents["validator_source"]),
+        "submit_ipmsm_v2_campaign_source_sha256": _sha256_bytes(
+            documents["submit_ipmsm_v2_campaign_source"]
+        ),
+        "submit_ipmsm_scheduler_task_source_sha256": _sha256_bytes(
+            documents["submit_ipmsm_scheduler_task_source"]
+        ),
+        "submit_ipmsm_scheduler_job_source_sha256": _sha256_bytes(
+            documents["submit_ipmsm_scheduler_job_source"]
+        ),
+        "subprocess_run_source_sha256": _sha256_bytes(documents["subprocess_run_source"]),
+        "run_ipmsm_batch_source_sha256": _sha256_bytes(documents["run_ipmsm_batch_source"]),
+        "ipmsm_ppt_setup_source_sha256": _sha256_bytes(documents["ipmsm_ppt_setup_source"]),
+        "ipmsm_geometry_source_sha256": _sha256_bytes(documents["ipmsm_geometry_source"]),
+        "variable_source_sha256": _sha256_bytes(documents["variable_source"]),
+        "pyaedt_core_source_sha256": _sha256_bytes(documents["pyaedt_core_source"]),
     }
     if dict(source_hashes) != expected_source_hashes:
         raise TargetLoadWorkflowError("root source hashes differ from embedded exact documents")
