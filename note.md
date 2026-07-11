@@ -3725,3 +3725,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: dashboard 57/57 and full 748/748 pass; HTTP/static/healthz return 200 with CSP; live PID 157348, resolved=1/8, Stage1=508/700 (72.57%), project #2 cap/active=100/100, history=634/634 complete.
 - Failure/next: in-app browser remained unavailable, so visual validation used source/DOM contracts plus live HTTP; keep Stage1 running to 700, then use the same UI for the official R² and conditional downstream transitions.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database. No simulation or scheduler task was submitted, cancelled, or restarted.
+
+## 2026-07-12 08:39:42 +09:00 - Crash-safe frozen model-family confirmation sidecar
+- Part/goal: automate the diagnostic-only untouched family confirmation after the official 700-row Stage1 gate without modifying sealed supervisor v3.
+- Hypothesis/actions: added exact lock-only resume and completed-report replay, strict metric semantics, source/input/official-gate SHA binding, independent PID/OS lock, supported crash prefixes, no-replace completion manifest, explicit `.venv` launcher, and a 48-hour `IgnoreNew` interactive scheduled task.
+- Candidates/options: kept confirmation outside the official R² gate; rejected direct one-shot scheduling because a crash after lock publication was previously unrecoverable, and fixed two independent-audit P1s before registration.
+- Metrics/result: focused=52/52, full=773/773, dry-run=`waiting/stage1_results` with zero writes; live task PID marker=43616, watcher SHA=`f5fc5c69...c5ffe`, Stage1=526/700, active=99/100, errors=0, output root absent.
+- Failure/next: the sidecar correctly waits until exact Stage1 results plus official validation/model/R² audit exist; then it will run the frozen 8x6 untouched confirmation and publish lock/report/completion evidence without gating Stage2.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

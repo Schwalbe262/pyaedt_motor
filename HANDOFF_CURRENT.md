@@ -8,7 +8,8 @@
 - Mesh and transient setup are controlled in `module/ipmsm_ppt_setup.py`.
 - Root project-memory files are now canonical; `md/` is template/archive context.
 - Live read-only dashboard: `http://127.0.0.1:8765/`; it now switches hero/counters across all 8 pipeline stages without inventing a whole-project percent or ETA.
-- 2026-07-12 07:50 KST: dashboard PID 157348 is healthy; Stage1=508/700 (72.57%), project #2 cap/active=100/100, scheduler history=634/634 complete, target-load waits for the surrogate gate; dashboard 57/57 and full 748/748 tests passed.
+- 2026-07-12 08:39 KST: dashboard is healthy; Stage1=526/700, project cap active=99/100, errors=0, and full `.venv` regression is 773/773.
+- Crash-safe frozen-family sidecar commit `3c44b25` is pushed; scheduled task `PYAEDT_MOTOR_IPMSM_V2_FAMILY_CONFIRM` is Running with PID marker 43616, exact watcher SHA `f5fc5c69...c5ffe`, and is safely waiting for audited Stage1 results without creating the confirmation output root.
 
 ## Current objective
 
