@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import math
 from pathlib import Path
 import tempfile
 from typing import Any, Mapping, Sequence
@@ -62,6 +63,13 @@ def _reject_json_constant(value: str) -> None:
     raise ConfirmationError(f"nonfinite JSON constant: {value}")
 
 
+def _parse_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ConfirmationError(f"nonfinite JSON number: {value}")
+    return parsed
+
+
 def read_json_document(path: Path) -> tuple[bytes, dict[str, Any]]:
     try:
         raw_bytes = path.read_bytes()
@@ -69,6 +77,7 @@ def read_json_document(path: Path) -> tuple[bytes, dict[str, Any]]:
             raw_bytes.decode("utf-8-sig"),
             object_pairs_hook=_unique_json_object,
             parse_constant=_reject_json_constant,
+            parse_float=_parse_json_float,
         )
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ConfirmationError(f"cannot read JSON object: {path}") from exc
@@ -442,8 +451,32 @@ def confirmation_decision(
     return ("positive_confirmation" if gain else "negative_confirmation"), gain
 
 
-def run_confirmation(args: argparse.Namespace) -> dict[str, Any]:
-    paths = {
+def _canonical_document_bytes(document: Mapping[str, Any]) -> bytes:
+    return (
+        json.dumps(
+            dict(document),
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _require_exact_fields(
+    value: object,
+    fields: set[str],
+    *,
+    label: str,
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ConfirmationError(f"{label} fields differ from the confirmation contract")
+    return value
+
+
+def _confirmation_paths(args: argparse.Namespace) -> dict[str, Path]:
+    return {
         name: Path(getattr(args, name)).resolve()
         for name in (
             "data",
@@ -457,15 +490,15 @@ def run_confirmation(args: argparse.Namespace) -> dict[str, Any]:
             "output",
         )
     }
-    if paths["lock_output"] == paths["output"]:
-        raise ConfirmationError("lock output and report output must differ")
-    if paths["lock_output"].exists() or paths["output"].exists():
-        raise ConfirmationError("lock output and report output must both be fresh paths")
 
+
+def _build_confirmation_context(paths: Mapping[str, Path]) -> dict[str, Any]:
     data_bytes = paths["data"].read_bytes()
     metadata_bytes, metadata = read_json_document(paths["baseline_metadata"])
     frozen_bytes, frozen_manifest = read_json_document(paths["frozen_selection_manifest"])
-    untouched_manifest_bytes, untouched_manifest = read_json_document(paths["untouched_plan_manifest"])
+    untouched_manifest_bytes, untouched_manifest = read_json_document(
+        paths["untouched_plan_manifest"]
+    )
     frozen = validate_frozen_selection(
         frozen_manifest,
         manifest_sha256=sha256_bytes(frozen_bytes),
@@ -482,6 +515,21 @@ def run_confirmation(args: argparse.Namespace) -> dict[str, Any]:
         expected_manifest_sha256=UNTOUCHED_PLAN_MANIFEST_SHA256,
         frozen_selection=frozen["selection"],
     )
+    _, evaluation_contract = trainer.load_v2_audit_case_plan(
+        paths["audit_case_plan"],
+        geometry_column="geometry_group_id",
+    )
+    expected_evaluation_contract = dict(evaluation_contract)
+    expected_evaluation_contract["case_plan"] = str(paths["audit_case_plan"])
+    expected_evaluation_contract["case_plan_sha256"] = untouched[
+        "audit_case_plan_sha256"
+    ]
+    if (
+        expected_evaluation_contract.get("rows") != untouched["audit_rows"]
+        or expected_evaluation_contract.get("groups") != untouched["audit_groups"]
+    ):
+        raise ConfirmationError("untouched evaluation contract differs from the frozen cohort")
+
     confirmation_script_sha256 = diagnostic.file_sha256(Path(__file__).resolve())
     lock_payload = {
         "decision_rule": DECISION_RULE,
@@ -520,8 +568,411 @@ def run_confirmation(args: argparse.Namespace) -> dict[str, Any]:
         "lock_sha256": lock_sha256,
         "lock": lock_payload,
     }
-    diagnostic._publish_report(paths["lock_output"], lock)
-    lock_file_sha256 = diagnostic.file_sha256(paths["lock_output"])
+    return {
+        "data_bytes": data_bytes,
+        "metadata_bytes": metadata_bytes,
+        "metadata": metadata,
+        "frozen_bytes": frozen_bytes,
+        "frozen": frozen,
+        "untouched_manifest_bytes": untouched_manifest_bytes,
+        "untouched": untouched,
+        "confirmation_script_sha256": confirmation_script_sha256,
+        "expected_evaluation_contract": expected_evaluation_contract,
+        "lock_payload": lock_payload,
+        "lock_sha256": lock_sha256,
+        "lock": lock,
+    }
+
+
+def _validate_exact_lock(path: Path, expected_lock: Mapping[str, Any]) -> str:
+    raw_bytes, actual = read_json_document(path)
+    expected_bytes = _canonical_document_bytes(expected_lock)
+    if raw_bytes != expected_bytes or actual != dict(expected_lock):
+        raise ConfirmationError("existing confirmation lock differs from current exact inputs")
+    return sha256_bytes(raw_bytes)
+
+
+def _metric_number_or_none(value: object, *, label: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfirmationError(f"{label} must be a finite number or null")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ConfirmationError(f"{label} must be finite")
+    return number
+
+
+def _audit_strict_metric_row(
+    row: Mapping[str, Any],
+    *,
+    expected_rows: int,
+    label: str,
+) -> float | None:
+    status = row["status"]
+    invalid_rows = row["invalid_prediction_rows"]
+    metrics = {
+        metric: _metric_number_or_none(row[metric], label=f"{label} {metric}")
+        for metric in ("MAE", "RMSE", "MAPE_pct", "R2", "NRMSE")
+    }
+    if status == "invalid_prediction":
+        if not 1 <= invalid_rows <= expected_rows:
+            raise ConfirmationError(
+                f"{label} invalid-prediction count differs from strict_metric semantics"
+            )
+        if any(value is not None for value in metrics.values()):
+            raise ConfirmationError(
+                f"{label} invalid-prediction metrics differ from strict_metric semantics"
+            )
+        return None
+
+    if invalid_rows != 0:
+        raise ConfirmationError(
+            f"{label} invalid-prediction count differs from strict_metric semantics"
+        )
+    for metric in ("MAE", "RMSE", "NRMSE"):
+        value = metrics[metric]
+        if value is None or value < 0.0:
+            raise ConfirmationError(
+                f"{label} {metric} differs from strict_metric semantics"
+            )
+    mape = metrics["MAPE_pct"]
+    if mape is not None and mape < 0.0:
+        raise ConfirmationError(
+            f"{label} MAPE_pct differs from strict_metric semantics"
+        )
+
+    r2 = metrics["R2"]
+    if status == "constant_truth":
+        if r2 is not None:
+            raise ConfirmationError(
+                f"{label} R2 differs from constant-truth strict_metric semantics"
+            )
+        return None
+    if r2 is None or r2 > 1.0:
+        raise ConfirmationError(f"{label} R2 differs from ok strict_metric semantics")
+    return r2
+
+
+def _validate_violation_counts(
+    value: object,
+    expected_fields: set[str],
+    *,
+    label: str,
+) -> dict[str, int]:
+    mapping = _require_exact_fields(value, expected_fields, label=label)
+    result: dict[str, int] = {}
+    for key, raw in mapping.items():
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+            raise ConfirmationError(f"{label} contains an invalid violation count")
+        result[key] = raw
+    return result
+
+
+def _audit_evaluation(value: object, *, expected_rows: int, label: str) -> dict[str, Any]:
+    evaluation = _require_exact_fields(
+        value,
+        {
+            "rows",
+            "primary_metric_count",
+            "primary_complete",
+            "primary_min_r2",
+            "primary_avg_r2",
+            "voltage_r2",
+            "physical_validity",
+        },
+        label=label,
+    )
+    raw_rows = evaluation["rows"]
+    if not isinstance(raw_rows, list) or len(raw_rows) != 9:
+        raise ConfirmationError(f"{label} metric row coverage differs")
+    expected_targets = (
+        *diagnostic.PRIMARY_DIRECT,
+        *diagnostic.DERIVED_REQUESTED,
+        "output_phase_voltage_last_peak_abs_v",
+    )
+    metric_fields = {
+        "target",
+        "status",
+        "rows",
+        "invalid_prediction_rows",
+        "MAE",
+        "RMSE",
+        "MAPE_pct",
+        "R2",
+        "NRMSE",
+    }
+    primary_r2: list[float | None] = []
+    for index, (raw_row, expected_target) in enumerate(
+        zip(raw_rows, expected_targets, strict=True)
+    ):
+        expected_fields = set(metric_fields)
+        if index == len(expected_targets) - 1:
+            expected_fields.add("role")
+        row = _require_exact_fields(
+            raw_row,
+            expected_fields,
+            label=f"{label} metric row {index + 1}",
+        )
+        if row.get("target") != expected_target:
+            raise ConfirmationError(f"{label} metric target order differs")
+        if index == len(expected_targets) - 1 and row.get("role") != "auxiliary_voltage":
+            raise ConfirmationError(f"{label} voltage metric role differs")
+        status = row.get("status")
+        if status not in {"ok", "constant_truth", "invalid_prediction"}:
+            raise ConfirmationError(f"{label} metric status is invalid")
+        if (
+            isinstance(row.get("rows"), bool)
+            or not isinstance(row.get("rows"), int)
+            or row["rows"] != expected_rows
+        ):
+            raise ConfirmationError(f"{label} metric row count differs")
+        invalid_rows = row.get("invalid_prediction_rows")
+        if isinstance(invalid_rows, bool) or not isinstance(invalid_rows, int) or invalid_rows < 0:
+            raise ConfirmationError(f"{label} invalid-prediction count is invalid")
+        r2 = _audit_strict_metric_row(
+            row,
+            expected_rows=expected_rows,
+            label=f"{label} metric row {index + 1}",
+        )
+        if index < 8:
+            primary_r2.append(r2)
+    complete = len(primary_r2) == 8 and all(value is not None for value in primary_r2)
+    if evaluation.get("primary_metric_count") != 8 or evaluation.get("primary_complete") is not complete:
+        raise ConfirmationError(f"{label} primary metric completeness differs")
+    expected_min = min(value for value in primary_r2 if value is not None) if complete else None
+    expected_avg = (
+        sum(value for value in primary_r2 if value is not None) / len(primary_r2)
+        if complete
+        else None
+    )
+    if (
+        evaluation.get("primary_min_r2") != expected_min
+        or evaluation.get("primary_avg_r2") != expected_avg
+        or evaluation.get("voltage_r2") != raw_rows[-1].get("R2")
+    ):
+        raise ConfirmationError(f"{label} aggregate metrics differ from metric rows")
+
+    physical = _require_exact_fields(
+        evaluation.get("physical_validity"),
+        {"truth", "prediction", "passed"},
+        label=f"{label} physical validity",
+    )
+    expected_direct = {
+        *diagnostic.PRIMARY_DIRECT,
+        "output_phase_voltage_last_peak_abs_v",
+    }
+    expected_derived = {
+        "torque_nonpositive",
+        "core_negative",
+        "solid_negative",
+        "derived_invalid",
+    }
+    expected_cross = {"torque_max_below_avg"}
+    normalized_physics: dict[str, dict[str, dict[str, int]]] = {}
+    for scope in ("truth", "prediction"):
+        scope_value = _require_exact_fields(
+            physical.get(scope),
+            {"direct", "derived", "cross_target"},
+            label=f"{label} physical {scope}",
+        )
+        normalized_physics[scope] = {
+            "direct": _validate_violation_counts(
+                scope_value["direct"],
+                expected_direct,
+                label=f"{label} physical {scope} direct",
+            ),
+            "derived": _validate_violation_counts(
+                scope_value["derived"],
+                expected_derived,
+                label=f"{label} physical {scope} derived",
+            ),
+            "cross_target": _validate_violation_counts(
+                scope_value["cross_target"],
+                expected_cross,
+                label=f"{label} physical {scope} cross-target",
+            ),
+        }
+    if any(
+        count
+        for counts in normalized_physics["truth"].values()
+        for count in counts.values()
+    ):
+        raise ConfirmationError(f"{label} records nonphysical untouched ground truth")
+    predicted_valid = not any(
+        count
+        for counts in normalized_physics["prediction"].values()
+        for count in counts.values()
+    )
+    if not isinstance(physical.get("passed"), bool) or physical["passed"] is not predicted_valid:
+        raise ConfirmationError(f"{label} physical pass flag differs from violation counts")
+    return evaluation
+
+
+def _audit_completed_report(
+    paths: Mapping[str, Path],
+    context: Mapping[str, Any],
+    *,
+    lock_file_sha256: str,
+) -> dict[str, Any]:
+    raw_bytes, report = read_json_document(paths["output"])
+    if raw_bytes != _canonical_document_bytes(report):
+        raise ConfirmationError("existing confirmation report is not canonical JSON bytes")
+    _require_exact_fields(
+        report,
+        {
+            "schema_version",
+            "status",
+            "diagnostic_only",
+            "official_gate_eligible",
+            "production_eligible",
+            "selection_frozen_before_confirmation",
+            "historical_metadata_r2_compared",
+            "baseline_control_scope",
+            "confirmation_lock",
+            "provenance",
+            "test_evaluation",
+            "prepared_data_contract",
+            "selected_family_by_target",
+            "baseline_control",
+            "selected_families",
+            "summary",
+        },
+        label="confirmation report",
+    )
+    expected_flags = {
+        "schema_version": SCHEMA_VERSION,
+        "diagnostic_only": True,
+        "official_gate_eligible": False,
+        "production_eligible": False,
+        "selection_frozen_before_confirmation": True,
+        "historical_metadata_r2_compared": False,
+        "baseline_control_scope": "simultaneous_same_untouched_cohort",
+    }
+    for key, expected in expected_flags.items():
+        if report.get(key) != expected:
+            raise ConfirmationError(f"confirmation report field differs: {key}")
+    if report.get("status") not in {
+        "positive_confirmation",
+        "negative_confirmation",
+        "invalid",
+    }:
+        raise ConfirmationError("confirmation report status is invalid")
+    expected_lock_reference = {
+        "path": str(paths["lock_output"]),
+        "lock_sha256": context["lock_sha256"],
+        "file_sha256": lock_file_sha256,
+    }
+    if report.get("confirmation_lock") != expected_lock_reference:
+        raise ConfirmationError("confirmation report lock reference differs")
+    expected_provenance = {
+        "data_path": str(paths["data"]),
+        "data_sha256": context["lock_payload"]["data_sha256"],
+        "frozen_selection_manifest_path": str(paths["frozen_selection_manifest"]),
+        "frozen_selection_manifest_sha256": context["lock_payload"][
+            "frozen_selection_manifest_sha256"
+        ],
+        "frozen_selection_sha256": context["frozen"]["selection_sha256"],
+        "untouched_plan_manifest_path": str(paths["untouched_plan_manifest"]),
+        "untouched_plan_manifest_sha256": context["lock_payload"][
+            "untouched_plan_manifest_sha256"
+        ],
+        "audit_case_plan_path": str(paths["audit_case_plan"]),
+        "audit_case_plan_sha256": context["untouched"]["audit_case_plan_sha256"],
+        "confirmation_script_sha256": context["confirmation_script_sha256"],
+    }
+    if report.get("provenance") != expected_provenance:
+        raise ConfirmationError("confirmation report provenance differs from current inputs")
+    if report.get("test_evaluation") != context["expected_evaluation_contract"]:
+        raise ConfirmationError("confirmation report untouched evaluation contract differs")
+    expected_prepared = {
+        "case_rows": context["untouched"]["full_case_rows"],
+        "case_identity_sha256": context["untouched"]["full_case_identity_sha256"],
+        "split_group_ids_sha256": context["untouched"]["full_split_group_ids_sha256"],
+    }
+    if report.get("prepared_data_contract") != expected_prepared:
+        raise ConfirmationError("confirmation report prepared-data contract differs")
+    if report.get("selected_family_by_target") != context["frozen"][
+        "selected_family_by_target"
+    ]:
+        raise ConfirmationError("confirmation report selected-family mapping differs")
+    baseline = _audit_evaluation(
+        report.get("baseline_control"),
+        expected_rows=context["untouched"]["audit_rows"],
+        label="baseline confirmation",
+    )
+    selected = _audit_evaluation(
+        report.get("selected_families"),
+        expected_rows=context["untouched"]["audit_rows"],
+        label="selected-family confirmation",
+    )
+    if baseline["physical_validity"]["truth"] != selected["physical_validity"]["truth"]:
+        raise ConfirmationError("baseline and selected reports use different ground truth")
+    decision, family_gain = confirmation_decision(baseline, selected)
+    if report.get("status") != decision:
+        raise ConfirmationError("confirmation report status differs from the decision rule")
+    expected_summary = {
+        "decision_rule": DECISION_RULE,
+        "family_gain": family_gain,
+        "baseline_primary_min_r2": baseline["primary_min_r2"],
+        "baseline_primary_avg_r2": baseline["primary_avg_r2"],
+        "baseline_voltage_r2": baseline["voltage_r2"],
+        "selected_primary_min_r2": selected["primary_min_r2"],
+        "selected_primary_avg_r2": selected["primary_avg_r2"],
+        "selected_voltage_r2": selected["voltage_r2"],
+    }
+    if report.get("summary") != expected_summary:
+        raise ConfirmationError("confirmation report summary differs from its evaluations")
+    return report
+
+
+def _verify_prepublication_state(
+    paths: Mapping[str, Path],
+    original_context: Mapping[str, Any],
+) -> str:
+    refreshed = _build_confirmation_context(paths)
+    if (
+        refreshed["lock"] != original_context["lock"]
+        or _canonical_document_bytes(refreshed["lock"])
+        != _canonical_document_bytes(original_context["lock"])
+    ):
+        raise ConfirmationError("confirmation inputs changed after the lock was published")
+    return _validate_exact_lock(paths["lock_output"], refreshed["lock"])
+
+
+def run_confirmation(args: argparse.Namespace) -> dict[str, Any]:
+    paths = _confirmation_paths(args)
+    resume = bool(getattr(args, "resume", False))
+    if paths["lock_output"] == paths["output"]:
+        raise ConfirmationError("lock output and report output must differ")
+    lock_exists = paths["lock_output"].exists()
+    report_exists = paths["output"].exists()
+    if not resume and (lock_exists or report_exists):
+        raise ConfirmationError("lock output and report output must both be fresh paths")
+    if resume and report_exists and not lock_exists:
+        raise ConfirmationError("confirmation report exists without its lock")
+
+    context = _build_confirmation_context(paths)
+    if lock_exists:
+        lock_file_sha256 = _validate_exact_lock(paths["lock_output"], context["lock"])
+    else:
+        diagnostic._publish_report(paths["lock_output"], context["lock"])
+        lock_file_sha256 = _validate_exact_lock(paths["lock_output"], context["lock"])
+    if resume and paths["output"].exists():
+        return _audit_completed_report(
+            paths,
+            context,
+            lock_file_sha256=lock_file_sha256,
+        )
+
+    data_bytes = context["data_bytes"]
+    metadata = context["metadata"]
+    frozen_bytes = context["frozen_bytes"]
+    frozen = context["frozen"]
+    untouched_manifest_bytes = context["untouched_manifest_bytes"]
+    untouched = context["untouched"]
+    confirmation_script_sha256 = context["confirmation_script_sha256"]
+    lock_sha256 = context["lock_sha256"]
 
     with tempfile.TemporaryDirectory(prefix="ipmsm-untouched-confirm-") as temporary:
         temporary_root = Path(temporary)
@@ -560,6 +1011,8 @@ def run_confirmation(args: argparse.Namespace) -> dict[str, Any]:
         evaluation_contract = dict(evaluation_contract)
         evaluation_contract["case_plan"] = str(paths["audit_case_plan"])
         evaluation_contract["case_plan_sha256"] = untouched["audit_case_plan_sha256"]
+        if evaluation_contract != context["expected_evaluation_contract"]:
+            raise ConfirmationError("training evaluation contract differs from the locked cohort")
         if tuple(evaluation.test_group_ids) != tuple(untouched["untouched_group_ids"]):
             raise ConfirmationError("training evaluation groups differ from the locked untouched groups")
         targets = tuple((*prepared.output_columns, *prepared.auxiliary_output_columns))
@@ -673,8 +1126,15 @@ def run_confirmation(args: argparse.Namespace) -> dict[str, Any]:
             "selected_voltage_r2": selected_evaluation["voltage_r2"],
         },
     }
+    verified_lock_file_sha256 = _verify_prepublication_state(paths, context)
+    if verified_lock_file_sha256 != lock_file_sha256:
+        raise ConfirmationError("confirmation lock file identity changed before publication")
     diagnostic._publish_report(paths["output"], report)
-    return report
+    return _audit_completed_report(
+        paths,
+        context,
+        lock_file_sha256=lock_file_sha256,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -691,6 +1151,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lock-output", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--n-jobs", type=int, default=-1)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from an exact lock-only state or audit an already-complete report.",
+    )
     return parser
 
 
