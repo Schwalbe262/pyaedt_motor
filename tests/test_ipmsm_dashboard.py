@@ -311,6 +311,95 @@ class CheckpointTests(unittest.TestCase):
             )
 
 
+class TargetLoadProgressTests(unittest.TestCase):
+    def payload(self, *, status: str = "running", updated_at: str | None = None) -> dict[str, object]:
+        document: dict[str, object] = {
+            "schema_version": dashboard.TARGET_LOAD_PROGRESS_SCHEMA_VERSION,
+            "workflow_revision": "target-load-v4",
+            "updated_at": updated_at or datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "root_manifest_sha256": "1" * 64,
+            "identity_sha256": "2" * 64,
+            "counts": {
+                "candidates_total": 2,
+                "candidates_finalized": 1,
+                "candidates_failed": 0,
+                "probes_total": 12,
+                "probes_pending": 5,
+                "probes_running": 1,
+                "probes_matched": 6,
+                "probes_failed": 0,
+                "attempts_issued": 9,
+                "attempts_active": 1,
+                "observations_validated": 8,
+                "fixed_mtpa_validated": 1,
+            },
+            "scheduler_counts": {"queued": 0, "running": 1, "completed": 8, "failed": 0},
+            "candidate_summaries": [
+                {
+                    "candidate_id": "candidate-001",
+                    "status": "matched_and_beta_validated",
+                    "objective_active_volume_m3": 0.0012,
+                    "objective_cycle_efficiency": 0.963,
+                    "summary_sha256": "3" * 64,
+                    "private_path": "must-not-leak",
+                }
+            ],
+            "current_probe": {
+                "candidate_id": "candidate-002",
+                "operating_point_id": "rated_power",
+                "beta_validation_role": "local_lower",
+                "attempt_index": 2,
+                "dedupe_key": "must-not-leak",
+            },
+            "failure": None,
+        }
+        document["payload_sha256"] = dashboard._canonical_json_sha256(document)
+        return document
+
+    def test_reader_verifies_integrity_counts_and_allow_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "progress.json"
+            path.write_text(json.dumps(self.payload()), encoding="utf-8")
+            result = dashboard._read_target_load_progress(path)
+        self.assertTrue(result["available"])
+        self.assertEqual(result["integrity_status"], "verified")
+        self.assertEqual(result["counts"]["probes_matched"], 6)
+        self.assertNotIn("private_path", result["candidate_summaries"][0])
+        self.assertNotIn("dedupe_key", result["current_probe"])
+
+    def test_reader_rejects_rehashed_impossible_counts_and_detects_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "progress.json"
+            invalid = self.payload()
+            invalid["counts"]["probes_pending"] = 99
+            invalid["payload_sha256"] = dashboard._canonical_json_sha256(
+                {key: value for key, value in invalid.items() if key != "payload_sha256"}
+            )
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(dashboard.DashboardDataError, "do not sum"):
+                dashboard._read_target_load_progress(path)
+
+            false_complete = self.payload(status="complete")
+            false_complete["payload_sha256"] = dashboard._canonical_json_sha256(
+                {key: value for key, value in false_complete.items() if key != "payload_sha256"}
+            )
+            path.write_text(json.dumps(false_complete), encoding="utf-8")
+            with self.assertRaisesRegex(dashboard.DashboardDataError, "terminally consistent"):
+                dashboard._read_target_load_progress(path)
+
+            stale = self.payload(
+                updated_at=(datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+            )
+            path.write_text(json.dumps(stale), encoding="utf-8")
+            self.assertTrue(dashboard._read_target_load_progress(path)["stale"])
+
+    def test_absent_progress_is_a_safe_waiting_state(self) -> None:
+        result = dashboard._read_target_load_progress(Path("definitely-absent-progress.json"))
+        self.assertFalse(result["available"])
+        self.assertEqual(result["integrity_status"], "absent")
+
+
 class TimelineTests(unittest.TestCase):
     def base_args(self) -> dict[str, object]:
         return {
@@ -332,6 +421,7 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(by_id["stage2"]["status"], "complete")
         self.assertEqual(by_id["stage3"]["status"], "skipped")
         self.assertEqual(by_id["optimization"]["status"], "ready")
+        self.assertEqual(by_id["target_load"]["status"], "waiting")
 
     def test_stage2_failure_activates_stage3_only(self) -> None:
         args = self.base_args()
@@ -786,6 +876,44 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(result["stale"])
         self.assertTrue(any("identity" in item["message"] for item in result["alerts"]))
         self.assertTrue(any("cap 99" in item["message"] for item in result["alerts"]))
+
+    def test_target_load_stale_or_invalid_degrades_top_level_health(self) -> None:
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 100,
+            "cap": 100,
+            "project_matches": True,
+            "cap_matches": True,
+            "campaign_status": {},
+        }
+        for target_load in (
+            {"integrity_status": "verified", "stale": True},
+            {"integrity_status": "invalid", "stale": False},
+        ):
+            local = {
+                "campaign": {"elapsed_s": 1.0, "active": 100, "total": 700, "result_ok": 1},
+                "pipeline": {
+                    "current_stage": "stage1",
+                    "current_label": "Stage 1",
+                    "stages": [{"id": "stage1", "label": "Stage 1", "status": "running"}],
+                },
+                "model": {"available": False},
+                "beta": {"available": True},
+                "optimization": {"decision": None},
+                "speed": {"complete": False},
+                "target_load": target_load,
+                "processes": [{"role": "supervisor", "state": "alive"}],
+                "alerts": [],
+            }
+            store = dashboard.DashboardStateStore(
+                dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+                local_collector=lambda _, state=local: state,
+                scheduler_collector=lambda _: scheduler,
+            )
+            result = store.refresh_once(force_scheduler=True)
+            self.assertEqual(result["health"], "degraded")
+            self.assertTrue(result["stale"])
 
     def test_state_store_scheduler_refresh_is_single_writer_ttl_cached(self) -> None:
         local_calls = 0
@@ -1385,6 +1513,12 @@ class HttpTests(unittest.TestCase):
         self.assertIn('setText("liveLabel", paused ? "PAUSED"', app)
         self.assertIn('output_efficiency_last_pct: "효율"', app)
         self.assertNotIn("output_efficiency_last_avg_pct", app)
+        self.assertIn("function renderTargetLoad(data)", app)
+        index = (Path(server.__file__).resolve().parent / "dashboard" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('id="targetLoadProgress"', index)
+        self.assertIn('id="targetLoadCandidates"', index)
 
     def test_mutating_methods_and_path_traversal_are_rejected(self) -> None:
         self.connection.request("POST", "/api/status", body=b"{}")

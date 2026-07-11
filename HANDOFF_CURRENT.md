@@ -220,3 +220,8 @@
 - 2026-07-12 04:04 KST Stage1 remains healthy at 459/700, active=100/100, rate=36.38/h, ETA=6.6h, errors=0; official gate is still waiting.
 - Frozen v5 family selection plus the manifest-first untouched v3 cohort (8 geometries/48 rows) now have a one-shot hash-anchored confirmation runner; target-load current matching is hardened but remains intentionally unintegrated until the live v3 campaign finishes.
 - 2026-07-12 05:13 KST dashboard is deployed at `http://127.0.0.1:8765`: Stage1=473/700, active=100/100, rate=30.49/h, ETA=7.4h, project #2/cap match, errors=0; result-progress age, 30m/2h/6h stall gates, age-aware healthz, fetch timeout, and PAUSED/STALE states passed focused 49/49 and full 714/714.
+- 2026-07-12 06:11 KST dashboard PID 169940 is live at `http://127.0.0.1:8765`; Stage1=498/700 and Slurm active=100/100 with project #2 unchanged.
+- Dashboard timeline/card now covers target-load current matching, per-beta probes, fixed-current MTPA, and candidate volume/required-power efficiency via a hash-checked sidecar; absent sidecar truthfully renders upstream wait.
+- Target-load v4 freezes exact spec/Pareto/plan/beta/model/source documents, loads the real strict surrogate bundle, replays exact result bytes, and rejects rehashed root/result/MTPA evidence drift.
+- Constraint-aware matching now refines below an in-band voltage-failed point instead of prematurely declaring infeasible; focused 69/69 and shared `.venv` 728/728 pass.
+- Next: keep sealed Stage1 running to 700, execute the official 9-target R² gate/frozen-family confirmation, then create the v4 root/sidecar and run NSGA-II target-load FEA.

@@ -36,9 +36,41 @@ DEFAULT_CONTRACT = Path(
     "simul_log_smoke/beta_zero_recovery_26092_26093/"
     "foundation_pipeline_contract_v3.json"
 )
+DEFAULT_TARGET_LOAD_PROGRESS = Path(
+    "simul_log_smoke/beta_zero_recovery_26092_26093/"
+    "ipmsm_target_load_v4/progress.json"
+)
 DEFAULT_REFRESH_SECONDS = 5.0
 DEFAULT_SCHEDULER_REFRESH_SECONDS = 15.0
 DEFAULT_TIMEOUT_SECONDS = 3.0
+TARGET_LOAD_PROGRESS_SCHEMA_VERSION = "ipmsm-target-load-progress-v1"
+TARGET_LOAD_PROGRESS_STALE_SECONDS = 5 * 60.0
+TARGET_LOAD_COUNT_FIELDS = frozenset(
+    {
+        "candidates_total",
+        "candidates_finalized",
+        "candidates_failed",
+        "probes_total",
+        "probes_pending",
+        "probes_running",
+        "probes_matched",
+        "probes_failed",
+        "attempts_issued",
+        "attempts_active",
+        "observations_validated",
+        "fixed_mtpa_validated",
+    }
+)
+TARGET_LOAD_STATUSES = frozenset(
+    {
+        "waiting_for_surrogate_gate",
+        "waiting_for_optimization",
+        "root_frozen",
+        "running",
+        "complete",
+        "failed",
+    }
+)
 DECISION_AUDIT_CACHE_SECONDS = 300.0
 CONTRACT_AUDIT_CACHE_SECONDS = 300.0
 RESULT_PROGRESS_WARNING_SECONDS = 30 * 60.0
@@ -170,6 +202,17 @@ def _safe_float(value: Any) -> float | None:
 def _clip_text(value: Any, limit: int = 120) -> str:
     text = str(value or "").strip().replace("\r", " ").replace("\n", " ")
     return text[:limit]
+
+
+def _canonical_json_sha256(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _iso_timestamp(epoch: float | None = None) -> str:
@@ -924,6 +967,248 @@ def _speed_marker_is_complete(
         return False
 
 
+def _empty_target_load_state(*, integrity_status: str = "absent") -> dict[str, Any]:
+    return {
+        "available": False,
+        "integrity_status": integrity_status,
+        "status": "waiting_for_surrogate_gate",
+        "workflow_revision": "target-load-v4",
+        "counts": {field: 0 for field in sorted(TARGET_LOAD_COUNT_FIELDS)},
+        "scheduler_counts": {"queued": 0, "running": 0, "completed": 0, "failed": 0},
+        "candidate_summaries": [],
+        "current_probe": None,
+        "updated_at": "",
+        "stale": False,
+    }
+
+
+def _read_target_load_progress(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.is_file():
+        return _empty_target_load_state()
+    document = read_json_file(path, max_bytes=2 * 1024 * 1024)
+    required_fields = {
+        "schema_version",
+        "workflow_revision",
+        "updated_at",
+        "status",
+        "root_manifest_sha256",
+        "identity_sha256",
+        "counts",
+        "scheduler_counts",
+        "candidate_summaries",
+        "current_probe",
+        "failure",
+        "payload_sha256",
+    }
+    if set(document) != required_fields:
+        raise DashboardDataError("target-load progress fields differ from the v1 contract")
+    if document.get("schema_version") != TARGET_LOAD_PROGRESS_SCHEMA_VERSION:
+        raise DashboardDataError("target-load progress schema is invalid")
+    status = _clip_text(document.get("status"), 40)
+    if status not in TARGET_LOAD_STATUSES:
+        raise DashboardDataError("target-load progress status is invalid")
+    revision = _clip_text(document.get("workflow_revision"), 40)
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", revision):
+        raise DashboardDataError("target-load workflow revision is invalid")
+    claimed_sha = str(document.get("payload_sha256") or "")
+    unsigned = {key: value for key, value in document.items() if key != "payload_sha256"}
+    if not re.fullmatch(r"[0-9a-f]{64}", claimed_sha) or claimed_sha != _canonical_json_sha256(
+        unsigned
+    ):
+        raise DashboardDataError("target-load progress payload SHA256 is invalid")
+
+    raw_counts = document.get("counts")
+    if not isinstance(raw_counts, Mapping) or set(raw_counts) != TARGET_LOAD_COUNT_FIELDS:
+        raise DashboardDataError("target-load progress counts are incomplete")
+    counts: dict[str, int] = {}
+    for field in TARGET_LOAD_COUNT_FIELDS:
+        value = raw_counts[field]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise DashboardDataError(f"target-load count is invalid: {field}")
+        counts[field] = value
+    if counts["candidates_finalized"] + counts["candidates_failed"] > counts["candidates_total"]:
+        raise DashboardDataError("target-load candidate counts are impossible")
+    if sum(counts[field] for field in (
+        "probes_pending",
+        "probes_running",
+        "probes_matched",
+        "probes_failed",
+    )) != counts["probes_total"]:
+        raise DashboardDataError("target-load probe counts do not sum to probes_total")
+    if counts["attempts_active"] > counts["attempts_issued"]:
+        raise DashboardDataError("target-load active attempts exceed issued attempts")
+    if counts["observations_validated"] > counts["attempts_issued"]:
+        raise DashboardDataError("target-load observations exceed issued attempts")
+    if counts["fixed_mtpa_validated"] > counts["candidates_total"]:
+        raise DashboardDataError("target-load fixed-MTPA count exceeds candidates")
+
+    raw_scheduler = document.get("scheduler_counts")
+    scheduler_fields = {"queued", "running", "completed", "failed"}
+    if not isinstance(raw_scheduler, Mapping) or set(raw_scheduler) != scheduler_fields:
+        raise DashboardDataError("target-load scheduler counts are incomplete")
+    scheduler_counts: dict[str, int] = {}
+    for field in scheduler_fields:
+        value = raw_scheduler[field]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise DashboardDataError(f"target-load scheduler count is invalid: {field}")
+        scheduler_counts[field] = value
+
+    root_sha = str(document.get("root_manifest_sha256") or "")
+    identity_sha = str(document.get("identity_sha256") or "")
+    if status not in {"waiting_for_surrogate_gate", "waiting_for_optimization"} and (
+        not re.fullmatch(r"[0-9a-f]{64}", root_sha)
+        or not re.fullmatch(r"[0-9a-f]{64}", identity_sha)
+    ):
+        raise DashboardDataError("target-load root identity hashes are missing")
+    if root_sha and not re.fullmatch(r"[0-9a-f]{64}", root_sha):
+        raise DashboardDataError("target-load root manifest hash is invalid")
+    if identity_sha and not re.fullmatch(r"[0-9a-f]{64}", identity_sha):
+        raise DashboardDataError("target-load identity hash is invalid")
+
+    raw_candidates = document.get("candidate_summaries")
+    if not isinstance(raw_candidates, list) or len(raw_candidates) > counts["candidates_total"]:
+        raise DashboardDataError("target-load candidate summaries exceed candidate coverage")
+    candidate_summaries: list[dict[str, Any]] = []
+    seen_candidates: set[str] = set()
+    for raw in raw_candidates:
+        if not isinstance(raw, Mapping):
+            raise DashboardDataError("target-load candidate summary is invalid")
+        candidate_id = _clip_text(raw.get("candidate_id"), 80)
+        candidate_status = _clip_text(raw.get("status"), 40)
+        if not candidate_id or candidate_id in seen_candidates:
+            raise DashboardDataError("target-load candidate identity is empty or duplicate")
+        seen_candidates.add(candidate_id)
+        volume = _safe_float(raw.get("objective_active_volume_m3"))
+        efficiency = _safe_float(raw.get("objective_cycle_efficiency"))
+        summary_sha = str(raw.get("summary_sha256") or "")
+        if candidate_status != "matched_and_beta_validated":
+            raise DashboardDataError("target-load finalized candidate status is invalid")
+        if volume is None or volume <= 0.0:
+            raise DashboardDataError("target-load candidate volume is invalid")
+        if efficiency is None or not 0.0 <= efficiency <= 1.0:
+            raise DashboardDataError("target-load candidate efficiency is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", summary_sha):
+            raise DashboardDataError("target-load candidate summary SHA256 is invalid")
+        candidate_summaries.append(
+            {
+                "candidate_id": candidate_id,
+                "status": candidate_status,
+                "objective_active_volume_m3": volume,
+                "objective_cycle_efficiency": efficiency,
+                "summary_sha256": summary_sha,
+            }
+        )
+
+    raw_probe = document.get("current_probe")
+    current_probe = None
+    if raw_probe is not None:
+        if not isinstance(raw_probe, Mapping):
+            raise DashboardDataError("target-load current probe is invalid")
+        current_probe = {
+            "candidate_id": _clip_text(raw_probe.get("candidate_id"), 80),
+            "operating_point_id": _clip_text(raw_probe.get("operating_point_id"), 80),
+            "beta_validation_role": _clip_text(raw_probe.get("beta_validation_role"), 40),
+            "attempt_index": max(0, _safe_int(raw_probe.get("attempt_index"))),
+        }
+        if (
+            not current_probe["candidate_id"]
+            or not current_probe["operating_point_id"]
+            or current_probe["beta_validation_role"]
+            not in {"selected_center", "local_lower", "local_upper"}
+            or current_probe["attempt_index"] < 1
+        ):
+            raise DashboardDataError("target-load current probe fields are invalid")
+    failure = document.get("failure")
+    sanitized_failure = None
+    if failure is not None:
+        if not isinstance(failure, Mapping):
+            raise DashboardDataError("target-load failure is invalid")
+        sanitized_failure = {
+            "code": _clip_text(failure.get("code"), 50),
+            "message": _clip_text(failure.get("message"), 160),
+        }
+        if not sanitized_failure["code"] or not sanitized_failure["message"]:
+            raise DashboardDataError("target-load failure fields are empty")
+    if len(candidate_summaries) != counts["candidates_finalized"]:
+        raise DashboardDataError("target-load finalized count differs from candidate summaries")
+    if counts["fixed_mtpa_validated"] < counts["candidates_finalized"]:
+        raise DashboardDataError("target-load finalized candidate lacks fixed-MTPA evidence")
+    if status in {"waiting_for_surrogate_gate", "waiting_for_optimization"}:
+        if (
+            any(counts.values())
+            or any(scheduler_counts.values())
+            or candidate_summaries
+            or current_probe is not None
+            or sanitized_failure is not None
+            or root_sha
+            or identity_sha
+        ):
+            raise DashboardDataError("target-load waiting status contains started work")
+    elif status == "root_frozen":
+        if (
+            counts["candidates_total"] < 1
+            or counts["probes_total"] < 1
+            or counts["probes_pending"] != counts["probes_total"]
+            or any(
+                counts[field]
+                for field in TARGET_LOAD_COUNT_FIELDS
+                if field not in {"candidates_total", "probes_total", "probes_pending"}
+            )
+            or any(scheduler_counts.values())
+            or current_probe is not None
+            or sanitized_failure is not None
+        ):
+            raise DashboardDataError("target-load root_frozen counts are impossible")
+    elif status == "running":
+        if counts["candidates_total"] < 1 or counts["probes_total"] < 1:
+            raise DashboardDataError("target-load running status has no frozen work")
+    elif status == "complete":
+        if (
+            counts["candidates_total"] < 1
+            or counts["candidates_finalized"] != counts["candidates_total"]
+            or counts["candidates_failed"] != 0
+            or counts["probes_total"] < 1
+            or counts["probes_matched"] != counts["probes_total"]
+            or any(counts[field] for field in ("probes_pending", "probes_running", "probes_failed"))
+            or counts["attempts_active"] != 0
+            or counts["fixed_mtpa_validated"] != counts["candidates_total"]
+            or scheduler_counts["queued"] != 0
+            or scheduler_counts["running"] != 0
+            or scheduler_counts["failed"] != 0
+            or current_probe is not None
+            or sanitized_failure is not None
+        ):
+            raise DashboardDataError("target-load complete status is not terminally consistent")
+    elif status == "failed" and (
+        sanitized_failure is None
+        and counts["candidates_failed"] == 0
+        and counts["probes_failed"] == 0
+        and scheduler_counts["failed"] == 0
+    ):
+        raise DashboardDataError("target-load failed status has no failure evidence")
+    updated = _parse_scheduler_time(document.get("updated_at"))
+    if updated is None:
+        raise DashboardDataError("target-load updated_at is invalid")
+    age_seconds = max(0.0, (datetime.now(timezone.utc) - updated).total_seconds())
+    stale = status in {"root_frozen", "running"} and age_seconds > TARGET_LOAD_PROGRESS_STALE_SECONDS
+    return {
+        "available": True,
+        "integrity_status": "verified",
+        "status": status,
+        "workflow_revision": revision,
+        "root_manifest_sha256": root_sha,
+        "identity_sha256": identity_sha,
+        "counts": counts,
+        "scheduler_counts": scheduler_counts,
+        "candidate_summaries": candidate_summaries,
+        "current_probe": current_probe,
+        "failure": sanitized_failure,
+        "updated_at": updated.isoformat(),
+        "age_seconds": age_seconds,
+        "stale": stale,
+    }
+
+
 @dataclass(frozen=True)
 class DashboardConfig:
     workdir: Path
@@ -933,6 +1218,7 @@ class DashboardConfig:
     cap: int = 100
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     runner_log: Path | None = None
+    target_load_progress: Path | None = None
 
 
 def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1126,6 +1412,12 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         "marker_status": "verified" if speed_complete else "invalid" if speed_marker.is_file() else "absent",
         "task_prefix": _argv_value(speed_campaign_argv, "--task-prefix"),
     }
+    target_load_error = ""
+    try:
+        target_load_state = _read_target_load_progress(config.target_load_progress)
+    except DashboardDataError as exc:
+        target_load_state = _empty_target_load_state(integrity_status="invalid")
+        target_load_error = _clip_text(exc, 160)
 
     stages = build_stage_timeline(
         beta=beta,
@@ -1135,6 +1427,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         stage3_decision=stage3_decision,
         optimization=optimization_state,
         speed=speed_state,
+        target_load=target_load_state,
     )
     current = select_current_stage(stages)
 
@@ -1161,6 +1454,10 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         )
     if speed_state.get("marker_status") == "invalid":
         alerts.append({"level": "warning", "message": "속도 검증 완료 marker 또는 artifact hash가 유효하지 않습니다."})
+    if target_load_error:
+        alerts.append({"level": "warning", "message": f"Target-load 진행 파일 검증 실패: {target_load_error}"})
+    elif target_load_state.get("stale"):
+        alerts.append({"level": "warning", "message": "Target-load 진행 파일이 5분 이상 갱신되지 않았습니다."})
     return {
         "campaign": campaign,
         "pipeline": {"current_stage": current["id"], "current_label": current["label"], "stages": stages},
@@ -1169,6 +1466,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         "optimization": optimization_state,
         "checkpoint_execution": checkpoint_execution,
         "speed": speed_state,
+        "target_load": target_load_state,
         "processes": processes,
         "alerts": alerts,
     }
@@ -1183,6 +1481,7 @@ def build_stage_timeline(
     stage3_decision: Mapping[str, Any] | None,
     optimization: Mapping[str, Any],
     speed: Mapping[str, Any],
+    target_load: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     beta_status = "complete" if beta.get("passed") else "failed" if beta.get("available") else "unavailable"
     campaign_complete = _safe_int(campaign.get("result_ok")) >= _safe_int(campaign.get("total"), 1)
@@ -1269,6 +1568,37 @@ def build_stage_timeline(
         speed_status = "ready" if optimization_status == "complete" else "waiting"
         speed_detail = "Pareto FEA 이후 cap-직렬 실행"
 
+    target_load_state = target_load or {}
+    target_load_raw_status = str(target_load_state.get("status") or "")
+    target_load_counts = (
+        target_load_state.get("counts")
+        if isinstance(target_load_state.get("counts"), Mapping)
+        else {}
+    )
+    if target_load_raw_status == "complete":
+        target_load_status = "complete"
+        target_load_detail = (
+            f"후보 {_safe_int(target_load_counts.get('candidates_finalized'))}개 최종 검증 완료"
+        )
+    elif target_load_raw_status in {"root_frozen", "running"}:
+        target_load_status = "running"
+        target_load_detail = (
+            f"β별 target-load {_safe_int(target_load_counts.get('probes_matched'))} / "
+            f"{_safe_int(target_load_counts.get('probes_total'))} probe 매칭"
+        )
+    elif target_load_raw_status == "failed":
+        target_load_status = "failed"
+        target_load_detail = "Target-load 또는 fixed-current β 검증 실패"
+    elif target_load_raw_status == "waiting_for_optimization":
+        target_load_status = "waiting"
+        target_load_detail = "Pareto 후보 확정 대기"
+    elif optimization_status == "complete" and speed_status == "complete":
+        target_load_status = "ready"
+        target_load_detail = "v4 progress root 생성 준비"
+    else:
+        target_load_status = "waiting"
+        target_load_detail = "R² gate · Pareto · 속도 검증 이후 실행"
+
     return [
         {"id": "beta", "label": "물리 β 보정", "status": beta_status, "detail": "역기전력 영점 + loaded MTPA"},
         {
@@ -1283,6 +1613,12 @@ def build_stage_timeline(
         {"id": "stage3", "label": "Stage 3 적응 DOE", "status": stage3_status, "detail": stage3_detail},
         {"id": "optimization", "label": "NSGA-II + Pareto FEA", "status": optimization_status, "detail": optimization_detail},
         {"id": "speed", "label": "속도 프로파일 검증", "status": speed_status, "detail": speed_detail},
+        {
+            "id": "target_load",
+            "label": "Target-load + β-neighbor FEA",
+            "status": target_load_status,
+            "detail": target_load_detail,
+        },
     ]
 
 
@@ -1939,6 +2275,10 @@ class DashboardStateStore:
             )
         )
         result_count_regressed = bool(local.get("campaign", {}).get("result_count_regressed"))
+        target_load_integrity_invalid = (
+            local.get("target_load", {}).get("integrity_status") == "invalid"
+        )
+        target_load_stale = bool(local.get("target_load", {}).get("stale"))
         local.setdefault("campaign", {})["result_progress_stalled"] = result_progress_stalled
         stale = bool(
             errors
@@ -1951,6 +2291,8 @@ class DashboardStateStore:
             or heartbeat_stalled
             or result_progress_stalled
             or result_count_regressed
+            or target_load_integrity_invalid
+            or target_load_stale
             or (scheduler_active == 0 and campaign_status_stale and not automation_alive)
         )
         if not project_identity_ok:

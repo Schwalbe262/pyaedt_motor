@@ -405,6 +405,67 @@ function renderPhysics(data) {
   }
 }
 
+function renderTargetLoad(data) {
+  const targetLoad = data.target_load || {};
+  const counts = targetLoad.counts || {};
+  const rawStatus = targetLoad.status || "waiting_for_surrogate_gate";
+  const labels = {
+    waiting_for_surrogate_gate: "R² gate 대기",
+    waiting_for_optimization: "Pareto 대기",
+    root_frozen: "root 확정",
+    running: "FEA 실행 중",
+    complete: "최종 검증 완료",
+    failed: "검증 실패",
+  };
+  const gate = byId("targetLoadGate");
+  gate.textContent = targetLoad.integrity_status === "invalid"
+    ? "진행 파일 오류"
+    : labels[rawStatus] || "상태 확인";
+  gate.className = `health-pill ${rawStatus === "complete" ? "complete" : rawStatus === "failed" || targetLoad.integrity_status === "invalid" ? "failed" : "warning"}`;
+
+  const candidatesTotal = integer(counts.candidates_total);
+  const candidatesFinalized = integer(counts.candidates_finalized);
+  const probesTotal = integer(counts.probes_total);
+  const probesMatched = integer(counts.probes_matched);
+  setText("targetLoadCandidateCount", `${candidatesFinalized} / ${candidatesTotal}`);
+  setText("targetLoadProbeCount", `${probesMatched} / ${probesTotal}`);
+  setText("targetLoadAttemptCount", `${integer(counts.attempts_issued)} 발행 · ${integer(counts.attempts_active)} 활성`);
+  setText("targetLoadMtpaCount", `${integer(counts.fixed_mtpa_validated)} 검증`);
+  const progress = byId("targetLoadProgress");
+  progress.max = Math.max(1, probesTotal || candidatesTotal);
+  progress.value = probesTotal ? Math.min(probesTotal, probesMatched) : Math.min(candidatesTotal, candidatesFinalized);
+
+  const current = targetLoad.current_probe;
+  if (current && current.candidate_id) {
+    setText(
+      "targetLoadCurrent",
+      `${current.candidate_id} · ${current.operating_point_id || "운전점"} · ${current.beta_validation_role || "β"} · attempt ${integer(current.attempt_index)}`,
+    );
+  } else if (targetLoad.available) {
+    setText("targetLoadCurrent", `v4 ${targetLoad.workflow_revision || ""} · ${targetLoad.stale ? "갱신 지연" : "진행 파일 검증됨"}`);
+  } else {
+    setText("targetLoadCurrent", "R² gate·Pareto·속도 검증 후 v4 progress root를 생성합니다.");
+  }
+
+  const container = byId("targetLoadCandidates");
+  empty(container);
+  const candidates = Array.isArray(targetLoad.candidate_summaries)
+    ? targetLoad.candidate_summaries.slice(0, 5)
+    : [];
+  candidates.forEach((candidate) => {
+    const row = element("div", "target-load-candidate");
+    row.appendChild(element("strong", "", candidate.candidate_id || "candidate"));
+    const volumeCm3 = finite(candidate.objective_active_volume_m3)
+      ? candidate.objective_active_volume_m3 * 1e6
+      : null;
+    row.appendChild(element("span", "", finite(volumeCm3) ? `${volumeCm3.toFixed(1)} cm³` : "부피 —"));
+    row.appendChild(element("span", "", finite(candidate.objective_cycle_efficiency)
+      ? `${(candidate.objective_cycle_efficiency * 100).toFixed(2)}%`
+      : candidate.status || "대기"));
+    container.appendChild(row);
+  });
+}
+
 function renderProcesses(data) {
   const processes = Array.isArray(data.processes) ? data.processes : [];
   const grid = byId("processGrid");
@@ -502,6 +563,7 @@ function render(data) {
   renderCheckpoint(data);
   renderModel(data);
   renderPhysics(data);
+  renderTargetLoad(data);
   renderProcesses(data);
   renderTasks(data);
 }

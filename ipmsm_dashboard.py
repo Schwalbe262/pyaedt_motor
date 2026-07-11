@@ -19,6 +19,7 @@ from ipmsm_dashboard_state import (
     DEFAULT_SCHEDULER_REFRESH_SECONDS,
     DEFAULT_SCHEDULER_URL,
     DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_TARGET_LOAD_PROGRESS,
     DashboardConfig,
     DashboardStateStore,
 )
@@ -175,6 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workdir", type=Path, default=Path.cwd())
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--runner-log", type=Path)
+    parser.add_argument("--target-load-progress", type=Path, default=DEFAULT_TARGET_LOAD_PROGRESS)
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--scheduler-url", default=DEFAULT_SCHEDULER_URL)
     parser.add_argument("--project-active-cap", type=int, default=100)
@@ -207,6 +209,9 @@ def _resolved_config(args: argparse.Namespace) -> DashboardConfig:
     runner_log = args.runner_log
     if runner_log is not None and not runner_log.is_absolute():
         runner_log = workdir / runner_log
+    target_load_progress = args.target_load_progress
+    if target_load_progress is not None and not target_load_progress.is_absolute():
+        target_load_progress = workdir / target_load_progress
     return DashboardConfig(
         workdir=workdir,
         contract_path=contract.resolve(strict=True),
@@ -215,6 +220,7 @@ def _resolved_config(args: argparse.Namespace) -> DashboardConfig:
         cap=args.project_active_cap,
         timeout_seconds=args.timeout_seconds,
         runner_log=runner_log,
+        target_load_progress=target_load_progress.resolve(strict=False) if target_load_progress else None,
     )
 
 

@@ -199,6 +199,21 @@
             <p class="constraint-note" id="constraintNote">두 목표는 PPT 수치 불일치 때문에 서로 독립된 운전점 제약으로 평가됩니다.</p>
             <div class="objective-row"><span>OBJECTIVES</span><b>부피 ↓</b><b>효율 ↑</b></div>
             <div class="nsga-progress" id="nsgaProgress" aria-label="NSGA-II seed 진행률"></div>
+            <div class="target-load-brief" aria-labelledby="targetLoadTitle">
+              <div class="target-load-heading">
+                <h3 id="targetLoadTitle">Target-load + β-neighbor FEA</h3>
+                <span class="health-pill warning" id="targetLoadGate">상위 단계 대기</span>
+              </div>
+              <div class="target-load-counts">
+                <div><span>후보</span><strong id="targetLoadCandidateCount">0 / 0</strong></div>
+                <div><span>β probe</span><strong id="targetLoadProbeCount">0 / 0</strong></div>
+                <div><span>FEA attempt</span><strong id="targetLoadAttemptCount">0</strong></div>
+                <div><span>fixed-current MTPA</span><strong id="targetLoadMtpaCount">0</strong></div>
+              </div>
+              <progress id="targetLoadProgress" max="1" value="0" aria-label="Target-load β probe 진행률"></progress>
+              <p id="targetLoadCurrent">R² gate와 Pareto 후보 확정 후 시작합니다.</p>
+              <div class="target-load-candidates" id="targetLoadCandidates"></div>
+            </div>
           </div>
         </section>
 

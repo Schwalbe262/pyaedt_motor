@@ -3702,3 +3702,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: focused 49/49 and full 714/714 passed; dashboard PID 216488→208424 while pipeline PID 75444 stayed unchanged; live Stage1=473/700, active=100/100, rate=30.49/h, ETA=7.4h, project #2/cap match, health ok, errors=0.
 - Failure/next: in-app browser was unavailable, so validation used live HTTP/API, JS syntax, DOM/static contracts, and independent read-only reviews; continue sealed Stage1 to the official 700-row gate.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-12 06:03:00 +09:00 - Target-load v4 contract and full-progress Web UI
+- Part/goal: expose the complete Stage1→R²→NSGA/speed→target-load/β/volume-efficiency workflow and harden the next optimization revision without mutating live v3 artifacts.
+- Hypothesis/actions: added a hash-checked target-load sidecar reader/UI, exact source/root reconstruction, production surrogate-bundle loading, exact CSV observation/MTPA replay, evidence receipts, independent per-β current histories, and voltage-failed lower-edge refinement.
+- Candidates/options: preserved immutable v3 and used an optional v4 sidecar; rejected embedding target-load keys into the sealed pipeline contract and rejected caller-supplied metric/hash evidence.
+- Metrics/result: focused 69/69 and shared `.venv` 728/728 pass; dashboard PID 169940 serves HTTP 200/CSP with Stage1=498/700, active=100/100, target-load=`waiting_for_surrogate_gate`, and pipeline PID 75444 unchanged.
+- Failure/next: in-app browser was unavailable and the v4 sidecar is correctly absent until upstream artifacts exist; finish Stage1 official gate/frozen-family confirmation, then freeze v4 root and execute target-load Pareto FEA.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

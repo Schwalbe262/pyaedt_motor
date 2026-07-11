@@ -783,3 +783,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: committed v5/v3 SHA anchors, LF-stable hashed sources, read-once inputs, manifest-first cohort publication, lock-before-prediction, exact 700-row identity/split checks, frozen family mapping, and an untouched same-cohort LightGBM control make the one-shot decision fail closed.
 - Evidence: the real frozen artifacts validate at 8 geometries/48 rows; mutation/order/identity/physics tests and two independent audits pass, with focused 45/45 and full 695/695 suites green.
 - Remaining risk: statistical confirmation still awaits all 700 sealed Stage1 results; a negative result must not trigger reuse of these 48 rows for another confirmation choice.
+
+## 2026-07-12 06:11:00 +09:00 - Insight 86
+- Source loop: `note.md` target-load v4 contract and full-progress Web UI.
+- Improvement: sequential FEA evidence must carry exact result bytes and runtime source bytes, then reconstruct every derived metric, history decision, and terminal status instead of trusting caller-supplied hashes or counters.
+- Before: rehashed observation metrics/root fields and stale source claims could alter target-load loss, feasibility, coverage, or the next proposed current; a sidecar could also claim complete with active work remaining.
+- After: canonical base64 result replay, exact spec/Pareto/plan/model/beta/source reconstruction, production bundle loading, runtime-source equality, terminal count invariants, and stale/invalid health propagation close those gaps.
+- Evidence: tamper/fuzz/independent-review regressions pass; focused 69/69 and shared `.venv` 728/728 are green, and live health/API/static readback is clean.
+- Remaining risk: the v4 coordinator/sidecar does not run until the sealed Stage1 gate and production Pareto artifacts exist; browser-level screenshot regression remains unavailable in this session.
