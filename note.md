@@ -3695,3 +3695,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: actual v5/v3 hashes validate, untouched=48 rows/8 groups, matcher fuzz=100,000 histories with 0 scale/bound/duplicate violations, focused=45/45 and full=695/695 tests; independent final audits found no P0/P1. Live Stage1=459/700, active=100/100, ETA=6.6h, errors=0.
 - Failure/next: confirmation cannot run before the sealed 700-row dataset exists, and matcher is not integrated into immutable v3 optimization code; finish Stage1 official gate, then run one-shot untouched confirmation and integrate sequential per-beta current attempts through a new revision.
 - Token usage: unavailable; `codex_ops.py` has no local Codex SQLite database.
+
+## 2026-07-12 05:13:13 +09:00 - Overall-progress dashboard stall hardening
+- Part/goal: deploy a trustworthy read-only Web UI for Stage1, scheduler, R² gates, β, NSGA-II, Pareto FEA, and speed validation.
+- Actions: separated runner heartbeat from result-count progress; reconstructed last increase from bounded log history; scoped grace to canonical successful Stage1 tasks; added 30m warning, 2h no-completion stall, 6h hard stall, age-aware healthz, fetch timeout, PAUSED/STALE rendering, and operating docs.
+- Metrics/result: focused 49/49 and full 714/714 passed; dashboard PID 216488→208424 while pipeline PID 75444 stayed unchanged; live Stage1=473/700, active=100/100, rate=30.49/h, ETA=7.4h, project #2/cap match, health ok, errors=0.
+- Failure/next: in-app browser was unavailable, so validation used live HTTP/API, JS syntax, DOM/static contracts, and independent read-only reviews; continue sealed Stage1 to the official 700-row gate.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

@@ -311,3 +311,23 @@ torque 2%, core/solid loss 5%, total loss 3%, Ld/Lq 3%, torque ripple 5 percenta
 points, efficiency 1.5 points의 p90 오차와 runtime ratio 1.2 이하, complete group rate
 0.95 이상이다. `rank_ipmsm_quality_profiles.py --fail-if-no-production-candidate`가
 통과하기 전에는 v2 ground truth profile을 더 빠른 profile로 바꾸지 않는다.
+
+## 7. 진행상황 WEB UI
+
+대시보드는 scheduler와 로컬 산출물을 읽기만 하며 task 제출·취소 기능은 제공하지 않는다.
+
+```powershell
+.\run_ipmsm_dashboard.ps1
+Start-Process 'http://127.0.0.1:8765/'
+Invoke-RestMethod 'http://127.0.0.1:8765/api/healthz'
+```
+
+화면은 10초마다 Stage 1/2/3, 공식 R² gate, β 보정, NSGA-II, Pareto FEA,
+speed 검증, scheduler project/cap을 갱신한다. `결과 증가` 시각은 runner heartbeat와
+별도로 계산된다. 30분 동안 검증 완료 수가 증가하지 않으면 경고하고, 2시간 동안
+scheduler 완료도 없거나 완료 수 자체가 6시간 동안 증가하지 않으면 정체로 표시한다.
+상태 수집 스레드 또는 snapshot이 멈추면 `/api/healthz`는 HTTP 503을 반환하고
+브라우저는 `STALE`로 바뀐다.
+
+Windows Scheduled Task가 `IgnoreNew`로 실행 중일 때 반복 trigger의 `0x800710E0`은
+기존 장기 실행 인스턴스를 유지했다는 뜻이며, 그 값만으로 장애로 판정하지 않는다.

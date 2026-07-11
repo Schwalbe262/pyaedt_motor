@@ -114,9 +114,9 @@ def make_handler(store: DashboardStateStore, static_dir: Path) -> type[BaseHTTPR
                 )
                 return
             if decoded_path == "/api/healthz":
-                payload = b'{"status":"ok"}'
+                healthy, payload = store.health_snapshot()
                 self._send_bytes(
-                    HTTPStatus.OK,
+                    HTTPStatus.OK if healthy else HTTPStatus.SERVICE_UNAVAILABLE,
                     payload,
                     "application/json; charset=utf-8",
                     head_only=head_only,

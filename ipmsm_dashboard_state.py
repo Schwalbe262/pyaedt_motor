@@ -41,6 +41,9 @@ DEFAULT_SCHEDULER_REFRESH_SECONDS = 15.0
 DEFAULT_TIMEOUT_SECONDS = 3.0
 DECISION_AUDIT_CACHE_SECONDS = 300.0
 CONTRACT_AUDIT_CACHE_SECONDS = 300.0
+RESULT_PROGRESS_WARNING_SECONDS = 30 * 60.0
+RESULT_PROGRESS_STALLED_SECONDS = 2 * 60 * 60.0
+RESULT_PROGRESS_HARD_STALLED_SECONDS = 6 * 60 * 60.0
 MAX_TAIL_BYTES = 128 * 1024
 MAX_JSON_BYTES = 16 * 1024 * 1024
 ACTIVE_STATUSES = frozenset({"queued", "attaching", "running"})
@@ -52,6 +55,9 @@ TASK_PREFIXES = {
     "pareto": "ipmsm-v2-pareto-fea-",
     "speed": "ipmsm-profile-thirdpass-speed-strict-v2-v1-",
 }
+STAGE1_TASK_NAME_RE = re.compile(
+    r"^ipmsm-v2-foundation-s1-v2s1_\d{4}_(?:rated_torque|rated_power_at_max_speed)_\d{2}$"
+)
 
 STATUS_RE = re.compile(
     r"^run_ipmsm_v2 "
@@ -251,6 +257,18 @@ def parse_campaign_log(path: Path, *, total_cases: int, cap: int) -> dict[str, A
     ):
         segment_start -= 1
     latest_segment = samples[segment_start:]
+    transition_index: int | None = None
+    for index in range(len(latest_segment) - 1, 0, -1):
+        if (
+            latest_segment[index]["result_ok"] == current["result_ok"]
+            and latest_segment[index - 1]["result_ok"] < current["result_ok"]
+        ):
+            transition_index = index
+            break
+    progress_anchor = latest_segment[transition_index or 0]
+    result_progress_log_age = max(0.0, latest_elapsed - progress_anchor["elapsed_s"])
+    if any(row["result_ok"] > current["result_ok"] for row in samples[:-1]):
+        warnings.append("Stage 1 검증 완료 수가 runner 로그에서 감소했습니다.")
     window = [
         row for row in latest_segment if latest_elapsed - row["elapsed_s"] <= 6 * 3600
     ]
@@ -275,6 +293,9 @@ def parse_campaign_log(path: Path, *, total_cases: int, cap: int) -> dict[str, A
             "completion_rate_per_hour": round(rate, 2),
             "eta_hours": round(eta_hours, 1) if eta_hours is not None else None,
             "settling_results": settling,
+            "result_progress_log_age_seconds": round(result_progress_log_age, 1),
+            "result_progress_log_transition_verified": transition_index is not None,
+            "result_progress_log_age_lower_bound": transition_index is None,
             "log_updated_at": _iso_timestamp(modified) if modified else "",
             "log_age_seconds": round(max(0.0, time.time() - modified), 1) if modified else None,
             "source_file": path.name,
@@ -1581,13 +1602,39 @@ def summarize_scheduler(
     ]
     completed_last_hour = sum(1 for value in completed_times if value >= now - timedelta(hours=1))
     campaign_status: dict[str, dict[str, int]] = {}
+    campaign_completed_last_hour: dict[str, int] = {}
+    campaign_last_completed_at: dict[str, str] = {}
     for stage, prefix in TASK_PREFIXES.items():
-        counts = Counter(
-            _clip_text(item.get("status"), 30).lower() or "unknown"
+        stage_tasks = [
+            item
             for item in clean_tasks
             if _clip_text(item.get("name"), 140).startswith(prefix)
+        ]
+        counts = Counter(
+            _clip_text(item.get("status"), 30).lower() or "unknown"
+            for item in stage_tasks
         )
         campaign_status[stage] = dict(sorted(counts.items()))
+        successful_stage_tasks = [
+            item
+            for item in stage_tasks
+            if _clip_text(item.get("status"), 20).lower() == "completed"
+            and _safe_int(item.get("exit_code"), -1) == 0
+            and (
+                stage != "stage1"
+                or STAGE1_TASK_NAME_RE.fullmatch(_clip_text(item.get("name"), 140)) is not None
+            )
+        ]
+        stage_completed_times = [
+            value
+            for item in successful_stage_tasks
+            if (value := _parse_scheduler_time(item.get("finished_at"))) is not None
+        ]
+        campaign_completed_last_hour[stage] = sum(
+            1 for value in stage_completed_times if value >= now - timedelta(hours=1)
+        )
+        if stage_completed_times:
+            campaign_last_completed_at[stage] = _iso_timestamp(max(stage_completed_times).timestamp())
     return {
         "reachable": True,
         "stale": False,
@@ -1608,6 +1655,8 @@ def summarize_scheduler(
         "status_counts": dict(sorted(status_counts.items())),
         "completed_last_hour": completed_last_hour,
         "campaign_status": campaign_status,
+        "campaign_completed_last_hour": campaign_completed_last_hour,
+        "campaign_last_completed_at": campaign_last_completed_at,
         "nodes": node_rows,
         "recent_tasks": recent,
         "updated_at": _iso_timestamp(),
@@ -1690,6 +1739,13 @@ class DashboardStateStore:
         self._campaign_observed_monotonic = 0.0
         self._campaign_observed_at = ""
         self._campaign_freshness_verified = False
+        self._campaign_result_ok: int | None = None
+        self._campaign_result_high_water = 0
+        self._campaign_result_changed_monotonic = 0.0
+        self._campaign_result_changed_at = ""
+        self._campaign_result_progress_verified = False
+        self._last_publish_monotonic = 0.0
+        self._last_snapshot_healthy = False
 
     def refresh_once(self, *, force_scheduler: bool = False) -> dict[str, Any]:
         errors: list[dict[str, str]] = []
@@ -1750,6 +1806,42 @@ class DashboardStateStore:
                 local.setdefault("alerts", []).append(
                     {"level": "info", "message": "Stage 1 정확한 진행 수의 다음 heartbeat를 기다리고 있습니다."}
                 )
+
+            result_ok = _safe_int(campaign.get("result_ok"))
+            if self._campaign_result_ok is None:
+                initial_progress_age = max(
+                    0.0,
+                    _safe_float(campaign.get("result_progress_log_age_seconds")) or 0.0,
+                )
+                self._campaign_result_ok = result_ok
+                self._campaign_result_high_water = result_ok
+                self._campaign_result_changed_monotonic = now - initial_progress_age
+                self._campaign_result_changed_at = _iso_timestamp(time.time() - initial_progress_age)
+                self._campaign_result_progress_verified = bool(
+                    campaign.get("result_progress_log_transition_verified")
+                )
+            else:
+                if result_ok > self._campaign_result_ok:
+                    self._campaign_result_changed_monotonic = now
+                    self._campaign_result_changed_at = _iso_timestamp()
+                    self._campaign_result_progress_verified = True
+                self._campaign_result_ok = result_ok
+                self._campaign_result_high_water = max(self._campaign_result_high_water, result_ok)
+            progress_age = max(0.0, now - self._campaign_result_changed_monotonic)
+            result_count_regressed = result_ok < self._campaign_result_high_water
+            progress_incomplete = result_ok < _safe_int(campaign.get("total"), 1)
+            progress_delayed = bool(
+                progress_incomplete
+                and progress_age > RESULT_PROGRESS_WARNING_SECONDS
+            )
+            campaign.update(
+                result_progress_observed_at=self._campaign_result_changed_at,
+                result_progress_age_seconds=round(progress_age, 1),
+                result_progress_freshness_verified=self._campaign_result_progress_verified,
+                result_progress_delayed=progress_delayed,
+                result_progress_stalled=False,
+                result_count_regressed=result_count_regressed,
+            )
         if local_ok:
             local["stale"] = False
             self._last_local = copy.deepcopy(local)
@@ -1820,11 +1912,34 @@ class DashboardStateStore:
         )
         campaign_status_stale = bool(local.get("campaign", {}).get("status_stale"))
         campaign_status_age = _safe_float(local.get("campaign", {}).get("status_age_seconds"))
-        progress_stalled = bool(
+        heartbeat_stalled = bool(
             campaign_result < campaign_total
+            and local.get("campaign", {}).get("status_freshness_verified")
             and campaign_status_age is not None
             and campaign_status_age > 12 * 60
         )
+        result_progress_age = _safe_float(local.get("campaign", {}).get("result_progress_age_seconds"))
+        result_progress_verified = bool(
+            local.get("campaign", {}).get("result_progress_freshness_verified")
+        )
+        result_progress_delayed = bool(local.get("campaign", {}).get("result_progress_delayed"))
+        completed_last_hour_by_campaign = scheduler.get("campaign_completed_last_hour")
+        scheduler_completed_last_hour = (
+            _safe_int(completed_last_hour_by_campaign.get("stage1"))
+            if isinstance(completed_last_hour_by_campaign, Mapping)
+            else 0
+        )
+        result_progress_stalled = bool(
+            campaign_result < campaign_total
+            and result_progress_age is not None
+            and result_progress_age > RESULT_PROGRESS_STALLED_SECONDS
+            and (
+                scheduler_completed_last_hour == 0
+                or result_progress_age > RESULT_PROGRESS_HARD_STALLED_SECONDS
+            )
+        )
+        result_count_regressed = bool(local.get("campaign", {}).get("result_count_regressed"))
+        local.setdefault("campaign", {})["result_progress_stalled"] = result_progress_stalled
         stale = bool(
             errors
             or local.get("stale")
@@ -1833,10 +1948,10 @@ class DashboardStateStore:
             or not scheduler.get("reachable")
             or not project_identity_ok
             or not project_cap_ok
-            or (
-                scheduler_active == 0
-                and (progress_stalled or (campaign_status_stale and not automation_alive))
-            )
+            or heartbeat_stalled
+            or result_progress_stalled
+            or result_count_regressed
+            or (scheduler_active == 0 and campaign_status_stale and not automation_alive)
         )
         if not project_identity_ok:
             local.setdefault("alerts", []).insert(
@@ -1854,16 +1969,62 @@ class DashboardStateStore:
                     "message": f"Scheduler project cap {scheduler_cap}과 로컬 설정 {self.config.cap}이 일치하지 않습니다.",
                 },
             )
+        if result_count_regressed:
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "error",
+                    "message": "Stage 1 검증 완료 수가 이전 관측보다 감소했습니다. runner log identity를 확인해야 합니다.",
+                },
+            )
+        elif result_progress_stalled:
+            hard_stall = bool(
+                result_progress_age is not None
+                and result_progress_age > RESULT_PROGRESS_HARD_STALLED_SECONDS
+            )
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "error",
+                    "message": (
+                        "Stage 1 검증 완료 수가 6시간 이상 증가하지 않아 정체 가능성이 높습니다."
+                        if hard_stall
+                        else "Scheduler 완료와 검증 결과 증가가 2시간 이상 없어 정체 가능성이 높습니다."
+                    ),
+                },
+            )
+        elif result_progress_delayed:
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "warning",
+                    "message": "Stage 1 검증 완료 수가 30분 이상 증가하지 않았습니다.",
+                },
+            )
         if (
             not stale
             and scheduler_active == scheduler_cap
+            and result_progress_verified
+            and not result_progress_delayed
             and not any(item.get("level") == "success" for item in local.get("alerts", []))
         ):
+            age_minutes = max(0, round((result_progress_age or 0.0) / 60.0))
             local.setdefault("alerts", []).insert(
                 0,
                 {
                     "level": "success",
-                    "message": f"멈춘 상태가 아닙니다. 프로젝트 FEA 슬롯 {scheduler_cap}개가 실행 또는 배정 중입니다.",
+                    "message": (
+                        f"FEA 슬롯 {scheduler_cap}개 점유 · 최근 1시간 scheduler 완료 "
+                        f"{scheduler_completed_last_hour}건 · 마지막 검증 결과 증가 {age_minutes}분 전"
+                    ),
+                },
+            )
+        elif not stale and scheduler_active == scheduler_cap and not result_progress_verified:
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "info",
+                    "message": f"FEA 슬롯 {scheduler_cap}개가 점유 중이며 다음 검증 결과 증가를 확인하고 있습니다.",
                 },
             )
         elif (
@@ -1919,11 +2080,45 @@ class DashboardStateStore:
             raise DashboardDataError("dashboard snapshot exceeds 256 KiB")
         with self._lock:
             self._encoded = encoded
+            self._last_publish_monotonic = time.monotonic()
+            self._last_snapshot_healthy = not stale and health != "degraded"
         return snapshot
 
     def encoded_snapshot(self) -> bytes:
         with self._lock:
             return self._encoded
+
+    def health_snapshot(self) -> tuple[bool, bytes]:
+        """Return an age-aware health result without touching project artifacts."""
+
+        now = time.monotonic()
+        thread = self._thread
+        thread_alive = bool(thread is not None and thread.is_alive())
+        max_age = max(30.0, self.refresh_seconds * 4.0, self.config.timeout_seconds * 2.0)
+        with self._lock:
+            last_publish = self._last_publish_monotonic
+            snapshot_healthy = self._last_snapshot_healthy
+        snapshot_age = max(0.0, now - last_publish) if last_publish else None
+        healthy = bool(
+            thread_alive
+            and snapshot_healthy
+            and snapshot_age is not None
+            and snapshot_age <= max_age
+        )
+        payload = json.dumps(
+            {
+                "status": "ok" if healthy else "degraded",
+                "thread_alive": thread_alive,
+                "snapshot_healthy": snapshot_healthy,
+                "snapshot_age_seconds": round(snapshot_age, 1) if snapshot_age is not None else None,
+                "max_snapshot_age_seconds": round(max_age, 1),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        return healthy, payload
 
     def _publish_refresh_failure(self) -> None:
         emergency = {
@@ -1963,6 +2158,8 @@ class DashboardStateStore:
         ).encode("utf-8")
         with self._lock:
             self._encoded = encoded
+            self._last_publish_monotonic = time.monotonic()
+            self._last_snapshot_healthy = False
 
     def start(self) -> None:
         if self._thread is not None:

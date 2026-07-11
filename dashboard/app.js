@@ -1,6 +1,8 @@
 "use strict";
 
 const POLL_MS = 10000;
+const FETCH_TIMEOUT_MS = 8000;
+const SNAPSHOT_STALE_MS = 30000;
 let paused = false;
 let polling = false;
 let timer = null;
@@ -18,7 +20,7 @@ const statusKorean = {
 };
 const provisionalLabels = {
   output_coreloss_last_avg_w: "철손",
-  output_efficiency_last_avg_pct: "효율",
+  output_efficiency_last_pct: "효율",
   output_ld_last_avg_h: "Ld",
   output_lq_last_avg_h: "Lq",
   output_solidloss_last_avg_w: "와전류손",
@@ -62,6 +64,20 @@ function estimatedFinish(hours) {
   }).format(date);
 }
 
+function timestampAgeMs(value) {
+  if (!value) return Infinity;
+  const normalized = /(?:Z|[+-]\d\d:\d\d)$/.test(value) ? value : `${value}Z`;
+  const timestamp = new Date(normalized).getTime();
+  return Number.isFinite(timestamp) ? Math.max(0, Date.now() - timestamp) : Infinity;
+}
+
+function progressAge(value) {
+  if (!finite(value)) return "확인 대기";
+  if (value < 60) return `${Math.round(value)}초 전`;
+  if (value < 3600) return `${Math.round(value / 60)}분 전`;
+  return `${(value / 3600).toFixed(1)}시간 전`;
+}
+
 function setText(id, value) {
   const element = byId(id);
   if (element) element.textContent = value;
@@ -83,7 +99,7 @@ function renderAlerts(data) {
   empty(container);
   const alerts = Array.isArray(data.alerts) ? data.alerts : [];
   const errors = Array.isArray(data.errors) ? data.errors : [];
-  [...alerts, ...errors.map((item) => ({ level: "error", message: item.message }))]
+  [...errors.map((item) => ({ level: "error", message: item.message })), ...alerts]
     .slice(0, 4)
     .forEach((item) => {
       const alert = element("div", `alert ${item.level || "info"}`, item.message || "상태 확인 필요");
@@ -463,16 +479,25 @@ function renderTasks(data) {
 function render(data) {
   setText("projectName", data.project || "PYAEDT_MOTOR_IPMSM_V2");
   const observed = data.campaign?.status_observed_at || data.scheduler?.updated_at || data.generated_at;
-  setText("updatedAt", `상태 관측 ${localTime(observed)} · API ${localTime(data.generated_at)}`);
+  const progressVerified = data.campaign?.result_progress_freshness_verified === true;
+  const progressObserved = progressVerified
+    ? `${localTime(data.campaign?.result_progress_observed_at)} (${progressAge(data.campaign?.result_progress_age_seconds)})`
+    : "확인 대기";
+  setText("updatedAt", `상태 관측 ${localTime(observed)} · 결과 증가 ${progressObserved} · API ${localTime(data.generated_at)}`);
   setText("footerSchema", data.schema_version || "IPMSM dashboard");
   const liveBadge = byId("liveBadge");
-  liveBadge.classList.toggle("offline", data.health === "degraded" && !data.scheduler?.reachable);
-  liveBadge.classList.toggle("stale", data.health === "degraded" && Boolean(data.scheduler?.reachable));
-  setText("liveLabel", data.health === "degraded" ? (data.scheduler?.reachable ? "STALE" : "OFFLINE") : "LIVE");
+  const snapshotStale = timestampAgeMs(data.generated_at) > SNAPSHOT_STALE_MS;
+  const serverDegraded = data.health === "degraded";
+  liveBadge.classList.toggle("offline", !paused && serverDegraded && !data.scheduler?.reachable && !snapshotStale);
+  liveBadge.classList.toggle("stale", paused || snapshotStale || (serverDegraded && Boolean(data.scheduler?.reachable)));
+  setText("liveLabel", paused ? "PAUSED" : snapshotStale ? "STALE" : serverDegraded ? (data.scheduler?.reachable ? "STALE" : "OFFLINE") : "LIVE");
   renderCampaign(data);
   renderOverview(data);
   renderPipeline(data);
   renderAlerts(data);
+  if (snapshotStale) {
+    byId("alerts").prepend(element("div", "alert error", "대시보드 수집 시각이 30초 이상 갱신되지 않았습니다. 서버 health를 확인하세요."));
+  }
   renderScheduler(data);
   renderCheckpoint(data);
   renderModel(data);
@@ -485,19 +510,26 @@ async function refresh() {
   if (polling) return;
   polling = true;
   byId("refreshButton").disabled = true;
+  const controller = new AbortController();
+  const requestTimeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch("/api/status", { cache: "no-store", headers: { Accept: "application/json" } });
+    const response = await fetch("/api/status", {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     render(await response.json());
   } catch (error) {
-    byId("liveBadge").classList.add("offline");
-    byId("liveBadge").classList.remove("stale");
-    setText("liveLabel", "OFFLINE");
+    byId("liveBadge").classList.toggle("offline", !paused);
+    byId("liveBadge").classList.toggle("stale", paused);
+    setText("liveLabel", paused ? "PAUSED" : "OFFLINE");
     setText("updatedAt", "대시보드 연결 재시도 중");
     const container = byId("alerts");
     empty(container);
     container.appendChild(element("div", "alert error", "대시보드 상태 API에 연결할 수 없습니다. 자동으로 다시 시도합니다."));
   } finally {
+    clearTimeout(requestTimeout);
     polling = false;
     byId("refreshButton").disabled = false;
   }
@@ -513,7 +545,17 @@ byId("pauseButton").addEventListener("click", () => {
   paused = !paused;
   byId("pauseButton").setAttribute("aria-pressed", String(paused));
   byId("pauseButton").textContent = paused ? "자동 갱신 다시 시작" : "자동 갱신 일시정지";
+  byId("liveBadge").classList.toggle("stale", paused);
+  byId("liveBadge").classList.remove("offline");
+  setText("liveLabel", paused ? "PAUSED" : "LIVE");
   schedule();
+  if (!paused) refresh();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!paused && document.visibilityState === "visible") refresh();
+});
+window.addEventListener("online", () => {
+  if (!paused) refresh();
 });
 
 refresh();

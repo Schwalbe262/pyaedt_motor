@@ -219,3 +219,4 @@
 - 2026-07-12 03:40 KST live dashboard audit: HTTP/health/tests pass; Stage1 is running at 443/700 (63.29%), active=100/100, rate=36.17/h, ETA=7.1h, scheduler project #2/cap/deployments match, and errors=0.
 - 2026-07-12 04:04 KST Stage1 remains healthy at 459/700, active=100/100, rate=36.38/h, ETA=6.6h, errors=0; official gate is still waiting.
 - Frozen v5 family selection plus the manifest-first untouched v3 cohort (8 geometries/48 rows) now have a one-shot hash-anchored confirmation runner; target-load current matching is hardened but remains intentionally unintegrated until the live v3 campaign finishes.
+- 2026-07-12 05:13 KST dashboard is deployed at `http://127.0.0.1:8765`: Stage1=473/700, active=100/100, rate=30.49/h, ETA=7.4h, project #2/cap match, errors=0; result-progress age, 30m/2h/6h stall gates, age-aware healthz, fetch timeout, and PAUSED/STALE states passed focused 49/49 and full 714/714.

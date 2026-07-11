@@ -102,6 +102,57 @@ class CampaignLogTests(unittest.TestCase):
         self.assertEqual(result["completion_rate_per_hour"], 0.0)
         self.assertIsNone(result["eta_hours"])
 
+    def test_result_progress_age_is_reconstructed_from_latest_runner_segment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runner.stderr.log"
+            path.write_text(
+                "run_ipmsm_v2 scheduler_ok=100 result_ok=99 active=100 pending=0 "
+                "missing=500 retry=0 project_active=100 submitted=100 elapsed_s=100.0\n"
+                "run_ipmsm_v2 scheduler_ok=100 result_ok=100 active=100 pending=0 "
+                "missing=500 retry=0 project_active=100 submitted=100 elapsed_s=200.0\n"
+                "run_ipmsm_v2 scheduler_ok=100 result_ok=100 active=100 pending=0 "
+                "missing=500 retry=0 project_active=100 submitted=100 elapsed_s=3800.0\n",
+                encoding="utf-8",
+            )
+            result = dashboard.parse_campaign_log(path, total_cases=700, cap=100)
+
+        self.assertTrue(result["result_progress_log_transition_verified"])
+        self.assertFalse(result["result_progress_log_age_lower_bound"])
+        self.assertEqual(result["result_progress_log_age_seconds"], 3600.0)
+
+    def test_result_progress_age_is_a_lower_bound_after_runner_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runner.stderr.log"
+            path.write_text(
+                "run_ipmsm_v2 scheduler_ok=100 result_ok=100 active=100 pending=0 "
+                "missing=500 retry=0 project_active=100 submitted=0 elapsed_s=50.0\n"
+                "run_ipmsm_v2 scheduler_ok=100 result_ok=100 active=100 pending=0 "
+                "missing=500 retry=0 project_active=100 submitted=0 elapsed_s=7250.0\n",
+                encoding="utf-8",
+            )
+            result = dashboard.parse_campaign_log(path, total_cases=700, cap=100)
+
+        self.assertFalse(result["result_progress_log_transition_verified"])
+        self.assertTrue(result["result_progress_log_age_lower_bound"])
+        self.assertEqual(result["result_progress_log_age_seconds"], 7200.0)
+
+    def test_result_count_regression_across_runner_restart_is_degraded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runner.stderr.log"
+            path.write_text(
+                "run_ipmsm_v2 scheduler_ok=500 result_ok=500 active=100 pending=0 "
+                "missing=100 retry=0 project_active=100 submitted=500 elapsed_s=200.0\n"
+                "run_ipmsm_v2 scheduler_ok=400 result_ok=400 active=100 pending=0 "
+                "missing=200 retry=0 project_active=100 submitted=0 elapsed_s=1.0\n"
+                "run_ipmsm_v2 scheduler_ok=400 result_ok=400 active=100 pending=0 "
+                "missing=200 retry=0 project_active=100 submitted=0 elapsed_s=2.0\n",
+                encoding="utf-8",
+            )
+            result = dashboard.parse_campaign_log(path, total_cases=700, cap=100)
+
+        self.assertEqual(result["source_status"], "degraded")
+        self.assertTrue(any("감소" in warning for warning in result["warnings"]))
+
 
 class CheckpointTests(unittest.TestCase):
     PROJECT = "PYAEDT_MOTOR_IPMSM_V2"
@@ -645,6 +696,61 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(result["server_cap"], 100)
         self.assertTrue(result["cap_matches"])
         self.assertEqual(result["deployed_count"], 1)
+        self.assertEqual(result["campaign_completed_last_hour"]["stage1"], 0)
+
+    def test_scheduler_summary_scopes_recent_completions_by_campaign_prefix(self) -> None:
+        finished_at = datetime.now(timezone.utc).isoformat()
+        tasks = [
+            {
+                "name": "ipmsm-v2-foundation-s1-v2s1_0001_rated_torque_01",
+                "status": "completed",
+                "exit_code": 0,
+                "finished_at": finished_at,
+            },
+            {
+                "name": "ipmsm-profile-thirdpass-speed-strict-v2-v1-case-1",
+                "status": "completed",
+                "exit_code": 0,
+                "finished_at": finished_at,
+            },
+            {"name": "unrelated-project-task", "status": "completed", "finished_at": finished_at},
+        ]
+        result = dashboard.summarize_scheduler(
+            project={"id": 2, "name": dashboard.DEFAULT_PROJECT, "max_active_tasks": 100},
+            tasks=tasks,
+            allocations=[],
+            cap=100,
+        )
+        self.assertEqual(result["completed_last_hour"], 3)
+        self.assertEqual(result["campaign_completed_last_hour"]["stage1"], 1)
+        self.assertEqual(result["campaign_completed_last_hour"]["speed"], 1)
+        self.assertIn("stage1", result["campaign_last_completed_at"])
+
+    def test_failed_or_noncanonical_stage1_tasks_are_not_progress_evidence(self) -> None:
+        finished_at = datetime.now(timezone.utc).isoformat()
+        tasks = [
+            {
+                "name": "ipmsm-v2-foundation-s1-v2s1_0001_rated_torque_01",
+                "status": "completed",
+                "exit_code": 42,
+                "finished_at": finished_at,
+            },
+            {
+                "name": "ipmsm-v2-foundation-s1-not-current",
+                "status": "completed",
+                "exit_code": 0,
+                "finished_at": finished_at,
+            },
+        ]
+        result = dashboard.summarize_scheduler(
+            project={"id": 2, "name": dashboard.DEFAULT_PROJECT, "max_active_tasks": 100},
+            tasks=tasks,
+            allocations=[],
+            cap=100,
+        )
+        self.assertEqual(result["completed_last_hour"], 2)
+        self.assertEqual(result["campaign_completed_last_hour"]["stage1"], 0)
+        self.assertNotIn("stage1", result["campaign_last_completed_at"])
 
     def test_project_or_server_cap_mismatch_degrades_state(self) -> None:
         local = {
@@ -847,6 +953,276 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(result["stale"])
         self.assertEqual(result["health"], "degraded")
 
+    def test_full_cap_heartbeat_does_not_hide_result_progress_stall(self) -> None:
+        state = {"elapsed": 10.0, "result_ok": 10}
+
+        def local(_: dashboard.DashboardConfig) -> dict[str, object]:
+            return {
+                "campaign": {
+                    "elapsed_s": state["elapsed"],
+                    "active": 100,
+                    "total": 700,
+                    "result_ok": state["result_ok"],
+                },
+                "pipeline": {
+                    "current_stage": "stage1",
+                    "current_label": "Stage 1",
+                    "stages": [{"id": "stage1", "label": "Stage 1", "status": "running"}],
+                },
+                "model": {"available": False},
+                "beta": {"available": True},
+                "optimization": {"decision": None},
+                "speed": {"complete": False},
+                "processes": [{"role": "supervisor", "state": "alive"}],
+                "alerts": [],
+            }
+
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 100,
+            "cap": 100,
+            "completed_last_hour": 0,
+            "campaign_status": {},
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=local,
+            scheduler_collector=lambda _: scheduler,
+        )
+        first = store.refresh_once(force_scheduler=True)
+        self.assertFalse(first["campaign"]["result_progress_freshness_verified"])
+        self.assertFalse(any(item["level"] == "success" for item in first["alerts"]))
+
+        state["elapsed"] = 10.5
+        store._campaign_result_changed_monotonic = (
+            dashboard.time.monotonic() - dashboard.RESULT_PROGRESS_STALLED_SECONDS - 1
+        )
+        stalled_before_first_progress = store.refresh_once()
+        self.assertTrue(stalled_before_first_progress["campaign"]["result_progress_stalled"])
+        self.assertEqual(stalled_before_first_progress["health"], "degraded")
+
+        state.update(elapsed=11.0, result_ok=11)
+        progressed = store.refresh_once()
+        self.assertTrue(progressed["campaign"]["result_progress_freshness_verified"])
+        self.assertTrue(any(item["level"] == "success" for item in progressed["alerts"]))
+
+        state["elapsed"] = 12.0
+        store._campaign_result_changed_monotonic = (
+            dashboard.time.monotonic() - dashboard.RESULT_PROGRESS_WARNING_SECONDS - 1
+        )
+        delayed = store.refresh_once()
+        self.assertTrue(delayed["campaign"]["result_progress_delayed"])
+        self.assertFalse(delayed["campaign"]["result_progress_stalled"])
+        self.assertFalse(any(item["level"] == "success" for item in delayed["alerts"]))
+
+        state["elapsed"] = 13.0
+        store._campaign_result_changed_monotonic = (
+            dashboard.time.monotonic() - dashboard.RESULT_PROGRESS_STALLED_SECONDS - 1
+        )
+        stalled = store.refresh_once()
+        self.assertTrue(stalled["campaign"]["result_progress_stalled"])
+        self.assertEqual(stalled["health"], "degraded")
+        self.assertTrue(stalled["stale"])
+
+    def test_result_count_regression_degrades_even_with_full_scheduler_cap(self) -> None:
+        state = {"elapsed": 1.0, "result_ok": 10}
+
+        def local(_: dashboard.DashboardConfig) -> dict[str, object]:
+            return {
+                "campaign": {"elapsed_s": state["elapsed"], "total": 700, "result_ok": state["result_ok"]},
+                "pipeline": {"current_stage": "stage1", "current_label": "Stage 1", "stages": []},
+                "model": {"available": False},
+                "beta": {"available": True},
+                "optimization": {"decision": None},
+                "speed": {"complete": False},
+                "processes": [{"role": "supervisor", "state": "alive"}],
+                "alerts": [],
+            }
+
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 100,
+            "cap": 100,
+            "completed_last_hour": 1,
+            "campaign_status": {},
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=local,
+            scheduler_collector=lambda _: scheduler,
+        )
+        store.refresh_once(force_scheduler=True)
+        state.update(elapsed=2.0, result_ok=11)
+        store.refresh_once()
+        state.update(elapsed=3.0, result_ok=9)
+        result = store.refresh_once()
+        self.assertTrue(result["campaign"]["result_count_regressed"])
+        self.assertEqual(result["health"], "degraded")
+        self.assertTrue(any("감소" in item["message"] for item in result["alerts"]))
+
+    def test_recent_stage1_scheduler_completion_prevents_critical_result_stall(self) -> None:
+        state = {"elapsed": 1.0, "result_ok": 10}
+
+        def local(_: dashboard.DashboardConfig) -> dict[str, object]:
+            return {
+                "campaign": {"elapsed_s": state["elapsed"], "total": 700, "result_ok": state["result_ok"]},
+                "pipeline": {"current_stage": "stage1", "current_label": "Stage 1", "stages": []},
+                "model": {"available": False},
+                "beta": {"available": True},
+                "optimization": {"decision": None},
+                "speed": {"complete": False},
+                "processes": [{"role": "supervisor", "state": "alive"}],
+                "alerts": [],
+            }
+
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 100,
+            "cap": 100,
+            "completed_last_hour": 1,
+            "campaign_completed_last_hour": {"stage1": 1},
+            "campaign_status": {},
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=local,
+            scheduler_collector=lambda _: scheduler,
+        )
+        store.refresh_once(force_scheduler=True)
+        state.update(elapsed=2.0, result_ok=11)
+        store.refresh_once()
+        state["elapsed"] = 3.0
+        store._campaign_result_changed_monotonic = (
+            dashboard.time.monotonic() - dashboard.RESULT_PROGRESS_STALLED_SECONDS - 1
+        )
+        result = store.refresh_once()
+        self.assertTrue(result["campaign"]["result_progress_delayed"])
+        self.assertFalse(result["campaign"]["result_progress_stalled"])
+        self.assertEqual(result["health"], "running")
+
+        state["elapsed"] = 4.0
+        store._campaign_result_changed_monotonic = (
+            dashboard.time.monotonic() - dashboard.RESULT_PROGRESS_HARD_STALLED_SECONDS - 1
+        )
+        hard_stalled = store.refresh_once()
+        self.assertTrue(hard_stalled["campaign"]["result_progress_stalled"])
+        self.assertEqual(hard_stalled["health"], "degraded")
+
+    def test_unrelated_scheduler_completion_does_not_hide_stage1_result_stall(self) -> None:
+        state = {"elapsed": 1.0, "result_ok": 10}
+
+        def local(_: dashboard.DashboardConfig) -> dict[str, object]:
+            return {
+                "campaign": {"elapsed_s": state["elapsed"], "total": 700, "result_ok": state["result_ok"]},
+                "pipeline": {"current_stage": "stage1", "current_label": "Stage 1", "stages": []},
+                "model": {"available": False},
+                "beta": {"available": True},
+                "optimization": {"decision": None},
+                "speed": {"complete": False},
+                "processes": [{"role": "supervisor", "state": "alive"}],
+                "alerts": [],
+            }
+
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 100,
+            "cap": 100,
+            "completed_last_hour": 1,
+            "campaign_completed_last_hour": {"stage1": 0, "speed": 1},
+            "campaign_status": {},
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=local,
+            scheduler_collector=lambda _: scheduler,
+        )
+        store.refresh_once(force_scheduler=True)
+        state.update(elapsed=2.0, result_ok=11)
+        store.refresh_once()
+        state["elapsed"] = 3.0
+        store._campaign_result_changed_monotonic = (
+            dashboard.time.monotonic() - dashboard.RESULT_PROGRESS_STALLED_SECONDS - 1
+        )
+        result = store.refresh_once()
+        self.assertTrue(result["campaign"]["result_progress_stalled"])
+        self.assertEqual(result["health"], "degraded")
+
+    def test_cold_start_uses_runner_log_result_progress_age(self) -> None:
+        def local(_: dashboard.DashboardConfig) -> dict[str, object]:
+            return {
+                "campaign": {
+                    "elapsed_s": 8000.0,
+                    "total": 700,
+                    "result_ok": 10,
+                    "result_progress_log_age_seconds": dashboard.RESULT_PROGRESS_STALLED_SECONDS + 1,
+                    "result_progress_log_transition_verified": True,
+                },
+                "pipeline": {"current_stage": "stage1", "current_label": "Stage 1", "stages": []},
+                "model": {"available": False},
+                "beta": {"available": True},
+                "optimization": {"decision": None},
+                "speed": {"complete": False},
+                "processes": [{"role": "supervisor", "state": "alive"}],
+                "alerts": [],
+            }
+
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 100,
+            "cap": 100,
+            "campaign_completed_last_hour": {"stage1": 0},
+            "campaign_status": {},
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=local,
+            scheduler_collector=lambda _: scheduler,
+        )
+        result = store.refresh_once(force_scheduler=True)
+        self.assertTrue(result["campaign"]["result_progress_stalled"])
+        self.assertEqual(result["health"], "degraded")
+
+    def test_health_snapshot_detects_dead_thread_and_old_publication(self) -> None:
+        class ThreadProbe:
+            def __init__(self, alive: bool) -> None:
+                self.alive = alive
+
+            def is_alive(self) -> bool:
+                return self.alive
+
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=lambda _: {},
+            scheduler_collector=lambda _: {},
+        )
+        store._thread = ThreadProbe(True)  # type: ignore[assignment]
+        store._last_publish_monotonic = dashboard.time.monotonic()
+        store._last_snapshot_healthy = True
+        healthy, payload = store.health_snapshot()
+        self.assertTrue(healthy)
+        self.assertEqual(json.loads(payload)["status"], "ok")
+
+        store._last_publish_monotonic = dashboard.time.monotonic() - 60
+        healthy, payload = store.health_snapshot()
+        self.assertFalse(healthy)
+        self.assertEqual(json.loads(payload)["status"], "degraded")
+
+        store._thread = ThreadProbe(False)  # type: ignore[assignment]
+        store._last_publish_monotonic = dashboard.time.monotonic()
+        healthy, _ = store.health_snapshot()
+        self.assertFalse(healthy)
+
+        store._thread = ThreadProbe(True)  # type: ignore[assignment]
+        store._last_snapshot_healthy = False
+        healthy, payload = store.health_snapshot()
+        self.assertFalse(healthy)
+        self.assertFalse(json.loads(payload)["snapshot_healthy"])
+
     def test_non_fea_pipeline_stage_can_be_running_with_zero_scheduler_tasks(self) -> None:
         def local(_: dashboard.DashboardConfig) -> dict[str, object]:
             return {
@@ -950,8 +1326,14 @@ class SchedulerTests(unittest.TestCase):
 
 class HttpTests(unittest.TestCase):
     class Store:
+        healthy = True
+
         def encoded_snapshot(self) -> bytes:
             return b'{"status":"ok"}'
+
+        def health_snapshot(self) -> tuple[bool, bytes]:
+            payload = b'{"status":"ok"}' if self.healthy else b'{"status":"degraded"}'
+            return self.healthy, payload
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -979,6 +1361,30 @@ class HttpTests(unittest.TestCase):
         self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))
         self.assertEqual(response.getheader("X-Frame-Options"), "DENY")
         self.assertIsNone(response.getheader("Access-Control-Allow-Origin"))
+
+    def test_healthz_reflects_store_health(self) -> None:
+        self.connection.request("GET", "/api/healthz")
+        response = self.connection.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(response.read())["status"], "ok")
+
+        self.Store.healthy = False
+        try:
+            self.connection.request("GET", "/api/healthz")
+            response = self.connection.getresponse()
+            self.assertEqual(response.status, 503)
+            self.assertEqual(json.loads(response.read())["status"], "degraded")
+        finally:
+            self.Store.healthy = True
+
+    def test_frontend_contains_timeout_and_snapshot_staleness_guards(self) -> None:
+        app = (Path(server.__file__).resolve().parent / "dashboard" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("new AbortController()", app)
+        self.assertIn("SNAPSHOT_STALE_MS", app)
+        self.assertIn("visibilitychange", app)
+        self.assertIn('setText("liveLabel", paused ? "PAUSED"', app)
+        self.assertIn('output_efficiency_last_pct: "효율"', app)
+        self.assertNotIn("output_efficiency_last_avg_pct", app)
 
     def test_mutating_methods_and_path_traversal_are_rejected(self) -> None:
         self.connection.request("POST", "/api/status", body=b"{}")
