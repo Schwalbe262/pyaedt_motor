@@ -751,3 +751,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: r4 renames both anchor and dependent repeat, CSV-first/manifest-last publication retains deterministic ownership proofs until commit, and contract revisions validate stable source/spec/plan snapshots against an exact six-reference allowlist.
 - Evidence: r4 changes exactly three cells while preserving 700 rows/112 designs/28 repeats and Stage2 overlap 0; safety tests passed 24/24, the full suite passed 616/616, and live project occupancy remained 100/100.
 - Remaining risk: clean-retry task 26529 is still running; a repeated solve-stage `analysis=False` must promote the whole geometry to the existing replacement workflow.
+
+## 2026-07-12 00:43:00 +09:00 - Insight 82
+- Source loop: `note.md` Stage1 solve-failure clean recovery.
+- Improvement: a Windows ScheduledTask contract switch must verify the entire spawned process tree; stopping the registered parent is not proof that nested venv/launcher children ended.
+- Before: `Stop-ScheduledTask` ended the v2 supervisor but left its r3 campaign wrapper and Python leaf polling beside the new r4 runner.
+- After: command line, creation time, and parent-child identity are checked immediately before leaf-first termination, followed by an active-dedupe audit; the v3 task also restarts failures at PT1M up to three times.
+- Evidence: r3 local process count is 0, r4 count is exactly 2 wrapper/leaf processes, scheduler active remains 100, and active duplicate dedupe keys remain 0.
+- Remaining risk: future task-definition changes still need this process-tree audit until the wrapper owns children through a Windows Job Object or equivalent kill-on-close mechanism.
