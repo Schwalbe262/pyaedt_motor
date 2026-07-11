@@ -86,6 +86,24 @@ class GenerateIpmsmQualityCasesTests(unittest.TestCase):
         self.assertEqual(by_name["time_210_lossmesh"].steps_per_period, 210)
         self.assertEqual(by_name["time_210_lossmesh"].mesh_elements["band"], 1500)
 
+    def test_third_pass_speed_profiles_use_audited_period_step_and_mesh_values(self) -> None:
+        profiles = quality_cases.parse_profiles(",".join(quality_cases.THIRD_PASS_SPEED_PROFILE_NAMES))
+        by_name = {profile.name: profile for profile in profiles}
+
+        baseline = by_name["time_138_p12_baseline"]
+        self.assertEqual(baseline.transient_periods, 12)
+        self.assertEqual(baseline.steps_per_period, 138)
+        self.assertEqual(baseline.mesh_elements, quality_cases.BASELINE_MESH_ELEMENTS)
+
+        iron525 = by_name["time_135_p12_iron525"]
+        self.assertEqual(iron525.transient_periods, 12)
+        self.assertEqual(iron525.steps_per_period, 135)
+        self.assertEqual(iron525.mesh_elements["magnet"], 50)
+        self.assertEqual(iron525.mesh_elements["rotor"], 525)
+        self.assertEqual(iron525.mesh_elements["stator"], 525)
+        self.assertEqual(iron525.mesh_elements["winding"], 50)
+        self.assertEqual(iron525.mesh_elements["band"], 1000)
+
     def test_cli_rejects_batches_above_max_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "too_many.csv"

@@ -22,6 +22,11 @@ BASELINE_MESH_ELEMENTS = {
     "winding": 50,
     "band": 1000,
 }
+IRON_525_MESH_ELEMENTS = {
+    **BASELINE_MESH_ELEMENTS,
+    "rotor": 525,
+    "stator": 525,
+}
 FINE_MESH_ELEMENTS = {
     "magnet": 75,
     "rotor": 750,
@@ -59,6 +64,10 @@ STAGE_A_PROFILE_NAMES = (
     "reference_ultra",
 )
 REFERENCE_PROFILE_NAME = "reference_ultra"
+THIRD_PASS_SPEED_PROFILE_NAMES = (
+    "time_138_p12_baseline",
+    "time_135_p12_iron525",
+)
 
 
 @dataclass(frozen=True)
@@ -107,6 +116,18 @@ QUALITY_PROFILES = {
         transient_periods=10,
         steps_per_period=210,
         mesh_elements=LOSS_FINE_MESH_ELEMENTS,
+    ),
+    "time_138_p12_baseline": QualityProfile(
+        "time_138_p12_baseline",
+        transient_periods=12,
+        steps_per_period=138,
+        mesh_elements=BASELINE_MESH_ELEMENTS,
+    ),
+    "time_135_p12_iron525": QualityProfile(
+        "time_135_p12_iron525",
+        transient_periods=12,
+        steps_per_period=135,
+        mesh_elements=IRON_525_MESH_ELEMENTS,
     ),
     "reference_ultra": QualityProfile(
         "reference_ultra",
