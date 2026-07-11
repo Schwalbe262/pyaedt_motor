@@ -205,8 +205,9 @@
 - Stage1 is homogeneous `reference_ultra`, 700 rows/112 geometries/28 repeats; stage2 is conditional non-overlapping 300 rows/48 geometries/12 repeats.
 - Stage1 r4 plan hash is `ab32f31a...2b1e`: 700 rows/112 designs/28 repeats, solve-only failure `v2s1_0049_rated_torque_01` and its dependent repeat both have fresh IDs, exactly three cells changed, and Stage2 design overlap remains zero.
 - Task `26141` remains the sole unknown SIGKILL (MaxRSS 2.08 GiB < 32 GiB, no OOM evidence); safe Windows PID probes replaced the `os.kill(pid,0)` pattern that accidentally stopped the first local runner.
-- Contract v3 `45728cda...e935` supervisor PID `75444` is live with PT1M x3 failure restart; project history is active=100, clean-retry task `26529` is running, and the dashboard at `127.0.0.1:8765` reads v3 with HTTP 200/errors 0.
+- Contract v3 `45728cda...e935` supervisor PID `75444` is live with PT1M x3 failure restart; latest r4 heartbeat is scheduler/result_ok=358/358, active=100, missing=242, retry=0, and clean-retry task `26529` is running.
 - `Stop-ScheduledTask` did not kill the prior campaign child tree; exact r3 wrapper/leaf PIDs were removed leaf-first, r4 is the only local runner, and active scheduler duplicate-dedupe count is zero.
+- Provisional checkpoint readiness is 58/60 complete base designs with split train/cal/test=33/10/15; the two incomplete groups are both 5/6 with their final tasks running, so no sub-threshold snapshot was published.
 - Faster `time_150` remains screening-only because core-loss p90 error `5.533% > 5%`; mixed-fidelity v2 training is forbidden.
 - Next: monitor Stage1 at the dashboard; Stage2 failure routes through sealed Stage3 before NSGA-II, while a pass routes directly; beta-neighbor Pareto FEA and 12x2 strict-v2 speed remain cap-serialized.
 - Windows fresh-output publication now uses shared identity-checked no-replace logic: mapped `Y:` drives bypass hard links for atomic rename, WinError 50 falls back likewise, and optimizer pair recovery preserves a proof; focused 96/96 and full 511/511 tests pass without touching live tasks.

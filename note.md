@@ -3640,3 +3640,13 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: v1 correctly failed closed on the structured failed row; final review found dependent-repeat path reuse and hard-kill partial-publication risks, and `Stop-ScheduledTask` left the old r3 child tree alive. r4/proof guards plus exact leaf-first orphan removal resolved all three without remote task cancellation.
 - Next action: monitor task 26529 and Stage1 completion; escalate this geometry only if the clean retry repeats the solve failure, then let the sealed R2/Stage2/Stage3/NSGA-II/Pareto/speed gates continue.
 - Token usage: `codex_ops.py` was attempted; the local Codex SQLite database is unavailable. Scheduler/project execution remains capped at 100.
+
+## 2026-07-12 01:04:10 +09:00 - r4 live confirmation and checkpoint readiness
+
+- Part/goal: prove that only the r4 runner is refilling Stage1 and decide whether the 60-design provisional learning checkpoint is ready.
+- Actions: monitored the v3 supervisor/process tree, shared-log bytes and heartbeat tail, exact scheduler history/dedupe state, base-design completion, split counts, and the restart audit bottleneck without reading remote result files.
+- Metrics: r3 processes=0, r4 wrapper/leaf=2, active=100, scheduler/result_ok=358/358, missing=242, retry=0, active duplicate dedupe=0; complete designs=58 with split 33/10/15 and two 5/6 groups remaining.
+- Result: r4 heartbeats and post-r3 task creation prove normal refill; no new failed result exists. The 60-design snapshot was correctly not created below threshold.
+- Failure reason: mapped-drive LastWriteTime stayed fixed while log bytes/tail advanced, so mtime alone is false-stale evidence; the remaining checkpoint delay is external FEA completion.
+- Next action: when settled complete designs reach 60, publish one rate-limited 360-row diagnostic snapshot, validate it, and train the isolated no-tuning five-member ensemble; keep the official 700-row R² gate untouched.
+- Token usage: local `codex_ops.py` recording remains unavailable without the Codex SQLite database.
