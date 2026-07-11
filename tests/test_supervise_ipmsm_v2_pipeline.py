@@ -521,6 +521,37 @@ class SupervisorContractTests(unittest.TestCase):
 
             self.assertIs(run.call_args.kwargs["shell"], False)
 
+    def test_stage3_execute_must_match_its_dry_run_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = Fixture(Path(tmp))
+            contract = fixture.load()
+            dry = {"mode": "dry-run", "case_plan_sha256": "1" * 64, "summary": {"rows": 300}}
+            committed = {**dry, "mode": "write"}
+            responses = [
+                completed(stdout=json.dumps(dry) + "\n"),
+                completed(stdout=json.dumps(committed) + "\n"),
+            ]
+            with mock.patch.object(supervisor.subprocess, "run", side_effect=responses):
+                supervisor.execute_action(
+                    contract,
+                    supervisor.PipelineSnapshot("generate_stage3_plan", "stage3"),
+                )
+
+            changed = {**committed, "case_plan_sha256": "2" * 64}
+            responses = [
+                completed(stdout=json.dumps(dry) + "\n"),
+                completed(stdout=json.dumps(changed) + "\n"),
+            ]
+            with mock.patch.object(supervisor.subprocess, "run", side_effect=responses):
+                with self.assertRaisesRegex(
+                    supervisor.PipelineStateError,
+                    "changed the dry-run artifact contract",
+                ):
+                    supervisor.execute_action(
+                        contract,
+                        supervisor.PipelineSnapshot("generate_stage3_plan", "stage3"),
+                    )
+
     def test_duplicate_execution_lock_is_rejected_and_reusable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pipeline.lock"

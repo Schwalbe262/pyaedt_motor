@@ -35,7 +35,7 @@ SPEED_MARKER_SCHEMA_VERSION = "ipmsm-v2-speed-completion-v1"
 STAGE2_DECISION_SCHEMA_VERSION = "ipmsm_v2_stage2_continuation_v1"
 OPTIMIZATION_DECISION_SCHEMA_VERSION = "ipmsm_v2_optimization_continuation_v1"
 MERGE_MANIFEST_SCHEMA_VERSION = "ipmsm-v2-case-plan-merge-v1"
-STAGE3_MANIFEST_SCHEMA_VERSION = "ipmsm_v2_stage3_fallback_plan_v1"
+STAGE3_MANIFEST_SCHEMA_VERSION = "ipmsm_v2_stage3_fallback_plan_v2"
 UPSTREAM_PLACEHOLDER = "{upstream_decision}"
 MAX_TRANSITIONS = 16
 
@@ -999,6 +999,7 @@ def _run_dry_then_execute(
     resume: bool = False,
     allowed_execute_returncodes: set[int] | None = None,
     expected_dry_statuses: set[str] | None = None,
+    require_execute_matches_dry: bool = False,
 ) -> None:
     dry_argv = [*argv, *( ["--resume"] if resume else [] )]
     dry = run_child(
@@ -1014,12 +1015,23 @@ def _run_dry_then_execute(
     ):
         raise PipelineStateError(f"{label} dry-run returned unexpected state: {proof.get('status')!r}")
     execute_argv = [*dry_argv, *execute_suffix]
-    run_child(
+    executed = run_child(
         execute_argv,
         workdir=workdir,
         label=f"{label} execute",
         allowed_returncodes=allowed_execute_returncodes,
+        capture_output=require_execute_matches_dry,
     )
+    if require_execute_matches_dry:
+        committed = _last_json(executed.stdout, f"{label} execute")
+        dry_contract = dict(proof)
+        committed_contract = dict(committed)
+        if dry_contract.pop("mode", None) != "dry-run":
+            raise PipelineStateError(f"{label} dry-run did not report mode=dry-run")
+        if committed_contract.pop("mode", None) != "write":
+            raise PipelineStateError(f"{label} execute did not report mode=write")
+        if committed_contract != dry_contract:
+            raise PipelineStateError(f"{label} execute changed the dry-run artifact contract")
 
 
 def _write_speed_marker(contract: PipelineContract) -> None:
@@ -1093,6 +1105,7 @@ def execute_action(contract: PipelineContract, snapshot: PipelineSnapshot) -> No
             workdir=workdir,
             label="Stage3 generation",
             execute_suffix=["--write-stage3"],
+            require_execute_matches_dry=True,
         )
     elif action in {"run_stage3_fresh", "run_stage3_resume"}:
         _run_dry_then_execute(
