@@ -743,3 +743,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: complete six-row base bundles preserve exact train/calibration/test groups, explicit 60/80-design evidence levels label early results, and the optimizer adapter still requires the official passed primary and voltage gates.
 - Evidence: the 43-design checkpoint retained 258/258 rows with zero invalid/outlier removals, produced a reproducible weak baseline, and was rejected by `load_surrogate_bundle` exactly at `primary_test_r2_gate_passed`.
 - Remaining risk: no repeat rows are complete yet, and 23 train groups are insufficient to infer whether the full tuned 700-row model will reach R² 0.95.
+
+## 2026-07-12 00:38:00 +09:00 - Insight 81
+- Source loop: `note.md` Stage1 solve-failure clean recovery.
+- Improvement: every plan row whose canonical scheduler content changes needs a fresh case identity, and multi-artifact plan revisions need snapshot-bound hashes plus ownership-proved recovery with the manifest published last.
+- Before: renaming a failed anchor changed its dependent repeat reference while reusing the repeat `case_id`/result path, and a hard kill between manifest-first and CSV publication could leave an unrecoverable partial pair.
+- After: r4 renames both anchor and dependent repeat, CSV-first/manifest-last publication retains deterministic ownership proofs until commit, and contract revisions validate stable source/spec/plan snapshots against an exact six-reference allowlist.
+- Evidence: r4 changes exactly three cells while preserving 700 rows/112 designs/28 repeats and Stage2 overlap 0; safety tests passed 24/24, the full suite passed 616/616, and live project occupancy remained 100/100.
+- Remaining risk: clean-retry task 26529 is still running; a repeated solve-stage `analysis=False` must promote the whole geometry to the existing replacement workflow.

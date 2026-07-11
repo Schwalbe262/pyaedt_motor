@@ -3629,3 +3629,14 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: <=23 train groups produce unstable inner selection and target-specific variance, especially solid loss; the learning curve cannot yet forecast the 700-row tuned gate.
 - Next action: preserve the campaign/model settings and repeat the fixed curve only at >=60 complete designs / >=30 train groups.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-12 00:08:34 +09:00 - Stage1 solve-failure clean recovery
+
+- Part/goal: recover the stopped Stage1 refill without accepting a structured failed Maxwell row or changing the validated geometry DOE.
+- Hypothesis/actions: task 26424 had validation=True and no missing outputs but solve-stage `analysis=False`; added identity-only clean-retry and contract-revision tools, then published r4/contract v3 and repointed the pipeline and dashboard ScheduledTasks.
+- Candidates/options: selected one clean retry before geometry replacement; direct failed-row acceptance and immediate geometry replacement were rejected.
+- Metrics: r4 has 700 rows/112 designs/28 repeats, exactly three changed cells, Stage2 overlap 0, plan hash `ab32f31a...2b1e`, contract hash `45728cda...e935`; focused safety tests 24/24 and full 616/616 pass. Corrected exact-dedupe runtime audit has 293 rows, median/p95 151.7/187.4 min, and no predeclared slow/fast node flag, so node distribution stayed unchanged.
+- Result: supervisor PID 75444 and r4 runner are live with PT1M x3 failure restart; scheduler history active is 100, clean-retry task 26529 is running with one unique dedupe, and dashboard v3 returns HTTP 200 with no status errors.
+- Failure reason: v1 correctly failed closed on the structured failed row; final review also found dependent-repeat path reuse and hard-kill partial-publication risks, so r4 gives the repeat a fresh ID and both revision tools now use snapshot/allowlist/proof-based fail-closed guards.
+- Next action: monitor task 26529 and Stage1 completion; escalate this geometry only if the clean retry repeats the solve failure, then let the sealed R2/Stage2/Stage3/NSGA-II/Pareto/speed gates continue.
+- Token usage: `codex_ops.py` was attempted; the local Codex SQLite database is unavailable. Scheduler/project execution remains capped at 100.

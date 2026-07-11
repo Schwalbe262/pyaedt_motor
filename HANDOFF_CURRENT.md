@@ -203,9 +203,9 @@
 - PyAEDT through `19a82bf` is pushed: Stage2 uses 66 untouched audit rows, speed ranking is strict-v2 paired, Pareto FEA validates beta +/-2 deg and publishes an FEA-filtered front, and audited non-reference profiles are explicit-only.
 - Dashboard `b69a252` is deployed read-only at `http://127.0.0.1:8765`; Task Scheduler uses logon plus PT15M watchdog/IgnoreNew, loopback GET/HEAD only, CSP, and no CORS.
 - Stage1 is homogeneous `reference_ultra`, 700 rows/112 geometries/28 repeats; stage2 is conditional non-overlapping 300 rows/48 geometries/12 repeats.
-- Stage1 r2 plan hash is `6ef6dae7...01e3`: 700 rows/112 designs/28 repeats, failed geometry replaced, 6 duplicate-result cases renamed `_clean_retry_01`, and Stage2 design overlap remains zero.
+- Stage1 r4 plan hash is `ab32f31a...2b1e`: 700 rows/112 designs/28 repeats, solve-only failure `v2s1_0049_rated_torque_01` and its dependent repeat both have fresh IDs, exactly three cells changed, and Stage2 design overlap remains zero.
 - Task `26141` remains the sole unknown SIGKILL (MaxRSS 2.08 GiB < 32 GiB, no OOM evidence); safe Windows PID probes replaced the `os.kill(pid,0)` pattern that accidentally stopped the first local runner.
-- Durable supervisor PID `82008` has run since 21:45 KST; latest Stage1 is scheduler_ok/result_ok=286/280, active=100, missing=314, retry=0, and dashboard PID `147688` serves the live state.
+- Contract v3 `45728cda...e935` supervisor PID `75444` is live with PT1M x3 failure restart; project history is active=100, clean-retry task `26529` is running, and the dashboard at `127.0.0.1:8765` reads v3 with HTTP 200/errors 0.
 - Faster `time_150` remains screening-only because core-loss p90 error `5.533% > 5%`; mixed-fidelity v2 training is forbidden.
 - Next: monitor Stage1 at the dashboard; Stage2 failure routes through sealed Stage3 before NSGA-II, while a pass routes directly; beta-neighbor Pareto FEA and 12x2 strict-v2 speed remain cap-serialized.
 - Windows fresh-output publication now uses shared identity-checked no-replace logic: mapped `Y:` drives bypass hard links for atomic rename, WinError 50 falls back likewise, and optimizer pair recovery preserves a proof; focused 96/96 and full 511/511 tests pass without touching live tasks.
