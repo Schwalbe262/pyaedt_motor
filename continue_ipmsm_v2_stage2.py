@@ -286,6 +286,7 @@ def _validate_model_configuration(
     expected_groups: int,
     expected_ensemble_size: int,
     expected_conformal_coverage: float,
+    expected_audit_case_plan: Path | None = None,
 ) -> None:
     failures: list[str] = []
     if _integer(metadata.get("ensemble_size"), "metadata.ensemble_size") != expected_ensemble_size:
@@ -309,6 +310,37 @@ def _validate_model_configuration(
         failures.append("feature_bounds_source must be train")
     if metadata.get("fingerprint_columns") != list(FINGERPRINT_COLUMNS):
         failures.append("fingerprint_columns must be the exact v2 fingerprint list")
+
+    if expected_audit_case_plan is not None:
+        geometry_column = str(metadata.get("geometry_group_column") or "").strip()
+        if geometry_column not in trainer.V2_GEOMETRY_ID_COLUMNS:
+            failures.append("geometry_group_column is invalid for audit evaluation")
+        else:
+            try:
+                _, expected_evaluation = trainer.load_v2_audit_case_plan(
+                    expected_audit_case_plan,
+                    geometry_column=geometry_column,
+                )
+            except (OSError, ValueError) as exc:
+                raise ContinuationGateError(
+                    f"cannot validate combined audit case plan: {exc}"
+                ) from exc
+            recorded_evaluation = metadata.get("test_evaluation")
+            if not isinstance(recorded_evaluation, Mapping):
+                failures.append("test_evaluation must be an object for combined training")
+            elif set(recorded_evaluation) != set(expected_evaluation):
+                failures.append("test_evaluation fields do not match the audit contract")
+            else:
+                mismatches = [
+                    key
+                    for key, expected in expected_evaluation.items()
+                    if recorded_evaluation.get(key) != expected
+                ]
+                if mismatches:
+                    failures.append(
+                        "test_evaluation does not match the Stage2 audit plan: "
+                        + ", ".join(mismatches)
+                    )
 
     split_counts = metadata.get("split_group_counts")
     if not isinstance(split_counts, Mapping) or set(split_counts) != {"train", "calibration", "test"}:
@@ -439,6 +471,7 @@ def evaluate_gate(
     threshold: float,
     expected_ensemble_size: int = DEFAULT_ENSEMBLE_SIZE,
     expected_conformal_coverage: float = DEFAULT_CONFORMAL_COVERAGE,
+    expected_audit_case_plan: Path | None = None,
 ) -> GateResult:
     validation = _validate_validation_summary(
         validation_path,
@@ -453,6 +486,7 @@ def evaluate_gate(
         expected_groups=expected_groups,
         expected_ensemble_size=expected_ensemble_size,
         expected_conformal_coverage=expected_conformal_coverage,
+        expected_audit_case_plan=expected_audit_case_plan,
     )
     fingerprints = _validate_fingerprints(metadata)
     primary_csv = _validate_primary_r2_csv(r2_path, threshold=threshold)
@@ -991,6 +1025,8 @@ def _training_argv(
         "0",
         "--max-removed-output-outlier-rows",
         "0",
+        "--v2-audit-case-plan",
+        str(args.stage2_case_plan),
     ]
     for column in FINGERPRINT_COLUMNS:
         argv.extend(("--expected-fingerprint", f"{column}={fingerprints[column]}"))
@@ -1062,6 +1098,7 @@ def run_combined_pipeline(
         threshold=args.r2_threshold,
         expected_ensemble_size=args.ensemble_size,
         expected_conformal_coverage=args.conformal_coverage,
+        expected_audit_case_plan=args.stage2_case_plan,
     )
     if (training_code == 0) != combined_gate.passed:
         raise ContinuationGateError("combined training exit code and R2 metadata disagree")
@@ -1122,6 +1159,7 @@ def _load_combined_gate(args: argparse.Namespace, stage1_gate: GateResult) -> Ga
         threshold=args.r2_threshold,
         expected_ensemble_size=args.ensemble_size,
         expected_conformal_coverage=args.conformal_coverage,
+        expected_audit_case_plan=args.stage2_case_plan,
     )
     if gate.fingerprints != stage1_gate.fingerprints:
         raise ContinuationGateError("combined fingerprints do not match Stage1")
@@ -1185,9 +1223,11 @@ def _execution_contract(args: argparse.Namespace, gate: GateResult) -> dict[str,
             "runner_argv": _stage2_runner_argv(args, submit=True),
         },
         "training": {
+            "audit_case_plan": _artifact_contract(args.stage2_case_plan),
             "conformal_coverage": args.conformal_coverage,
             "ensemble_size": args.ensemble_size,
             "r2_threshold": args.r2_threshold,
+            "test_evaluation_scope": trainer.V2_TEST_EVALUATION_SCOPE_AUDIT_CASE_PLAN,
         },
     }
 

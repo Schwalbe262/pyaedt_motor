@@ -71,6 +71,7 @@ def valid_metadata(
         "conformal_coverage": 0.95,
         "conformal_calibration_isolated": True,
         "feature_bounds_source": "train",
+        "geometry_group_column": "geometry_group_id",
         "split_strategy": "preassigned_geometry_group",
         "split_group_counts": {"train": groups - 2, "calibration": 1, "test": 1},
         "raw_rows": rows,
@@ -188,7 +189,17 @@ def fixture(root: Path, *, primary_r2: float = 0.96, voltage_r2: float = 0.96) -
     )
     write_json(paths["metadata"], metadata)
     write_r2(paths["r2"], metadata)
-    write_csv(paths["stage2_plan"], [{"case_id": "s2-a", "design_hash": "hash-group-d"}])
+    write_csv(
+        paths["stage2_plan"],
+        [
+            {
+                "case_id": "s2-a",
+                "design_hash": "hash-group-d",
+                "geometry_group_id": "group-d",
+                "doe_split": "test",
+            }
+        ],
+    )
     write_json(paths["beta_summary"], {})
     write_csv(paths["beta_plan"], [{"case_id": "beta-a"}])
     write_csv(paths["beta_results"], [{"case_id": "beta-a"}])
@@ -1059,6 +1070,43 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
                             threshold=0.95,
                         )
 
+    def test_combined_gate_requires_exact_stage2_test_audit_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp))
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError,
+                "test_evaluation",
+            ):
+                continuation.evaluate_gate(
+                    paths["validation"],
+                    paths["metadata"],
+                    paths["r2"],
+                    expected_rows=4,
+                    expected_groups=3,
+                    expected_repeats=1,
+                    threshold=0.95,
+                    expected_audit_case_plan=paths["stage2_plan"],
+                )
+
+            metadata = paths["metadata_value"]
+            _, metadata["test_evaluation"] = continuation.trainer.load_v2_audit_case_plan(
+                paths["stage2_plan"],
+                geometry_column="geometry_group_id",
+            )
+            write_json(paths["metadata"], metadata)
+            gate = continuation.evaluate_gate(
+                paths["validation"],
+                paths["metadata"],
+                paths["r2"],
+                expected_rows=4,
+                expected_groups=3,
+                expected_repeats=1,
+                threshold=0.95,
+                expected_audit_case_plan=paths["stage2_plan"],
+            )
+
+        self.assertTrue(gate.passed)
+
     def test_atomic_create_never_overwrites_external_decision(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decision.json"
@@ -1155,6 +1203,10 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
                     groups=4,
                 )
                 metadata["fingerprints"] = stage1_gate.fingerprints
+                _, metadata["test_evaluation"] = continuation.trainer.load_v2_audit_case_plan(
+                    paths["stage2_plan"],
+                    geometry_column="geometry_group_id",
+                )
                 write_json(model_dir / "metadata.json", metadata)
                 write_r2(r2_path, metadata)
                 return 0
@@ -1173,6 +1225,10 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
             )
             training_args = training.call_args.args[0]
             self.assertEqual(training_args.count("--expected-fingerprint"), 8)
+            self.assertEqual(
+                training_args[training_args.index("--v2-audit-case-plan") + 1],
+                str(paths["stage2_plan"]),
+            )
 
 
 if __name__ == "__main__":

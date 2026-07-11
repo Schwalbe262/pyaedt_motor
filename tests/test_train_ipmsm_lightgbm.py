@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import math
@@ -203,6 +204,57 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
             trainer.validated_preassigned_group_partitions(
                 ["g1", "g1", "g2", "g3"],
                 ["train", "test", "calibration", "test"],
+            )
+
+    def test_v2_audit_case_plan_selects_only_its_untouched_test_geometry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "stage2.csv"
+            rows = [
+                {"case_id": "s2-train", "geometry_group_id": "s2-g-train", "doe_split": "train"},
+                {"case_id": "s2-test-a", "geometry_group_id": "s2-g-test", "doe_split": "test"},
+                {"case_id": "s2-test-b", "geometry_group_id": "s2-g-test", "doe_split": "test"},
+            ]
+            with path.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+
+            plan_rows, contract = trainer.load_v2_audit_case_plan(
+                path,
+                geometry_column="geometry_group_id",
+            )
+            test_ids, test_groups = trainer.validate_v2_audit_records(
+                plan_rows,
+                [
+                    {
+                        "case_id": "s1-test",
+                        "geometry_group_id": "s1-g-test",
+                        "doe_split": "test",
+                    },
+                    *rows,
+                ],
+                geometry_column="geometry_group_id",
+            )
+
+        self.assertEqual(test_ids, ("s2-test-a", "s2-test-b"))
+        self.assertEqual(test_groups, ("s2-g-test",))
+        self.assertEqual(contract["scope"], trainer.V2_TEST_EVALUATION_SCOPE_AUDIT_CASE_PLAN)
+        self.assertEqual(contract["rows"], 2)
+        self.assertEqual(contract["groups"], 1)
+        self.assertEqual(contract["case_plan_rows"], 3)
+
+    def test_v2_audit_case_plan_rejects_geometry_present_outside_plan(self) -> None:
+        plan_rows = [
+            {"case_id": "s2-test", "geometry_group_id": "shared", "doe_split": "test"}
+        ]
+        with self.assertRaisesRegex(ValueError, "outside the audit case plan"):
+            trainer.validate_v2_audit_records(
+                plan_rows,
+                [
+                    *plan_rows,
+                    {"case_id": "s1-test", "geometry_group_id": "shared", "doe_split": "test"},
+                ],
+                geometry_column="geometry_group_id",
             )
 
     def test_model_selection_partitions_are_inside_outer_train_groups(self) -> None:
@@ -445,10 +497,15 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
         legacy = trainer.build_parser().parse_args([])
         self.assertFalse(legacy.v2)
         self.assertTrue(legacy.remove_output_outliers)
+        self.assertIsNone(legacy.v2_audit_case_plan)
 
         args = trainer.build_parser().parse_args(
             ["--expected-fingerprint", "input_quality_profile=reference_ultra"]
         )
+        with self.assertRaisesRegex(ValueError, "requires --v2"):
+            trainer.validate_training_options(args)
+
+        args = trainer.build_parser().parse_args(["--v2-audit-case-plan", "stage2.csv"])
         with self.assertRaisesRegex(ValueError, "requires --v2"):
             trainer.validate_training_options(args)
 

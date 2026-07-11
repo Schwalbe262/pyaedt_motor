@@ -7,6 +7,7 @@ import csv
 from dataclasses import dataclass
 import hashlib
 import importlib
+import io
 import json
 import math
 import os
@@ -27,6 +28,8 @@ R2_THRESHOLD = 0.95
 V2_CONFORMAL_COVERAGE = 0.95
 V2_MODEL_SELECTION_FRACTION = 0.20
 V2_DEFAULT_ENSEMBLE_SIZE = 5
+V2_TEST_EVALUATION_SCOPE_ALL = "all_preassigned_test"
+V2_TEST_EVALUATION_SCOPE_AUDIT_CASE_PLAN = "audit_case_plan_test"
 
 DEFAULT_DATA_PATHS = (
     PROJECT_DIR / "ipmsm_simulation_results1.csv",
@@ -532,6 +535,169 @@ def validated_preassigned_group_partitions(
     return assignments
 
 
+def load_v2_audit_case_plan(
+    path: Path,
+    *,
+    geometry_column: str,
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    """Load an exact case plan whose preassigned test rows form the final audit cohort."""
+
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f"v2 audit case plan is missing: {path}")
+    try:
+        raw_bytes = path.read_bytes()
+        text = raw_bytes.decode("utf-8-sig")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"cannot read v2 audit case plan {path}: {exc}") from exc
+    try:
+        with io.StringIO(text, newline="") as stream:
+            reader = csv.DictReader(stream)
+            fieldnames = list(reader.fieldnames or ())
+            if not fieldnames or len(fieldnames) != len(set(fieldnames)):
+                raise ValueError("v2 audit case plan has a missing or duplicate CSV header")
+            required = {"case_id", "doe_split", geometry_column}
+            missing = sorted(required - set(fieldnames))
+            if missing:
+                raise ValueError(f"v2 audit case plan is missing columns: {missing}")
+            rows = [dict(row) for row in reader]
+    except csv.Error as exc:
+        raise ValueError(f"cannot parse v2 audit case plan {path}: {exc}") from exc
+    if not rows:
+        raise ValueError("v2 audit case plan is empty")
+    if any(None in row for row in rows):
+        raise ValueError("v2 audit case plan has fields beyond its CSV header")
+
+    case_ids: list[str] = []
+    seen_case_ids: set[str] = set()
+    group_splits: dict[str, str] = {}
+    test_case_ids: list[str] = []
+    test_groups: set[str] = set()
+    allowed_splits = {"train", "calibration", "test"}
+    for index, row in enumerate(rows, start=1):
+        case_id = normalized_nonempty_text(row.get("case_id"))
+        group_id = normalized_nonempty_text(row.get(geometry_column))
+        split_name = str(row.get("doe_split") or "").strip().lower()
+        if not case_id:
+            raise ValueError(f"v2 audit case plan row {index} has a blank case_id")
+        if case_id in seen_case_ids:
+            raise ValueError(f"v2 audit case plan contains duplicate case_id: {case_id}")
+        if not group_id:
+            raise ValueError(
+                f"v2 audit case plan row {index} has a blank {geometry_column}"
+            )
+        if split_name not in allowed_splits:
+            raise ValueError(
+                f"v2 audit case plan row {index} has invalid doe_split: {split_name!r}"
+            )
+        previous = group_splits.setdefault(group_id, split_name)
+        if previous != split_name:
+            raise ValueError(
+                f"v2 audit geometry group {group_id!r} crosses doe_split partitions"
+            )
+        seen_case_ids.add(case_id)
+        case_ids.append(case_id)
+        if split_name == "test":
+            test_case_ids.append(case_id)
+            test_groups.add(group_id)
+    if not test_case_ids or not test_groups:
+        raise ValueError("v2 audit case plan has no preassigned test geometry")
+
+    encoded_test_ids = json.dumps(
+        test_case_ids,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    contract: dict[str, Any] = {
+        "scope": V2_TEST_EVALUATION_SCOPE_AUDIT_CASE_PLAN,
+        "case_plan": str(path.resolve(strict=False)),
+        "case_plan_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+        "case_plan_rows": len(case_ids),
+        "geometry_column": geometry_column,
+        "rows": len(test_case_ids),
+        "groups": len(test_groups),
+        "test_case_ids_sha256": hashlib.sha256(encoded_test_ids).hexdigest(),
+    }
+    return rows, contract
+
+
+def validate_v2_audit_records(
+    plan_rows: Iterable[dict[str, object]],
+    data_records: Iterable[dict[str, object]],
+    *,
+    geometry_column: str,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Bind every audit-plan row to valid data and return only its untouched test cohort."""
+
+    normalized_plan: list[tuple[str, str, str]] = []
+    plan_ids: set[str] = set()
+    for row in plan_rows:
+        case_id = normalized_nonempty_text(row.get("case_id"))
+        group_id = normalized_nonempty_text(row.get(geometry_column))
+        split_name = str(row.get("doe_split") or "").strip().lower()
+        if not case_id or not group_id or split_name not in {"train", "calibration", "test"}:
+            raise ValueError("v2 audit case plan contains an invalid normalized row")
+        if case_id in plan_ids:
+            raise ValueError(f"v2 audit case plan contains duplicate case_id: {case_id}")
+        plan_ids.add(case_id)
+        normalized_plan.append((case_id, group_id, split_name))
+
+    data_by_case: dict[str, tuple[str, str]] = {}
+    all_data: list[tuple[str, str, str]] = []
+    for row in data_records:
+        case_id = normalized_nonempty_text(row.get("case_id"))
+        group_id = normalized_nonempty_text(row.get(geometry_column))
+        split_name = str(row.get("doe_split") or "").strip().lower()
+        if not case_id or not group_id or split_name not in {"train", "calibration", "test"}:
+            raise ValueError("v2 training data contains an invalid audit identity row")
+        if case_id in data_by_case:
+            raise ValueError(f"v2 training data contains duplicate case_id: {case_id}")
+        data_by_case[case_id] = (group_id, split_name)
+        all_data.append((case_id, group_id, split_name))
+
+    missing = [case_id for case_id, _, _ in normalized_plan if case_id not in data_by_case]
+    if missing:
+        raise ValueError(
+            f"v2 audit case plan rows are missing from valid training data: {missing[:3]}"
+        )
+    mismatches = [
+        case_id
+        for case_id, group_id, split_name in normalized_plan
+        if data_by_case[case_id] != (group_id, split_name)
+    ]
+    if mismatches:
+        raise ValueError(
+            f"v2 audit case plan identity/split differs from training data: {mismatches[:3]}"
+        )
+
+    test_case_ids = tuple(
+        case_id for case_id, _, split_name in normalized_plan if split_name == "test"
+    )
+    test_groups = tuple(
+        sorted(
+            {
+                group_id
+                for _, group_id, split_name in normalized_plan
+                if split_name == "test"
+            }
+        )
+    )
+    if not test_case_ids or not test_groups:
+        raise ValueError("v2 audit case plan has no preassigned test geometry")
+    audit_group_set = set(test_groups)
+    leaked = [
+        case_id
+        for case_id, group_id, _ in all_data
+        if group_id in audit_group_set and case_id not in plan_ids
+    ]
+    if leaked:
+        raise ValueError(
+            "v2 audit geometry appears outside the audit case plan: " + str(leaked[:3])
+        )
+    return test_case_ids, test_groups
+
+
 def deterministic_model_selection_partitions(
     group_values: Iterable[object],
     *,
@@ -993,6 +1159,74 @@ def split_training_data(
     return SplitData(x_train=x_train, x_val=x_val, x_test=x_test, y_train=y_train, y_val=y_val, y_test=y_test)
 
 
+def select_v2_test_evaluation_split(
+    prepared: PreparedData,
+    outer_split: SplitData,
+    audit_case_plan: Path | None,
+) -> tuple[SplitData, dict[str, Any]]:
+    """Keep fitting partitions unchanged while optionally restricting decisive test metrics."""
+
+    if not prepared.geometry_group_column:
+        raise ValueError("v2 test evaluation requires a geometry group column")
+    if audit_case_plan is None:
+        return outer_split, {
+            "scope": V2_TEST_EVALUATION_SCOPE_ALL,
+            "case_plan": "",
+            "case_plan_sha256": "",
+            "case_plan_rows": 0,
+            "geometry_column": prepared.geometry_group_column,
+            "rows": len(outer_split.x_test),
+            "groups": len(outer_split.test_group_ids),
+            "test_case_ids_sha256": "",
+        }
+    if "case_id" not in prepared.valid_df.columns or "doe_split" not in prepared.valid_df.columns:
+        raise ValueError("v2 audit evaluation requires case_id and doe_split in valid data")
+
+    plan_rows, contract = load_v2_audit_case_plan(
+        audit_case_plan,
+        geometry_column=prepared.geometry_group_column,
+    )
+    identity_columns = ["case_id", "doe_split", prepared.geometry_group_column]
+    data_records = prepared.valid_df[identity_columns].to_dict(orient="records")
+    test_case_ids, test_groups = validate_v2_audit_records(
+        plan_rows,
+        data_records,
+        geometry_column=prepared.geometry_group_column,
+    )
+    normalized_data_ids = prepared.valid_df["case_id"].map(normalized_nonempty_text)
+    index_by_case = {
+        case_id: index
+        for index, case_id in zip(prepared.valid_df.index, normalized_data_ids)
+        if case_id is not None
+    }
+    audit_indices = [index_by_case[case_id] for case_id in test_case_ids]
+    outer_test_indices = set(outer_split.x_test.index)
+    outside_test = [index for index in audit_indices if index not in outer_test_indices]
+    if outside_test:
+        raise ValueError("v2 audit rows are not wholly inside the preassigned outer test split")
+
+    evaluation_split = SplitData(
+        x_train=outer_split.x_train,
+        x_val=outer_split.x_val,
+        x_test=outer_split.x_test.loc[audit_indices].copy(),
+        y_train=outer_split.y_train,
+        y_val=outer_split.y_val,
+        y_test=outer_split.y_test.loc[audit_indices].copy(),
+        group_column=outer_split.group_column,
+        train_group_ids=outer_split.train_group_ids,
+        val_group_ids=outer_split.val_group_ids,
+        test_group_ids=test_groups,
+    )
+    if len(evaluation_split.x_test) != contract["rows"]:
+        raise RuntimeError("v2 audit test row count is inconsistent with its case plan")
+    print(
+        "test_evaluation_scope=audit_case_plan_test "
+        f"rows={len(evaluation_split.x_test)} groups={len(test_groups)} "
+        f"case_plan={audit_case_plan}"
+    )
+    return evaluation_split, contract
+
+
 def build_v2_model_selection_split(
     prepared: PreparedData,
     outer_split: SplitData,
@@ -1398,6 +1632,8 @@ def validate_training_options(args: argparse.Namespace) -> None:
         raise ValueError("--ensemble-size must be at least 1")
     if args.expected_fingerprint and not args.v2:
         raise ValueError("--expected-fingerprint requires --v2")
+    if args.v2_audit_case_plan is not None and not args.v2:
+        raise ValueError("--v2-audit-case-plan requires --v2")
     parse_expected_fingerprints(args.expected_fingerprint)
 
 
@@ -1424,6 +1660,11 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
         raise RuntimeError("training data quality gate failed: " + "; ".join(quality_failures))
 
     split = split_training_data(deps, prepared, args.test_size, args.val_size, args.seed)
+    evaluation_split, test_evaluation = (
+        select_v2_test_evaluation_split(prepared, split, args.v2_audit_case_plan)
+        if args.v2
+        else (split, {})
+    )
     model_selection_split = build_v2_model_selection_split(prepared, split, seed=args.seed) if args.v2 else None
     models: dict[str, Any] = {}
     model_paths: dict[str, str] = {}
@@ -1437,7 +1678,7 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
         if args.v2:
             model, best_params, target_metric_rows, target_tuning_records = train_one_target_v2(
                 deps,
-                split,
+                evaluation_split,
                 model_selection_split,
                 target_col,
                 args.enable_tuning,
@@ -1468,7 +1709,7 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
             print(f"training auxiliary_target={target_col} tuning={args.enable_tuning}")
             model, best_params, target_metric_rows, target_tuning_records = train_one_target_v2(
                 deps,
-                split,
+                evaluation_split,
                 model_selection_split,
                 target_col,
                 args.enable_tuning,
@@ -1482,7 +1723,7 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
             best_params_by_target[target_col] = best_params
             auxiliary_metric_rows.extend(target_metric_rows)
             tuning_records.extend(target_tuning_records)
-        metric_rows.extend(v2_derived_metric_rows(split, models, prepared.output_name_map))
+        metric_rows.extend(v2_derived_metric_rows(evaluation_split, models, prepared.output_name_map))
 
     modeled_output_columns = (*prepared.output_columns, *prepared.auxiliary_output_columns)
     conformal_absolute_residuals = (
@@ -1568,6 +1809,7 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
             "calibration": len(split.val_group_ids),
             "test": len(split.test_group_ids),
         },
+        "test_evaluation": test_evaluation,
         "model_selection_group_counts": {
             "fit": len(model_selection_split.train_group_ids) if model_selection_split else len(split.train_group_ids),
             "holdout": len(model_selection_split.val_group_ids) if model_selection_split else 0,
@@ -1653,6 +1895,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="COLUMN=VALUE",
         help="Require a v2 dataset fingerprint value; repeat for multiple fingerprint columns.",
+    )
+    parser.add_argument(
+        "--v2-audit-case-plan",
+        type=Path,
+        help=(
+            "Restrict decisive v2 test metrics to every preassigned test row in this "
+            "untouched audit case plan."
+        ),
     )
     parser.add_argument("--max-invalid-training-rows", type=int, help="Fail if status/nonfinite filtering removes more rows than this.")
     parser.add_argument(
