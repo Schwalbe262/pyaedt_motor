@@ -39,18 +39,28 @@ from ipmsm_surrogate_bundle import (
     V2_TRAINING_SCHEMA,
 )
 from optimize_ipmsm_nsga2 import (
+    BETA_VALIDATION_ROLE_CENTER,
+    BETA_VALIDATION_ROLES,
     FEA_DATASET_SCHEMA_VERSION,
     FEA_MODEL_EXTENT,
+    LOCAL_BETA_NEIGHBOR_STEP_DEG,
     REFERENCE_FEA_QUALITY_PROFILE,
+    beta_validation_case_id,
     fea_case_fieldnames,
+    local_beta_validation_points,
     pareto_fieldnames,
 )
 
 
-SUMMARY_SCHEMA_VERSION = "ipmsm_pareto_fea_validation_v2"
-ROW_SCHEMA_VERSION = "ipmsm_pareto_fea_validation_row_v1"
+SUMMARY_SCHEMA_VERSION = "ipmsm_pareto_fea_validation_v3"
+ROW_SCHEMA_VERSION = "ipmsm_pareto_fea_validation_row_v2"
+FINAL_FRONT_SCHEMA_VERSION = "ipmsm_fea_filtered_final_front_v1"
+DEFAULT_FINAL_FRONT_NAME = "fea_filtered_final_front.csv"
 DEFAULT_MINIMUM_COVERAGE = 0.8
 DEFAULT_IDENTITY_RELATIVE_TOLERANCE = 1e-6
+LOCAL_BETA_LOSS_RELATIVE_TOLERANCE = 0.01
+LOCAL_BETA_LOSS_ABSOLUTE_TOLERANCE_W = 1.0
+MINIMUM_VALIDATED_CANDIDATES_IF_MULTIPLE_PLANNED = 2
 NUMERIC_RELATIVE_TOLERANCE = 1e-10
 NUMERIC_ABSOLUTE_TOLERANCE = 1e-12
 COMPARISON_ABSOLUTE_TOLERANCE = 1e-9
@@ -139,6 +149,10 @@ ROW_FIELDNAMES = (
     "case_id",
     "candidate_id",
     "operating_point_id",
+    "beta_validation_role",
+    "beta_dq_deg",
+    "selected_beta_dq_deg",
+    "beta_offset_deg",
     "target_kind",
     "target_value",
     "actual_torque_nm",
@@ -535,7 +549,7 @@ def validate_case_plan(
     point_by_name = {point.name: point for point in spec.operating_points}
     point_order = [point.name for point in spec.operating_points]
     seen_cases: set[str] = set()
-    seen_pairs: set[tuple[str, str]] = set()
+    seen_probes: set[tuple[str, str, str]] = set()
     candidate_order: list[str] = []
     grouped: dict[str, list[dict[str, str]]] = {}
     homogeneous_provenance: dict[str, str] | None = None
@@ -581,18 +595,25 @@ def validate_case_plan(
         case_id = _text(row, "case_id", label)
         candidate_id = _text(row, "candidate_id", label)
         point_id = _text(row, "operating_point_id", label)
+        beta_role = _text(row, "beta_validation_role", label)
         if case_id in seen_cases:
             raise ParetoFEAValidationError(f"duplicate FEA case-plan case_id: {case_id!r}")
-        if (candidate_id, point_id) in seen_pairs:
+        if beta_role not in BETA_VALIDATION_ROLES:
+            raise ParetoFEAValidationError(f"{label} has unknown beta_validation_role={beta_role!r}")
+        probe_key = (candidate_id, point_id, beta_role)
+        if probe_key in seen_probes:
             raise ParetoFEAValidationError(
-                f"duplicate FEA case-plan candidate/operating-point pair: {candidate_id!r}/{point_id!r}"
+                "duplicate FEA case-plan candidate/operating-point/beta-role: "
+                f"{candidate_id!r}/{point_id!r}/{beta_role!r}"
             )
         seen_cases.add(case_id)
-        seen_pairs.add((candidate_id, point_id))
+        seen_probes.add(probe_key)
         if point_id not in point_by_name:
             raise ParetoFEAValidationError(f"{label} references unknown operating_point_id={point_id!r}")
-        if case_id != f"{candidate_id}__{point_id}":
-            raise ParetoFEAValidationError(f"{label} case_id is not canonical for its candidate/operating point")
+        if case_id != beta_validation_case_id(candidate_id, point_id, beta_role):
+            raise ParetoFEAValidationError(
+                f"{label} case_id is not canonical for its candidate/operating point/beta role"
+            )
         if _text(row, "geometry_group_id", label) != f"optimization_{candidate_id}":
             raise ParetoFEAValidationError(f"{label} geometry_group_id is not canonical")
         required_text = {
@@ -604,13 +625,21 @@ def validate_case_plan(
             "quality_profile": REFERENCE_FEA_QUALITY_PROFILE,
             "geometry_mode": "fixed",
             "operation": "sin_current",
-            "control_source": "surrogate_inner_search",
         }
         for column, expected in required_text.items():
             if _text(row, column, label) != expected:
                 raise ParetoFEAValidationError(f"{label} {column} does not match canonical value {expected!r}")
         if str(row.get("repeat_of_case_id") or "").strip():
             raise ParetoFEAValidationError(f"{label} repeat_of_case_id must be blank")
+        expected_control_source = (
+            "surrogate_inner_search"
+            if beta_role == BETA_VALIDATION_ROLE_CENTER
+            else "local_beta_physical_validation"
+        )
+        if _text(row, "control_source", label) != expected_control_source:
+            raise ParetoFEAValidationError(
+                f"{label} control_source does not match beta validation role"
+            )
         if not _false_like(row.get("use_periodic_boundary")):
             raise ParetoFEAValidationError(f"{label} must disable periodic boundary")
 
@@ -630,11 +659,17 @@ def validate_case_plan(
 
         current = _nonnegative(row, "i_peak_a", label)
         beta = _finite(row, "beta_dq_deg", label)
+        selected_beta = _finite(row, "selected_beta_dq_deg", label)
+        beta_offset = _finite(row, "beta_offset_deg", label)
         resistance = _nonnegative(row, "phase_resistance_ohm", label)
         if current > spec.effective_peak_current_limit_a + _comparison_tolerance(spec.effective_peak_current_limit_a):
             raise ParetoFEAValidationError(f"{label} exceeds effective peak-current limit")
         if not spec.beta_bounds_deg[0] <= beta <= spec.beta_bounds_deg[1]:
             raise ParetoFEAValidationError(f"{label} beta_dq_deg is outside optimization bounds")
+        if not spec.beta_bounds_deg[0] <= selected_beta <= spec.beta_bounds_deg[1]:
+            raise ParetoFEAValidationError(f"{label} selected_beta_dq_deg is outside optimization bounds")
+        if not _equivalent(beta, selected_beta + beta_offset):
+            raise ParetoFEAValidationError(f"{label} beta offset identity is invalid")
         if resistance <= 0.0:
             raise ParetoFEAValidationError(f"{label} phase_resistance_ohm must be > 0")
 
@@ -643,10 +678,14 @@ def validate_case_plan(
         _nonnegative(row, "surrogate_total_loss_ucb_w", label)
         point = point_by_name[point_id]
         required_torque = point.required_torque_nm
-        if torque_lcb + _comparison_tolerance(required_torque) < required_torque:
+        if beta_role == BETA_VALIDATION_ROLE_CENTER and (
+            torque_lcb + _comparison_tolerance(required_torque) < required_torque
+        ):
             raise ParetoFEAValidationError(f"{label} surrogate torque LCB does not satisfy its target")
         voltage_limit = spec.phase_peak_voltage_limit_v
-        if voltage_ucb > voltage_limit + _comparison_tolerance(voltage_limit):
+        if beta_role == BETA_VALIDATION_ROLE_CENTER and (
+            voltage_ucb > voltage_limit + _comparison_tolerance(voltage_limit)
+        ):
             raise ParetoFEAValidationError(f"{label} surrogate voltage UCB exceeds the hard voltage limit")
 
         if candidate_id not in grouped:
@@ -658,11 +697,56 @@ def validate_case_plan(
 
     for candidate_id in candidate_order:
         candidate_rows = grouped[candidate_id]
-        actual_order = [str(row["operating_point_id"]).strip() for row in candidate_rows]
-        if actual_order != point_order:
+        expected_layout: list[tuple[str, str, float, float, float]] = []
+        for point_id in point_order:
+            point_rows = [
+                row
+                for row in candidate_rows
+                if str(row["operating_point_id"]).strip() == point_id
+            ]
+            center_rows = [
+                row
+                for row in point_rows
+                if str(row["beta_validation_role"]).strip()
+                == BETA_VALIDATION_ROLE_CENTER
+            ]
+            if len(center_rows) != 1:
+                raise ParetoFEAValidationError(
+                    f"candidate {candidate_id!r}/{point_id!r} must contain exactly one selected beta center"
+                )
+            selected_beta = _finite(
+                center_rows[0],
+                "selected_beta_dq_deg",
+                f"candidate {candidate_id!r}/{point_id!r}",
+            )
+            expected_layout.extend(
+                (point_id, role, beta, selected_beta, offset)
+                for role, beta, offset in local_beta_validation_points(
+                    selected_beta,
+                    spec.beta_bounds_deg,
+                    neighbor_step_deg=LOCAL_BETA_NEIGHBOR_STEP_DEG,
+                )
+            )
+        actual_layout = [
+            (
+                str(row["operating_point_id"]).strip(),
+                str(row["beta_validation_role"]).strip(),
+                _finite(row, "beta_dq_deg", f"candidate {candidate_id!r}"),
+                _finite(row, "selected_beta_dq_deg", f"candidate {candidate_id!r}"),
+                _finite(row, "beta_offset_deg", f"candidate {candidate_id!r}"),
+            )
+            for row in candidate_rows
+        ]
+        if len(actual_layout) != len(expected_layout) or any(
+            actual[:2] != expected[:2]
+            or any(
+                not _equivalent(expected_value, actual_value)
+                for expected_value, actual_value in zip(expected[2:], actual[2:])
+            )
+            for actual, expected in zip(actual_layout, expected_layout)
+        ):
             raise ParetoFEAValidationError(
-                f"candidate {candidate_id!r} operating-point order/coverage mismatch: "
-                f"expected={point_order!r} actual={actual_order!r}"
+                f"candidate {candidate_id!r} beta-neighbor order/coverage mismatch"
             )
         design = {
             bound.name: _finite(candidate_rows[0], bound.name, f"candidate {candidate_id!r}")
@@ -699,7 +783,10 @@ def validate_case_plan(
             )
         expected_design_hash = _candidate_design_hash(design)
         for row in candidate_rows:
-            label = f"candidate {candidate_id!r}/{row['operating_point_id']!r}"
+            label = (
+                f"candidate {candidate_id!r}/{row['operating_point_id']!r}/"
+                f"{row['beta_validation_role']!r}"
+            )
             actual_hash = _plain_sha256(row.get("design_hash"), f"{label} design_hash")
             if actual_hash != expected_design_hash:
                 raise ParetoFEAValidationError(f"{label} design_hash does not match canonical design values")
@@ -710,6 +797,32 @@ def validate_case_plan(
                 raise ParetoFEAValidationError(
                     f"{label} phase_resistance_ohm does not match canonical 100C winding calculation"
                 )
+        for point_id in point_order:
+            point_rows = [
+                row
+                for row in candidate_rows
+                if str(row["operating_point_id"]).strip() == point_id
+            ]
+            center = next(
+                row
+                for row in point_rows
+                if str(row["beta_validation_role"]).strip()
+                == BETA_VALIDATION_ROLE_CENTER
+            )
+            invariant_columns = (
+                "i_peak_a",
+                "selected_beta_dq_deg",
+                "phase_resistance_ohm",
+                "surrogate_torque_lcb_nm",
+                "surrogate_voltage_peak_ucb_v",
+                "surrogate_total_loss_ucb_w",
+            )
+            for row in point_rows:
+                for column in invariant_columns:
+                    if not _equivalent(center.get(column), row.get(column)):
+                        raise ParetoFEAValidationError(
+                            f"candidate {candidate_id!r}/{point_id!r} local beta probe changes {column}"
+                        )
     return candidate_order
 
 
@@ -796,7 +909,17 @@ def validate_pareto_front(
             )
         pareto_row = candidates[candidate_id]
         selected_rows = plan_by_candidate[candidate_id]
-        first_plan = selected_rows[0]
+        center_rows = [
+            row
+            for row in selected_rows
+            if str(row["beta_validation_role"]).strip()
+            == BETA_VALIDATION_ROLE_CENTER
+        ]
+        if len(center_rows) != len(spec.operating_points):
+            raise ParetoFEAValidationError(
+                f"FEA-selected candidate {candidate_id!r} has incomplete selected beta centers"
+            )
+        first_plan = center_rows[0]
         label = f"FEA-selected candidate {candidate_id!r}"
         for name in spec.design_variable_names:
             _require_exact_numeric(pareto_row, name, first_plan, name, label)
@@ -809,7 +932,7 @@ def validate_pareto_front(
         )
         plan_by_point = {
             str(row["operating_point_id"]).strip(): row
-            for row in selected_rows
+            for row in center_rows
         }
         for point in spec.operating_points:
             prefix = _safe_column_name(point.name)
@@ -1001,6 +1124,122 @@ def coverage_summary(
     }
 
 
+def final_front_fieldnames(spec: OptimizationSpec) -> list[str]:
+    fields = [
+        "final_front_schema_version",
+        "candidate_id",
+        "active_volume_m3",
+        "fea_actual_cycle_efficiency",
+        "objective_one_minus_cycle_efficiency",
+        *spec.design_variable_names,
+    ]
+    for point in spec.operating_points:
+        prefix = _safe_column_name(point.name)
+        fields.extend(
+            [
+                f"{prefix}_current_peak_a",
+                f"{prefix}_selected_beta_deg",
+                f"{prefix}_actual_torque_nm",
+                f"{prefix}_actual_power_w",
+                f"{prefix}_actual_voltage_peak_v",
+                f"{prefix}_actual_total_loss_w",
+                f"{prefix}_actual_efficiency_pct",
+                f"{prefix}_target_margin",
+                f"{prefix}_voltage_margin_v",
+                f"{prefix}_local_beta_neighbor_count",
+                f"{prefix}_lowest_feasible_neighbor_loss_w",
+                f"{prefix}_local_beta_loss_tolerance_w",
+                f"{prefix}_local_beta_optimality_passed",
+            ]
+        )
+    return fields
+
+
+def _fea_nondominated(candidates: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    def dominates(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+        left_values = (
+            float(left["active_volume_m3"]),
+            1.0 - float(left["fea_actual_cycle_efficiency"]),
+        )
+        right_values = (
+            float(right["active_volume_m3"]),
+            1.0 - float(right["fea_actual_cycle_efficiency"]),
+        )
+        return all(a <= b + 1e-12 for a, b in zip(left_values, right_values)) and any(
+            a < b - 1e-12 for a, b in zip(left_values, right_values)
+        )
+
+    front = [
+        candidate
+        for index, candidate in enumerate(candidates)
+        if not any(
+            dominates(other, candidate)
+            for other_index, other in enumerate(candidates)
+            if other_index != index
+        )
+    ]
+    return sorted(
+        front,
+        key=lambda row: (
+            float(row["active_volume_m3"]),
+            -float(row["fea_actual_cycle_efficiency"]),
+            str(row["candidate_id"]),
+        ),
+    )
+
+
+def minimum_required_fea_candidates(planned_candidates: int) -> int:
+    if isinstance(planned_candidates, bool) or planned_candidates < 1:
+        raise ValueError("planned candidate count must be a positive integer")
+    return (
+        1
+        if planned_candidates == 1
+        else MINIMUM_VALIDATED_CANDIDATES_IF_MULTIPLE_PLANNED
+    )
+
+
+def _final_front_row(spec: OptimizationSpec, candidate: Mapping[str, Any]) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "final_front_schema_version": FINAL_FRONT_SCHEMA_VERSION,
+        "candidate_id": candidate["candidate_id"],
+        "active_volume_m3": candidate["active_volume_m3"],
+        "fea_actual_cycle_efficiency": candidate["fea_actual_cycle_efficiency"],
+        "objective_one_minus_cycle_efficiency": 1.0
+        - float(candidate["fea_actual_cycle_efficiency"]),
+        **dict(candidate["design"]),
+    }
+    by_point = {
+        str(point["operating_point_id"]): point
+        for point in candidate["operating_points"]
+    }
+    for operating_point in spec.operating_points:
+        point = by_point[operating_point.name]
+        center = point["selected_center"]
+        prefix = _safe_column_name(operating_point.name)
+        row.update(
+            {
+                f"{prefix}_current_peak_a": point["current_peak_a"],
+                f"{prefix}_selected_beta_deg": point["selected_beta_deg"],
+                f"{prefix}_actual_torque_nm": center["actual_torque_nm"],
+                f"{prefix}_actual_power_w": center["actual_power_w"],
+                f"{prefix}_actual_voltage_peak_v": center["actual_voltage_peak_v"],
+                f"{prefix}_actual_total_loss_w": center["actual_total_loss_w"],
+                f"{prefix}_actual_efficiency_pct": center["actual_efficiency_pct"],
+                f"{prefix}_target_margin": center["target_margin"],
+                f"{prefix}_voltage_margin_v": center["voltage_margin_v"],
+                f"{prefix}_local_beta_neighbor_count": point["neighbor_count"],
+                f"{prefix}_lowest_feasible_neighbor_loss_w": point[
+                    "lowest_feasible_neighbor_loss_w"
+                ],
+                f"{prefix}_local_beta_loss_tolerance_w": point["loss_tolerance_w"],
+                f"{prefix}_local_beta_optimality_passed": point[
+                    "local_beta_optimality_passed"
+                ],
+            }
+        )
+    return row
+
+
 def assess_rows(
     spec: OptimizationSpec,
     plan_rows: Sequence[dict[str, str]],
@@ -1017,6 +1256,10 @@ def assess_rows(
         case_id = str(plan["case_id"]).strip()
         label = f"FEA result case_id={case_id!r}"
         point_id = str(plan["operating_point_id"]).strip()
+        beta_role = _text(plan, "beta_validation_role", label)
+        beta = _finite(plan, "beta_dq_deg", label)
+        selected_beta = _finite(plan, "selected_beta_dq_deg", label)
+        beta_offset = _finite(plan, "beta_offset_deg", label)
         point = point_by_name[point_id]
         rpm = _finite(result, "input_base_rpm", label)
         current_peak = _nonnegative(result, "input_i_peak_a", label)
@@ -1075,6 +1318,10 @@ def assess_rows(
             "case_id": case_id,
             "candidate_id": str(plan["candidate_id"]).strip(),
             "operating_point_id": point_id,
+            "beta_validation_role": beta_role,
+            "beta_dq_deg": beta,
+            "selected_beta_dq_deg": selected_beta,
+            "beta_offset_deg": beta_offset,
             "target_kind": point.target_kind,
             "target_value": target_value,
             "actual_torque_nm": torque,
@@ -1127,7 +1374,7 @@ def validate_pareto_fea(
     if not math.isfinite(identity_relative_tolerance) or identity_relative_tolerance < 0.0:
         raise ParetoFEAValidationError("identity_relative_tolerance must be finite and >= 0")
 
-    spec, _spec_mapping, spec_hash = read_spec(spec_path)
+    spec, spec_mapping, spec_hash = read_spec(spec_path)
     model_metadata, model_fingerprints, model_metadata_hash = read_model_metadata(
         model_metadata_path,
         spec,
@@ -1171,15 +1418,29 @@ def validate_pareto_fea(
         results_hash=results_hash,
     )
 
+    center_assessments = [
+        row
+        for row in assessments
+        if row["beta_validation_role"] == BETA_VALIDATION_ROLE_CENTER
+    ]
     coverage = {
         "torque_lcb": coverage_summary(
-            assessments, "torque_lcb_covered", "torque_lcb_relative_error", minimum_coverage
+            center_assessments,
+            "torque_lcb_covered",
+            "torque_lcb_relative_error",
+            minimum_coverage,
         ),
         "voltage_ucb": coverage_summary(
-            assessments, "voltage_ucb_covered", "voltage_ucb_relative_error", minimum_coverage
+            center_assessments,
+            "voltage_ucb_covered",
+            "voltage_ucb_relative_error",
+            minimum_coverage,
         ),
         "total_loss_ucb": coverage_summary(
-            assessments, "total_loss_ucb_covered", "total_loss_ucb_relative_error", minimum_coverage
+            center_assessments,
+            "total_loss_ucb_covered",
+            "total_loss_ucb_relative_error",
+            minimum_coverage,
         ),
     }
     candidate_summaries: list[dict[str, Any]] = []
@@ -1187,31 +1448,118 @@ def validate_pareto_fea(
     expected_points = [point.name for point in spec.operating_points]
     for candidate_id in candidate_order:
         rows = [row for row in assessments if row["candidate_id"] == candidate_id]
-        passed_points = [row["operating_point_id"] for row in rows if row["hard_constraints_passed"]]
-        passed = len(rows) == len(expected_points) and all(row["hard_constraints_passed"] for row in rows)
-        plan_row = next(row for row in plan_rows if str(row["candidate_id"]).strip() == candidate_id)
+        point_summaries: list[dict[str, Any]] = []
+        centers: dict[str, dict[str, Any]] = {}
+        for point in spec.operating_points:
+            point_rows = [row for row in rows if row["operating_point_id"] == point.name]
+            center = next(
+                row
+                for row in point_rows
+                if row["beta_validation_role"] == BETA_VALIDATION_ROLE_CENTER
+            )
+            centers[point.name] = center
+            neighbors = [
+                row
+                for row in point_rows
+                if row["beta_validation_role"] != BETA_VALIDATION_ROLE_CENTER
+            ]
+            feasible_neighbors = [row for row in neighbors if row["hard_constraints_passed"]]
+            loss_tolerance = max(
+                LOCAL_BETA_LOSS_ABSOLUTE_TOLERANCE_W,
+                LOCAL_BETA_LOSS_RELATIVE_TOLERANCE * center["actual_total_loss_w"],
+            )
+            materially_better = [
+                row
+                for row in feasible_neighbors
+                if row["actual_total_loss_w"]
+                < center["actual_total_loss_w"] - loss_tolerance
+            ]
+            local_passed = bool(center["hard_constraints_passed"]) and not materially_better
+            evidence_keys = (
+                "case_id",
+                "beta_validation_role",
+                "beta_dq_deg",
+                "beta_offset_deg",
+                "actual_torque_nm",
+                "actual_power_w",
+                "actual_voltage_peak_v",
+                "actual_total_loss_w",
+                "actual_efficiency_pct",
+                "target_margin",
+                "voltage_margin_v",
+                "hard_constraints_passed",
+            )
+            point_summaries.append(
+                {
+                    "operating_point_id": point.name,
+                    "current_peak_a": _finite(
+                        next(
+                            plan
+                            for plan in plan_rows
+                            if str(plan["case_id"]).strip() == center["case_id"]
+                        ),
+                        "i_peak_a",
+                        f"candidate {candidate_id!r}/{point.name!r}",
+                    ),
+                    "selected_beta_deg": center["selected_beta_dq_deg"],
+                    "selected_center": {
+                        key: center[key] for key in evidence_keys
+                    },
+                    "neighbors": [
+                        {key: neighbor[key] for key in evidence_keys}
+                        for neighbor in neighbors
+                    ],
+                    "neighbor_count": len(neighbors),
+                    "feasible_neighbor_count": len(feasible_neighbors),
+                    "lowest_feasible_neighbor_loss_w": (
+                        min(row["actual_total_loss_w"] for row in feasible_neighbors)
+                        if feasible_neighbors
+                        else None
+                    ),
+                    "loss_tolerance_w": loss_tolerance,
+                    "materially_better_neighbor_case_ids": [
+                        row["case_id"] for row in materially_better
+                    ],
+                    "selected_center_hard_constraints_passed": center[
+                        "hard_constraints_passed"
+                    ],
+                    "local_beta_optimality_passed": local_passed,
+                }
+            )
+        passed_points = [
+            row["operating_point_id"]
+            for row in point_summaries
+            if row["local_beta_optimality_passed"]
+        ]
+        passed = len(passed_points) == len(expected_points)
+        plan_row = next(
+            row
+            for row in plan_rows
+            if str(row["candidate_id"]).strip() == candidate_id
+            and str(row["beta_validation_role"]).strip()
+            == BETA_VALIDATION_ROLE_CENTER
+        )
         fea_active_volume = active_volume_m3(
             _finite(plan_row, "stator_outer_radius", f"candidate {candidate_id!r}"),
             _finite(plan_row, "stack_length_mm", f"candidate {candidate_id!r}"),
         )
-        assessment_by_point = {row["operating_point_id"]: row for row in rows}
         target_cycle_numerator = sum(
             point.duty_weight * point.required_power_w for point in spec.operating_points
         )
         target_cycle_denominator = sum(
             point.duty_weight
-            * (point.required_power_w + assessment_by_point[point.name]["actual_total_loss_w"])
+            * (point.required_power_w + centers[point.name]["actual_total_loss_w"])
             for point in spec.operating_points
         )
         actual_cycle_numerator = sum(
-            point.duty_weight * assessment_by_point[point.name]["actual_power_w"]
+            point.duty_weight * centers[point.name]["actual_power_w"]
             for point in spec.operating_points
         )
         actual_cycle_denominator = sum(
             point.duty_weight
             * (
-                assessment_by_point[point.name]["actual_power_w"]
-                + assessment_by_point[point.name]["actual_total_loss_w"]
+                centers[point.name]["actual_power_w"]
+                + centers[point.name]["actual_total_loss_w"]
             )
             for point in spec.operating_points
         )
@@ -1231,12 +1579,24 @@ def validate_pareto_fea(
         candidate_summaries.append(
             {
                 "candidate_id": candidate_id,
+                "design": {
+                    bound.name: _finite(
+                        plan_row,
+                        bound.name,
+                        f"candidate {candidate_id!r}",
+                    )
+                    for bound in spec.design_space
+                },
                 "expected_operating_points": expected_points,
                 "passed_operating_points": passed_points,
                 "failed_operating_points": [
-                    row["operating_point_id"] for row in rows if not row["hard_constraints_passed"]
+                    row["operating_point_id"]
+                    for row in point_summaries
+                    if not row["local_beta_optimality_passed"]
                 ],
                 "all_operating_points_passed": passed,
+                "local_beta_optimality_passed": passed,
+                "operating_points": point_summaries,
                 "active_volume_m3": fea_active_volume,
                 "fea_actual_cycle_efficiency": actual_cycle_efficiency,
                 "target_load_cycle_efficiency": target_cycle_efficiency,
@@ -1249,9 +1609,19 @@ def validate_pareto_fea(
             }
         )
 
+    fea_filtered_front = _fea_nondominated(
+        [row for row in candidate_summaries if row["all_operating_points_passed"]]
+    )
+    final_front_rows = [
+        _final_front_row(spec, candidate)
+        for candidate in fea_filtered_front
+    ]
+    required_feasible_candidates = minimum_required_fea_candidates(len(candidate_order))
     gate_failures = [f"{name}_coverage" for name, value in coverage.items() if not value["passed"]]
     if not feasible_candidate_ids:
         gate_failures.append("no_fea_feasible_candidate")
+    elif len(feasible_candidate_ids) < required_feasible_candidates:
+        gate_failures.append("insufficient_fea_feasible_candidates")
     summary: dict[str, Any] = {
         "summary_schema_version": SUMMARY_SCHEMA_VERSION,
         "status": "passed" if not gate_failures else "failed",
@@ -1260,6 +1630,10 @@ def validate_pareto_fea(
         "thresholds": {
             "minimum_one_sided_coverage": minimum_coverage,
             "identity_relative_tolerance": identity_relative_tolerance,
+            "local_beta_neighbor_step_deg": LOCAL_BETA_NEIGHBOR_STEP_DEG,
+            "local_beta_loss_relative_tolerance": LOCAL_BETA_LOSS_RELATIVE_TOLERANCE,
+            "local_beta_loss_absolute_tolerance_w": LOCAL_BETA_LOSS_ABSOLUTE_TOLERANCE_W,
+            "minimum_fea_feasible_candidates": required_feasible_candidates,
         },
         "input_hashes": {
             "optimization_spec": spec_hash,
@@ -1280,17 +1654,31 @@ def validate_pareto_fea(
             "candidate_count": len(candidate_order),
             "pareto_candidate_count": len(pareto_candidates),
             "operating_points_per_candidate": len(spec.operating_points),
+            "beta_validation_roles": list(BETA_VALIDATION_ROLES),
+            "beta_neighbor_step_deg": LOCAL_BETA_NEIGHBOR_STEP_DEG,
+            "selected_center_rows": len(center_assessments),
             "quality_profile": REFERENCE_FEA_QUALITY_PROFILE,
             "model_extent": FEA_MODEL_EXTENT,
             "beta_convention": BETA_CONVENTION,
             "beta_calibration_id": spec.beta_calibration.calibration_id,
             "optimization_provenance": expected_provenance,
+            "optimization_target_assumptions": dict(
+                spec_mapping.get("_assumptions")
+                if isinstance(spec_mapping.get("_assumptions"), Mapping)
+                else {}
+            ),
             **fingerprints,
         },
         "coverage": coverage,
         "candidates": candidate_summaries,
         "feasible_candidate_count": len(feasible_candidate_ids),
         "feasible_candidate_ids": feasible_candidate_ids,
+        "required_feasible_candidate_count": required_feasible_candidates,
+        "fea_filtered_final_front_count": len(final_front_rows),
+        "fea_filtered_final_front_candidate_ids": [
+            row["candidate_id"] for row in final_front_rows
+        ],
+        "fea_filtered_final_front": final_front_rows,
         "row_binding_hashes": [row["case_binding_hash"] for row in assessments],
     }
     summary["validation_id"] = canonical_hash("ipmsm-pareto-fea-validation", summary)
@@ -1306,6 +1694,21 @@ def _json_text(value: Mapping[str, Any]) -> str:
 def _row_csv_text(rows: Sequence[Mapping[str, Any]]) -> str:
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=ROW_FIELDNAMES, extrasaction="raise")
+    writer.writeheader()
+    writer.writerows(rows)
+    return stream.getvalue()
+
+
+def _final_front_csv_text(
+    spec: OptimizationSpec,
+    rows: Sequence[Mapping[str, Any]],
+) -> str:
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        stream,
+        fieldnames=final_front_fieldnames(spec),
+        extrasaction="raise",
+    )
     writer.writeheader()
     writer.writerows(rows)
     return stream.getvalue()
@@ -1356,29 +1759,42 @@ def write_atomic_outputs(
     summary: Mapping[str, Any],
     rows_path: Path | None = None,
     rows: Sequence[Mapping[str, Any]] = (),
+    final_front_path: Path | None = None,
+    final_front_text: str | None = None,
 ) -> None:
-    outputs = [summary_path, *([rows_path] if rows_path is not None else [])]
+    if (final_front_path is None) != (final_front_text is None):
+        raise ParetoFEAValidationError(
+            "final front path and rendered text must be supplied together"
+        )
+    outputs = [
+        summary_path,
+        *([rows_path] if rows_path is not None else []),
+        *([final_front_path] if final_front_path is not None else []),
+    ]
     resolved = [path.resolve() for path in outputs]
     if len(resolved) != len(set(resolved)):
-        raise ParetoFEAValidationError("summary and row CSV outputs must be distinct paths")
+        raise ParetoFEAValidationError("validation outputs must be distinct paths")
     existing = [path for path in outputs if path.exists()]
     if existing:
         raise ParetoFEAValidationError(f"refusing to overwrite existing validation output(s): {existing}")
 
     staged: list[Path] = []
-    published_rows: PublishReceipt | None = None
-    row_temp: Path | None = None
+    published: list[PublishReceipt] = []
     try:
         summary_temp = _stage_text(summary_path, _json_text(summary))
         staged.append(summary_temp)
         if rows_path is not None:
             row_temp = _stage_text(rows_path, _row_csv_text(rows))
             staged.append(row_temp)
-            published_rows = _publish_no_replace(row_temp, rows_path)
+            published.append(_publish_no_replace(row_temp, rows_path))
+        if final_front_path is not None and final_front_text is not None:
+            front_temp = _stage_text(final_front_path, final_front_text)
+            staged.append(front_temp)
+            published.append(_publish_no_replace(front_temp, final_front_path))
         _publish_no_replace(summary_temp, summary_path)
     except Exception:
-        if published_rows is not None:
-            _rollback_published_inode(published_rows)
+        for receipt in reversed(published):
+            _rollback_published_inode(receipt)
         raise
     finally:
         for path in staged:
@@ -1407,6 +1823,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--results", type=Path, required=True)
     parser.add_argument("--summary-output", type=Path, required=True)
     parser.add_argument("--rows-output", type=Path)
+    parser.add_argument("--final-front-output", type=Path)
     parser.add_argument("--minimum-coverage", type=float, default=DEFAULT_MINIMUM_COVERAGE)
     parser.add_argument(
         "--identity-relative-tolerance",
@@ -1423,6 +1840,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.model_dir / METADATA_FILENAME if args.model_dir is not None else args.model_metadata
         )
         assert model_metadata_path is not None
+        final_front_path = args.final_front_output or args.summary_output.with_name(
+            DEFAULT_FINAL_FRONT_NAME
+        )
         input_paths = [
             args.spec.resolve(),
             model_metadata_path.resolve(),
@@ -1430,9 +1850,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.case_plan.resolve(),
             args.results.resolve(),
         ]
-        output_paths = [args.summary_output.resolve(), *([args.rows_output.resolve()] if args.rows_output else [])]
+        output_paths = [
+            args.summary_output.resolve(),
+            *([args.rows_output.resolve()] if args.rows_output else []),
+            final_front_path.resolve(),
+        ]
         if set(input_paths) & set(output_paths):
             raise ParetoFEAValidationError("validation outputs must not overwrite input files")
+        spec_for_front, _, _ = read_spec(args.spec)
         summary, rows = validate_pareto_fea(
             args.spec,
             model_metadata_path,
@@ -1442,7 +1867,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             minimum_coverage=args.minimum_coverage,
             identity_relative_tolerance=args.identity_relative_tolerance,
         )
-        write_atomic_outputs(args.summary_output, summary, args.rows_output, rows)
+        write_atomic_outputs(
+            args.summary_output,
+            summary,
+            args.rows_output,
+            rows,
+            final_front_path,
+            _final_front_csv_text(
+                spec=spec_for_front,
+                rows=summary["fea_filtered_final_front"],
+            ),
+        )
     except (ParetoFEAValidationError, OSError) as exc:
         print(f"validation_error: {exc}", file=sys.stderr)
         return 2
@@ -1455,6 +1890,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "feasible_candidate_count": summary["feasible_candidate_count"],
                 "summary_output": str(args.summary_output),
                 "rows_output": str(args.rows_output) if args.rows_output else "",
+                "final_front_output": str(final_front_path),
             },
             ensure_ascii=False,
             separators=(",", ":"),

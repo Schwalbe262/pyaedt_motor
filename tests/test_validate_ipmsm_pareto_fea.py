@@ -323,6 +323,7 @@ class ParetoFEAValidatorTests(unittest.TestCase):
             fixture = ValidationFixture(Path(tmp))
             summary_path = Path(tmp) / "out" / "summary.json"
             rows_path = Path(tmp) / "out" / "rows.csv"
+            final_front_path = Path(tmp) / "out" / validator.DEFAULT_FINAL_FRONT_NAME
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
                 code = validator.main(
@@ -348,9 +349,13 @@ class ParetoFEAValidatorTests(unittest.TestCase):
             output = json.loads(stdout.getvalue())
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             self.assertTrue(summary["pass"])
-            self.assertEqual(summary["summary_schema_version"], "ipmsm_pareto_fea_validation_v2")
+            self.assertEqual(summary["summary_schema_version"], validator.SUMMARY_SCHEMA_VERSION)
             self.assertEqual(summary["feasible_candidate_count"], 1)
             self.assertEqual(summary["coverage"]["torque_lcb"]["required_covered"], 2)
+            self.assertEqual(summary["fea_filtered_final_front_count"], 1)
+            front_fields, front_rows = read_csv(final_front_path)
+            self.assertEqual(front_fields, validator.final_front_fieldnames(fixture.spec))
+            self.assertEqual([row["candidate_id"] for row in front_rows], ["pareto_001"])
             candidate = summary["candidates"][0]
             first_plan = fixture.plan_rows[0]
             expected_volume = math.pi * (float(first_plan["stator_outer_radius"]) * 1e-3) ** 2 * (
@@ -403,10 +408,100 @@ class ParetoFEAValidatorTests(unittest.TestCase):
             )
             self.assertEqual(output["validation_id"], summary["validation_id"])
             _, rows = read_csv(rows_path)
-            self.assertEqual(len(rows), 2)
-            self.assertEqual({row["validation_id"] for row in rows}, {summary["validation_id"]})
-            self.assertTrue(all(row["case_binding_hash"].startswith("ipmsm-pareto-fea-row:sha256:") for row in rows))
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(
+                {row["validation_id"] for row in rows},
+                {summary["validation_id"]},
+            )
+            self.assertTrue(
+                all(
+                    row["case_binding_hash"].startswith(
+                        "ipmsm-pareto-fea-row:sha256:"
+                    )
+                    for row in rows
+                )
+            )
 
+    def test_missing_local_beta_neighbor_is_rejected_exactly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = ValidationFixture(Path(tmp))
+            neighbor_index = next(
+                index
+                for index, row in enumerate(fixture.plan_rows)
+                if row["beta_validation_role"] != optimizer.BETA_VALIDATION_ROLE_CENTER
+            )
+            fixture.plan_rows.pop(neighbor_index)
+            fixture.result_rows.pop(neighbor_index)
+            fixture.rewrite_plan()
+            fixture.rewrite_results()
+            with self.assertRaisesRegex(
+                validator.ParetoFEAValidationError,
+                "beta-neighbor order/coverage mismatch",
+            ):
+                fixture.validate()
+
+    def test_materially_lower_feasible_neighbor_fails_local_beta_optimality(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = ValidationFixture(Path(tmp))
+            point_id = fixture.spec.operating_points[0].name
+            center_index = next(
+                index
+                for index, row in enumerate(fixture.plan_rows)
+                if row["operating_point_id"] == point_id
+                and row["beta_validation_role"] == optimizer.BETA_VALIDATION_ROLE_CENTER
+            )
+            neighbor_index = next(
+                index
+                for index, row in enumerate(fixture.plan_rows)
+                if row["operating_point_id"] == point_id
+                and row["beta_validation_role"] != optimizer.BETA_VALIDATION_ROLE_CENTER
+            )
+            for index, core_loss in ((center_index, 500.0), (neighbor_index, 0.0)):
+                result = fixture.result_rows[index]
+                copper = float(result["output_copperloss_last_avg_w"])
+                solid = float(result["output_solidloss_last_avg_w"])
+                total = core_loss + solid + copper
+                power = float(result["output_torque_last_avg_nm"]) * next(
+                    point.mechanical_angular_speed_rad_s
+                    for point in fixture.spec.operating_points
+                    if point.name == point_id
+                )
+                result["output_coreloss_last_avg_w"] = core_loss
+                result["output_total_loss_last_avg_w"] = total
+                result["output_efficiency_last_pct"] = power / (power + total) * 100.0
+            fixture.rewrite_results()
+
+            summary, _ = fixture.validate()
+            point = summary["candidates"][0]["operating_points"][0]
+            self.assertFalse(summary["pass"])
+            self.assertFalse(point["local_beta_optimality_passed"])
+            self.assertEqual(
+                point["materially_better_neighbor_case_ids"],
+                [fixture.plan_rows[neighbor_index]["case_id"]],
+            )
+            self.assertIn("no_fea_feasible_candidate", summary["gate_failures"])
+
+    def test_multi_candidate_gate_requires_two_but_single_plan_requires_one(self) -> None:
+        self.assertEqual(
+            validator.minimum_required_fea_candidates(1),
+            1,
+        )
+        self.assertEqual(
+            validator.minimum_required_fea_candidates(2),
+            validator.MINIMUM_VALIDATED_CANDIDATES_IF_MULTIPLE_PLANNED,
+        )
+        self.assertGreater(validator.minimum_required_fea_candidates(12), 1)
+
+    def test_fea_nondominated_front_uses_actual_volume_and_efficiency(self) -> None:
+        candidates = [
+            {"candidate_id": "a", "active_volume_m3": 0.01, "fea_actual_cycle_efficiency": 0.90},
+            {"candidate_id": "b", "active_volume_m3": 0.02, "fea_actual_cycle_efficiency": 0.91},
+            {"candidate_id": "dominated", "active_volume_m3": 0.03, "fea_actual_cycle_efficiency": 0.89},
+        ]
+        self.assertEqual(
+            [row["candidate_id"] for row in validator._fea_nondominated(candidates)],
+            ["a", "b"],
+        )
     def test_rejects_result_reorder_duplicate_and_non_ok_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = ValidationFixture(Path(tmp))
@@ -502,7 +597,7 @@ class ParetoFEAValidatorTests(unittest.TestCase):
                 fixture.rewrite_plan()
                 with self.assertRaisesRegex(
                     validator.ParetoFEAValidationError,
-                    "does not exactly match Pareto",
+                    "does not exactly match Pareto|local beta probe changes",
                 ):
                     fixture.validate()
 

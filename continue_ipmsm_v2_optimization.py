@@ -79,6 +79,7 @@ class OutputPaths:
     fea_results: Path
     validation_summary: Path
     validation_rows: Path
+    final_front: Path
     checkpoint_dir: Path
 
 
@@ -650,6 +651,7 @@ def output_paths(args: argparse.Namespace) -> OutputPaths:
         fea_results=fea_output_dir / "merged_results.csv",
         validation_summary=root / "pareto_fea_validation.json",
         validation_rows=root / "pareto_fea_validation_rows.csv",
+        final_front=root / pareto_validator.DEFAULT_FINAL_FRONT_NAME,
         checkpoint_dir=args.checkpoint_dir,
     )
 
@@ -709,7 +711,11 @@ def _campaign_argv(
     audited: AuditedInputs,
     paths: OutputPaths,
 ) -> list[str]:
-    maximum_cases = args.max_fea_candidates * 2
+    maximum_cases = (
+        args.max_fea_candidates
+        * len(audited.spec.operating_points)
+        * len(optimizer.BETA_VALIDATION_ROLES)
+    )
     scope = _campaign_scope(args, audited, paths)
     return [
         "--cases",
@@ -774,6 +780,8 @@ def _validator_argv(args: argparse.Namespace, audited: AuditedInputs, paths: Out
         str(paths.validation_summary),
         "--rows-output",
         str(paths.validation_rows),
+        "--final-front-output",
+        str(paths.final_front),
         "--minimum-coverage",
         str(args.minimum_coverage),
         "--identity-relative-tolerance",
@@ -823,6 +831,7 @@ def validate_args(args: argparse.Namespace, paths: OutputPaths) -> None:
         paths.fea_results,
         paths.validation_summary,
         paths.validation_rows,
+        paths.final_front,
         args.decision_output,
     )
     normalized = [os.path.normcase(str(_resolved(path))) for path in file_outputs]
@@ -834,7 +843,14 @@ def validate_args(args: argparse.Namespace, paths: OutputPaths) -> None:
         paths.fea_output_dir, paths.checkpoint_dir
     ):
         raise OptimizationContinuationError("checkpoint and Pareto FEA directories must not overlap")
-    for path in (args.decision_output, paths.pareto, paths.fea_cases, paths.validation_summary, paths.validation_rows):
+    for path in (
+        args.decision_output,
+        paths.pareto,
+        paths.fea_cases,
+        paths.validation_summary,
+        paths.validation_rows,
+        paths.final_front,
+    ):
         if _within(path, paths.checkpoint_dir):
             raise OptimizationContinuationError("final outputs must be outside the checkpoint directory")
 
@@ -862,6 +878,7 @@ def _assert_new_outputs_fresh(paths: OutputPaths) -> None:
             paths.fea_output_dir,
             paths.validation_summary,
             paths.validation_rows,
+            paths.final_front,
         )
         if path.exists()
     ]
@@ -919,7 +936,11 @@ def _execution_contract(
             "checkpoint_dir": str(_resolved(paths.checkpoint_dir)),
             "max_fea_candidates": args.max_fea_candidates,
             "operating_points": [point.name for point in audited.spec.operating_points],
-            "maximum_fea_cases": args.max_fea_candidates * len(audited.spec.operating_points),
+            "maximum_fea_cases": (
+                args.max_fea_candidates
+                * len(audited.spec.operating_points)
+                * len(optimizer.BETA_VALIDATION_ROLES)
+            ),
             "pareto_output": str(_resolved(paths.pareto)),
             "fea_cases_output": str(_resolved(paths.fea_cases)),
         },
@@ -937,6 +958,7 @@ def _execution_contract(
             "identity_relative_tolerance": args.identity_relative_tolerance,
             "summary_output": str(_resolved(paths.validation_summary)),
             "rows_output": str(_resolved(paths.validation_rows)),
+            "final_front_output": str(_resolved(paths.final_front)),
         },
         "source_sha256": _source_contract(),
     }
@@ -1423,9 +1445,14 @@ def _validate_optimization_outputs(
         raise OptimizationContinuationError("FEA candidate count is empty or exceeds its maximum")
     if not set(candidate_ids) <= feasible_pareto_ids:
         raise OptimizationContinuationError("FEA plan contains a non-feasible/non-Pareto candidate")
-    expected_rows = len(candidate_ids) * len(audited.spec.operating_points)
-    if len(fea_rows) != expected_rows:
-        raise OptimizationContinuationError("FEA plan operating-point coverage is incomplete")
+    minimum_rows = len(candidate_ids) * len(audited.spec.operating_points) * 2
+    maximum_rows = (
+        len(candidate_ids)
+        * len(audited.spec.operating_points)
+        * len(optimizer.BETA_VALIDATION_ROLES)
+    )
+    if not minimum_rows <= len(fea_rows) <= maximum_rows:
+        raise OptimizationContinuationError("FEA plan beta-neighbor coverage is incomplete")
     dedupe = _task_dedupe_contract(args, audited, paths)
     return {
         "pareto": {"path": str(_resolved(paths.pareto)), "sha256": _sha256(paths.pareto)},
@@ -1544,16 +1571,27 @@ def _validation_expected(
 
 
 def _verify_validation_outputs(
+    spec: OptimizationSpec,
     paths: OutputPaths,
     summary: Mapping[str, Any],
     rows: Sequence[Mapping[str, Any]],
 ) -> None:
-    if not paths.validation_summary.is_file() or not paths.validation_rows.is_file():
+    if (
+        not paths.validation_summary.is_file()
+        or not paths.validation_rows.is_file()
+        or not paths.final_front.is_file()
+    ):
         raise OptimizationContinuationError("Pareto FEA validation outputs are incomplete")
     if paths.validation_summary.read_bytes() != pareto_validator._json_text(summary).encode("utf-8"):
         raise OptimizationContinuationError("Pareto FEA validation summary changed")
     if paths.validation_rows.read_bytes() != pareto_validator._row_csv_text(rows).encode("utf-8"):
         raise OptimizationContinuationError("Pareto FEA validation rows changed")
+    expected_front = pareto_validator._final_front_csv_text(
+        spec,
+        summary["fea_filtered_final_front"],
+    ).encode("utf-8")
+    if paths.final_front.read_bytes() != expected_front:
+        raise OptimizationContinuationError("FEA-filtered final front changed")
 
 
 def _finish_validation(
@@ -1566,18 +1604,33 @@ def _finish_validation(
     summary, rows = _validation_expected(args, audited, paths)
     summary_exists = paths.validation_summary.exists()
     rows_exists = paths.validation_rows.exists()
-    if summary_exists and not rows_exists:
+    front_exists = paths.final_front.exists()
+    if summary_exists and (not rows_exists or not front_exists):
         raise OptimizationContinuationError(
-            "validation summary exists without its rows commit predecessor"
+            "validation summary exists without both commit predecessors"
         )
-    if rows_exists and not summary_exists:
-        if paths.validation_rows.read_bytes() != pareto_validator._row_csv_text(rows).encode("utf-8"):
-            raise OptimizationContinuationError("hard-kill validation row orphan is not exact")
+    expected_rows = pareto_validator._row_csv_text(rows).encode("utf-8")
+    expected_front = pareto_validator._final_front_csv_text(
+        audited.spec,
+        summary["fea_filtered_final_front"],
+    ).encode("utf-8")
+    if rows_exists and paths.validation_rows.read_bytes() != expected_rows:
+        raise OptimizationContinuationError("hard-kill validation row orphan is not exact")
+    if front_exists and paths.final_front.read_bytes() != expected_front:
+        raise OptimizationContinuationError("hard-kill final-front orphan is not exact")
+    if not summary_exists and (rows_exists or front_exists):
         if not allow_writes:
             raise OptimizationContinuationError(
-                "validation summary is missing; read-only audit cannot repair its row orphan"
+                "validation summary is missing; read-only audit cannot repair its predecessors"
             )
-        pareto_validator.write_atomic_outputs(paths.validation_summary, summary)
+        pareto_validator.write_atomic_outputs(
+            paths.validation_summary,
+            summary,
+            None if rows_exists else paths.validation_rows,
+            () if rows_exists else rows,
+            None if front_exists else paths.final_front,
+            None if front_exists else expected_front.decode("utf-8"),
+        )
     elif not summary_exists:
         if not allow_writes:
             raise OptimizationContinuationError(
@@ -1591,7 +1644,7 @@ def _finish_validation(
         )
         if result.get("status") not in {None, summary["status"]}:
             raise OptimizationContinuationError("Pareto validator output status is inconsistent")
-    _verify_validation_outputs(paths, summary, rows)
+    _verify_validation_outputs(audited.spec, paths, summary, rows)
     if summary.get("pass") is not True or summary.get("status") != "passed":
         raise OptimizationContinuationError(
             "Pareto FEA comparator gate failed: " + ", ".join(summary.get("gate_failures") or ())
@@ -1606,6 +1659,12 @@ def _finish_validation(
         "rows": {
             "path": str(_resolved(paths.validation_rows)),
             "sha256": _sha256(paths.validation_rows),
+        },
+        "final_front": {
+            "path": str(_resolved(paths.final_front)),
+            "sha256": _sha256(paths.final_front),
+            "candidate_count": summary["fea_filtered_final_front_count"],
+            "candidate_ids": summary["fea_filtered_final_front_candidate_ids"],
         },
         "validation_id": summary["validation_id"],
         "feasible_candidate_count": summary["feasible_candidate_count"],
@@ -1741,7 +1800,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "planned_commands": _planned_commands(args, audited, paths),
                     "writes_performed": 0,
                     "maximum_fea_candidates": args.max_fea_candidates,
-                    "maximum_fea_cases": args.max_fea_candidates * len(audited.spec.operating_points),
+                    "maximum_fea_cases": (
+                        args.max_fea_candidates
+                        * len(audited.spec.operating_points)
+                        * len(optimizer.BETA_VALIDATION_ROLES)
+                    ),
                 }
             )
             print(json.dumps(output, ensure_ascii=False, separators=(",", ":"), sort_keys=True))

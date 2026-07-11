@@ -269,8 +269,19 @@ class OptimizerCliTests(unittest.TestCase):
         self.assertEqual(len(pareto_rows), 1)
         self.assertEqual(pareto_rows[0]["candidate_id"], "pareto_001")
         self.assertIn("low_current_peak_a", pareto_rows[0])
-        self.assertEqual(len(fea_rows), 2)
+        self.assertEqual(len(fea_rows), 4)
         self.assertEqual({item["operating_point_id"] for item in fea_rows}, {"low", "rated"})
+        self.assertEqual(
+            {item["beta_validation_role"] for item in fea_rows},
+            {cli.BETA_VALIDATION_ROLE_CENTER, cli.BETA_VALIDATION_ROLE_UPPER},
+        )
+        self.assertTrue(
+            all(
+                float(item["beta_dq_deg"])
+                == float(item["selected_beta_dq_deg"]) + float(item["beta_offset_deg"])
+                for item in fea_rows
+            )
+        )
         self.assertTrue(all(item["geometry_mode"] == "fixed" for item in fea_rows))
         self.assertTrue(all(item["quality_profile"] == "reference_ultra" for item in fea_rows))
         self.assertTrue(all(item["beta_convention"] == opt.BETA_CONVENTION for item in fea_rows))

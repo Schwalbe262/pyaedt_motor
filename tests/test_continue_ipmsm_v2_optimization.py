@@ -189,7 +189,7 @@ class OptimizationContinuationTests(unittest.TestCase):
         self.assertEqual(output["mode"], "dry-run")
         self.assertEqual(output["writes_performed"], 0)
         self.assertEqual(output["maximum_fea_candidates"], 12)
-        self.assertEqual(output["maximum_fea_cases"], 24)
+        self.assertEqual(output["maximum_fea_cases"], 72)
         self.assertEqual([item["name"] for item in output["planned_commands"]], [
             "production_nsga2",
             "reference_ultra_pareto_fea",
@@ -198,7 +198,7 @@ class OptimizationContinuationTests(unittest.TestCase):
         campaign_argv = output["planned_commands"][1]["argv"]
         self.assertIn("--submit", campaign_argv)
         self.assertEqual(campaign_argv[campaign_argv.index("--project-active-cap") + 1], "100")
-        self.assertEqual(campaign_argv[campaign_argv.index("--max-plan-cases") + 1], "24")
+        self.assertEqual(campaign_argv[campaign_argv.index("--max-plan-cases") + 1], "72")
         validator_argv = output["planned_commands"][2]["argv"]
         self.assertEqual(
             validator_argv[validator_argv.index("--pareto") + 1],
@@ -384,6 +384,9 @@ class OptimizationContinuationTests(unittest.TestCase):
             "gate_failures": [],
             "validation_id": "validation-id",
             "feasible_candidate_count": 1,
+            "fea_filtered_final_front": [],
+            "fea_filtered_final_front_count": 0,
+            "fea_filtered_final_front_candidate_ids": [],
         }
         rows: list[dict] = []
         paths.validation_rows.parent.mkdir(parents=True, exist_ok=True)
@@ -395,6 +398,7 @@ class OptimizationContinuationTests(unittest.TestCase):
             evidence = continuation._finish_validation(args, self.audited, paths)
         self.assertTrue(evidence["pass"])
         self.assertTrue(paths.validation_summary.is_file())
+        self.assertTrue(paths.final_front.is_file())
         self.assertEqual(paths.validation_rows.read_bytes(), original_rows.encode("utf-8"))
 
     def test_comparator_gate_failure_is_fail_closed(self) -> None:
@@ -406,6 +410,9 @@ class OptimizationContinuationTests(unittest.TestCase):
             "gate_failures": ["torque_lcb_coverage"],
             "validation_id": "validation-id",
             "feasible_candidate_count": 1,
+            "fea_filtered_final_front": [],
+            "fea_filtered_final_front_count": 0,
+            "fea_filtered_final_front_candidate_ids": [],
         }
         rows: list[dict] = []
         continuation.pareto_validator.write_atomic_outputs(
@@ -413,6 +420,8 @@ class OptimizationContinuationTests(unittest.TestCase):
             summary,
             paths.validation_rows,
             rows,
+            paths.final_front,
+            continuation.pareto_validator._final_front_csv_text(self.spec, []),
         )
         with mock.patch.object(
             continuation, "_validation_expected", return_value=(summary, rows)
@@ -564,8 +573,8 @@ class OptimizationContinuationTests(unittest.TestCase):
             continuation.optimizer.STRICT_BUNDLE_VERIFICATION
         )
         fea_rows = [
-            {**provenance, "candidate_id": "candidate-1"},
-            {**provenance, "candidate_id": "candidate-1"},
+            {**provenance, "candidate_id": "candidate-1"}
+            for _ in range(4)
         ]
         with mock.patch.object(
             continuation.optimizer,
@@ -701,7 +710,7 @@ class OptimizationContinuationTests(unittest.TestCase):
                 paths,
             )
         self.assertEqual(evidence["fea_candidate_ids"], ["candidate-1"])
-        self.assertEqual(evidence["fea_case_rows"], 2)
+        self.assertEqual(evidence["fea_case_rows"], 4)
         self.assertEqual(
             evidence["provenance"][continuation.optimizer.PARETO_SHA256_FIELD],
             continuation._sha256(paths.pareto),

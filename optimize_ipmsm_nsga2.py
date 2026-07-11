@@ -59,6 +59,15 @@ DEFAULT_FEA_CASES_NAME = "fea_validation_cases.csv"
 FEA_DATASET_SCHEMA_VERSION = "ipmsm_v2"
 FEA_MODEL_EXTENT = "full_360"
 REFERENCE_FEA_QUALITY_PROFILE = "reference_ultra"
+LOCAL_BETA_NEIGHBOR_STEP_DEG = 2.0
+BETA_VALIDATION_ROLE_CENTER = "selected_center"
+BETA_VALIDATION_ROLE_LOWER = "local_lower"
+BETA_VALIDATION_ROLE_UPPER = "local_upper"
+BETA_VALIDATION_ROLES = (
+    BETA_VALIDATION_ROLE_CENTER,
+    BETA_VALIDATION_ROLE_LOWER,
+    BETA_VALIDATION_ROLE_UPPER,
+)
 STRICT_BUNDLE_VERIFICATION = "STRICT_V2_FINGERPRINT_VERIFIED"
 CUSTOM_PREDICTOR_VERIFICATION = "UNVERIFIED_CUSTOM_PREDICTOR"
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -1045,6 +1054,45 @@ def re_sub_nonword(value: str) -> str:
     return "".join(character if character.isalnum() or character == "_" else "_" for character in value)
 
 
+def local_beta_validation_points(
+    selected_beta_deg: float,
+    beta_bounds_deg: tuple[float, float],
+    *,
+    neighbor_step_deg: float = LOCAL_BETA_NEIGHBOR_STEP_DEG,
+) -> tuple[tuple[str, float, float], ...]:
+    """Return center then clipped/deduplicated lower/upper beta probes."""
+
+    center = float(selected_beta_deg)
+    lower, upper = (float(value) for value in beta_bounds_deg)
+    step = float(neighbor_step_deg)
+    if not all(math.isfinite(value) for value in (center, lower, upper, step)):
+        raise ValueError("local beta validation values must be finite")
+    if lower >= upper or not lower <= center <= upper:
+        raise ValueError("selected beta must be inside valid beta bounds")
+    if step <= 0.0:
+        raise ValueError("local beta neighbor step must be > 0")
+    raw = (
+        (BETA_VALIDATION_ROLE_CENTER, center),
+        (BETA_VALIDATION_ROLE_LOWER, max(lower, center - step)),
+        (BETA_VALIDATION_ROLE_UPPER, min(upper, center + step)),
+    )
+    points: list[tuple[str, float, float]] = []
+    seen: list[float] = []
+    for role, beta in raw:
+        if any(math.isclose(beta, prior, abs_tol=1e-12) for prior in seen):
+            continue
+        seen.append(beta)
+        offset = 0.0 if role == BETA_VALIDATION_ROLE_CENTER else beta - center
+        points.append((role, beta, offset))
+    return tuple(points)
+
+
+def beta_validation_case_id(candidate_id: str, operating_point_id: str, role: str) -> str:
+    if role not in BETA_VALIDATION_ROLES:
+        raise ValueError(f"unknown beta validation role: {role!r}")
+    return f"{candidate_id}__{operating_point_id}__{role}"
+
+
 def pareto_fieldnames(spec: OptimizationSpec) -> list[str]:
     fields = [
         "candidate_id",
@@ -1185,6 +1233,9 @@ def fea_case_fieldnames(spec: OptimizationSpec) -> list[str]:
         "base_rpm",
         "i_peak_a",
         "beta_dq_deg",
+        "selected_beta_dq_deg",
+        "beta_validation_role",
+        "beta_offset_deg",
         "beta_convention",
         "electrical_zero_deg",
         "beta_calibration_id",
@@ -1230,10 +1281,18 @@ def render_fea_cases_csv_bytes(
     for candidate in rows:
         design_hash = candidate_design_hash(candidate)
         for control in candidate.control_results:
-            row: dict[str, Any] = dict(candidate.design)
-            row.update(
-                {
-                    "case_id": f"{candidate.candidate_id}__{control.operating_point.name}",
+            for role, beta, offset in local_beta_validation_points(
+                control.beta_deg,
+                spec.beta_bounds_deg,
+            ):
+                row: dict[str, Any] = dict(candidate.design)
+                row.update(
+                    {
+                    "case_id": beta_validation_case_id(
+                        candidate.candidate_id,
+                        control.operating_point.name,
+                        role,
+                    ),
                     "geometry_group_id": f"optimization_{candidate.candidate_id}",
                     "design_hash": design_hash,
                     "doe_split": "test",
@@ -1244,7 +1303,10 @@ def render_fea_cases_csv_bytes(
                     "pole_num": spec.pole_number,
                     "base_rpm": control.operating_point.speed_rpm,
                     "i_peak_a": control.current_peak_a,
-                    "beta_dq_deg": control.beta_deg,
+                    "beta_dq_deg": beta,
+                    "selected_beta_dq_deg": control.beta_deg,
+                    "beta_validation_role": role,
+                    "beta_offset_deg": offset,
                     "beta_convention": BETA_CONVENTION,
                     "electrical_zero_deg": spec.beta_calibration.electrical_zero_deg,
                     "beta_calibration_id": spec.beta_calibration.calibration_id,
@@ -1260,13 +1322,17 @@ def render_fea_cases_csv_bytes(
                     "operation": "sin_current",
                     "candidate_id": candidate.candidate_id,
                     "operating_point_id": control.operating_point.name,
-                    "control_source": "surrogate_inner_search",
+                    "control_source": (
+                        "surrogate_inner_search"
+                        if role == BETA_VALIDATION_ROLE_CENTER
+                        else "local_beta_physical_validation"
+                    ),
                     "surrogate_torque_lcb_nm": control.prediction.torque_lcb_nm,
                     "surrogate_voltage_peak_ucb_v": control.prediction.voltage_peak_ucb_v,
                     "surrogate_total_loss_ucb_w": control.total_loss_ucb_w,
-                }
-            )
-            writer.writerow(row)
+                    }
+                )
+                writer.writerow(row)
     return stream.getvalue().encode("utf-8")
 
 
