@@ -3579,3 +3579,13 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Result/failure reason: dashboard and pipeline tasks are Running; the apparent stall was dead legacy orchestration plus one watcher holding the supervisor guard, and the durable chain has remained alive since 21:45 KST.
 - Next action: monitor `http://127.0.0.1:8765` through Stage1 completion and let the sealed surrogate/Stage2/Stage3/NSGA-II/Pareto/speed gates continue automatically.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-11 22:30:21 +09:00 - Stage1 live and early quality audit
+- Part/goal: prove the running campaign is making real progress and detect data-quality/downstream orchestration defects before the 700-row gate.
+- Hypothesis/actions: audited scheduler health/heartbeat/process identity, all 25 immutable contract inputs, Stage2/3/optimization/speed transitions, and collected two settled read-only samples for exact result and v2 physics validation.
+- Candidates/options: avoided new submissions at cap 100; a full concurrent partial fetch was rejected after scheduler HTTP 429, left no published output, and no further bulk fetch was attempted.
+- Metrics: Stage1 scheduler_ok/result_ok=257/257, active=100, missing=343, retry=0; 20/20 unique-design rows and 30/30 rows from 5 complete designs passed with failures=0; recent throughput was 71 completed/hour.
+- Result: no live stall, unresolved failed case, immutable-hash mismatch, or downstream identity gap exists; the only active gate remains Stage1 completion.
+- Failure reason: planned exact repeats are later in the 700-row plan, so repeat-noise and provisional R² are not yet evidence-backed; scheduler rate limiting also makes concurrent bulk result reads inappropriate.
+- Next action: keep cap 100 and monitor the artifact-driven supervisor; after Stage1 completion inspect the exact validation/R² gate before any conditional Stage2/3 or NSGA-II transition.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

@@ -205,8 +205,9 @@
 - Stage1 is homogeneous `reference_ultra`, 700 rows/112 geometries/28 repeats; stage2 is conditional non-overlapping 300 rows/48 geometries/12 repeats.
 - Stage1 r2 plan hash is `6ef6dae7...01e3`: 700 rows/112 designs/28 repeats, failed geometry replaced, 6 duplicate-result cases renamed `_clean_retry_01`, and Stage2 design overlap remains zero.
 - Task `26141` remains the sole unknown SIGKILL (MaxRSS 2.08 GiB < 32 GiB, no OOM evidence); safe Windows PID probes replaced the `os.kill(pid,0)` pattern that accidentally stopped the first local runner.
-- Durable supervisor PID `82008` has run since 21:45 KST; latest Stage1 is scheduler_ok/result_ok=256/256, active=100, missing=344, retry=0, and dashboard PID `147688` serves the live state.
+- Durable supervisor PID `82008` has run since 21:45 KST; latest Stage1 is scheduler_ok/result_ok=257/257, active=100, missing=343, retry=0, and dashboard PID `147688` serves the live state.
 - Faster `time_150` remains screening-only because core-loss p90 error `5.533% > 5%`; mixed-fidelity v2 training is forbidden.
 - Next: monitor Stage1 at the dashboard; Stage2 failure routes through sealed Stage3 before NSGA-II, while a pass routes directly; beta-neighbor Pareto FEA and 12x2 strict-v2 speed remain cap-serialized.
 - Windows fresh-output publication now uses shared identity-checked no-replace logic: mapped `Y:` drives bypass hard links for atomic rename, WinError 50 falls back likewise, and optimizer pair recovery preserves a proof; focused 96/96 and full 511/511 tests pass without touching live tasks.
 - Dashboard closeout passed 27 focused and 586 full tests; live API readback confirmed latest fields, CSP/nosniff, no CORS, active cap 100, and no final-review blockers.
+- Early settled-result audits passed 20/20 unique-design rows and 30/30 rows across 5 complete designs with zero v2 validation failures; contract `a52778b0...e162`, 25 immutable hashes, and every downstream gate path also re-audited cleanly.
