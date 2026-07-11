@@ -16,6 +16,13 @@ series_turns_per_phase * parallel_branches
 
 초기 사양에는 `beta_calibration`이 없어도 된다.
 
+The current PPT values are not exactly self-consistent: `65.1 Nm @ 1200 rpm`
+implies about `8.18 kW`, while `7.5 kW @ 5000 rpm` implies about `14.32 Nm`
+(the PPT maximum-speed torque `12.7 Nm` implies about `6.65 kW`). Until the
+source specification is confirmed, the production JSON records this under
+`_assumptions` and treats `65.1 Nm @ 1200 rpm` and `7.5 kW @ 5000 rpm` as
+independent requirements rather than deriving one from the other.
+
 ## 2. 물리적 dq zero 보정
 
 ElectricalZero는 부하 토크 최대점으로 정하지 않는다. 그렇게 하면 IPMSM의 MTPA
@@ -148,6 +155,54 @@ python run_ipmsm_v2_campaign.py `
   --merged-output merged_results.csv --terminal-retry-limit 1 --submit
 ```
 
+Stage2 continuation is a separate fail-closed decision. Run this command first
+without `--execute`. While either Stage1 PID is live it only reports
+`wait_for_stage1`. Once Stage1 finishes, it requires exact 700-row/112-group/
+28-repeat validation and complete finite primary-eight plus voltage test R2.
+It skips Stage2 when all nine values are at least 0.95, runs Stage2 only for
+finite threshold misses, and hard-stops on physics, repeat, coverage, missing,
+incomplete, or non-finite evidence. Add `--execute` only after reviewing the
+dry-run JSON; the decision file is an atomic duplicate-execution guard.
+If an execution stops with decision status `stage2_started`, rerun the same
+command with `--resume` for a read-only audit, then with `--resume --execute`.
+Resume is allowed only when every Stage1, Stage2-plan, beta, runner, and
+training contract value is unchanged. A partial Stage2/combined directory
+hard-stops. An active or identity-mismatched claim also hard-stops, while an
+exact stale claim owned by a dead local process can be recovered with
+`--resume`; completed Stage2 output is reused without duplicate submission.
+Combined artifacts are built in a sibling staging directory and atomically
+published as one directory.
+
+```powershell
+python continue_ipmsm_v2_stage2.py `
+  --stage1-runner-pid-file simul_log_smoke/beta_zero_recovery_26092_26093/foundation_stage1_runner.pid `
+  --stage1-watcher-pid-file simul_log_smoke/beta_zero_recovery_26092_26093/foundation_stage1_train_watcher.pid `
+  --stage1-case-plan simul_log_smoke/beta_zero_recovery_26092_26093/ipmsm_v2_foundation_stage1_700_cases.csv `
+  --stage1-result collected/ipmsm_v2_foundation_stage1_700/merged_results.csv `
+  --stage1-validation simul_log_smoke/beta_zero_recovery_26092_26093/foundation_stage1_validation.csv `
+  --stage1-metadata simul_log_smoke/beta_zero_recovery_26092_26093/ipmsm_v2_stage1_models/metadata.json `
+  --stage1-r2 simul_log_smoke/beta_zero_recovery_26092_26093/foundation_stage1_r2_gate.csv `
+  --stage2-case-plan simul_log_smoke/beta_zero_recovery_26092_26093/ipmsm_v2_foundation_stage2_300_cases.csv `
+  --stage2-output-dir collected/ipmsm_v2_foundation_stage2_300 `
+  --combined-output-dir collected/ipmsm_v2_foundation_stage12_1000 `
+  --decision-output simul_log_smoke/beta_zero_recovery_26092_26093/foundation_stage2_decision.json `
+  --project PYAEDT_MOTOR_IPMSM_V2 --project-active-cap 100 `
+  --beta-summary simul_log_smoke/beta_zero_recovery_26092_26093/beta_mtpa_summary.json `
+  --beta-case-plan simul_log_smoke/beta_zero_recovery_26092_26093/beta_mtpa_cases.csv `
+  --beta-results simul_log_smoke/beta_zero_recovery_26092_26093/beta_mtpa_collected_26094_26103/beta_mtpa_results.csv `
+  --beta-calibration-manifest simul_log_smoke/beta_zero_recovery_26092_26093/beta_zero_manifest.json
+```
+
+For manual merging, repeat `--case-plan` in the required output order. The
+plans and result batches must each be non-overlapping and exactly cover one
+another.
+
+```powershell
+python merge_ipmsm_v2_results.py `
+  --case-plan stage1_cases.csv --case-plan stage2_cases.csv `
+  --input stage1_results.csv stage2_results.csv --output merged_results.csv
+```
+
 ## 4. 데이터 gate와 surrogate 학습
 
 모든 batch를 case ID 중복 없이 하나의 성공 결과 CSV로 합친 뒤 검증한다. merge는
@@ -180,9 +235,9 @@ python train_ipmsm_lightgbm.py --v2 `
 
 학습은 preassigned geometry split을 그대로 사용하고, outer calibration은 tuning과
 early stopping에서 격리한다. 다중 seed ensemble의 평균으로 6개 primitive와 2개
-derived test R2를 계산하며, 8개 모두 0.95 이상인
-bundle만 optimizer가 읽을 수 있다. 전압은 별도 auxiliary model이며 conformal UCB를
-전압 제약에 사용한다.
+derived test R2를 계산한다. 이 primary 8개와 별도 auxiliary voltage model의 test
+R2까지 총 9개가 모두 0.95 이상인 bundle만 optimizer가 읽을 수 있다. 전압 제약에는
+auxiliary voltage model의 conformal UCB를 사용한다.
 
 R2 gate가 실패하면 임계값을 낮춰 optimizer로 넘어가지 않는다. seed와 prefix를 바꾸고
 이전 plan의 design hash를 제외한 coverage batch를 추가한 뒤 전체 데이터를 다시 학습한다.
@@ -210,7 +265,38 @@ python optimize_ipmsm_nsga2.py `
 python optimize_ipmsm_nsga2.py `
   --spec ipmsm_optimization_spec.json `
   --model-dir ipmsm_v2_models `
-  --output-dir ipmsm_optimization_output
+  --output-dir ipmsm_optimization_output `
+  --checkpoint-dir ipmsm_optimization_checkpoints
+```
+
+Production runs checkpoint every generation. After a hard kill, rerun the
+same production command with `--resume`; it proceeds only when the immutable
+spec, model artifacts, source files, and library versions match. The optimizer
+intentionally rejects combining `--resume` with `--dry-run`.
+Fresh and resumed runs publish the Pareto CSV and FEA case plan as one bound
+artifact pair; a run with zero feasible Pareto candidates fails without
+publishing validation cases.
+
+The fail-closed continuation below selects the Stage1 or combined Stage1+2
+model from the atomic Stage2 decision, enforces all nine `R2 >= 0.95` gates,
+runs checkpointed NSGA-II, submits at most `12 candidates x 2 operating
+points` under project cap 100, and completes only after strict
+`reference_ultra` Pareto FEA comparison. Omit `--execute` for the mandatory
+read-only audit. For a hard-killed identity-matched run, audit with `--resume`
+and then execute with `--resume --execute`.
+
+```powershell
+python continue_ipmsm_v2_optimization.py `
+  --stage2-decision simul_log_smoke/beta_zero_recovery_26092_26093/foundation_stage2_decision.json `
+  --optimization-spec simul_log_smoke/beta_zero_recovery_26092_26093/ipmsm_optimization_spec.json `
+  --beta-summary simul_log_smoke/beta_zero_recovery_26092_26093/beta_mtpa_summary.json `
+  --beta-case-plan simul_log_smoke/beta_zero_recovery_26092_26093/beta_mtpa_cases.csv `
+  --beta-results simul_log_smoke/beta_zero_recovery_26092_26093/beta_mtpa_collected_26094_26103/beta_mtpa_results.csv `
+  --beta-calibration-manifest simul_log_smoke/beta_zero_recovery_26092_26093/beta_zero_manifest.json `
+  --output-dir collected/ipmsm_v2_optimization `
+  --checkpoint-dir simul_log_smoke/beta_zero_recovery_26092_26093/ipmsm_v2_nsga2_checkpoints `
+  --decision-output simul_log_smoke/beta_zero_recovery_26092_26093/ipmsm_v2_optimization_decision.json `
+  --project PYAEDT_MOTOR_IPMSM_V2 --project-active-cap 100
 ```
 
 목적함수는 active cylindrical volume과 `1 - duty-weighted cycle efficiency`다.

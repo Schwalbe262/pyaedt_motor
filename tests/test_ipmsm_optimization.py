@@ -224,6 +224,7 @@ class InnerControlTests(unittest.TestCase):
         candidate = opt.evaluate_design_candidate(design, spec, pessimistic)
         self.assertFalse(candidate.feasible)
         self.assertGreater(candidate.total_constraint_violation, 0.0)
+        self.assertEqual(opt.select_validation_candidates([candidate]), [])
 
     def test_batch_control_search_matches_scalar_and_batches_each_grid_stage(self) -> None:
         spec = make_spec()

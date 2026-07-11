@@ -20,6 +20,19 @@ V2_TRAINING_SCHEMA = "ipmsm_v2"
 METADATA_FILENAME = "metadata.json"
 FEATURE_BOUNDS_SOURCE = "train"
 MIN_OPTIMIZER_R2 = 0.95
+MIN_OPTIMIZER_ENSEMBLE_SIZE = 5
+MIN_CONFORMAL_COVERAGE = 0.95
+
+REQUIRED_OPTIMIZER_FINGERPRINTS = (
+    "input_dataset_schema_version",
+    "input_setup_fingerprint",
+    "input_quality_profile",
+    "input_material_fingerprint",
+    "input_aedt_version",
+    "input_beta_calibration_id",
+    "input_beta_convention",
+    "input_model_extent",
+)
 
 TORQUE_TARGET = "output_torque_last_avg_nm"
 CORE_LOSS_TARGET = "output_coreloss_last_avg_w"
@@ -87,6 +100,23 @@ def _string_list(value: Any, path: str) -> tuple[str, ...]:
     if len(set(result)) != len(result):
         raise SurrogateBundleError(f"{path} must not contain duplicates")
     return result
+
+
+def _nonempty_string(value: Any, path: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise SurrogateBundleError(f"{path} must be a nonempty string")
+    return value.strip()
+
+
+def _parse_fingerprints(metadata: Mapping[str, Any]) -> dict[str, str]:
+    raw = _mapping(_required(metadata, "fingerprints"), "metadata.fingerprints")
+    return {
+        name: _nonempty_string(
+            _required(raw, name, "metadata.fingerprints"),
+            f"metadata.fingerprints.{name}",
+        )
+        for name in REQUIRED_OPTIMIZER_FINGERPRINTS
+    }
 
 
 @dataclass(frozen=True)
@@ -367,7 +397,21 @@ class IPMSMV2SurrogateBundle:
     input_columns: tuple[str, ...]
     feature_bounds: Mapping[str, FeatureBound]
     targets: Mapping[str, LoadedTargetModel]
+    fingerprints: Mapping[str, str]
     metadata: Mapping[str, Any]
+
+    def assert_fingerprint_compatible(self, expected: Mapping[str, str]) -> None:
+        """Fail when production inputs differ from the model's training provenance."""
+
+        mismatches = [
+            f"metadata.fingerprints.{name}: expected={value!r}, actual={self.fingerprints.get(name)!r}"
+            for name, value in expected.items()
+            if self.fingerprints.get(name) != value
+        ]
+        if mismatches:
+            raise SurrogateBundleError(
+                "surrogate fingerprint mismatch: " + "; ".join(mismatches)
+            )
 
     def predict_one(self, features: Mapping[str, Any]) -> dict[str, Any]:
         """Return point/conformal predictions and strict feature-bound OOD."""
@@ -461,6 +505,12 @@ class IPMSMV2SurrogateBundle:
         return {
             "model_dir": str(self.model_dir),
             "training_schema": V2_TRAINING_SCHEMA,
+            "ensemble_size": int(self.metadata["ensemble_size"]),
+            "conformal_coverage": float(self.metadata["conformal_coverage"]),
+            "conformal_calibration_isolated": self.metadata[
+                "conformal_calibration_isolated"
+            ],
+            "fingerprints": dict(self.fingerprints),
             "input_columns": list(self.input_columns),
             "targets": {
                 canonical: {
@@ -497,6 +547,29 @@ def load_surrogate_bundle(model_dir: str | Path) -> IPMSMV2SurrogateBundle:
     if _required(metadata, "feature_bounds_source") != FEATURE_BOUNDS_SOURCE:
         raise SurrogateBundleError(
             f"metadata.feature_bounds_source must be {FEATURE_BOUNDS_SOURCE!r}"
+        )
+    fingerprints = _parse_fingerprints(metadata)
+    ensemble_size = _positive_int(
+        _required(metadata, "ensemble_size"),
+        "metadata.ensemble_size",
+    )
+    if ensemble_size < MIN_OPTIMIZER_ENSEMBLE_SIZE:
+        raise SurrogateBundleError(
+            "metadata.ensemble_size must be >= "
+            f"{MIN_OPTIMIZER_ENSEMBLE_SIZE}; got {ensemble_size}"
+        )
+    conformal_coverage = _finite(
+        _required(metadata, "conformal_coverage"),
+        "metadata.conformal_coverage",
+    )
+    if not MIN_CONFORMAL_COVERAGE <= conformal_coverage < 1.0:
+        raise SurrogateBundleError(
+            "metadata.conformal_coverage must be >= "
+            f"{MIN_CONFORMAL_COVERAGE} and < 1; got {conformal_coverage}"
+        )
+    if _required(metadata, "conformal_calibration_isolated") is not True:
+        raise SurrogateBundleError(
+            "metadata.conformal_calibration_isolated must be true"
         )
     r2_threshold = _finite(_required(metadata, "r2_threshold"), "metadata.r2_threshold")
     if r2_threshold < MIN_OPTIMIZER_R2:
@@ -567,7 +640,26 @@ def load_surrogate_bundle(model_dir: str | Path) -> IPMSMV2SurrogateBundle:
         if model_target not in model_paths:
             raise SurrogateBundleError(f"metadata.model_paths is missing modeled target: {model_target}")
         calibration = _parse_conformal(conformal_raw, model_target)
+        if calibration.coverage != conformal_coverage:
+            raise SurrogateBundleError(
+                f"metadata.conformal_absolute_residuals.{model_target}.coverage must equal "
+                f"metadata.conformal_coverage {conformal_coverage}; got {calibration.coverage}"
+            )
+        expected_rank = math.ceil(
+            (calibration.calibration_rows + 1) * calibration.coverage
+        )
+        if calibration.rank != expected_rank:
+            raise SurrogateBundleError(
+                f"metadata.conformal_absolute_residuals.{model_target}.rank must equal "
+                "ceil((calibration_rows + 1) * coverage) "
+                f"{expected_rank}; got {calibration.rank}"
+            )
         estimators = _load_estimators(root, model_paths[model_target], model_target)
+        if len(estimators) != ensemble_size:
+            raise SurrogateBundleError(
+                f"model artifact estimator count for {model_target} must equal "
+                f"metadata.ensemble_size {ensemble_size}; got {len(estimators)}"
+            )
         targets[canonical] = LoadedTargetModel(canonical, model_target, estimators, calibration)
 
     return IPMSMV2SurrogateBundle(
@@ -575,5 +667,6 @@ def load_surrogate_bundle(model_dir: str | Path) -> IPMSMV2SurrogateBundle:
         input_columns=input_columns,
         feature_bounds=feature_bounds,
         targets=targets,
+        fingerprints=fingerprints,
         metadata=metadata,
     )

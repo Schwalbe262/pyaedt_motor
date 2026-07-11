@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 import ipmsm_surrogate_bundle as bundle
+import train_ipmsm_lightgbm as trainer
 
 
 class ConstantEstimator:
@@ -52,6 +53,19 @@ def metadata() -> dict:
     )
     return {
         "training_schema": "ipmsm_v2",
+        "fingerprints": {
+            "input_dataset_schema_version": "ipmsm_v2",
+            "input_setup_fingerprint": "setup:fixture",
+            "input_quality_profile": "reference_ultra",
+            "input_material_fingerprint": "material:fixture",
+            "input_aedt_version": "2025.2",
+            "input_beta_calibration_id": "fixture-calibration",
+            "input_beta_convention": "dq_current_advance_v2",
+            "input_model_extent": "full_360",
+        },
+        "ensemble_size": 5,
+        "conformal_coverage": 0.95,
+        "conformal_calibration_isolated": True,
         "r2_threshold": 0.95,
         "primary_test_r2_gate_complete": True,
         "primary_test_r2_gate_passed": True,
@@ -101,11 +115,22 @@ def write_bundle(
     raw = copy.deepcopy(metadata_value or metadata())
     root.mkdir(parents=True, exist_ok=True)
     (root / "metadata.json").write_text(json.dumps(raw), encoding="utf-8")
+    torque_members = (
+        [copy.deepcopy(torque_estimator) for _ in range(5)]
+        if torque_estimator is not None
+        else [
+            ConstantEstimator(100.0),
+            ConstantEstimator(100.0),
+            ConstantEstimator(101.0),
+            ConstantEstimator(102.0),
+            ConstantEstimator(102.0),
+        ]
+    )
     estimators = {
-        bundle.TORQUE_TARGET: torque_estimator or [ConstantEstimator(100.0), ConstantEstimator(102.0)],
-        bundle.CORE_LOSS_TARGET: ConstantEstimator(20.0),
-        bundle.SOLID_LOSS_TARGET: ConstantEstimator(10.0),
-        bundle.VOLTAGE_TARGET: ConstantEstimator(150.0),
+        bundle.TORQUE_TARGET: torque_members,
+        bundle.CORE_LOSS_TARGET: [ConstantEstimator(20.0) for _ in range(5)],
+        bundle.SOLID_LOSS_TARGET: [ConstantEstimator(10.0) for _ in range(5)],
+        bundle.VOLTAGE_TARGET: [ConstantEstimator(150.0) for _ in range(5)],
     }
     for target, estimator in estimators.items():
         path_value = raw.get("model_paths", {}).get(target)
@@ -142,7 +167,15 @@ class SurrogateBundleTests(unittest.TestCase):
         self.assertEqual(prediction["voltage_peak_ucb_v"], 155.0)
         self.assertTrue(prediction["in_domain"])
         self.assertEqual(prediction["ood_features"], ())
-        self.assertEqual(loaded.summary()["targets"][bundle.TORQUE_TARGET]["ensemble_members"], 2)
+        self.assertEqual(loaded.summary()["targets"][bundle.TORQUE_TARGET]["ensemble_members"], 5)
+        self.assertEqual(loaded.summary()["ensemble_size"], 5)
+        self.assertEqual(loaded.summary()["conformal_coverage"], 0.95)
+        self.assertTrue(loaded.summary()["conformal_calibration_isolated"])
+        self.assertEqual(loaded.summary()["fingerprints"], metadata()["fingerprints"])
+        self.assertEqual(
+            bundle.REQUIRED_OPTIMIZER_FINGERPRINTS,
+            trainer.V2_FINGERPRINT_COLUMNS,
+        )
         self.assertEqual(len(bundle.PRIMARY_R2_TARGETS), 8)
         self.assertNotIn(bundle.VOLTAGE_TARGET, bundle.PRIMARY_R2_TARGETS)
 
@@ -201,6 +234,18 @@ class SurrogateBundleTests(unittest.TestCase):
                 lambda raw: raw.__setitem__("training_schema", "legacy"),
             ),
             (
+                "metadata.fingerprints",
+                lambda raw: raw.pop("fingerprints"),
+            ),
+            (
+                "input_beta_calibration_id",
+                lambda raw: raw["fingerprints"].pop("input_beta_calibration_id"),
+            ),
+            (
+                "input_quality_profile must be a nonempty string",
+                lambda raw: raw["fingerprints"].__setitem__("input_quality_profile", ""),
+            ),
+            (
                 "feature_bounds_source",
                 lambda raw: raw.__setitem__("feature_bounds_source", "all_rows"),
             ),
@@ -239,6 +284,85 @@ class SurrogateBundleTests(unittest.TestCase):
                 mutate(raw)
                 root = write_bundle(Path(tmp) / "model", metadata_value=raw)
                 with self.assertRaisesRegex(bundle.SurrogateBundleError, expected):
+                    bundle.load_surrogate_bundle(root)
+
+    def test_optimizer_fingerprint_compatibility_is_fail_closed_for_every_required_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            loaded = bundle.load_surrogate_bundle(write_bundle(Path(tmp) / "model"))
+
+        loaded.assert_fingerprint_compatible(dict(loaded.fingerprints))
+        for name in bundle.REQUIRED_OPTIMIZER_FINGERPRINTS:
+            with self.subTest(name=name):
+                expected = dict(loaded.fingerprints)
+                expected[name] = "mismatch"
+                with self.assertRaisesRegex(bundle.SurrogateBundleError, name):
+                    loaded.assert_fingerprint_compatible(expected)
+
+    def test_production_ensemble_and_conformal_contract_is_fail_closed(self) -> None:
+        mutations = [
+            (
+                "metadata.ensemble_size",
+                lambda raw: raw.pop("ensemble_size"),
+            ),
+            (
+                "ensemble_size must be >= 5",
+                lambda raw: raw.__setitem__("ensemble_size", 4),
+            ),
+            (
+                "metadata.conformal_coverage",
+                lambda raw: raw.pop("conformal_coverage"),
+            ),
+            (
+                "conformal_coverage must be >= 0.95",
+                lambda raw: raw.__setitem__("conformal_coverage", 0.94),
+            ),
+            (
+                "conformal_calibration_isolated must be true",
+                lambda raw: raw.__setitem__("conformal_calibration_isolated", False),
+            ),
+            (
+                "metadata.conformal_calibration_isolated",
+                lambda raw: raw.pop("conformal_calibration_isolated"),
+            ),
+            (
+                "coverage must equal metadata.conformal_coverage",
+                lambda raw: raw["conformal_absolute_residuals"][bundle.TORQUE_TARGET].update(
+                    {"coverage": 0.9, "rank": 19}
+                ),
+            ),
+            (
+                "rank must equal ceil",
+                lambda raw: raw["conformal_absolute_residuals"][bundle.TORQUE_TARGET].__setitem__(
+                    "rank", 19
+                ),
+            ),
+            (
+                "estimator count.*must equal metadata.ensemble_size 6",
+                lambda raw: raw.__setitem__("ensemble_size", 6),
+            ),
+        ]
+        for expected, mutate in mutations:
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
+                raw = metadata()
+                mutate(raw)
+                root = write_bundle(Path(tmp) / "model", metadata_value=raw)
+                with self.assertRaisesRegex(bundle.SurrogateBundleError, expected):
+                    bundle.load_surrogate_bundle(root)
+
+    def test_every_optimizer_fingerprint_is_required_and_nonblank(self) -> None:
+        for name in bundle.REQUIRED_OPTIMIZER_FINGERPRINTS:
+            with self.subTest(name=name, condition="missing"), tempfile.TemporaryDirectory() as tmp:
+                raw = metadata()
+                raw["fingerprints"].pop(name)
+                root = write_bundle(Path(tmp) / "model", metadata_value=raw)
+                with self.assertRaisesRegex(bundle.SurrogateBundleError, name):
+                    bundle.load_surrogate_bundle(root)
+
+            with self.subTest(name=name, condition="blank"), tempfile.TemporaryDirectory() as tmp:
+                raw = metadata()
+                raw["fingerprints"][name] = " "
+                root = write_bundle(Path(tmp) / "model", metadata_value=raw)
+                with self.assertRaisesRegex(bundle.SurrogateBundleError, name):
                     bundle.load_surrogate_bundle(root)
 
     def test_voltage_r2_metadata_is_required_and_thresholded(self) -> None:
@@ -297,7 +421,7 @@ class SurrogateBundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = write_bundle(Path(tmp) / "model")
             with (root / f"{bundle.CORE_LOSS_TARGET}.pkl").open("wb") as stream:
-                pickle.dump(ConstantEstimator(-2.0), stream)
+                pickle.dump([ConstantEstimator(-2.0) for _ in range(5)], stream)
             loaded = bundle.load_surrogate_bundle(root)
             prediction = loaded.predict_one(prediction_features())
 

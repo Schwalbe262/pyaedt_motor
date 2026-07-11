@@ -1347,13 +1347,13 @@ def nondominated_candidates(candidates: Iterable[OptimizationCandidate]) -> list
 def select_validation_candidates(
     candidates: Iterable[OptimizationCandidate], max_candidates: int = 12
 ) -> list[OptimizationCandidate]:
-    """Select deterministic, volume-spread FEA candidates from a Pareto front."""
+    """Select deterministic, volume-spread feasible FEA candidates from a Pareto front."""
 
     if max_candidates < 1:
         raise ValueError("max_candidates must be >= 1")
     rows = [row for row in nondominated_candidates(candidates) if row.feasible]
     if not rows:
-        rows = nondominated_candidates(candidates)
+        return []
     if len(rows) <= max_candidates:
         return rows
     rows.sort(key=lambda row: (row.active_volume_m3, -row.cycle_efficiency, row.candidate_id))
