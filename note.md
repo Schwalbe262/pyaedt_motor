@@ -3609,3 +3609,13 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: only 23 train groups (18 fit/5 holdout) are available, below the 60-design 30/10/10 provisional minimum, so torque/Ld/Lq/solid-loss/efficiency R² is not yet decision-grade.
 - Next action: repeat the same seed/no-tuning checkpoint at >=60 complete designs, but leave the official R²>=0.95 and Stage2 decision to the sealed 700-row supervisor artifact.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-11 23:30:14 +09:00 - Checkpoint-43 residual and Stage2 coverage audit
+- Part/goal: determine whether weak early torque/Ld/Lq/solid-loss metrics expose a geometry-coverage hole that should alter the sealed conditional DOE.
+- Hypothesis/actions: reproduced ensemble test predictions exactly, aggregated normalized residuals over 14 test geometries, and compared 19 raw geometry features against all 48 Stage2 and remaining Stage1 designs.
+- Candidates/options: excluded six derived dimensions already represented by source ratios; the first derived-column attempt failed before output, then the raw-feature audit was published as diagnostic-only evidence.
+- Metrics: the four highest-error groups have Stage2 nearest-distance percentiles <=55.4; one fifth-ranked group is at 95.5 percentile, but its nearest remaining Stage1 train design is closer (normalized RMS 0.228935) than Stage2 (0.289507).
+- Result: `actionable_coverage_gap=false`; preserve the non-overlapping Stage2 plan and re-evaluate at >=60 complete designs. Live Stage1 advanced to result_ok/scheduler_ok=277/280, active=100, missing=320, retry=0.
+- Failure reason: 14 test geometries are insufficient for residual-driven DOE changes, and adapting now would contaminate the precommitted audit path.
+- Next action: continue Stage1 at cap 100 and repeat the fixed learning/coverage checkpoint only after the 60-design evidence threshold.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
