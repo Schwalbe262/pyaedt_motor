@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from urllib import error, parse, request
 
+import run_ipmsm_v2_campaign as campaign_runner
+import submit_ipmsm_v2_campaign as campaign_submitter
 import supervise_ipmsm_v2_pipeline as pipeline_supervisor
 
 
@@ -32,7 +34,7 @@ DEFAULT_PROJECT = "PYAEDT_MOTOR_IPMSM_V2"
 DEFAULT_SCHEDULER_URL = "http://127.0.0.1:8000"
 DEFAULT_CONTRACT = Path(
     "simul_log_smoke/beta_zero_recovery_26092_26093/"
-    "foundation_pipeline_contract_v1.json"
+    "foundation_pipeline_contract_v3.json"
 )
 DEFAULT_REFRESH_SECONDS = 5.0
 DEFAULT_SCHEDULER_REFRESH_SECONDS = 15.0
@@ -239,7 +241,18 @@ def parse_campaign_log(path: Path, *, total_cases: int, cap: int) -> dict[str, A
 
     rate = 0.0
     latest_elapsed = current["elapsed_s"]
-    window = [row for row in samples if latest_elapsed - row["elapsed_s"] <= 6 * 3600]
+    # A supervised runner restart resets elapsed_s.  Older restart segments
+    # must not inflate the recent completion rate or produce a misleading ETA.
+    segment_start = len(samples) - 1
+    while (
+        segment_start > 0
+        and samples[segment_start - 1]["elapsed_s"] <= samples[segment_start]["elapsed_s"]
+    ):
+        segment_start -= 1
+    latest_segment = samples[segment_start:]
+    window = [
+        row for row in latest_segment if latest_elapsed - row["elapsed_s"] <= 6 * 3600
+    ]
     if len(window) >= 2:
         base = window[0]
         span_hours = (latest_elapsed - base["elapsed_s"]) / 3600.0
@@ -1139,6 +1152,185 @@ def _validate_scheduler_health(value: Mapping[str, Any]) -> None:
             raise DashboardDataError(f"scheduler health is degraded: {key}")
 
 
+def summarize_stage1_checkpoint(
+    tasks: Sequence[campaign_submitter.CampaignTask],
+    selected_rows: Sequence[dict[str, Any]],
+    history: Sequence[Mapping[str, Any]],
+    project: str,
+    first_row_number: int,
+    settle_seconds: float,
+    now: datetime,
+    target_designs: int = 60,
+) -> dict[str, Any]:
+    """Summarize the read-only, provisional Stage 1 design checkpoint."""
+
+    if len(tasks) != len(selected_rows):
+        raise DashboardDataError("checkpoint tasks and plan rows differ in length")
+    if target_designs <= 0 or settle_seconds < 0:
+        raise DashboardDataError("checkpoint policy is invalid")
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+    clean_history = [dict(item) for item in history if isinstance(item, Mapping)]
+    try:
+        state = campaign_runner.classify_campaign_state(
+            tasks,
+            clean_history,
+            project,
+            {},
+            1,
+        )
+    except RuntimeError as exc:
+        raise DashboardDataError("checkpoint scheduler history is ambiguous") from exc
+
+    history_by_dedupe = campaign_runner._history_by_dedupe(clean_history, project)
+    successful_rows: set[int] = set()
+    settled_rows: set[int] = set()
+    for task in state.successful:
+        matches = [
+            item
+            for item in history_by_dedupe.get(task.dedupe_key, [])
+            if str(item.get("status") or "").strip().lower() == "completed"
+            and campaign_runner._exit_code(item) == 0
+            and isinstance(campaign_runner._task_id(item), int)
+        ]
+        if not matches:
+            raise DashboardDataError("checkpoint success has no completed scheduler task")
+        latest_id = max(int(campaign_runner._task_id(item)) for item in matches)
+        latest = [item for item in matches if campaign_runner._task_id(item) == latest_id]
+        if len(latest) != 1:
+            raise DashboardDataError("checkpoint latest completed task is ambiguous")
+        plan_index = task.row_number - first_row_number
+        if not 0 <= plan_index < len(selected_rows):
+            raise DashboardDataError("checkpoint task row is outside the plan")
+        plan_row = selected_rows[plan_index]
+        if str(plan_row.get("case_id") or "").strip() != task.case_id:
+            raise DashboardDataError("checkpoint task identity differs from the plan")
+        successful_rows.add(task.row_number)
+        finished_at = _parse_scheduler_time(latest[0].get("finished_at"))
+        if finished_at is not None and (now - finished_at).total_seconds() >= settle_seconds:
+            settled_rows.add(task.row_number)
+
+    required_base_rows: dict[str, set[int]] = {}
+    split_by_group: dict[str, str] = {}
+    group_order: list[str] = []
+    for task, row in zip(tasks, selected_rows, strict=True):
+        group = str(row.get("geometry_group_id") or "").strip()
+        split = str(row.get("doe_split") or "").strip().lower()
+        if not group or split not in {"train", "calibration", "test"}:
+            raise DashboardDataError("checkpoint plan has an invalid design group")
+        previous_split = split_by_group.setdefault(group, split)
+        if previous_split != split:
+            raise DashboardDataError("checkpoint design group spans multiple splits")
+        if group not in required_base_rows:
+            required_base_rows[group] = set()
+            group_order.append(group)
+        if not str(row.get("repeat_of_case_id") or "").strip():
+            required_base_rows[group].add(task.row_number)
+    if any(not rows for rows in required_base_rows.values()):
+        raise DashboardDataError("checkpoint design group has no base rows")
+
+    complete_groups = [
+        group for group in group_order if required_base_rows[group] <= settled_rows
+    ]
+    successful_groups = [
+        group for group in group_order if required_base_rows[group] <= successful_rows
+    ]
+    complete_set = set(complete_groups)
+    settling_designs = sum(group not in complete_set for group in successful_groups)
+    split_counts = Counter(split_by_group[group] for group in complete_groups)
+    normalized_splits = {
+        name: split_counts.get(name, 0) for name in ("train", "calibration", "test")
+    }
+    if (
+        len(complete_groups) >= 80
+        and normalized_splits["train"] >= 40
+        and normalized_splits["calibration"] >= 15
+        and normalized_splits["test"] >= 15
+    ):
+        scope = "provisional_stronger"
+    elif (
+        len(complete_groups) >= target_designs
+        and normalized_splits["train"] >= 30
+        and normalized_splits["calibration"] >= 10
+        and normalized_splits["test"] >= 10
+    ):
+        scope = "provisional_minimum"
+    else:
+        scope = "physics_only"
+    if scope != "physics_only":
+        status = "ready"
+    elif settling_designs:
+        status = "settling"
+    else:
+        status = "waiting"
+    return {
+        "status": status,
+        "target_designs": target_designs,
+        "complete_designs": len(complete_groups),
+        "settling_designs": settling_designs,
+        "remaining_designs": max(0, target_designs - len(complete_groups)),
+        "successful_rows": len(successful_rows),
+        "settled_rows": len(settled_rows),
+        "complete_base_rows": sum(len(required_base_rows[group]) for group in complete_groups),
+        "split_design_counts": normalized_splits,
+        "split_requirements": {"train": 30, "calibration": 10, "test": 10},
+        "diagnostic_scope": scope,
+        "official_gate_eligible": False,
+    }
+
+
+def collect_stage1_checkpoint(
+    config: DashboardConfig,
+    history: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Build checkpoint identities locally and reuse the scheduler history fetch."""
+
+    _, pipeline = _pipeline_definition(config)
+    stage1 = pipeline.get("stage1")
+    if not isinstance(stage1, Mapping):
+        raise DashboardDataError("pipeline contract has no Stage 1 definition")
+    argv = stage1.get("campaign_argv")
+    if (
+        not isinstance(argv, list)
+        or len(argv) < 2
+        or Path(str(argv[1])).name != "run_ipmsm_v2_campaign.py"
+    ):
+        raise DashboardDataError("Stage 1 campaign argv is invalid")
+    try:
+        args = campaign_runner.build_parser().parse_args([str(item) for item in argv[2:]])
+        args.cases = _resolve(config.workdir, stage1.get("case_plan"))
+        rows = campaign_submitter.load_and_validate_cases(
+            args.cases,
+            args.max_plan_cases,
+            False,
+        )
+        selected_rows = campaign_submitter.select_case_rows(
+            rows,
+            args.case_start_index,
+            args.case_limit,
+        )
+        tasks = campaign_submitter.build_campaign_tasks(
+            args,
+            selected_rows,
+            first_row_number=args.case_start_index,
+        )
+    except (RuntimeError, SystemExit, ValueError) as exc:
+        raise DashboardDataError("cannot reconstruct Stage 1 checkpoint identities") from exc
+    if args.project != config.project:
+        raise DashboardDataError("checkpoint project differs from dashboard project")
+    return summarize_stage1_checkpoint(
+        tasks,
+        selected_rows,
+        history,
+        args.project,
+        args.case_start_index,
+        args.completed_result_settle_seconds,
+        datetime.now(timezone.utc),
+    )
+
+
 def summarize_scheduler(
     *,
     project: Mapping[str, Any],
@@ -1261,12 +1453,26 @@ def collect_scheduler_state(config: DashboardConfig) -> dict[str, Any]:
     allocations = results.get("allocations")
     if not isinstance(tasks, list) or not isinstance(allocations, list):
         raise DashboardDataError("scheduler list response is invalid")
-    return summarize_scheduler(
+    summary = summarize_scheduler(
         project=results["project"],
         tasks=tasks,
         allocations=allocations,
         cap=config.cap,
     )
+    try:
+        checkpoint = collect_stage1_checkpoint(config, tasks)
+    except DashboardDataError:
+        checkpoint = {
+            "status": "unavailable",
+            "target_designs": 60,
+            "complete_designs": 0,
+            "settling_designs": 0,
+            "remaining_designs": 60,
+            "split_design_counts": {"train": 0, "calibration": 0, "test": 0},
+            "diagnostic_scope": "unavailable",
+            "official_gate_eligible": False,
+        }
+    return {**summary, "checkpoint": checkpoint}
 
 
 class DashboardStateStore:
@@ -1384,6 +1590,9 @@ class DashboardStateStore:
                 self._last_scheduler_refresh = now
 
         scheduler = dict(self._last_scheduler or {})
+        scheduler_checkpoint = scheduler.get("checkpoint")
+        if isinstance(scheduler_checkpoint, Mapping):
+            local["checkpoint"] = dict(scheduler_checkpoint)
         campaign_status = scheduler.get("campaign_status")
         if isinstance(campaign_status, Mapping):
             speed_counts = campaign_status.get("speed")
@@ -1517,6 +1726,16 @@ class DashboardStateStore:
             "model": {"available": False, "gate_status": "unavailable", "metrics": []},
             "beta": {"available": False, "passed": False},
             "optimization": {"decision": None, "seeds": []},
+            "checkpoint": {
+                "status": "unavailable",
+                "target_designs": 60,
+                "complete_designs": 0,
+                "settling_designs": 0,
+                "remaining_designs": 60,
+                "split_design_counts": {"train": 0, "calibration": 0, "test": 0},
+                "diagnostic_scope": "unavailable",
+                "official_gate_eligible": False,
+            },
             "speed": {"complete": False},
             "processes": [],
             "alerts": [],

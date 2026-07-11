@@ -95,9 +95,9 @@
           </div>
           <div class="scheduler-summary">
             <div><span>Running</span><strong id="schedulerRunning">—</strong></div>
-            <div><span>Completed</span><strong id="schedulerCompleted">—</strong></div>
-            <div><span>Failed</span><strong id="schedulerFailed">—</strong></div>
-            <div><span>최근 1시간</span><strong id="lastHour">—</strong></div>
+            <div><span>완료 시도</span><strong id="schedulerCompleted">—</strong></div>
+            <div><span>실패 시도</span><strong id="schedulerFailed">—</strong></div>
+            <div><span>1h 완료 시도</span><strong id="lastHour">—</strong></div>
           </div>
           <div class="subheading-row">
             <h3>노드별 활성 작업</h3>
@@ -114,6 +114,25 @@
             </div>
             <span class="threshold-chip">목표 ≥ <b id="r2Threshold">0.95</b></span>
           </div>
+          <section class="checkpoint-card" aria-labelledby="checkpointTitle">
+            <div class="checkpoint-heading">
+              <div>
+                <span class="section-kicker">EARLY DIAGNOSTIC · OFFICIAL GATE 아님</span>
+                <h3 id="checkpointTitle">60-design 조기 Surrogate 체크포인트</h3>
+              </div>
+              <span class="health-pill warning" id="checkpointStatus">계산 중</span>
+            </div>
+            <div class="checkpoint-progress-row">
+              <progress id="checkpointProgress" max="60" value="0" aria-label="조기 진단용 완전 설계 수"></progress>
+              <strong id="checkpointProgressLabel">0 / 60 designs</strong>
+            </div>
+            <div class="checkpoint-splits" aria-label="조기 진단 데이터 분할">
+              <div><span>Train</span><strong id="checkpointTrain">0 / 30</strong></div>
+              <div><span>Calibration</span><strong id="checkpointCalibration">0 / 10</strong></div>
+              <div><span>Test</span><strong id="checkpointTest">0 / 10</strong></div>
+            </div>
+            <p id="checkpointNote">안정화된 6개 운전점이 모두 모인 설계만 계산합니다.</p>
+          </section>
           <div class="model-summary">
             <div class="score-ring">
               <strong id="r2Passed">0</strong><span>/ 9</span><small>통과 지표</small>

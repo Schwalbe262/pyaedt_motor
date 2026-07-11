@@ -270,6 +270,18 @@ progress::-moz-progress-bar { border-radius: 999px; background: linear-gradient(
 .node-bar { display: block; height: 3px; margin: 10px 0 8px; }
 .node-card small { color: #647d91; font-size: 8px; }
 
+.checkpoint-card { margin: -2px 0 21px; padding: 16px; border: 1px solid rgba(255,186,102,.18); border-radius: 12px; background: linear-gradient(135deg, rgba(255,186,102,.075), rgba(7,19,32,.46)); }
+.checkpoint-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.checkpoint-heading .section-kicker { margin-bottom: 5px; color: #9d7e58; }
+.checkpoint-progress-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; margin-top: 14px; }
+.checkpoint-progress-row progress { height: 7px; }
+.checkpoint-progress-row strong { color: #d8e4ec; font-size: 11px; }
+.checkpoint-splits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 12px; }
+.checkpoint-splits div { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(7,19,32,.4); }
+.checkpoint-splits span { display: block; color: #71899d; font-size: 8px; }
+.checkpoint-splits strong { display: block; margin-top: 4px; font-size: 10px; }
+.checkpoint-card > p { margin: 10px 1px 0; color: #7890a4; font-size: 8px; line-height: 1.55; }
+
 .model-summary { display: grid; grid-template-columns: 90px 1fr; gap: 17px; align-items: center; padding: 0 0 20px; border-bottom: 1px solid var(--line); }
 .score-ring { width: 82px; height: 82px; display: grid; grid-template-columns: auto auto; place-content: center; align-items: baseline; border: 1px solid rgba(54,217,238,.32); border-radius: 50%; background: radial-gradient(circle, rgba(54,217,238,.09), transparent 67%); }
 .score-ring strong { font-size: 26px; }

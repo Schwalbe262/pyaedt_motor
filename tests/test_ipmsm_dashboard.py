@@ -6,8 +6,10 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import ipmsm_dashboard as server
@@ -61,6 +63,201 @@ class CampaignLogTests(unittest.TestCase):
             )
             result = dashboard.parse_campaign_log(path, total_cases=700, cap=100)
         self.assertEqual(result["settling_results"], 0)
+
+    def test_rate_and_eta_use_only_latest_monotonic_elapsed_segment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runner.stderr.log"
+            path.write_text(
+                "run_ipmsm_v2 scheduler_ok=100 result_ok=100 active=100 pending=0 "
+                "missing=500 retry=0 project_active=100 submitted=100 elapsed_s=0.0\n"
+                "run_ipmsm_v2 scheduler_ok=130 result_ok=130 active=100 pending=0 "
+                "missing=470 retry=0 project_active=100 submitted=130 elapsed_s=1800.0\n"
+                "run_ipmsm_v2 scheduler_ok=130 result_ok=130 active=100 pending=0 "
+                "missing=470 retry=0 project_active=100 submitted=0 elapsed_s=100.0\n"
+                "run_ipmsm_v2 scheduler_ok=140 result_ok=140 active=100 pending=0 "
+                "missing=460 retry=0 project_active=100 submitted=10 elapsed_s=3700.0\n",
+                encoding="utf-8",
+            )
+            result = dashboard.parse_campaign_log(path, total_cases=700, cap=100)
+
+        self.assertEqual(result["completion_rate_per_hour"], 10.0)
+        self.assertEqual(result["eta_hours"], 56.0)
+
+    def test_rate_and_eta_wait_when_latest_restart_segment_is_too_short(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runner.stderr.log"
+            path.write_text(
+                "run_ipmsm_v2 scheduler_ok=100 result_ok=100 active=100 pending=0 "
+                "missing=500 retry=0 project_active=100 submitted=100 elapsed_s=0.0\n"
+                "run_ipmsm_v2 scheduler_ok=130 result_ok=130 active=100 pending=0 "
+                "missing=470 retry=0 project_active=100 submitted=130 elapsed_s=1800.0\n"
+                "run_ipmsm_v2 scheduler_ok=140 result_ok=140 active=100 pending=0 "
+                "missing=460 retry=0 project_active=100 submitted=0 elapsed_s=200.0\n"
+                "run_ipmsm_v2 scheduler_ok=142 result_ok=142 active=100 pending=0 "
+                "missing=458 retry=0 project_active=100 submitted=2 elapsed_s=1000.0\n",
+                encoding="utf-8",
+            )
+            result = dashboard.parse_campaign_log(path, total_cases=700, cap=100)
+
+        self.assertEqual(result["completion_rate_per_hour"], 0.0)
+        self.assertIsNone(result["eta_hours"])
+
+
+class CheckpointTests(unittest.TestCase):
+    PROJECT = "PYAEDT_MOTOR_IPMSM_V2"
+    NOW = datetime(2026, 7, 12, 1, 0, tzinfo=timezone.utc)
+
+    @staticmethod
+    def task_and_row(
+        row_number: int,
+        group: str,
+        split: str,
+        *,
+        repeat_of: str = "",
+    ) -> tuple[SimpleNamespace, dict[str, str]]:
+        case_id = f"case-{row_number}"
+        return (
+            SimpleNamespace(
+                row_number=row_number,
+                case_id=case_id,
+                dedupe_key=f"dedupe-{row_number}",
+            ),
+            {
+                "case_id": case_id,
+                "geometry_group_id": group,
+                "doe_split": split,
+                "repeat_of_case_id": repeat_of,
+            },
+        )
+
+    @classmethod
+    def history(
+        cls,
+        task: SimpleNamespace,
+        task_id: int,
+        *,
+        status: str = "completed",
+        age_seconds: float = 600.0,
+        project: str | None = None,
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "id": task_id,
+            "project": project or cls.PROJECT,
+            "dedupe_key": task.dedupe_key,
+            "status": status,
+        }
+        if status == "completed":
+            row["exit_code"] = 0
+            row["finished_at"] = (cls.NOW - timedelta(seconds=age_seconds)).isoformat()
+        return row
+
+    def test_checkpoint_counts_only_settled_complete_base_designs(self) -> None:
+        definitions = [
+            self.task_and_row(1, "train-complete", "train"),
+            self.task_and_row(2, "train-complete", "train"),
+            self.task_and_row(3, "train-complete", "train", repeat_of="case-1"),
+            self.task_and_row(4, "cal-complete", "calibration"),
+            self.task_and_row(5, "cal-complete", "calibration"),
+            self.task_and_row(6, "test-settling", "test"),
+            self.task_and_row(7, "test-settling", "test"),
+            self.task_and_row(8, "train-partial", "train"),
+            self.task_and_row(9, "train-partial", "train"),
+        ]
+        tasks = [item[0] for item in definitions]
+        rows = [item[1] for item in definitions]
+        history = [
+            self.history(tasks[0], 101),
+            self.history(tasks[1], 102),
+            # The repeat has no scheduler result and must not block its base design.
+            self.history(tasks[3], 104),
+            self.history(tasks[4], 105),
+            self.history(tasks[5], 106),
+            self.history(tasks[6], 107, age_seconds=60.0),
+            self.history(tasks[7], 108),
+            self.history(tasks[8], 109, status="running"),
+            # A foreign project record with the same dedupe key is ignored.
+            self.history(tasks[8], 999, project="OTHER_PROJECT"),
+        ]
+
+        result = dashboard.summarize_stage1_checkpoint(
+            tasks,
+            rows,
+            history,
+            self.PROJECT,
+            first_row_number=1,
+            settle_seconds=300.0,
+            now=self.NOW,
+            target_designs=60,
+        )
+
+        self.assertEqual(result["target_designs"], 60)
+        self.assertEqual(result["complete_designs"], 2)
+        self.assertEqual(result["settling_designs"], 1)
+        self.assertEqual(result["remaining_designs"], 58)
+        self.assertEqual(
+            result["split_design_counts"],
+            {"train": 1, "calibration": 1, "test": 0},
+        )
+        self.assertEqual(result["diagnostic_scope"], "physics_only")
+        self.assertFalse(result["official_gate_eligible"])
+
+    def test_checkpoint_reaches_provisional_minimum_at_exact_sixty_designs(self) -> None:
+        splits = ["train"] * 30 + ["calibration"] * 10 + ["test"] * 20
+        definitions = [
+            self.task_and_row(index, f"group-{index:02d}", split)
+            for index, split in enumerate(splits, start=1)
+        ]
+        tasks = [item[0] for item in definitions]
+        rows = [item[1] for item in definitions]
+        history = [self.history(task, 1000 + index) for index, task in enumerate(tasks)]
+
+        result = dashboard.summarize_stage1_checkpoint(
+            tasks,
+            rows,
+            history,
+            self.PROJECT,
+            first_row_number=1,
+            settle_seconds=300.0,
+            now=self.NOW,
+            target_designs=60,
+        )
+
+        self.assertEqual(result["complete_designs"], 60)
+        self.assertEqual(result["settling_designs"], 0)
+        self.assertEqual(result["remaining_designs"], 0)
+        self.assertEqual(
+            result["split_design_counts"],
+            {"train": 30, "calibration": 10, "test": 20},
+        )
+        self.assertEqual(result["diagnostic_scope"], "provisional_minimum")
+        self.assertFalse(result["official_gate_eligible"])
+
+    def test_checkpoint_rejects_ambiguous_latest_success_history(self) -> None:
+        task, row = self.task_and_row(1, "train-ambiguous", "train")
+        duplicate = self.history(task, 101)
+        with self.assertRaises(dashboard.DashboardDataError):
+            dashboard.summarize_stage1_checkpoint(
+                [task],
+                [row],
+                [duplicate, dict(duplicate)],
+                self.PROJECT,
+                first_row_number=1,
+                settle_seconds=300.0,
+                now=self.NOW,
+            )
+
+    def test_checkpoint_rejects_unknown_scheduler_status(self) -> None:
+        task, row = self.task_and_row(1, "train-unknown", "train")
+        with self.assertRaises(dashboard.DashboardDataError):
+            dashboard.summarize_stage1_checkpoint(
+                [task],
+                [row],
+                [self.history(task, 101, status="mystery")],
+                self.PROJECT,
+                first_row_number=1,
+                settle_seconds=300.0,
+                now=self.NOW,
+            )
 
 
 class TimelineTests(unittest.TestCase):

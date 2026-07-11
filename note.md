@@ -3650,3 +3650,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: mapped-drive LastWriteTime stayed fixed while log bytes/tail advanced, so mtime alone is false-stale evidence; the remaining checkpoint delay is external FEA completion.
 - Next action: when settled complete designs reach 60, publish one rate-limited 360-row diagnostic snapshot, validate it, and train the isolated no-tuning five-member ensemble; keep the official 700-row R² gate untouched.
 - Token usage: local `codex_ops.py` recording remains unavailable without the Codex SQLite database.
+
+## 2026-07-12 01:46:24 +09:00 - Live dashboard checkpoint observability
+
+- Part/goal: expose the full FEA→surrogate→DOE→NSGA/Pareto/speed pipeline and the pending 60-design diagnostic in one read-only Web UI.
+- Actions: added exact settled-design/split checkpoint state, corrected restart-segment rate/ETA, labeled raw Slurm attempts separately from deduped results, aligned manual startup to contract v3, and safely restarted only the dashboard task.
+- Metrics/result: live `http://127.0.0.1:8765` is healthy with errors=0, result/scheduler_ok=359/361, active=100, checkpoint=59/60 designs and 34/10/15 splits; warm API reads are ~2 ms, 33 focused and shared 636/636 tests passed.
+- Failure/next: in-app visual browser was unavailable; HTTP/DOM/security checks passed. A separate provisional watcher remains unlaunched while its resume snapshot-to-contract proof is hardened; existing Stage1 FEA is unaffected.
+- Token usage: unavailable; `codex_ops.py` will be attempted at closeout.

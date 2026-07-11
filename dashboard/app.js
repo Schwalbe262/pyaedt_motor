@@ -146,7 +146,7 @@ function renderScheduler(data) {
   setText("schedulerCompleted", integer(counts.completed));
   setText("schedulerFailed", integer(counts.failed));
   setText("lastHour", integer(scheduler.completed_last_hour));
-  setText("taskTotal", `프로젝트 이력 ${integer(scheduler.project_total_count).toLocaleString("ko-KR")}건`);
+  setText("taskTotal", `raw task 이력 ${integer(scheduler.project_total_count).toLocaleString("ko-KR")}건 · 재시도 포함`);
   const nodes = Array.isArray(scheduler.nodes) ? scheduler.nodes : [];
   setText("nodeCount", `${nodes.length} nodes`);
   const nodeGrid = byId("nodeGrid");
@@ -168,6 +168,44 @@ function renderScheduler(data) {
     nodeGrid.appendChild(card);
   });
   if (!nodes.length) nodeGrid.appendChild(element("p", "muted", "활성 노드 정보가 없습니다."));
+}
+
+function renderCheckpoint(data) {
+  const checkpoint = data.checkpoint || data.scheduler?.checkpoint || {};
+  const target = Math.max(1, integer(checkpoint.target_designs, 60));
+  const complete = Math.max(0, integer(checkpoint.complete_designs));
+  const settling = Math.max(0, integer(checkpoint.settling_designs));
+  const remaining = Math.max(0, integer(checkpoint.remaining_designs, target - complete));
+  const splits = checkpoint.split_design_counts || {};
+  const requirements = checkpoint.split_requirements || { train: 30, calibration: 10, test: 10 };
+  const progress = byId("checkpointProgress");
+  progress.max = target;
+  progress.value = Math.min(target, complete);
+  setText("checkpointProgressLabel", `${complete} / ${target} designs`);
+  setText("checkpointTrain", `${integer(splits.train)} / ${integer(requirements.train, 30)}`);
+  setText("checkpointCalibration", `${integer(splits.calibration)} / ${integer(requirements.calibration, 10)}`);
+  setText("checkpointTest", `${integer(splits.test)} / ${integer(requirements.test, 10)}`);
+
+  const status = byId("checkpointStatus");
+  const statusKey = checkpoint.status || "unavailable";
+  const statusLabel = {
+    ready: "최소 조건 충족",
+    settling: "결과 안정화",
+    waiting: "FEA 수집 중",
+    unavailable: "확인 필요",
+  }[statusKey] || "확인 필요";
+  status.textContent = statusLabel;
+  status.className = `health-pill ${statusKey === "ready" ? "complete" : statusKey === "unavailable" ? "failed" : "warning"}`;
+
+  if (statusKey === "ready") {
+    setText("checkpointNote", `provisional 진단 최소 조건 충족 · ${integer(checkpoint.complete_base_rows)}개 base row · 공식 R² gate와 분리됨`);
+  } else if (statusKey === "settling") {
+    setText("checkpointNote", `${settling}개 완전 설계의 결과 안정화 확인 중 · ${remaining} designs remaining · 공식 gate 아님`);
+  } else if (statusKey === "waiting") {
+    setText("checkpointNote", `${remaining} designs remaining · ${integer(checkpoint.complete_base_rows)}개 base row 안정화 · scope ${checkpoint.diagnostic_scope || "physics_only"}`);
+  } else {
+    setText("checkpointNote", "체크포인트 상태를 확인할 수 없습니다. 다음 scheduler 갱신에서 다시 시도합니다.");
+  }
 }
 
 function renderModel(data) {
@@ -329,6 +367,7 @@ function render(data) {
   renderPipeline(data);
   renderAlerts(data);
   renderScheduler(data);
+  renderCheckpoint(data);
   renderModel(data);
   renderPhysics(data);
   renderProcesses(data);
