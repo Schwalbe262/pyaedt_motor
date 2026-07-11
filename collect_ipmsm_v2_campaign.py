@@ -10,7 +10,9 @@ import math
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
+import time
 from typing import Any, Iterable
 
 from inspect_ipmsm_scheduler_job import fetch_task_remote_file
@@ -22,6 +24,9 @@ ACTIVE_STATUSES = frozenset({"queued", "attaching", "running"})
 SCHEMA_VERSION = "ipmsm_v2"
 BETA_CONVENTION = "dq_current_advance_v2"
 DEFAULT_SCHEDULER_TIMEOUT_SECONDS = 60.0
+DEFAULT_POLL_INTERVAL_SECONDS = 30.0
+DEFAULT_WAIT_TIMEOUT_SECONDS = 43_200.0
+WAIT_STATUS_PREVIEW = 5
 DEFAULT_MERGED_OUTPUT = Path("merged_results.csv")
 SELECTED_PLAN_NAME = "selected_cases.csv"
 REQUIRED_FINGERPRINT_COLUMNS = (
@@ -59,6 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-plan-cases", type=int, default=submit_campaign.DEFAULT_MAX_PLAN_CASES)
     parser.add_argument("--history-limit", type=int, default=submit_campaign.DEFAULT_HISTORY_LIMIT)
     parser.add_argument("--scheduler-timeout", type=float, default=DEFAULT_SCHEDULER_TIMEOUT_SECONDS)
+    parser.add_argument("--wait", action="store_true")
+    parser.add_argument("--poll-interval-seconds", type=float, default=DEFAULT_POLL_INTERVAL_SECONDS)
+    parser.add_argument("--wait-timeout-seconds", type=float, default=DEFAULT_WAIT_TIMEOUT_SECONDS)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--merged-output", type=Path, default=DEFAULT_MERGED_OUTPUT)
     return parser
@@ -73,6 +81,10 @@ def validate_args(args: argparse.Namespace) -> None:
         )
     if not math.isfinite(args.scheduler_timeout) or args.scheduler_timeout <= 0.0:
         raise RuntimeError("--scheduler-timeout must be finite and > 0")
+    if not math.isfinite(args.poll_interval_seconds) or args.poll_interval_seconds <= 0.0:
+        raise RuntimeError("--poll-interval-seconds must be finite and > 0")
+    if not math.isfinite(args.wait_timeout_seconds) or args.wait_timeout_seconds <= 0.0:
+        raise RuntimeError("--wait-timeout-seconds must be finite and > 0")
     if args.output_dir.exists():
         raise RuntimeError(f"--output-dir must not already exist: {args.output_dir}")
     if args.merged_output.is_absolute() or ".." in args.merged_output.parts:
@@ -132,11 +144,11 @@ def _exit_code(task: dict[str, Any]) -> int | None:
         return None
 
 
-def resolve_successful_history_tasks(
+def inspect_history_task_states(
     tasks: Iterable[submit_campaign.CampaignTask],
     history: Iterable[dict[str, Any]],
     project: str,
-) -> list[tuple[submit_campaign.CampaignTask, dict[str, Any]]]:
+) -> tuple[list[tuple[submit_campaign.CampaignTask, dict[str, Any]]], list[dict[str, Any]]]:
     by_dedupe: dict[str, list[dict[str, Any]]] = {}
     for history_task in history:
         if not submit_campaign.task_belongs_to_project(history_task, project):
@@ -146,29 +158,37 @@ def resolve_successful_history_tasks(
             by_dedupe.setdefault(dedupe_key, []).append(history_task)
 
     resolved: list[tuple[submit_campaign.CampaignTask, dict[str, Any]]] = []
+    active_records: list[dict[str, Any]] = []
     for task in tasks:
         matches = by_dedupe.get(task.dedupe_key, [])
         if not matches:
             raise RuntimeError(f"missing scheduler task for case_id={task.case_id!r}")
-        active = [
-            item
-            for item in matches
-            if str(item.get("status") or "").strip().lower() in ACTIVE_STATUSES
-        ]
-        if active:
-            statuses = sorted({str(item.get("status") or "").strip().lower() for item in active})
-            raise RuntimeError(f"active scheduler task for case_id={task.case_id!r}: {statuses}")
         unknown = [
             item
             for item in matches
             if str(item.get("status") or "").strip().lower()
-            not in {"completed", "failed", "cancelled"}
+            not in ({"completed", "failed", "cancelled"} | ACTIVE_STATUSES)
         ]
         if unknown:
             statuses = sorted(
                 {str(item.get("status") or "").strip().lower() or "<blank>" for item in unknown}
             )
             raise RuntimeError(f"ambiguous scheduler status for case_id={task.case_id!r}: {statuses}")
+        active = [
+            item
+            for item in matches
+            if str(item.get("status") or "").strip().lower() in ACTIVE_STATUSES
+        ]
+        if active:
+            latest = max(active, key=lambda item: _task_id(item) or -1)
+            active_records.append(
+                {
+                    "case_id": task.case_id,
+                    "status": str(latest.get("status") or "").strip().lower(),
+                    "task_id": _task_id(latest),
+                }
+            )
+            continue
         successful = [
             item
             for item in matches
@@ -183,6 +203,18 @@ def resolve_successful_history_tasks(
         if len(latest) != 1:
             raise RuntimeError(f"ambiguous latest successful task for case_id={task.case_id!r}")
         resolved.append((task, latest[0]))
+    return resolved, active_records
+
+
+def resolve_successful_history_tasks(
+    tasks: Iterable[submit_campaign.CampaignTask],
+    history: Iterable[dict[str, Any]],
+    project: str,
+) -> list[tuple[submit_campaign.CampaignTask, dict[str, Any]]]:
+    resolved, active = inspect_history_task_states(tasks, history, project)
+    if active:
+        statuses = sorted({str(item["status"]) for item in active})
+        raise RuntimeError(f"active scheduler task for case_id={active[0]['case_id']!r}: {statuses}")
     return resolved
 
 
@@ -323,22 +355,9 @@ def _stage_and_commit(
     return final_plan, final_merged, final_results
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    validate_args(args)
-    identity_args = build_identity_args(args)
-    validated_rows = submit_campaign.load_and_validate_cases(args.cases, args.max_plan_cases, False)
-    selected_rows = submit_campaign.select_case_rows(
-        validated_rows,
-        args.case_start_index,
-        args.case_limit,
-    )
-    campaign_tasks = submit_campaign.build_campaign_tasks(
-        identity_args,
-        selected_rows,
-        first_row_number=args.case_start_index,
-    )
-
+def read_history_snapshot(
+    args: argparse.Namespace,
+) -> tuple[list[dict[str, Any]], int, int]:
     try:
         history = submit_campaign.get_scheduler_task_history(
             args.scheduler_url,
@@ -365,8 +384,76 @@ def main(argv: list[str] | None = None) -> int:
             f"history_project_tasks={history_project_tasks} project_total_count={project_total_count} "
             f"history_rows={len(history)} history_limit={args.history_limit}"
         )
+    return history, history_project_tasks, project_total_count
 
-    resolved = resolve_successful_history_tasks(campaign_tasks, history, args.project)
+
+def wait_for_successful_tasks(
+    args: argparse.Namespace,
+    campaign_tasks: list[submit_campaign.CampaignTask],
+) -> tuple[
+    list[tuple[submit_campaign.CampaignTask, dict[str, Any]]],
+    list[dict[str, Any]],
+    int,
+    int,
+]:
+    started = time.monotonic()
+    previous_signature: tuple[tuple[str, str, int | None], ...] | None = None
+    polls = 0
+    while True:
+        history, history_project_tasks, project_total_count = read_history_snapshot(args)
+        resolved, active = inspect_history_task_states(campaign_tasks, history, args.project)
+        if not active:
+            return resolved, history, history_project_tasks, project_total_count
+        if not args.wait:
+            statuses = sorted({str(item["status"]) for item in active})
+            raise RuntimeError(
+                f"active scheduler task for case_id={active[0]['case_id']!r}: {statuses}; "
+                "pass --wait to poll"
+            )
+        elapsed = time.monotonic() - started
+        if elapsed >= args.wait_timeout_seconds:
+            raise RuntimeError(
+                f"wait timeout after {elapsed:.3f}s with {len(active)} active task(s); "
+                "no files were written"
+            )
+        signature = tuple(
+            sorted((str(item["case_id"]), str(item["status"]), item["task_id"]) for item in active)
+        )
+        if signature != previous_signature or polls % 10 == 0:
+            preview = signature[:WAIT_STATUS_PREVIEW]
+            compact = ",".join(f"{case_id}:{status}" for case_id, status, _ in preview)
+            if len(signature) > len(preview):
+                compact += f",...(+{len(signature) - len(preview)})"
+            print(
+                f"wait_ipmsm_v2 active={len(active)} elapsed_s={elapsed:.1f} {compact}",
+                file=sys.stderr,
+            )
+        previous_signature = signature
+        polls += 1
+        remaining = args.wait_timeout_seconds - elapsed
+        time.sleep(min(args.poll_interval_seconds, remaining))
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    validate_args(args)
+    identity_args = build_identity_args(args)
+    validated_rows = submit_campaign.load_and_validate_cases(args.cases, args.max_plan_cases, False)
+    selected_rows = submit_campaign.select_case_rows(
+        validated_rows,
+        args.case_start_index,
+        args.case_limit,
+    )
+    campaign_tasks = submit_campaign.build_campaign_tasks(
+        identity_args,
+        selected_rows,
+        first_row_number=args.case_start_index,
+    )
+
+    resolved, history, history_project_tasks, project_total_count = wait_for_successful_tasks(
+        args,
+        campaign_tasks,
+    )
     collected: list[tuple[submit_campaign.CampaignTask, str]] = []
     collected_rows: list[dict[str, str]] = []
     summaries: list[dict[str, Any]] = []

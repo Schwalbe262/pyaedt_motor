@@ -74,6 +74,180 @@ def completed_history(
 
 
 class CollectIpmsmV2CampaignTests(unittest.TestCase):
+    def test_wait_options_have_safe_defaults_and_require_positive_finite_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            args = collector_args(output_dir)
+            self.assertFalse(args.wait)
+            self.assertEqual(args.poll_interval_seconds, 30.0)
+            self.assertEqual(args.wait_timeout_seconds, 43200.0)
+            for option, value in (
+                ("--poll-interval-seconds", "0"),
+                ("--poll-interval-seconds", "nan"),
+                ("--wait-timeout-seconds", "0"),
+                ("--wait-timeout-seconds", "inf"),
+            ):
+                with self.subTest(option=option, value=value):
+                    with self.assertRaisesRegex(RuntimeError, option):
+                        collector.validate_args(collector_args(output_dir, option, value))
+
+    def test_wait_polls_active_to_completed_then_collects(self) -> None:
+        rows = [{"case_id": "case-a", "design_hash": "hash-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "collected"
+            args = collector_args(output_dir, "--wait")
+            task = campaign_tasks(args, rows)[0]
+            active = [
+                {
+                    "id": 100,
+                    "project": "pyaedt_motor",
+                    "status": "running",
+                    "dedupe_key": task.dedupe_key,
+                }
+            ]
+            completed = completed_history([task])
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
+                with mock.patch.object(
+                    submit_campaign,
+                    "get_scheduler_task_history",
+                    side_effect=[active, completed],
+                ) as history_get:
+                    with mock.patch.object(
+                        submit_campaign,
+                        "get_scheduler_project_summary",
+                        side_effect=[{"total_count": 1}, {"total_count": 1}],
+                    ) as project_get:
+                        with mock.patch.object(
+                            collector,
+                            "fetch_task_remote_file",
+                            return_value=valid_result("case-a", "hash-a"),
+                        ):
+                            with mock.patch.object(collector.time, "monotonic", side_effect=[0.0, 0.0]):
+                                with mock.patch.object(collector.time, "sleep") as sleep:
+                                    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                                        result = collector.main(
+                                            [
+                                                "--cases",
+                                                "cases.csv",
+                                                "--project",
+                                                "pyaedt_motor",
+                                                "--output-dir",
+                                                str(output_dir),
+                                                "--wait",
+                                                "--poll-interval-seconds",
+                                                "0.01",
+                                            ]
+                                        )
+
+            output = json.loads(stdout.getvalue())
+
+        self.assertEqual(result, 0)
+        self.assertEqual(history_get.call_count, 2)
+        self.assertEqual(project_get.call_count, 2)
+        sleep.assert_called_once_with(0.01)
+        self.assertIn("wait_ipmsm_v2 active=1", stderr.getvalue())
+        self.assertNotIn("wait_ipmsm_v2", stdout.getvalue())
+        self.assertEqual(output["collected_results"], 1)
+
+    def test_wait_timeout_writes_nothing(self) -> None:
+        rows = [{"case_id": "case-a", "design_hash": "hash-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "collected"
+            args = collector_args(output_dir, "--wait")
+            task = campaign_tasks(args, rows)[0]
+            active = [
+                {
+                    "id": 100,
+                    "project": "pyaedt_motor",
+                    "status": "running",
+                    "dedupe_key": task.dedupe_key,
+                }
+            ]
+            with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
+                with mock.patch.object(submit_campaign, "get_scheduler_task_history", return_value=active):
+                    with mock.patch.object(
+                        submit_campaign,
+                        "get_scheduler_project_summary",
+                        return_value={"total_count": 1},
+                    ):
+                        with mock.patch.object(collector, "fetch_task_remote_file") as fetch:
+                            with mock.patch.object(collector.time, "monotonic", side_effect=[0.0, 2.0]):
+                                with self.assertRaisesRegex(RuntimeError, "wait timeout.*no files were written"):
+                                    collector.main(
+                                        [
+                                            "--cases",
+                                            "cases.csv",
+                                            "--project",
+                                            "pyaedt_motor",
+                                            "--output-dir",
+                                            str(output_dir),
+                                            "--wait",
+                                            "--wait-timeout-seconds",
+                                            "1",
+                                        ]
+                                    )
+
+            fetch.assert_not_called()
+            self.assertFalse(output_dir.exists())
+
+    def test_wait_fails_immediately_when_active_task_becomes_failed(self) -> None:
+        rows = [{"case_id": "case-a", "design_hash": "hash-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collector_args(Path(tmp) / "out", "--wait")
+            task = campaign_tasks(args, rows)[0]
+            active = [
+                {"id": 100, "project": "pyaedt_motor", "status": "running", "dedupe_key": task.dedupe_key}
+            ]
+            failed = [
+                {"id": 100, "project": "pyaedt_motor", "status": "failed", "dedupe_key": task.dedupe_key}
+            ]
+            with mock.patch.object(
+                collector,
+                "read_history_snapshot",
+                side_effect=[(active, 1, 1), (failed, 1, 1)],
+            ):
+                with mock.patch.object(collector.time, "monotonic", side_effect=[0.0, 0.0]):
+                    with mock.patch.object(collector.time, "sleep") as sleep:
+                        with contextlib.redirect_stderr(io.StringIO()):
+                            with self.assertRaisesRegex(RuntimeError, "no successful completed task"):
+                                collector.wait_for_successful_tasks(args, [task])
+
+        sleep.assert_called_once()
+
+    def test_wait_status_preview_is_bounded(self) -> None:
+        rows = [
+            {"case_id": f"case-{suffix}", "design_hash": f"hash-{suffix}"}
+            for suffix in "abcdef"
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collector_args(Path(tmp) / "out", "--wait", "--wait-timeout-seconds", "1")
+            tasks = campaign_tasks(args, rows)
+            active = [
+                {
+                    "id": 100 + index,
+                    "project": "pyaedt_motor",
+                    "status": "running",
+                    "dedupe_key": task.dedupe_key,
+                }
+                for index, task in enumerate(tasks)
+            ]
+            stderr = io.StringIO()
+            with mock.patch.object(
+                collector,
+                "read_history_snapshot",
+                return_value=(active, len(active), len(active)),
+            ):
+                with mock.patch.object(collector.time, "monotonic", side_effect=[0.0, 0.0, 2.0]):
+                    with mock.patch.object(collector.time, "sleep"):
+                        with contextlib.redirect_stderr(stderr):
+                            with self.assertRaisesRegex(RuntimeError, "wait timeout"):
+                                collector.wait_for_successful_tasks(args, tasks)
+
+        self.assertIn("case-e:running,...(+1)", stderr.getvalue())
+        self.assertNotIn("case-f:running", stderr.getvalue())
+
     def test_successful_collection_merges_in_selected_plan_order(self) -> None:
         rows = [
             {"case_id": "case-b", "design_hash": "hash-b"},
