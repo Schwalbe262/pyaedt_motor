@@ -58,8 +58,10 @@ python calibrate_ipmsm_beta.py beta-generate `
 
 python calibrate_ipmsm_beta.py beta-analyze `
   --results beta_mtpa_results.csv `
+  --case-plan beta_mtpa_cases.csv `
   --calibration-manifest beta_zero_manifest.json `
-  --summary beta_mtpa_summary.json
+  --summary beta_mtpa_summary.json `
+  --require-stage-pass
 ```
 
 ## 3. v2 foundation DOE와 FEA
@@ -122,6 +124,28 @@ python collect_ipmsm_v2_campaign.py `
   --simulation-dir simulation/ipmsm_v2_foundation_w1 `
   --output-dir collected/ipmsm_v2_foundation_w1 `
   --merged-output merged_results.csv
+```
+
+For a production foundation stage, use the continuous runner. It validates the
+strict beta gate before any scheduler access, keeps the project cap filled,
+limits terminal retries, and invokes the atomic collector only after every
+selected case succeeds. Omit `--submit` for a read-only dry run.
+
+```powershell
+python run_ipmsm_v2_campaign.py `
+  --cases ipmsm_v2_foundation_stage1_700_cases.csv `
+  --project PYAEDT_MOTOR_IPMSM_V2 --project-active-cap 100 `
+  --task-prefix ipmsm-v2-foundation-s1 `
+  --remote-cases-dir remote/ipmsm_v2_foundation_s1 `
+  --result-dir simul_log/ipmsm_v2_foundation_s1 `
+  --simulation-dir simulation/ipmsm_v2_foundation_s1 `
+  --log-dir simul_log_scheduler/ipmsm_v2_foundation_s1_logs `
+  --beta-summary beta_mtpa_summary.json `
+  --beta-case-plan beta_mtpa_cases.csv `
+  --beta-results beta_mtpa_results.csv `
+  --beta-calibration-manifest beta_zero_manifest.json `
+  --output-dir collected/ipmsm_v2_foundation_stage1_700 `
+  --merged-output merged_results.csv --terminal-retry-limit 1 --submit
 ```
 
 ## 4. 데이터 gate와 surrogate 학습

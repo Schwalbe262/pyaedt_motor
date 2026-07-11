@@ -1,0 +1,728 @@
+"""Continuously refill, monitor, and collect an IPMSM v2 scheduler campaign."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import csv
+from dataclasses import dataclass
+import io
+import json
+import math
+from pathlib import Path
+import sys
+import time
+from typing import Any, Iterable, Mapping
+
+import calibrate_ipmsm_beta as beta_calibration
+import collect_ipmsm_v2_campaign as collector
+import submit_ipmsm_v2_campaign as submit_campaign
+
+
+ACTIVE_STATUSES = frozenset({"queued", "attaching", "running"})
+TERMINAL_RETRY_STATUSES = frozenset({"failed", "cancelled"})
+KNOWN_STATUSES = ACTIVE_STATUSES | TERMINAL_RETRY_STATUSES | {"completed"}
+DEFAULT_POLL_INTERVAL_SECONDS = 30.0
+DEFAULT_OVERALL_TIMEOUT_SECONDS = 604_800.0
+DEFAULT_TERMINAL_RETRY_LIMIT = 1
+STATUS_HEARTBEAT_POLLS = 10
+BETA_PATH_ARGUMENTS = (
+    "beta_summary",
+    "beta_case_plan",
+    "beta_results",
+    "beta_calibration_manifest",
+)
+
+
+@dataclass(frozen=True)
+class PendingSubmission:
+    task_id: int | str | None
+    prior_match_count: int
+
+
+@dataclass(frozen=True)
+class CampaignState:
+    successful: tuple[submit_campaign.CampaignTask, ...]
+    active: tuple[submit_campaign.CampaignTask, ...]
+    missing: tuple[submit_campaign.CampaignTask, ...]
+    retryable: tuple[submit_campaign.CampaignTask, ...]
+    pending: tuple[submit_campaign.CampaignTask, ...]
+
+    @property
+    def candidates(self) -> tuple[submit_campaign.CampaignTask, ...]:
+        return tuple(sorted((*self.missing, *self.retryable), key=lambda task: task.row_number))
+
+
+@dataclass(frozen=True)
+class SchedulerSnapshot:
+    history: list[dict[str, Any]]
+    history_project_tasks: int
+    project_total_count: int
+    server_project_cap: int
+    project_active_count: int
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = submit_campaign.build_parser()
+    parser.description = __doc__
+    parser.add_argument(
+        "--poll-interval-seconds",
+        type=float,
+        default=DEFAULT_POLL_INTERVAL_SECONDS,
+    )
+    parser.add_argument(
+        "--overall-timeout-seconds",
+        type=float,
+        default=DEFAULT_OVERALL_TIMEOUT_SECONDS,
+    )
+    parser.add_argument(
+        "--terminal-retry-limit",
+        type=int,
+        default=DEFAULT_TERMINAL_RETRY_LIMIT,
+        help="Maximum failed/cancelled attempts that may each be followed by a retry.",
+    )
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--merged-output",
+        type=Path,
+        default=collector.DEFAULT_MERGED_OUTPUT,
+    )
+    parser.add_argument("--beta-summary", type=Path)
+    parser.add_argument("--beta-case-plan", type=Path)
+    parser.add_argument("--beta-results", type=Path)
+    parser.add_argument("--beta-calibration-manifest", type=Path)
+    return parser
+
+
+def _collector_argv(args: argparse.Namespace) -> list[str]:
+    return [
+        "--cases",
+        str(args.cases),
+        "--project",
+        args.project,
+        "--scheduler-url",
+        args.scheduler_url,
+        "--task-prefix",
+        args.task_prefix,
+        "--remote-cases-dir",
+        args.remote_cases_dir,
+        "--result-dir",
+        args.result_dir,
+        "--simulation-dir",
+        args.simulation_dir,
+        "--log-dir",
+        args.log_dir,
+        "--start",
+        str(args.case_start_index),
+        "--limit",
+        str(args.case_limit),
+        "--max-plan-cases",
+        str(args.max_plan_cases),
+        "--history-limit",
+        str(args.history_limit),
+        "--scheduler-timeout",
+        str(args.timeout),
+        "--output-dir",
+        str(args.output_dir),
+        "--merged-output",
+        str(args.merged_output),
+    ]
+
+
+def validate_args(args: argparse.Namespace) -> None:
+    submit_campaign.validate_args(args)
+    if not math.isfinite(args.timeout) or args.timeout <= 0.0:
+        raise RuntimeError("--timeout must be finite and > 0")
+    if not math.isfinite(args.poll_interval_seconds) or args.poll_interval_seconds <= 0.0:
+        raise RuntimeError("--poll-interval-seconds must be finite and > 0")
+    if not math.isfinite(args.overall_timeout_seconds) or args.overall_timeout_seconds <= 0.0:
+        raise RuntimeError("--overall-timeout-seconds must be finite and > 0")
+    if args.terminal_retry_limit < 0:
+        raise RuntimeError("--terminal-retry-limit must be >= 0")
+    if args.write_manifest is not None:
+        raise RuntimeError("--write-manifest is not supported by the campaign runner")
+    beta_paths = [getattr(args, name) for name in BETA_PATH_ARGUMENTS]
+    if args.submit and not all(path is not None for path in beta_paths):
+        raise RuntimeError(
+            "--submit requires --beta-summary, --beta-case-plan, --beta-results, "
+            "and --beta-calibration-manifest"
+        )
+    if any(path is not None for path in beta_paths) and not all(
+        path is not None for path in beta_paths
+    ):
+        raise RuntimeError(
+            "beta prerequisite validation requires --beta-summary, --beta-case-plan, "
+            "--beta-results, and --beta-calibration-manifest together"
+        )
+    collector_args = collector.build_parser().parse_args(_collector_argv(args))
+    collector.validate_args(collector_args)
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON object key: {key!r}")
+        value[key] = item
+    return value
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON numeric constant: {value}")
+
+
+def _read_json_object(path: Path, label: str) -> dict[str, Any]:
+    if not path.is_file():
+        raise RuntimeError(f"{label} must be an existing file: {path}")
+    try:
+        value = json.loads(
+            path.read_text(encoding="utf-8-sig"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise RuntimeError(f"cannot read {label} JSON {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{label} must contain one JSON object: {path}")
+    return value
+
+
+def _read_csv_rows(path: Path, label: str) -> list[dict[str, str]]:
+    if not path.is_file():
+        raise RuntimeError(f"{label} must be an existing file: {path}")
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            fieldnames = list(reader.fieldnames or ())
+            if not fieldnames or any(not str(name or "").strip() for name in fieldnames):
+                raise RuntimeError(f"{label} CSV must have a nonblank header: {path}")
+            if len(set(fieldnames)) != len(fieldnames):
+                raise RuntimeError(f"{label} CSV has duplicate header names: {path}")
+            rows = [dict(row) for row in reader]
+    except (OSError, UnicodeError, csv.Error) as exc:
+        raise RuntimeError(f"cannot read {label} CSV {path}: {exc}") from exc
+    if any(None in row for row in rows):
+        raise RuntimeError(f"{label} CSV has fields beyond its header: {path}")
+    return rows
+
+
+def load_beta_prerequisite(args: argparse.Namespace) -> dict[str, Any] | None:
+    if args.beta_summary is None:
+        return None
+    summary = _read_json_object(args.beta_summary, "beta summary")
+    case_plan_rows = _read_csv_rows(args.beta_case_plan, "beta case plan")
+    result_rows = _read_csv_rows(args.beta_results, "beta results")
+    manifest = _read_json_object(args.beta_calibration_manifest, "beta calibration manifest")
+    try:
+        return beta_calibration.validate_beta_sweep_summary(
+            summary,
+            case_plan_rows=case_plan_rows,
+            result_rows=result_rows,
+            calibration_manifest=manifest,
+            require_stage_pass=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"strict beta prerequisite failed: {exc}") from exc
+
+
+def _foundation_text(row: Mapping[str, Any], field: str, case_id: str) -> str:
+    value = str(row.get(field) or "").strip()
+    if not value:
+        raise RuntimeError(f"foundation case {case_id!r} has blank {field}")
+    return value
+
+
+def _foundation_float(row: Mapping[str, Any], field: str, case_id: str) -> float:
+    try:
+        value = float(row.get(field))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"foundation case {case_id!r} has invalid {field}") from exc
+    if not math.isfinite(value):
+        raise RuntimeError(f"foundation case {case_id!r} has non-finite {field}")
+    return value
+
+
+def validate_foundation_rows(
+    rows: Iterable[Mapping[str, Any]],
+    summary: Mapping[str, Any],
+) -> None:
+    calibration_id = str(summary["beta_calibration_id"])
+    electrical_zero_deg = float(summary["electrical_zero_deg"])
+    stage_lower, stage_upper = (float(value) for value in summary["stage_beta_bounds_deg"])
+    summary_quality = str(summary["homogeneous_identities"]["quality_profile"])
+    if summary_quality != "reference_ultra":
+        raise RuntimeError(
+            "strict beta prerequisite must use homogeneous quality_profile='reference_ultra'"
+        )
+    for index, row in enumerate(rows, start=1):
+        case_id = str(row.get("case_id") or f"row-{index}").strip()
+        required_text = {
+            "dataset_schema_version": "ipmsm_v2",
+            "quality_profile": "reference_ultra",
+            "model_extent": "full_360",
+            "beta_convention": "dq_current_advance_v2",
+            "beta_calibration_id": calibration_id,
+        }
+        for field, expected in required_text.items():
+            actual = _foundation_text(row, field, case_id)
+            if actual != expected:
+                raise RuntimeError(
+                    f"foundation case {case_id!r} {field} mismatch: "
+                    f"expected={expected!r} actual={actual!r}"
+                )
+        symmetry = _foundation_float(row, "symmetry_factor", case_id)
+        if not math.isclose(symmetry, 1.0, rel_tol=0.0, abs_tol=1e-12):
+            raise RuntimeError(f"foundation case {case_id!r} must use symmetry_factor=1")
+        periodic = str(row.get("use_periodic_boundary")).strip().lower()
+        if periodic not in {"0", "false", "no", "off"}:
+            raise RuntimeError(
+                f"foundation case {case_id!r} must set use_periodic_boundary=false"
+            )
+        row_zero = _foundation_float(row, "electrical_zero_deg", case_id)
+        if not math.isclose(
+            row_zero,
+            electrical_zero_deg,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            raise RuntimeError(
+                f"foundation case {case_id!r} electrical_zero_deg mismatch: "
+                f"expected={electrical_zero_deg:g} actual={row_zero:g}"
+            )
+        beta = _foundation_float(row, "beta_dq_deg", case_id)
+        if not stage_lower <= beta <= stage_upper:
+            raise RuntimeError(
+                f"foundation case {case_id!r} beta_dq_deg={beta:g} is outside "
+                f"stage bounds [{stage_lower:g}, {stage_upper:g}]"
+            )
+        operation = _foundation_text(row, "operation", case_id).lower().replace("-", "_")
+        if operation not in {"sin_current", "sincurrent"}:
+            raise RuntimeError(
+                f"foundation case {case_id!r} must use loaded sin_current operation"
+            )
+
+
+def _beta_gate_output(summary: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if summary is None:
+        return None
+    return {
+        "best_beta_dq_deg": float(summary["best_beta_dq_deg"]),
+        "sweep_id": str(summary["sweep_id"]),
+    }
+
+
+def _task_id(task: dict[str, Any]) -> int | str | None:
+    value = task.get("id", task.get("task_id"))
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _exit_code(task: dict[str, Any]) -> int | None:
+    raw = task.get("exit_code", task.get("return_code"))
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _history_by_dedupe(
+    history: Iterable[dict[str, Any]],
+    project: str,
+) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+    for history_task in history:
+        if not submit_campaign.task_belongs_to_project(history_task, project):
+            continue
+        dedupe_key = str(history_task.get("dedupe_key") or "").strip()
+        if dedupe_key:
+            result.setdefault(dedupe_key, []).append(history_task)
+    return result
+
+
+def reconcile_pending_submissions(
+    pending: dict[str, PendingSubmission],
+    history_by_dedupe: dict[str, list[dict[str, Any]]],
+) -> None:
+    observed: list[str] = []
+    for dedupe_key, submission in pending.items():
+        matches = history_by_dedupe.get(dedupe_key, [])
+        task_ids = {_task_id(item) for item in matches}
+        if (
+            submission.task_id is not None
+            and submission.task_id in task_ids
+        ) or len(matches) > submission.prior_match_count:
+            observed.append(dedupe_key)
+    for dedupe_key in observed:
+        pending.pop(dedupe_key, None)
+
+
+def classify_campaign_state(
+    tasks: Iterable[submit_campaign.CampaignTask],
+    history: Iterable[dict[str, Any]],
+    project: str,
+    pending: dict[str, PendingSubmission],
+    terminal_retry_limit: int,
+) -> CampaignState:
+    by_dedupe = _history_by_dedupe(history, project)
+    reconcile_pending_submissions(pending, by_dedupe)
+    successful: list[submit_campaign.CampaignTask] = []
+    active: list[submit_campaign.CampaignTask] = []
+    missing: list[submit_campaign.CampaignTask] = []
+    retryable: list[submit_campaign.CampaignTask] = []
+    locally_pending: list[submit_campaign.CampaignTask] = []
+
+    for task in tasks:
+        matches = by_dedupe.get(task.dedupe_key, [])
+        statuses = {
+            str(item.get("status") or "").strip().lower() or "<blank>"
+            for item in matches
+        }
+        unknown = sorted(statuses - KNOWN_STATUSES)
+        if unknown:
+            raise RuntimeError(
+                f"ambiguous scheduler history status for case_id={task.case_id!r}: {unknown}"
+            )
+        if any(
+            str(item.get("status") or "").strip().lower() in ACTIVE_STATUSES
+            for item in matches
+        ):
+            active.append(task)
+            continue
+        completed = [
+            item
+            for item in matches
+            if str(item.get("status") or "").strip().lower() == "completed"
+        ]
+        completed_success = [
+            item
+            for item in completed
+            if _exit_code(item) == 0 and _task_id(item) is not None
+        ]
+        if completed_success:
+            successful.append(task)
+            continue
+        if completed:
+            raise RuntimeError(
+                f"completed scheduler task is not a valid success for case_id={task.case_id!r}"
+            )
+        terminal = [
+            item
+            for item in matches
+            if str(item.get("status") or "").strip().lower() in TERMINAL_RETRY_STATUSES
+        ]
+        retry_count = len(terminal)
+        if retry_count > terminal_retry_limit:
+            raise RuntimeError(
+                "terminal retry limit exceeded for "
+                f"case_id={task.case_id!r}: failures={retry_count} limit={terminal_retry_limit}"
+            )
+        if task.dedupe_key in pending:
+            locally_pending.append(task)
+        elif terminal:
+            retryable.append(task)
+        else:
+            missing.append(task)
+
+    return CampaignState(
+        successful=tuple(successful),
+        active=tuple(active),
+        missing=tuple(missing),
+        retryable=tuple(retryable),
+        pending=tuple(locally_pending),
+    )
+
+
+def read_scheduler_snapshot(args: argparse.Namespace) -> SchedulerSnapshot:
+    try:
+        history = submit_campaign.get_scheduler_task_history(
+            args.scheduler_url,
+            args.timeout,
+            args.history_limit,
+            args.project,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"cannot inspect scheduler history; no POST was attempted in this polling loop: {exc}"
+        ) from exc
+    try:
+        project_summary = submit_campaign.get_scheduler_project_summary(
+            args.scheduler_url,
+            args.project,
+            args.timeout,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "cannot verify scheduler project history coverage; "
+            f"no POST was attempted in this polling loop: {exc}"
+        ) from exc
+    server_project_cap = submit_campaign.require_scheduler_project_cap(
+        project_summary,
+        args.project_active_cap,
+    )
+    history_project_tasks = sum(
+        1
+        for task in history
+        if submit_campaign.task_belongs_to_project(task, args.project)
+    )
+    project_total_count = int(project_summary["total_count"])
+    if history_project_tasks != project_total_count:
+        saturated = "saturated " if len(history) >= args.history_limit else ""
+        raise RuntimeError(
+            f"{saturated}scheduler history coverage is incomplete; "
+            "no POST was attempted in this polling loop: "
+            f"history_project_tasks={history_project_tasks} "
+            f"project_total_count={project_total_count} history_rows={len(history)} "
+            f"history_limit={args.history_limit}"
+        )
+    try:
+        active_tasks = submit_campaign.get_scheduler_tasks(args.scheduler_url, args.timeout)
+    except Exception as exc:
+        raise RuntimeError(
+            f"cannot enforce project active cap; no POST was attempted in this polling loop: {exc}"
+        ) from exc
+    endpoint_active_count = submit_campaign.project_active_task_count(active_tasks, args.project)
+    history_active_count = sum(
+        1
+        for task in history
+        if submit_campaign.task_belongs_to_project(task, args.project)
+        and str(task.get("status") or "").strip().lower() in ACTIVE_STATUSES
+    )
+    project_active_count = max(endpoint_active_count, history_active_count)
+    if project_active_count > server_project_cap:
+        raise RuntimeError(
+            "scheduler project active count exceeds its configured cap; "
+            "no POST was attempted in this polling loop: "
+            f"active={project_active_count} cap={server_project_cap}"
+        )
+    return SchedulerSnapshot(
+        history=history,
+        history_project_tasks=history_project_tasks,
+        project_total_count=project_total_count,
+        server_project_cap=server_project_cap,
+        project_active_count=project_active_count,
+    )
+
+
+def _status_signature(
+    state: CampaignState,
+    snapshot: SchedulerSnapshot,
+    submitted: int,
+) -> tuple[int, ...]:
+    return (
+        len(state.successful),
+        len(state.active),
+        len(state.pending),
+        len(state.missing),
+        len(state.retryable),
+        snapshot.project_active_count,
+        submitted,
+    )
+
+
+def _emit_status(
+    state: CampaignState,
+    snapshot: SchedulerSnapshot,
+    submitted: int,
+    elapsed: float,
+) -> None:
+    print(
+        "run_ipmsm_v2 "
+        f"ok={len(state.successful)} active={len(state.active)} "
+        f"pending={len(state.pending)} missing={len(state.missing)} "
+        f"retry={len(state.retryable)} project_active={snapshot.project_active_count} "
+        f"submitted={submitted} elapsed_s={elapsed:.1f}",
+        file=sys.stderr,
+    )
+
+
+def _compact_collector_result(result: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "collected_results": int(result.get("collected_results", 0)),
+        "merged_output": str(result.get("merged_output") or (args.output_dir / args.merged_output)),
+        "output_dir": str(result.get("output_dir") or args.output_dir),
+    }
+
+
+def collect_completed_campaign(args: argparse.Namespace) -> dict[str, Any]:
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        result_code = collector.main(_collector_argv(args))
+    if result_code != 0:
+        raise RuntimeError(f"collector returned nonzero status: {result_code}")
+    try:
+        result = json.loads(captured.getvalue())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("collector did not return valid JSON") from exc
+    if not isinstance(result, dict):
+        raise RuntimeError("collector did not return a JSON object")
+    return _compact_collector_result(result, args)
+
+
+def _dry_run_output(
+    args: argparse.Namespace,
+    tasks: list[submit_campaign.CampaignTask],
+    state: CampaignState,
+    snapshot: SchedulerSnapshot,
+    beta_summary: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    effective_active = snapshot.project_active_count + len(state.pending)
+    open_slots = max(0, snapshot.server_project_cap - effective_active)
+    planned = state.candidates[:open_slots]
+    return {
+        "active_cases": len(state.active) + len(state.pending),
+        "beta_gate": _beta_gate_output(beta_summary),
+        "missing_cases": len(state.missing),
+        "mode": "dry-run",
+        "open_slots": open_slots,
+        "planned_submissions": len(planned),
+        "project": args.project,
+        "project_active": snapshot.project_active_count,
+        "retryable_cases": len(state.retryable),
+        "selected_cases": len(tasks),
+        "successful_cases": len(state.successful),
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    validate_args(args)
+    beta_summary = load_beta_prerequisite(args)
+    validated_rows = submit_campaign.load_and_validate_cases(args.cases, args.max_plan_cases, False)
+    selected_rows = submit_campaign.select_case_rows(
+        validated_rows,
+        args.case_start_index,
+        args.case_limit,
+    )
+    if beta_summary is not None:
+        validate_foundation_rows(selected_rows, beta_summary)
+    tasks = submit_campaign.build_campaign_tasks(
+        args,
+        selected_rows,
+        first_row_number=args.case_start_index,
+    )
+    pending: dict[str, PendingSubmission] = {}
+    submitted = 0
+
+    if not args.submit:
+        snapshot = read_scheduler_snapshot(args)
+        state = classify_campaign_state(
+            tasks,
+            snapshot.history,
+            args.project,
+            pending,
+            args.terminal_retry_limit,
+        )
+        print(
+            json.dumps(
+                _dry_run_output(args, tasks, state, snapshot, beta_summary),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    started = time.monotonic()
+    previous_signature: tuple[int, ...] | None = None
+    polls = 0
+    while True:
+        snapshot = read_scheduler_snapshot(args)
+        history_by_dedupe = _history_by_dedupe(snapshot.history, args.project)
+        state = classify_campaign_state(
+            tasks,
+            snapshot.history,
+            args.project,
+            pending,
+            args.terminal_retry_limit,
+        )
+        if len(state.successful) == len(tasks):
+            collected = collect_completed_campaign(args)
+            output = {
+                **collected,
+                "beta_gate": _beta_gate_output(beta_summary),
+                "mode": "submit",
+                "project": args.project,
+                "selected_cases": len(tasks),
+                "submitted": submitted,
+                "successful_cases": len(state.successful),
+            }
+            print(
+                json.dumps(
+                    output,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        elapsed = time.monotonic() - started
+        if elapsed >= args.overall_timeout_seconds:
+            raise RuntimeError(
+                f"campaign timeout after {elapsed:.3f}s: "
+                f"successful={len(state.successful)} selected={len(tasks)}; "
+                "no output files were written"
+            )
+
+        effective_active = snapshot.project_active_count + len(state.pending)
+        open_slots = max(0, snapshot.server_project_cap - effective_active)
+        candidates = state.candidates[:open_slots]
+        for task in candidates:
+            elapsed = time.monotonic() - started
+            if elapsed >= args.overall_timeout_seconds:
+                raise RuntimeError(
+                    f"campaign timeout after {elapsed:.3f}s and {submitted} submission(s); "
+                    "no output files were written"
+                )
+            prior_matches = history_by_dedupe.get(task.dedupe_key, [])
+            prior_ids = {_task_id(item) for item in prior_matches}
+            try:
+                response = submit_campaign.post_scheduler_task(
+                    args.scheduler_url,
+                    task.payload,
+                    args.timeout,
+                    "/api/tasks",
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"scheduler POST failed after {submitted} successful submission(s): {exc}"
+                ) from exc
+            response_id = _task_id(response)
+            if response_id is not None and response_id in prior_ids:
+                raise RuntimeError(
+                    f"scheduler POST returned an existing task id for case_id={task.case_id!r}: "
+                    f"task_id={response_id}"
+                )
+            pending[task.dedupe_key] = PendingSubmission(
+                task_id=response_id,
+                prior_match_count=len(prior_matches),
+            )
+            submitted += 1
+
+        if candidates:
+            elapsed = time.monotonic() - started
+            if elapsed >= args.overall_timeout_seconds:
+                raise RuntimeError(
+                    f"campaign timeout after {elapsed:.3f}s and {submitted} submission(s); "
+                    "no output files were written"
+                )
+
+        signature = _status_signature(state, snapshot, submitted)
+        if signature != previous_signature or polls % STATUS_HEARTBEAT_POLLS == 0:
+            _emit_status(state, snapshot, submitted, elapsed)
+        previous_signature = signature
+        polls += 1
+        remaining = args.overall_timeout_seconds - elapsed
+        time.sleep(min(args.poll_interval_seconds, remaining))
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)

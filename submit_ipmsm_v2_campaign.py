@@ -222,8 +222,13 @@ def get_scheduler_task_history(
     scheduler_url: str,
     timeout: float,
     history_limit: int,
+    project: str = "",
 ) -> list[dict[str, Any]]:
-    query = parse.urlencode({"limit": history_limit})
+    query_values: dict[str, Any] = {"limit": history_limit}
+    project_name = str(project or "").strip()
+    if project_name:
+        query_values["project"] = project_name
+    query = parse.urlencode(query_values)
     url = scheduler_url.rstrip("/") + f"/api/tasks?{query}"
     with request.urlopen(url, timeout=timeout) as response:
         body = response.read().decode("utf-8")
@@ -418,7 +423,12 @@ def main(argv: list[str] | None = None) -> int:
     tasks = build_campaign_tasks(args, selected_rows, first_row_number=args.case_start_index)
 
     try:
-        history = get_scheduler_task_history(args.scheduler_url, args.timeout, args.history_limit)
+        history = get_scheduler_task_history(
+            args.scheduler_url,
+            args.timeout,
+            args.history_limit,
+            args.project,
+        )
     except Exception as exc:
         raise RuntimeError(
             f"cannot inspect scheduler task history; no task was submitted: project={args.project!r}: {exc}"

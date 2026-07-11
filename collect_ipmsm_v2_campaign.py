@@ -363,6 +363,7 @@ def read_history_snapshot(
             args.scheduler_url,
             args.scheduler_timeout,
             args.history_limit,
+            args.project,
         )
     except Exception as exc:
         raise RuntimeError(f"cannot inspect scheduler task history; no files were written: {exc}") from exc

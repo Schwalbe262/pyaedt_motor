@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import copy
 import math
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import calibrate_ipmsm_beta as calibration
 import run_ipmsm_batch
@@ -97,6 +99,64 @@ def zero_manifest(zero_deg: float = 30.0) -> dict:
             zero_result(1200.0, zero_deg, amplitude=100.0),
         ]
     )
+
+
+def beta_fixture(
+    beta_values: tuple[float, ...] = (-10.0, 0.0, 20.0, 40.0),
+    torque_by_beta: dict[float, float] | None = None,
+) -> tuple[dict, list[dict], list[dict]]:
+    manifest = zero_manifest()
+    cases = calibration.generate_beta_sweep_rows(
+        source_row(),
+        manifest,
+        rpm=1200.0,
+        current_peak_a=100.0,
+        beta_values=beta_values,
+    )
+    torques = torque_by_beta or {
+        beta: 42.0 - abs(beta - 20.0) * 0.3
+        for beta in beta_values
+    }
+    results: list[dict] = []
+    for case in cases:
+        beta = float(case["beta_dq_deg"])
+        id_a, iq_a = canonical_dq_current_components(100.0, beta)
+        results.append(
+            {
+                **case,
+                "status": "ok",
+                "input_dataset_schema_version": calibration.DATASET_SCHEMA_VERSION,
+                "input_model_extent": case["model_extent"],
+                "input_symmetry_factor": str(case["symmetry_factor"]),
+                "input_use_periodic_boundary": str(case["use_periodic_boundary"]),
+                "input_beta_convention": case["beta_convention"],
+                "input_beta_calibration_id": case["beta_calibration_id"],
+                "input_electrical_zero_deg": str(case["electrical_zero_deg"]),
+                "input_initial_position_deg": str(case["initial_position_deg"]),
+                "input_beta_dq_deg": str(beta),
+                "input_i_peak_a": "100.0",
+                "input_base_rpm": "1200.0",
+                "input_operation": "sin_current",
+                "input_quality_profile": case["quality_profile"],
+                "input_setup_fingerprint": "setup-v2",
+                "input_material_fingerprint": "materials-v2",
+                "input_aedt_version": "2025.2",
+                "output_torque_last_avg_nm": str(torques[beta]),
+                "output_id_current_last_avg_a": str(id_a),
+                "output_iq_current_last_avg_a": str(iq_a),
+            }
+        )
+    return manifest, cases, results
+
+
+def write_beta_fixture(root: Path, manifest: dict, cases: list[dict], results: list[dict]) -> tuple[Path, Path, Path]:
+    plan_path = root / "beta_plan.csv"
+    result_path = root / "beta_results.csv"
+    calibration.write_rows(plan_path, cases)
+    calibration.write_rows(result_path, results)
+    manifest_path = root / "zero_manifest.json"
+    calibration.write_json_object(manifest_path, manifest)
+    return plan_path, result_path, manifest_path
 
 
 class SimpleFrame(dict[str, list[float]]):
@@ -319,6 +379,222 @@ class CalibrateIpmsmBetaTests(unittest.TestCase):
         self.assertEqual(summary["electrical_zero_deg"], 30.0)
         self.assertEqual(summary["best_beta_dq_deg"], 20.0)
         self.assertTrue(summary["sweep_id"].startswith("beta-mtpa:sha256:"))
+
+    def test_strict_beta_summary_is_exact_replayable_and_stage_passed(self) -> None:
+        manifest, cases, results = beta_fixture()
+
+        summary = calibration.analyze_beta_sweep_rows(
+            results,
+            manifest,
+            case_plan_rows=cases,
+        )
+        validated = calibration.validate_beta_sweep_summary(
+            summary,
+            case_plan_rows=cases,
+            result_rows=results,
+            calibration_manifest=manifest,
+            require_stage_pass=True,
+        )
+
+        self.assertEqual(set(summary), set(calibration.BETA_SUMMARY_FIELDS))
+        self.assertEqual(validated, summary)
+        self.assertEqual(summary["status"], "passed")
+        self.assertTrue(summary["pass"])
+        self.assertTrue(summary["strict_case_plan_validation"])
+        self.assertEqual(summary["expected_rows"], len(cases))
+        self.assertEqual(summary["successful_rows"], len(results))
+        self.assertEqual(summary["tested_beta_bounds_deg"], [-10.0, 40.0])
+        self.assertEqual(summary["tested_beta_values_deg"], [-10.0, 0.0, 20.0, 40.0])
+        self.assertEqual(summary["stage_beta_bounds_deg"], [0.0, 80.0])
+        self.assertEqual(summary["max_dq_current_relative_error"], 0.02)
+        self.assertEqual(summary["homogeneous_identities"]["design_hash"], manifest["design_hash"])
+        self.assertTrue(summary["plan_hash"].startswith("beta-plan:sha256:"))
+        self.assertTrue(summary["result_hash"].startswith("beta-results:sha256:"))
+
+    def test_diagnostic_best_outside_stage_bounds_is_valid_but_not_stage_passed(self) -> None:
+        torques = {-20.0: 35.0, -10.0: 42.0, 0.0: 40.0, 10.0: 30.0}
+        manifest, cases, results = beta_fixture(tuple(torques), torques)
+
+        summary = calibration.analyze_beta_sweep_rows(
+            results,
+            manifest,
+            case_plan_rows=cases,
+        )
+
+        self.assertEqual(summary["best_beta_dq_deg"], -10.0)
+        self.assertEqual(summary["status"], "diagnostic_only")
+        self.assertFalse(summary["pass"])
+        self.assertEqual(summary["gate_failures"], ["best_beta_outside_stage_bounds"])
+        calibration.validate_beta_sweep_summary(
+            summary,
+            case_plan_rows=cases,
+            result_rows=results,
+            calibration_manifest=manifest,
+        )
+        with self.assertRaisesRegex(ValueError, "stage gate did not pass"):
+            calibration.validate_beta_sweep_summary(
+                summary,
+                case_plan_rows=cases,
+                result_rows=results,
+                calibration_manifest=manifest,
+                require_stage_pass=True,
+            )
+
+    def test_boundary_optimum_is_rejected_before_summary_construction(self) -> None:
+        torques = {-10.0: 50.0, 0.0: 40.0, 10.0: 30.0}
+        manifest, cases, results = beta_fixture(tuple(torques), torques)
+
+        with self.assertRaisesRegex(ValueError, "beta sweep boundary"):
+            calibration.analyze_beta_sweep_rows(
+                results,
+                manifest,
+                case_plan_rows=cases,
+            )
+
+    def test_strict_beta_contract_rejects_missing_failed_duplicate_and_reordered_results(self) -> None:
+        manifest, cases, results = beta_fixture()
+        mutations = (
+            ("coverage mismatch", lambda rows: rows.pop()),
+            ("must be ok", lambda rows: rows[1].__setitem__("status", "failed")),
+            ("duplicate case_id", lambda rows: rows.__setitem__(1, copy.deepcopy(rows[0]))),
+            ("result order", lambda rows: rows.reverse()),
+        )
+        for expected, mutate in mutations:
+            with self.subTest(expected=expected):
+                changed = copy.deepcopy(results)
+                mutate(changed)
+                with self.assertRaisesRegex(ValueError, expected):
+                    calibration.validate_beta_case_plan_results(cases, changed, manifest)
+
+    def test_strict_beta_contract_rejects_duplicate_or_mismatched_plan_values(self) -> None:
+        manifest, cases, results = beta_fixture()
+        duplicate_cases = copy.deepcopy(cases)
+        duplicate_results = copy.deepcopy(results)
+        duplicate_cases[1]["beta_dq_deg"] = duplicate_cases[0]["beta_dq_deg"]
+        duplicate_results[1]["beta_dq_deg"] = duplicate_results[0]["beta_dq_deg"]
+        duplicate_results[1]["input_beta_dq_deg"] = duplicate_results[0]["input_beta_dq_deg"]
+        with self.assertRaisesRegex(ValueError, "duplicate beta values"):
+            calibration.validate_beta_case_plan_results(duplicate_cases, duplicate_results, manifest)
+
+        mismatches = (
+            "input_beta_dq_deg",
+            "input_base_rpm",
+            "input_i_peak_a",
+            "input_design_hash",
+            "input_beta_calibration_id",
+            "input_electrical_zero_deg",
+        )
+        for field in mismatches:
+            with self.subTest(field=field):
+                changed = copy.deepcopy(results)
+                changed[1][field] = "mismatch" if "hash" in field or "id" in field else "999"
+                with self.assertRaises(ValueError):
+                    calibration.validate_beta_case_plan_results(cases, changed, manifest)
+
+    def test_beta_summary_validator_rejects_schema_hash_and_best_tampering(self) -> None:
+        manifest, cases, results = beta_fixture()
+        summary = calibration.analyze_beta_sweep_rows(results, manifest, case_plan_rows=cases)
+
+        missing = copy.deepcopy(summary)
+        missing.pop("result_hash")
+        with self.assertRaisesRegex(ValueError, "schema mismatch"):
+            calibration.validate_beta_sweep_summary(missing)
+
+        extra = copy.deepcopy(summary)
+        extra["unexpected"] = True
+        with self.assertRaisesRegex(ValueError, "schema mismatch"):
+            calibration.validate_beta_sweep_summary(extra)
+
+        bad_hash = copy.deepcopy(summary)
+        bad_hash["sweep_id"] = "beta-mtpa:sha256:" + "0" * 64
+        with self.assertRaisesRegex(ValueError, "does not match sweep_id"):
+            calibration.validate_beta_sweep_summary(bad_hash)
+
+        bad_best = copy.deepcopy(summary)
+        bad_best["best_beta_dq_deg"] = 0.0
+        with self.assertRaisesRegex(ValueError, "recomputed optimum"):
+            calibration.validate_beta_sweep_summary(bad_best)
+
+    def test_beta_analyze_cli_is_fresh_by_default_and_overwrite_is_explicit(self) -> None:
+        manifest, cases, results = beta_fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_path, result_path, manifest_path = write_beta_fixture(root, manifest, cases, results)
+            summary_path = root / "summary.json"
+            summary_path.write_text("stale", encoding="utf-8")
+            args = [
+                "beta-analyze",
+                "--results",
+                str(result_path),
+                "--calibration-manifest",
+                str(manifest_path),
+                "--case-plan",
+                str(plan_path),
+                "--summary",
+                str(summary_path),
+                "--require-stage-pass",
+            ]
+
+            with self.assertRaisesRegex(FileExistsError, "summary already exists"):
+                calibration.main(args)
+            self.assertEqual(summary_path.read_text(encoding="utf-8"), "stale")
+            self.assertEqual(calibration.main([*args, "--overwrite-summary"]), 0)
+            written = calibration.read_json_object(summary_path)
+
+        self.assertTrue(written["pass"])
+        self.assertEqual(written["status"], "passed")
+
+    def test_beta_analyze_cli_atomic_failure_leaves_no_summary_or_temp(self) -> None:
+        manifest, cases, results = beta_fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_path, result_path, manifest_path = write_beta_fixture(root, manifest, cases, results)
+            summary_path = root / "summary.json"
+            args = [
+                "beta-analyze",
+                "--results",
+                str(result_path),
+                "--calibration-manifest",
+                str(manifest_path),
+                "--case-plan",
+                str(plan_path),
+                "--summary",
+                str(summary_path),
+                "--require-stage-pass",
+            ]
+
+            with mock.patch.object(calibration.os, "replace", side_effect=OSError("commit failed")):
+                with self.assertRaisesRegex(OSError, "commit failed"):
+                    calibration.main(args)
+
+            self.assertFalse(summary_path.exists())
+            self.assertEqual(list(root.glob(".summary.json.*.tmp")), [])
+
+    def test_beta_analyze_cli_gate_failure_writes_no_summary(self) -> None:
+        torques = {-20.0: 35.0, -10.0: 42.0, 0.0: 40.0, 10.0: 30.0}
+        manifest, cases, results = beta_fixture(tuple(torques), torques)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_path, result_path, manifest_path = write_beta_fixture(root, manifest, cases, results)
+            summary_path = root / "summary.json"
+
+            with self.assertRaisesRegex(ValueError, "stage gate did not pass"):
+                calibration.main(
+                    [
+                        "beta-analyze",
+                        "--results",
+                        str(result_path),
+                        "--calibration-manifest",
+                        str(manifest_path),
+                        "--case-plan",
+                        str(plan_path),
+                        "--summary",
+                        str(summary_path),
+                        "--require-stage-pass",
+                    ]
+                )
+
+            self.assertFalse(summary_path.exists())
 
     def test_loaded_beta_sweep_rejects_tampered_zero_manifest(self) -> None:
         manifest = zero_manifest()

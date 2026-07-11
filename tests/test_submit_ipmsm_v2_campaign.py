@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+from urllib import parse
 
 import submit_ipmsm_v2_campaign as campaign
 
@@ -18,6 +19,23 @@ def parsed_args(*extra: str) -> object:
 
 
 class SubmitIpmsmV2CampaignTests(unittest.TestCase):
+    def test_history_lookup_can_filter_project_before_scheduler_limit(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b"[]"
+        with mock.patch.object(campaign.request, "urlopen", return_value=response) as urlopen:
+            history = campaign.get_scheduler_task_history(
+                "http://scheduler",
+                12.0,
+                700,
+                "pyaedt_motor",
+            )
+
+        url = urlopen.call_args.args[0]
+        query = parse.parse_qs(parse.urlparse(url).query)
+        self.assertEqual(history, [])
+        self.assertEqual(query, {"limit": ["700"], "project": ["pyaedt_motor"]})
+
     def test_defaults_are_fea_bursty_and_dry_run(self) -> None:
         args = parsed_args()
 
