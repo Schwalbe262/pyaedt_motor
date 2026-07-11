@@ -3619,3 +3619,13 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: 14 test geometries are insufficient for residual-driven DOE changes, and adapting now would contaminate the precommitted audit path.
 - Next action: continue Stage1 at cap 100 and repeat the fixed learning/coverage checkpoint only after the 60-design evidence threshold.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-11 23:35:56 +09:00 - Nested learning curve at checkpoint 43
+- Part/goal: separate data-volume instability from a fixed-model configuration problem before committing to tuning or changing DOE.
+- Hypothesis/actions: kept the same 14 test and 6 calibration geometries, created deterministic nested train cohorts of 10/15/20/23 complete groups, validated every dataset, and trained identical seed-42 no-tuning five-member ensembles.
+- Candidates/options: tuning was intentionally rejected because the inner holdout has at most five groups; all outputs remain diagnostic and isolated from official artifacts.
+- Metrics: rows 180/210/240/258; primary avg R² 0.080067/0.197466/0.005126/0.352877, min R² -1.438621/-0.898504/-2.010799/-0.105099, voltage R² 0.817282/0.829616/0.872761/0.909032; invalid/outlier rows 0 throughout.
+- Result: 6/8 primary targets improve net from 10 to 23 groups, but none is monotonic; voltage is monotonic. The evidence is `small_sample_unstable`, not a basis for model or DOE changes. Live Stage1 is scheduler_ok/result_ok=286/280, active=100, missing=314, retry=0.
+- Failure reason: <=23 train groups produce unstable inner selection and target-specific variance, especially solid loss; the learning curve cannot yet forecast the 700-row tuned gate.
+- Next action: preserve the campaign/model settings and repeat the fixed curve only at >=60 complete designs / >=30 train groups.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
