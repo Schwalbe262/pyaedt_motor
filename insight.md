@@ -759,3 +759,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: command line, creation time, and parent-child identity are checked immediately before leaf-first termination, followed by an active-dedupe audit; the v3 task also restarts failures at PT1M up to three times.
 - Evidence: r3 local process count is 0, r4 count is exactly 2 wrapper/leaf processes, scheduler active remains 100, and active duplicate dedupe keys remain 0.
 - Remaining risk: future task-definition changes still need this process-tree audit until the wrapper owns children through a Windows Job Object or equivalent kill-on-close mechanism.
+
+## 2026-07-12 02:00:50 +09:00 - Insight 83
+- Source loop: `note.md` exact-60 provisional watcher launch.
+- Improvement: a resumable atomic data snapshot must carry its own contract, source-plan, producer-helper, artifact, and count/split proof inside the published directory; process-local hashes or stdout evidence are not durable provenance.
+- Before: a hard kill after snapshot publication followed by a contract or helper change could let a new watcher audit valid rows yet relabel the old prefix under the new execution context.
+- After: `snapshot_manifest.json` is published atomically with the snapshot and strict fresh/resume/already-complete audits bind contract/document/source-plan/producer/artifact hashes plus exact 60-design/360-row/split/scope counts.
+- Evidence: contract/source-plan/producer/artifact mutation, missing manifest, duplicate key, NaN, and resume-prefix tests fail closed; focused 37/37 and full 647/647 tests pass, and live launch occurred only after two reviews cleared P0 blockers.
+- Remaining risk: PID reuse/boot identity and realistic full-model resume fixtures can be hardened further, but they cannot make the guarded provisional model eligible for production loading.

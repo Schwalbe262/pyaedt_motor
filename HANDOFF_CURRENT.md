@@ -205,13 +205,13 @@
 - Stage1 is homogeneous `reference_ultra`, 700 rows/112 geometries/28 repeats; stage2 is conditional non-overlapping 300 rows/48 geometries/12 repeats.
 - Stage1 r4 plan hash is `ab32f31a...2b1e`: 700 rows/112 designs/28 repeats, solve-only failure `v2s1_0049_rated_torque_01` and its dependent repeat both have fresh IDs, exactly three cells changed, and Stage2 design overlap remains zero.
 - Task `26141` remains the sole unknown SIGKILL (MaxRSS 2.08 GiB < 32 GiB, no OOM evidence); safe Windows PID probes replaced the `os.kill(pid,0)` pattern that accidentally stopped the first local runner.
-- Contract v3 `45728cda...e935` supervisor is live with PT1M x3 failure restart; latest dashboard is scheduler/result_ok=361/359, active=100, retry=0, and clean-retry task `26529` remains running.
+- Contract v3 `45728cda...e935` supervisor is live with PT1M x3 failure restart; latest dashboard remains healthy at active=100/errors=0 while Stage1 continues.
 - `Stop-ScheduledTask` did not kill the prior campaign child tree; exact r3 wrapper/leaf PIDs were removed leaf-first, r4 is the only local runner, and active scheduler duplicate-dedupe count is zero.
-- Provisional checkpoint readiness is 59/60 complete base designs, 354/360 base rows, split train/cal/test=34/10/15; task `26529` plus its 300s settle is the remaining dependency and no sub-threshold snapshot was published.
+- Provisional readiness reached exact 60 designs/360 base rows with split 35/10/15; ScheduledTask `PYAEDT_MOTOR_IPMSM_V2_CHECKPOINT60` is running the rate-limited isolated snapshot/training chain, with PID/lock alive and stderr=0.
 - Faster `time_150` remains screening-only because core-loss p90 error `5.533% > 5%`; mixed-fidelity v2 training is forbidden.
 - Next: monitor Stage1 at the dashboard; Stage2 failure routes through sealed Stage3 before NSGA-II, while a pass routes directly; beta-neighbor Pareto FEA and 12x2 strict-v2 speed remain cap-serialized.
 - Windows fresh-output publication now uses shared identity-checked no-replace logic: mapped `Y:` drives bypass hard links for atomic rename, WinError 50 falls back likewise, and optimizer pair recovery preserves a proof; focused 96/96 and full 511/511 tests pass without touching live tasks.
-- Dashboard enhancement passed 33 focused tests and the shared `.venv` suite passed 636/636; live API is healthy with errors=0, 59/60 checkpoint data, CSP/nosniff, no CORS, and ~2ms warm reads.
+- Dashboard enhancement passed 33 focused tests; checkpoint/resume provenance passed 37 focused tests and the final shared `.venv` suite passed 647/647, with dry-run writes/output/PID=0 before launch.
 - Rate-limited snapshot auditor `becd3d6` enforces max-in-flight 1, 10 reads/30s and 429 backoff; live mapped-drive publish classified 42 base-complete designs as `physics_only`, and its 6/6 v2 sample plus full 598 tests passed.
 - Complete-only learning checkpoint has 43 designs/258 rows (23/6/14 train/cal/test), validation 258/258, min/avg primary R² -0.105/0.353 and voltage R² 0.909; it is `physics_only` and optimizer loading correctly fails closed.
 - Checkpoint-43 residual coverage found no actionable Stage2 gap: the four largest-error groups are at <=55.4 distance percentile, and the sole 95.5-percentile watch has a closer remaining Stage1 train design (0.229 vs Stage2 0.290).

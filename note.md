@@ -3658,3 +3658,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: live `http://127.0.0.1:8765` is healthy with errors=0, result/scheduler_ok=359/361, active=100, checkpoint=59/60 designs and 34/10/15 splits; warm API reads are ~2 ms, 33 focused and shared 636/636 tests passed.
 - Failure/next: in-app visual browser was unavailable; HTTP/DOM/security checks passed. A separate provisional watcher remains unlaunched while its resume snapshot-to-contract proof is hardened; existing Stage1 FEA is unaffected.
 - Token usage: unavailable; `codex_ops.py` will be attempted at closeout.
+
+## 2026-07-12 02:00:50 +09:00 - Exact-60 provisional watcher launch
+
+- Part/goal: automate the first decision-grade provisional 60-design learning diagnostic without touching the official 700-row gate.
+- Hypothesis/actions: hardened snapshot publication with an atomic contract/document/source-plan/producer/artifact proof manifest, strict resume audit, bounded child/429 waits, and a guarded no-tuning ensemble; then registered and started `PYAEDT_MOTOR_IPMSM_V2_CHECKPOINT60`.
+- Metrics/result: readiness=60 designs/360 base rows, split=35/10/15, scope=`provisional_minimum`; task/PID/lock are live, stderr=0, and the rate-limited snapshot fetch is running. Focused tests=37/37 and full `.venv` suite=647/647.
+- Failure/next: two independent reviews found and closed contract-resume and producer-resume provenance gaps before launch. Monitor atomic snapshot→validation→training→decision/manifest; official Stage1/Stage2/optimization artifacts remain untouched.
+- Token usage: unavailable; `codex_ops.py` had no local Codex SQLite database.
