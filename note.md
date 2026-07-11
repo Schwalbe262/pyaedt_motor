@@ -3589,3 +3589,13 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: planned exact repeats are later in the 700-row plan, so repeat-noise and provisional R² are not yet evidence-backed; scheduler rate limiting also makes concurrent bulk result reads inappropriate.
 - Next action: keep cap 100 and monitor the artifact-driven supervisor; after Stage1 completion inspect the exact validation/R² gate before any conditional Stage2/3 or NSGA-II transition.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-11 23:02:39 +09:00 - Rate-limited Stage1 partial snapshot auditor
+- Part/goal: make early data-quality evidence reproducible without competing with the live campaign or mislabeling partial data as the official R² gate.
+- Hypothesis/actions: added a standalone immutable-contract auditor that selects complete six-row base designs, fetches sequentially under the scheduler remote-read budget, validates exact result identity/fingerprints, and publishes one no-replace directory only after all rows merge.
+- Candidates/options: full concurrent fetch was rejected after HTTP 429; late repeat rows 673-700 do not block base-design completeness, while official R² remains false until the sealed pipeline gate.
+- Metrics: commit `becd3d6`; max-in-flight 1, 0.5s+jitter, 10 requests/30s, 429 backoff 1/2/4/8/10s; live complete designs=42, sample=6/6 pass/failures0, focused 12/12 and full 598/598 tests.
+- Result: mapped `Y:` no-replace directory publish and existing-output rejection passed; live Stage1 advanced to result_ok=267/scheduler_ok=269, active=100, missing=331, retry=0.
+- Failure reason: the first collector directory publish used `os.replace` and hit WinError 5; Windows `os.rename` and Linux `renameat2(RENAME_NOREPLACE)` now provide fail-closed publication.
+- Next action: wait for at least 60 complete designs before any provisional learning-curve smoke, and reserve the actual R²>=0.95 decision for the full 700-row supervisor gate.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

@@ -727,3 +727,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: active scheduler work keeps the dashboard running, zero active work plus a verified 12-minute progress stall degrades it, and Task Scheduler relaunches a single durable supervisor/dashboard via PT15M IgnoreNew watchdogs.
 - Evidence: the UI exposed the zero/refill gap, the recovered campaign returned to 100/100 with result_ok=256, 27 focused and 586 full tests passed, and live response/security checks plus independent final review found no blockers.
 - Remaining risk: loopback availability still depends on the Windows host and scheduler/UNC reachability; warnings remain visible when only one evidence source is fresh.
+
+## 2026-07-11 23:02:39 +09:00 - Insight 79
+- Source loop: `note.md` rate-limited Stage1 partial snapshot auditor.
+- Improvement: treat scheduler remote-file reads as a scarce shared resource and publish a validated snapshot as one no-replace directory transaction.
+- Before: four concurrent reads exceeded the shared two-slot semaphore with HTTP 429, and generic directory `os.replace` failed on the mapped Windows drive after all fetches completed.
+- After: one reader uses 0.5s deterministic jitter, 10 requests per 30-second window, bounded 429 backoff, complete-base-design selection, and platform-specific no-replace directory rename.
+- Evidence: live 6-row snapshot published on mapped `Y:`, duplicate output was rejected, v2 validation passed 6/6, and focused 12 plus full 598 tests passed.
+- Remaining risk: snapshots before 60 complete designs are physics-only diagnostics; repeat drift and the official R² gate still require the later plan rows/full 700-row artifact.
