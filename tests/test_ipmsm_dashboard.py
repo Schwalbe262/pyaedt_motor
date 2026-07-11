@@ -438,6 +438,9 @@ class ArtifactTests(unittest.TestCase):
                         "official_gate_eligible": False,
                         "provisional": True,
                         "recommended_action": "continue_stage1",
+                        "selected_designs": 60,
+                        "selected_rows": 360,
+                        "split_design_counts": {"train": 35, "calibration": 10, "test": 15},
                         "result": {
                             "primary_failures": ["target-0", "target-1", "target-2", "target-3", "target-4"],
                             "primary_test_r2": primary,
@@ -470,6 +473,10 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(result["primary_min_r2"], 0.9)
         self.assertEqual(result["primary_avg_r2"], 0.935)
         self.assertEqual(result["voltage_r2"], 0.97)
+        self.assertEqual(result["snapshot_designs"], 60)
+        self.assertEqual(result["snapshot_rows"], 360)
+        self.assertEqual(result["split_design_counts"], {"train": 35, "calibration": 10, "test": 15})
+        self.assertEqual(result["primary_metrics"][0]["target"], "target-0")
 
     def test_metadata_is_cross_checked_against_r2_gate(self) -> None:
         primary = {
@@ -619,7 +626,13 @@ class SchedulerTests(unittest.TestCase):
             "started_at": "2026-07-11T10:00:00",
         }
         result = dashboard.summarize_scheduler(
-            project={"name": dashboard.DEFAULT_PROJECT, "total_count": 1},
+            project={
+                "id": 2,
+                "name": dashboard.DEFAULT_PROJECT,
+                "total_count": 1,
+                "max_active_tasks": 100,
+                "deployments": [{"status": "deployed"}],
+            },
             tasks=[payload],
             allocations=[{"id": 9, "node_cpu_load_percent": 50}],
             cap=100,
@@ -628,6 +641,45 @@ class SchedulerTests(unittest.TestCase):
         self.assertNotIn("secret", encoded)
         self.assertNotIn("remote_cwd", encoded)
         self.assertEqual(result["nodes"][0]["active_tasks"], 1)
+        self.assertEqual(result["project_id"], 2)
+        self.assertEqual(result["server_cap"], 100)
+        self.assertTrue(result["cap_matches"])
+        self.assertEqual(result["deployed_count"], 1)
+
+    def test_project_or_server_cap_mismatch_degrades_state(self) -> None:
+        local = {
+            "campaign": {"elapsed_s": 1.0, "active": 100, "total": 700, "result_ok": 1},
+            "pipeline": {
+                "current_stage": "stage1",
+                "current_label": "Stage 1",
+                "stages": [{"id": "stage1", "label": "Stage 1", "status": "running"}],
+            },
+            "model": {"available": False},
+            "beta": {"available": True},
+            "optimization": {"decision": None},
+            "speed": {"complete": False},
+            "processes": [{"role": "supervisor", "state": "alive"}],
+            "alerts": [],
+        }
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 100,
+            "cap": 99,
+            "project_matches": False,
+            "cap_matches": False,
+            "campaign_status": {},
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=lambda _: local,
+            scheduler_collector=lambda _: scheduler,
+        )
+        result = store.refresh_once(force_scheduler=True)
+        self.assertEqual(result["health"], "degraded")
+        self.assertTrue(result["stale"])
+        self.assertTrue(any("identity" in item["message"] for item in result["alerts"]))
+        self.assertTrue(any("cap 99" in item["message"] for item in result["alerts"]))
 
     def test_state_store_scheduler_refresh_is_single_writer_ttl_cached(self) -> None:
         local_calls = 0

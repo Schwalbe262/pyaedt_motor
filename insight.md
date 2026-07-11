@@ -767,3 +767,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `snapshot_manifest.json` is published atomically with the snapshot and strict fresh/resume/already-complete audits bind contract/document/source-plan/producer/artifact hashes plus exact 60-design/360-row/split/scope counts.
 - Evidence: contract/source-plan/producer/artifact mutation, missing manifest, duplicate key, NaN, and resume-prefix tests fail closed; focused 37/37 and full 647/647 tests pass, and live launch occurred only after two reviews cleared P0 blockers.
 - Remaining risk: PID reuse/boot identity and realistic full-model resume fixtures can be hardened further, but they cannot make the guarded provisional model eligible for production loading.
+
+## 2026-07-12 02:44:31 +09:00 - Insight 84
+- Source loop: `note.md` overall-progress dashboard and exact-60 result.
+- Improvement: operational dashboards must compare server-side project identity/cap with local expectations and distinguish a frozen diagnostic snapshot from later live readiness counts.
+- Before: the UI trusted the configured cap, treated scheduler reachability as sufficient, and could show 61/60 designs after the exact 60-design model had already been frozen.
+- After: project name/id, server/local cap, deployment count, and snapshot counts/splits are allow-listed and audited; identity/cap mismatch degrades health, while provisional metrics remain explicitly non-official.
+- Evidence: live project #2 reports cap 100=100 and deployments 5/5; the dashboard shows exact 60/360 despite live readiness >60, and focused 36/36 plus full 650/650 tests pass.
+- Remaining risk: browser-level visual regression is not automated; static DOM contracts, responsive CSS review, and live HTTP checks currently cover deployment correctness.

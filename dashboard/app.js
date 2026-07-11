@@ -16,6 +16,16 @@ const statusKorean = {
   failed: "실패",
   unavailable: "확인 필요",
 };
+const provisionalLabels = {
+  output_coreloss_last_avg_w: "철손",
+  output_efficiency_last_avg_pct: "효율",
+  output_ld_last_avg_h: "Ld",
+  output_lq_last_avg_h: "Lq",
+  output_solidloss_last_avg_w: "와전류손",
+  output_torque_last_avg_nm: "평균 토크",
+  output_torque_last_max_nm: "최대 토크",
+  output_total_loss_last_avg_w: "총손실",
+};
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const integer = (value, fallback = 0) => Number.isInteger(value) ? value : fallback;
@@ -38,6 +48,18 @@ function durationHours(value) {
   if (!finite(value)) return { value: "—", unit: "시간" };
   if (value < 24) return { value: Math.max(0, value).toFixed(value < 10 ? 1 : 0), unit: "시간" };
   return { value: (value / 24).toFixed(1), unit: "일" };
+}
+
+function estimatedFinish(hours) {
+  if (!finite(hours)) return "—";
+  const date = new Date(Date.now() + Math.max(0, hours) * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function setText(id, value) {
@@ -70,6 +92,33 @@ function renderAlerts(data) {
     });
 }
 
+function renderOverview(data) {
+  const campaign = data.campaign || {};
+  const scheduler = data.scheduler || {};
+  const pipeline = data.pipeline || {};
+  const optimization = data.optimization || {};
+  const total = integer(campaign.total, 700);
+  const complete = integer(campaign.result_ok);
+  const remaining = Math.max(0, total - complete);
+  const active = scheduler.reachable ? integer(scheduler.active_count) : integer(campaign.active);
+  const cap = integer(scheduler.cap, integer(campaign.cap, 100));
+
+  setText("currentSummary", pipeline.current_label || "현재 단계 확인 필요");
+  setText("currentDetail", `${complete} / ${total} 결과 검증 · FEA ${active} / ${cap} 활성`);
+  if (remaining > 0) {
+    setText("nextSummary", "700-row 공식 Surrogate R² gate");
+    setText("nextDetail", `${remaining}개 결과 남음 · 검증 후 8 primary + 전압 R²를 판정`);
+  } else {
+    setText("nextSummary", "공식 모델 학습·감사");
+    setText("nextDetail", "R² 결과에 따라 Stage 2 생략 또는 보강 DOE로 자동 전환");
+  }
+  const specPending = optimization.requires_user_confirmation === true;
+  setText("blockerSummary", specPending ? "공식 R² gate + 모터 사양 확인" : "공식 R² gate");
+  setText("blockerDetail", specPending
+    ? "Production NSGA-II 전 운전점 수치·duty·권선 가정 결정 필요"
+    : "9개 품질 지표가 모두 R² ≥ 0.95여야 최적화 시작");
+}
+
 function renderCampaign(data) {
   const campaign = data.campaign || {};
   const scheduler = data.scheduler || {};
@@ -93,11 +142,13 @@ function renderCampaign(data) {
   setText("activeCap", `/ ${cap}`);
   setText("slotSub", `실행 ${running} · 배정/대기 ${assigning}`);
   setText("completionRate", decimal(campaign.completion_rate_per_hour, 1));
-  setText("rateSub", `최근 최대 6시간 · 제출 ${integer(campaign.submitted)}건`);
+  setText("rateSub", "최근 최대 6시간 · 검증 완료 증가량 기준");
   const eta = durationHours(campaign.eta_hours);
   setText("etaValue", eta.value);
   setText("etaUnit", eta.unit);
-  setText("etaSub", finite(campaign.eta_hours) ? "현재 처리 속도 기준 추정" : "완료 표본이 더 필요합니다");
+  setText("etaSub", finite(campaign.eta_hours)
+    ? `${estimatedFinish(campaign.eta_hours)} 예상 · 후속 단계 제외`
+    : "완료 표본이 더 필요합니다 · 후속 단계 제외");
   const supervisorAlive = Array.isArray(data.processes)
     && data.processes.some((item) => item.role === "supervisor" && item.state === "alive");
   setText("heroDescription", active >= cap && integer(campaign.retry) === 0
@@ -132,9 +183,15 @@ function renderScheduler(data) {
   const scheduler = data.scheduler || {};
   const counts = scheduler.status_counts || {};
   const health = byId("schedulerHealth");
-  if (scheduler.reachable && !scheduler.stale) {
+  const identityOk = scheduler.project_exists === true
+    && scheduler.project_matches !== false
+    && scheduler.cap_matches !== false;
+  if (scheduler.reachable && !scheduler.stale && identityOk) {
     health.textContent = "정상 연결";
     health.className = "health-pill complete";
+  } else if (scheduler.reachable && !identityOk) {
+    health.textContent = "프로젝트 확인 필요";
+    health.className = "health-pill failed";
   } else if (scheduler.stale) {
     health.textContent = "마지막 정상 값";
     health.className = "health-pill warning";
@@ -147,8 +204,24 @@ function renderScheduler(data) {
   setText("schedulerFailed", integer(counts.failed));
   setText("lastHour", integer(scheduler.completed_last_hour));
   setText("taskTotal", `raw task 이력 ${integer(scheduler.project_total_count).toLocaleString("ko-KR")}건 · 재시도 포함`);
+  setText("schedulerProject", scheduler.project || data.project || "—");
+  const projectIdentity = byId("projectIdentity");
+  const deploymentText = integer(scheduler.deployment_count) > 0
+    ? ` · 배포 ${integer(scheduler.deployed_count)}/${integer(scheduler.deployment_count)}`
+    : "";
+  if (identityOk) {
+    projectIdentity.textContent = `#${integer(scheduler.project_id)} 등록·일치 · cap ${integer(scheduler.server_cap, integer(scheduler.cap))}${deploymentText}`;
+    projectIdentity.className = "";
+  } else {
+    projectIdentity.textContent = scheduler.project_exists ? "project명 또는 cap 불일치" : "scheduler project 없음";
+    projectIdentity.className = "failed";
+  }
   const nodes = Array.isArray(scheduler.nodes) ? scheduler.nodes : [];
-  setText("nodeCount", `${nodes.length} nodes`);
+  const computeNodes = nodes.filter((node) => node.node !== "배정 대기");
+  const queuedTasks = nodes
+    .filter((node) => node.node === "배정 대기")
+    .reduce((sum, node) => sum + integer(node.active_tasks), 0);
+  setText("nodeCount", `${computeNodes.length} compute nodes${queuedTasks ? ` · 대기 ${queuedTasks}` : ""}`);
   const nodeGrid = byId("nodeGrid");
   empty(nodeGrid);
   nodes.forEach((node) => {
@@ -174,10 +247,12 @@ function renderCheckpoint(data) {
   const checkpoint = data.checkpoint || data.scheduler?.checkpoint || {};
   const execution = checkpoint.execution || {};
   const target = Math.max(1, integer(checkpoint.target_designs, 60));
-  const complete = Math.max(0, integer(checkpoint.complete_designs));
+  const liveComplete = Math.max(0, integer(checkpoint.complete_designs));
   const settling = Math.max(0, integer(checkpoint.settling_designs));
-  const remaining = Math.max(0, integer(checkpoint.remaining_designs, target - complete));
-  const splits = checkpoint.split_design_counts || {};
+  const remaining = Math.max(0, integer(checkpoint.remaining_designs, target - liveComplete));
+  const published = execution.status === "complete" && integer(execution.snapshot_designs) > 0;
+  const complete = published ? integer(execution.snapshot_designs) : liveComplete;
+  const splits = published ? execution.split_design_counts || {} : checkpoint.split_design_counts || {};
   const requirements = checkpoint.split_requirements || { train: 30, calibration: 10, test: 10 };
   const progress = byId("checkpointProgress");
   progress.max = target;
@@ -211,7 +286,7 @@ function renderCheckpoint(data) {
   status.className = `health-pill ${["ready", "complete"].includes(statusKey) ? "complete" : ["unavailable", "resume_required"].includes(statusKey) ? "failed" : "warning"}`;
 
   if (statusKey === "complete") {
-    setText("checkpointNote", `primary R² 최소 ${decimal(execution.primary_min_r2, 4)} · 평균 ${decimal(execution.primary_avg_r2, 4)} · 통과 ${integer(execution.primary_passed_count)}/8 · 전압 ${decimal(execution.voltage_r2, 4)} · 공식 gate 아님`);
+    setText("checkpointNote", `고정 snapshot ${complete} designs / ${integer(execution.snapshot_rows)} rows · primary R² 최소 ${decimal(execution.primary_min_r2, 4)} · 평균 ${decimal(execution.primary_avg_r2, 4)} · 통과 ${integer(execution.primary_passed_count)}/8 · 전압 ${decimal(execution.voltage_r2, 4)} · 공식 gate 아님`);
   } else if (statusKey === "running") {
     setText("checkpointNote", `${phaseLabel} 진행 중 · exact ${complete} designs / ${integer(checkpoint.complete_base_rows)} base rows · 공식 gate와 격리됨`);
   } else if (statusKey === "resume_required") {
@@ -225,12 +300,24 @@ function renderCheckpoint(data) {
   } else {
     setText("checkpointNote", "체크포인트 상태를 확인할 수 없습니다. 다음 scheduler 갱신에서 다시 시도합니다.");
   }
+  const worst = byId("checkpointWorst");
+  empty(worst);
+  const metrics = Array.isArray(execution.primary_metrics) ? execution.primary_metrics : [];
+  metrics.slice(0, 3).forEach((metric) => {
+    worst.appendChild(element("b", "", `${provisionalLabels[metric.target] || metric.target}: ${decimal(metric.r2, 4)}`));
+  });
+  if (!metrics.length) worst.appendChild(element("small", "", statusKey === "complete" ? "상세 지표 확인 필요" : "체크포인트 완료 후 표시"));
+  const action = {
+    continue_stage1: "다음: Stage 1 700-row 수집 계속 · 공식 gate 판정 대기",
+    run_stage2: "다음: 공식 Stage 1 gate까지 계속 수집",
+  }[execution.recommended_action] || "다음: 공식 Stage 1 gate까지 계속 수집";
+  setText("checkpointAction", action);
 }
 
 function renderModel(data) {
   const model = data.model || {};
   setText("r2Threshold", finite(model.threshold) ? model.threshold.toFixed(2) : "0.95");
-  setText("r2Passed", integer(model.passed_count));
+  setText("r2Passed", model.available ? integer(model.passed_count) : "—");
   const stateText = {
     passed: "모든 지표가 품질 목표를 통과했습니다",
     failed: "일부 지표가 R² 목표에 미달했습니다",
@@ -271,8 +358,8 @@ function renderPhysics(data) {
   setText("targetTorqueSpeed", `@ ${integer(optimization.target_torque_speed_rpm).toLocaleString("ko-KR")} rpm`);
   setText("targetPower", finite(optimization.target_power_kw) ? `${optimization.target_power_kw.toFixed(1)} kW` : "—");
   setText("targetPowerSpeed", `@ ${integer(optimization.target_power_speed_rpm).toLocaleString("ko-KR")} rpm`);
-  setText("constraintNote", optimization.spec_status === "verified"
-    ? `독립 운전점 제약 · 65.1 N·m @ 1,200 rpm = ${decimal(optimization.torque_point_power_kw, 3)} kW · 7.5 kW @ 5,000 rpm = ${decimal(optimization.power_point_torque_nm, 3)} N·m`
+  setText("constraintNote", ["verified", "artifact_audited"].includes(optimization.spec_status)
+    ? `산출물 감사 완료 · 사용자 확인 전 production NSGA 차단 · 65.1 N·m @ 1,200 rpm = ${decimal(optimization.torque_point_power_kw, 3)} kW · 7.5 kW @ 5,000 rpm = ${decimal(optimization.power_point_torque_nm, 3)} N·m`
     : "최적화 spec 확인 실패 · 화면에는 기본 목표값이 표시됩니다.");
   const nsga = byId("nsgaProgress");
   empty(nsga);
@@ -383,6 +470,7 @@ function render(data) {
   liveBadge.classList.toggle("stale", data.health === "degraded" && Boolean(data.scheduler?.reachable));
   setText("liveLabel", data.health === "degraded" ? (data.scheduler?.reachable ? "STALE" : "OFFLINE") : "LIVE");
   renderCampaign(data);
+  renderOverview(data);
   renderPipeline(data);
   renderAlerts(data);
   renderScheduler(data);

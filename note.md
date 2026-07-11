@@ -3672,3 +3672,13 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Actions/result: added strict PID/decision/manifest readback and UI phases for snapshot fetch, validation, training, model audit, finalization, and completed R²; restarted only the dashboard task.
 - Metrics: live API reports `snapshot_fetch`, watcher process alive, active FEA=100, errors=0; dashboard focused tests=35/35 and full `.venv` suite=649/649.
 - Next: monitor the rate-limited atomic snapshot and interpret the guarded provisional R² when decision/manifest appear; official pipeline remains unchanged.
+
+## 2026-07-12 02:44:31 +09:00 - Overall-progress dashboard and exact-60 result
+- Part/goal: make project identity, current/next/blocker, exact provisional quality, and Stage1 ETA unambiguous in the read-only Web UI.
+- Hypothesis/actions: audited live scheduler/artifact identities, added server project/cap/deployment fail-closed checks, fixed live 61-vs-exact-60 presentation, exposed weakest provisional targets/action, and restarted only the dashboard task.
+- Candidates/options: kept loopback GET/HEAD-only UI and official/provisional isolation; task mutation, official Stage2 routing from the provisional branch, and displaying local cap without server comparison were rejected.
+- Metrics: project `PYAEDT_MOTOR_IPMSM_V2` id=2, cap 100=100, deployments 5/5; exact snapshot 60/360 split 35/10/15, validation 360/360, primary min/avg R² 0.203203/0.560698, pass 0/8, voltage 0.884733; live Stage1 result/scheduler_ok=394/400, active=100, ETA=10.8h, errors=0.
+- Result: `http://127.0.0.1:8765` serves the new UI and sanitized API; focused 36/36 and full 650/650 tests pass, JS syntax/DOM IDs/HTTP assets pass.
+- Failure reason: in-app browser remained unavailable, so visual layout was verified through responsive source/DOM contracts and live HTTP rather than a screenshot.
+- Next action: continue sealed Stage1 to 700 results, execute the official 9-metric R² gate, and obtain user confirmation of operating-point/duty/winding assumptions before production NSGA-II.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

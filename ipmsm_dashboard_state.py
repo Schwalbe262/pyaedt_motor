@@ -395,9 +395,13 @@ def _read_provisional_checkpoint_execution(
         "process_state": "stopped",
         "decision_available": False,
         "official_gate_eligible": False,
+        "snapshot_designs": None,
+        "snapshot_rows": None,
+        "split_design_counts": {},
         "primary_min_r2": None,
         "primary_avg_r2": None,
         "primary_passed_count": 0,
+        "primary_metrics": [],
         "voltage_r2": None,
         "recommended_action": "",
     }
@@ -428,19 +432,55 @@ def _read_provisional_checkpoint_execution(
             voltage = _safe_float(result.get("voltage_test_r2")) if isinstance(result, Mapping) else None
             if not isinstance(primary, Mapping) or len(primary) != 8 or not isinstance(failures, list):
                 raise DashboardDataError("provisional decision R2 coverage is invalid")
+            selected_designs = _safe_int(decision.get("selected_designs"), -1)
+            selected_rows = _safe_int(decision.get("selected_rows"), -1)
+            split_counts = decision.get("split_design_counts")
+            if (
+                selected_designs <= 0
+                or selected_rows != selected_designs * 6
+                or not isinstance(split_counts, Mapping)
+                or set(split_counts) != {"train", "calibration", "test"}
+            ):
+                raise DashboardDataError("provisional decision snapshot coverage is invalid")
+            normalized_splits = {
+                name: _safe_int(split_counts.get(name), -1)
+                for name in ("train", "calibration", "test")
+            }
+            if any(value < 0 for value in normalized_splits.values()) or sum(normalized_splits.values()) != selected_designs:
+                raise DashboardDataError("provisional decision split coverage is invalid")
             primary_values = [_safe_float(value) for value in primary.values()]
             if any(value is None for value in primary_values) or voltage is None:
                 raise DashboardDataError("provisional decision has nonfinite R2")
+            failure_names = [_clip_text(value, 120) for value in failures]
+            failure_set = set(failure_names)
+            if len(failure_names) != len(failure_set) or not failure_set <= set(primary):
+                raise DashboardDataError("provisional decision failure identities are invalid")
             finite_primary = [float(value) for value in primary_values if value is not None]
+            primary_metrics = sorted(
+                (
+                    {
+                        "target": _clip_text(target, 120),
+                        "r2": round(float(value), 6),
+                        "passed": target not in failure_set,
+                    }
+                    for target, value in primary.items()
+                    if _safe_float(value) is not None
+                ),
+                key=lambda item: (item["r2"], item["target"]),
+            )
             return {
                 **base,
                 "status": "complete",
                 "phase": "complete",
                 "process_state": "stopped",
                 "decision_available": True,
+                "snapshot_designs": selected_designs,
+                "snapshot_rows": selected_rows,
+                "split_design_counts": normalized_splits,
                 "primary_min_r2": round(min(finite_primary), 6),
                 "primary_avg_r2": round(sum(finite_primary) / len(finite_primary), 6),
-                "primary_passed_count": len(finite_primary) - len(failures),
+                "primary_passed_count": len(finite_primary) - len(failure_set),
+                "primary_metrics": primary_metrics,
                 "voltage_r2": round(voltage, 6),
                 "recommended_action": _clip_text(decision.get("recommended_action"), 40),
             }
@@ -758,6 +798,7 @@ def _read_optimization_targets(path: Path) -> dict[str, Any]:
         "power_point_torque_nm": default_power * 60_000.0 / (default_power_speed * 2.0 * math.pi),
         "independent_operating_points": True,
         "source_values_inconsistent": True,
+        "requires_user_confirmation": True,
         "population_size": 160,
         "max_generations": 300,
         "configured_seeds": [42, 43, 44],
@@ -802,8 +843,9 @@ def _read_optimization_targets(path: Path) -> dict[str, Any]:
             "power_point_torque_nm": power * 60_000.0 / (power_speed * 2.0 * math.pi),
             "independent_operating_points": True,
             "source_values_inconsistent": True,
+            "requires_user_confirmation": True,
             "configured_seeds": parsed_seeds,
-            "spec_status": "verified",
+            "spec_status": "artifact_audited",
         }
     except DashboardDataError:
         return defaults
@@ -1087,8 +1129,15 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         )
     for warning in campaign["warnings"]:
         alerts.append({"level": "warning", "message": warning})
-    if optimization_state.get("spec_status") != "verified":
+    if optimization_state.get("spec_status") not in {"verified", "artifact_audited"}:
         alerts.append({"level": "warning", "message": "최적화 spec을 검증하지 못해 기본 목표값을 표시합니다."})
+    if optimization_state.get("requires_user_confirmation"):
+        alerts.append(
+            {
+                "level": "warning",
+                "message": "Production NSGA-II 전에 모터 운전점 수치, duty, 권선 가정을 사용자 확인해야 합니다.",
+            }
+        )
     if speed_state.get("marker_status") == "invalid":
         alerts.append({"level": "warning", "message": "속도 검증 완료 marker 또는 artifact hash가 유효하지 않습니다."})
     return {
@@ -1460,6 +1509,13 @@ def summarize_scheduler(
     allocations: Sequence[Mapping[str, Any]],
     cap: int,
 ) -> dict[str, Any]:
+    project_name = _clip_text(project.get("name"), 80)
+    server_cap = _safe_int(project.get("max_active_tasks"), cap)
+    if server_cap <= 0:
+        server_cap = cap
+    deployments = project.get("deployments")
+    clean_deployments = [item for item in deployments if isinstance(item, Mapping)] if isinstance(deployments, list) else []
+    deployed_count = sum(_clip_text(item.get("status"), 24).lower() == "deployed" for item in clean_deployments)
     clean_tasks = [item for item in tasks if isinstance(item, Mapping)]
     status_counts = Counter(_clip_text(item.get("status"), 30).lower() or "unknown" for item in clean_tasks)
     active = [item for item in clean_tasks if _clip_text(item.get("status"), 30).lower() in ACTIVE_STATUSES]
@@ -1536,11 +1592,19 @@ def summarize_scheduler(
         "reachable": True,
         "stale": False,
         "project_exists": bool(project),
-        "project": _clip_text(project.get("name"), 80),
+        "project": project_name,
+        "project_id": _safe_int(project.get("id"), -1),
+        "project_created_at": _normalized_scheduler_time(project.get("created_at")),
+        "project_updated_at": _normalized_scheduler_time(project.get("updated_at")),
+        "deployment_count": len(clean_deployments),
+        "deployed_count": deployed_count,
         "project_total_count": _safe_int(project.get("total_count"), len(clean_tasks)),
         "active_count": len(active),
-        "cap": cap,
-        "utilization_pct": round(100.0 * len(active) / cap, 1) if cap else 0.0,
+        "configured_cap": cap,
+        "server_cap": server_cap,
+        "cap": server_cap,
+        "cap_matches": server_cap == cap,
+        "utilization_pct": round(100.0 * len(active) / server_cap, 1) if server_cap else 0.0,
         "status_counts": dict(sorted(status_counts.items())),
         "completed_last_hour": completed_last_hour,
         "campaign_status": campaign_status,
@@ -1581,6 +1645,7 @@ def collect_scheduler_state(config: DashboardConfig) -> dict[str, Any]:
         allocations=allocations,
         cap=config.cap,
     )
+    summary["project_matches"] = bool(summary.get("project_exists")) and summary.get("project") == config.project
     try:
         checkpoint = collect_stage1_checkpoint(config, tasks)
     except DashboardDataError:
@@ -1744,6 +1809,9 @@ class DashboardStateStore:
         local.setdefault("pipeline", {})["current_stage"] = current_stage.get("id", "unknown")
         local["pipeline"]["current_label"] = current_stage.get("label", "상태 확인 필요")
         scheduler_active = _safe_int(scheduler.get("active_count"))
+        scheduler_cap = _safe_int(scheduler.get("cap"), self.config.cap)
+        project_identity_ok = bool(scheduler.get("project_matches", True))
+        project_cap_ok = bool(scheduler.get("cap_matches", True))
         campaign_result = _safe_int(local.get("campaign", {}).get("result_ok"))
         campaign_total = _safe_int(local.get("campaign", {}).get("total"), 1)
         automation_alive = any(
@@ -1763,26 +1831,44 @@ class DashboardStateStore:
             or local.get("campaign", {}).get("source_status", "ok") != "ok"
             or scheduler.get("stale")
             or not scheduler.get("reachable")
+            or not project_identity_ok
+            or not project_cap_ok
             or (
                 scheduler_active == 0
                 and (progress_stalled or (campaign_status_stale and not automation_alive))
             )
         )
+        if not project_identity_ok:
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "error",
+                    "message": "Scheduler project identity가 대시보드 설정과 일치하지 않습니다.",
+                },
+            )
+        if not project_cap_ok:
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "error",
+                    "message": f"Scheduler project cap {scheduler_cap}과 로컬 설정 {self.config.cap}이 일치하지 않습니다.",
+                },
+            )
         if (
             not stale
-            and scheduler_active == self.config.cap
+            and scheduler_active == scheduler_cap
             and not any(item.get("level") == "success" for item in local.get("alerts", []))
         ):
             local.setdefault("alerts", []).insert(
                 0,
                 {
                     "level": "success",
-                    "message": "멈춘 상태가 아닙니다. 프로젝트 FEA 슬롯 100개가 실행 또는 배정 중입니다.",
+                    "message": f"멈춘 상태가 아닙니다. 프로젝트 FEA 슬롯 {scheduler_cap}개가 실행 또는 배정 중입니다.",
                 },
             )
         elif (
             not stale
-            and scheduler_active < self.config.cap
+            and scheduler_active < scheduler_cap
             and campaign_result < campaign_total
             and any(
                 item.get("role") == "supervisor" and item.get("state") == "alive"
@@ -1799,9 +1885,9 @@ class DashboardStateStore:
         if stale:
             health = "degraded"
             headline = "일부 상태가 오래되었거나 확인이 필요합니다"
-        elif scheduler_active == self.config.cap:
+        elif scheduler_active == scheduler_cap:
             health = "running"
-            headline = "FEA 슬롯 100 / 100 점유"
+            headline = f"FEA 슬롯 {scheduler_cap} / {scheduler_cap} 점유"
         elif current_stage.get("status") == "running":
             health = "running"
             headline = f"{current_stage.get('label', '파이프라인')} 실행 중"
