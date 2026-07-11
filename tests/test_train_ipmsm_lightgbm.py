@@ -317,6 +317,10 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
             len((*trainer.V2_PRIMITIVE_OUTPUT_COLUMNS, *trainer.V2_DERIVED_OUTPUT_COLUMNS)),
             8,
         )
+        self.assertNotIn(
+            trainer.V2_AUXILIARY_OUTPUT_COLUMNS[0],
+            trainer.V2_PRIMARY_EVALUATION_OUTPUT_COLUMNS,
+        )
         with self.assertRaisesRegex(ValueError, "output_phase_voltage_last_peak_abs_v"):
             trainer.resolve_output_columns(set(), requested_columns=trainer.V2_AUXILIARY_OUTPUT_COLUMNS)
 
@@ -327,6 +331,70 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
         ]
 
         self.assertEqual(trainer.primary_test_r2_by_target(rows), {"primary": 0.96})
+
+    def test_single_target_voltage_r2_gate_is_complete_finite_and_thresholded(self) -> None:
+        target = trainer.V2_AUXILIARY_OUTPUT_COLUMNS[0]
+        rows = [
+            {"target": target, "split": "calibration", "R2": 0.1},
+            {"target": target, "split": "test", "R2": 0.96},
+        ]
+
+        self.assertEqual(
+            trainer.single_target_test_r2_gate(rows, target, 0.95),
+            (0.96, True, True),
+        )
+        self.assertEqual(
+            trainer.single_target_test_r2_gate(rows, target, 0.97),
+            (0.96, True, False),
+        )
+        self.assertEqual(
+            trainer.single_target_test_r2_gate([], target, 0.95),
+            (None, False, False),
+        )
+        self.assertEqual(
+            trainer.single_target_test_r2_gate(
+                [{"target": target, "split": "test", "R2": math.nan}],
+                target,
+                0.95,
+            ),
+            (None, True, False),
+        )
+
+    def test_fail_on_threshold_combines_primary_and_voltage_gates_for_v2(self) -> None:
+        self.assertFalse(
+            trainer.threshold_gate_failed(
+                v2=True,
+                primary_gate_passed=True,
+                voltage_gate_passed=True,
+                metric_failures=0,
+                )
+            )
+        self.assertTrue(
+            trainer.threshold_gate_failed(
+                v2=True,
+                primary_gate_passed=True,
+                voltage_gate_passed=True,
+                metric_failures=1,
+            )
+        )
+        for primary_passed, voltage_passed in ((False, True), (True, False), (False, False)):
+            with self.subTest(primary_passed=primary_passed, voltage_passed=voltage_passed):
+                self.assertTrue(
+                    trainer.threshold_gate_failed(
+                        v2=True,
+                        primary_gate_passed=primary_passed,
+                        voltage_gate_passed=voltage_passed,
+                        metric_failures=0,
+                    )
+                )
+        self.assertTrue(
+            trainer.threshold_gate_failed(
+                v2=False,
+                primary_gate_passed=False,
+                voltage_gate_passed=False,
+                metric_failures=1,
+            )
+        )
 
     def test_predict_model_averages_v2_ensemble_members(self) -> None:
         class ConstantModel:
@@ -389,6 +457,13 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "--conformal-coverage"):
             trainer.validate_training_options(args)
+
+    def test_validate_training_options_rejects_nonfinite_r2_threshold(self) -> None:
+        for value in ("nan", "inf", "-inf"):
+            with self.subTest(value=value):
+                args = trainer.build_parser().parse_args([f"--r2-threshold={value}"])
+                with self.assertRaisesRegex(ValueError, "--r2-threshold must be finite"):
+                    trainer.validate_training_options(args)
 
     def test_sample_params_uses_each_search_space_key(self) -> None:
         rng = __import__("random").Random(7)

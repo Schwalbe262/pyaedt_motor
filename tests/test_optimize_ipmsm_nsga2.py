@@ -122,6 +122,40 @@ class OptimizerCliTests(unittest.TestCase):
         loader.assert_called_once()
         self.assertEqual(json.loads(stdout.getvalue())["surrogate_bundle"]["training_schema"], "ipmsm_v2")
 
+    def test_model_dir_dry_run_propagates_voltage_gate_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "spec.json"
+            path.write_text(json.dumps(spec_mapping()), encoding="utf-8")
+            stderr = io.StringIO()
+            with mock.patch.object(
+                cli,
+                "load_surrogate_bundle",
+                side_effect=cli.SurrogateBundleError(
+                    "metadata.voltage_test_r2 must be >= 0.95; got 0.5"
+                ),
+            ) as loader:
+                with contextlib.redirect_stderr(stderr):
+                    with self.assertRaises(SystemExit) as caught:
+                        cli.main(
+                            [
+                                "--spec",
+                                str(path),
+                                "--model-dir",
+                                str(Path(tmp) / "model"),
+                                "--dry-run",
+                            ]
+                        )
+
+        self.assertEqual(caught.exception.code, 2)
+        loader.assert_called_once()
+        self.assertIn("metadata.voltage_test_r2", stderr.getvalue())
+
+    def test_predictor_help_marks_unverified_testing_escape_hatch(self) -> None:
+        help_text = cli.build_parser().format_help()
+
+        self.assertIn("UNVERIFIED testing surrogate", help_text)
+        self.assertIn("production should use --model-dir", help_text)
+
     def test_model_dir_and_predictor_are_mutually_exclusive(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as caught:

@@ -1332,6 +1332,36 @@ def primary_test_r2_by_target(metric_rows: Iterable[dict[str, Any]]) -> dict[str
     return result
 
 
+def single_target_test_r2_gate(
+    metric_rows: Iterable[dict[str, Any]],
+    target: str,
+    threshold: float,
+) -> tuple[float | None, bool, bool]:
+    test_rows = [
+        row
+        for row in metric_rows
+        if str(row.get("split", "")).lower() == "test"
+        and str(row.get("target") or "") == target
+    ]
+    complete = len(test_rows) == 1
+    raw_r2 = finite_float(test_rows[0].get("R2")) if complete else math.nan
+    test_r2 = raw_r2 if math.isfinite(raw_r2) else None
+    passed = bool(complete and test_r2 is not None and test_r2 >= threshold)
+    return test_r2, complete, passed
+
+
+def threshold_gate_failed(
+    *,
+    v2: bool,
+    primary_gate_passed: bool,
+    voltage_gate_passed: bool,
+    metric_failures: int,
+) -> bool:
+    if v2:
+        return metric_failures > 0 or not primary_gate_passed or not voltage_gate_passed
+    return metric_failures > 0
+
+
 def write_verification_csv(path: Path, metric_rows: list[dict[str, Any]], threshold: float) -> int:
     import verify_regression_metrics
 
@@ -1356,6 +1386,8 @@ def validate_training_options(args: argparse.Namespace) -> None:
         raise ValueError("--early-stopping-rounds must be at least 1")
     if args.outlier_iqr_weight < 0.0:
         raise ValueError("--outlier-iqr-weight must be zero or greater")
+    if not math.isfinite(args.r2_threshold):
+        raise ValueError("--r2-threshold must be finite")
     if not 0.0 < args.conformal_coverage < 1.0:
         raise ValueError("--conformal-coverage must be greater than 0 and less than 1")
     if args.max_invalid_training_rows is not None and args.max_invalid_training_rows < 0:
@@ -1491,6 +1523,20 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
             for target in V2_PRIMARY_EVALUATION_OUTPUT_COLUMNS
         )
     )
+    voltage_target = (
+        prepared.output_name_map[V2_AUXILIARY_OUTPUT_COLUMNS[0]]
+        if args.v2
+        else ""
+    )
+    voltage_test_r2, voltage_gate_complete, voltage_gate_passed = (
+        single_target_test_r2_gate(
+            auxiliary_metric_rows,
+            voltage_target,
+            args.r2_threshold,
+        )
+        if args.v2
+        else (None, False, False)
+    )
 
     metadata = {
         "training_schema": prepared.schema_version,
@@ -1533,6 +1579,10 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
         "primary_test_r2_gate_complete": primary_gate_complete if args.v2 else False,
         "primary_test_r2_gate_passed": primary_gate_passed,
         "primary_test_r2_failures": int(failures),
+        "voltage_r2_threshold": float(args.r2_threshold),
+        "voltage_test_r2": voltage_test_r2,
+        "voltage_test_r2_gate_complete": voltage_gate_complete,
+        "voltage_test_r2_gate_passed": voltage_gate_passed,
         "fingerprints": prepared.fingerprints or {},
         "fingerprint_columns": list(V2_FINGERPRINT_COLUMNS) if args.v2 else [],
         "conformal_absolute_residuals": conformal_absolute_residuals,
@@ -1564,7 +1614,13 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
     print(f"saved_metrics={metrics_path}")
     print(f"saved_metadata={metadata_path}")
     print(threshold_summary)
-    return 1 if args.fail_on_threshold and failures else 0
+    gate_failed = threshold_gate_failed(
+        v2=args.v2,
+        primary_gate_passed=primary_gate_passed,
+        voltage_gate_passed=voltage_gate_passed,
+        metric_failures=failures,
+    )
+    return 1 if args.fail_on_threshold and gate_failed else 0
 
 
 def build_parser() -> argparse.ArgumentParser:

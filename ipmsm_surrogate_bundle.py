@@ -517,6 +517,24 @@ def load_surrogate_bundle(model_dir: str | Path) -> IPMSMV2SurrogateBundle:
             raise SurrogateBundleError(
                 f"metadata.primary_test_r2.{target} must be >= {MIN_OPTIMIZER_R2}; got {value}"
             )
+    voltage_r2_threshold = _finite(
+        _required(metadata, "voltage_r2_threshold"),
+        "metadata.voltage_r2_threshold",
+    )
+    voltage_test_r2 = _finite(
+        _required(metadata, "voltage_test_r2"),
+        "metadata.voltage_test_r2",
+    )
+    if _required(metadata, "voltage_test_r2_gate_complete") is not True:
+        raise SurrogateBundleError("metadata.voltage_test_r2_gate_complete must be true")
+    if _required(metadata, "voltage_test_r2_gate_passed") is not True:
+        raise SurrogateBundleError("metadata.voltage_test_r2_gate_passed must be true")
+    required_voltage_r2 = max(voltage_r2_threshold, MIN_OPTIMIZER_R2)
+    if voltage_test_r2 < required_voltage_r2:
+        raise SurrogateBundleError(
+            "metadata.voltage_test_r2 must be "
+            f">= {required_voltage_r2}; got {voltage_test_r2}"
+        )
 
     input_columns = _string_list(_required(metadata, "input_columns"), "metadata.input_columns")
     modeled_outputs = _string_list(

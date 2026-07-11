@@ -1,8 +1,9 @@
 """Run deterministic nested-control IPMSM optimization with optional pymoo.
 
 The CLI can validate/dry-run a JSON specification without installing pymoo.
-An actual optimization receives a project-specific surrogate wrapper through
-``--predictor module:attribute``; the callable contract is defined in
+Production optimization uses a quality-gated bundle through ``--model-dir``.
+``--predictor module:attribute`` remains an explicitly unverified testing
+escape hatch; its callable contract is defined in
 ``ipmsm_optimization.SurrogatePredictor``.
 """
 
@@ -85,7 +86,7 @@ def _load_pymoo_components() -> dict[str, Any]:
 
 
 def load_predictor(reference: str) -> SurrogatePredictor:
-    """Load a surrogate callable from ``module:attribute``."""
+    """Load an unverified testing surrogate from ``module:attribute``."""
 
     if ":" not in reference:
         raise ValueError("predictor must use module:attribute syntax")
@@ -480,7 +481,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", help="Versioned optimization JSON")
     predictor_group = parser.add_mutually_exclusive_group()
-    predictor_group.add_argument("--predictor", help="Surrogate wrapper as module:attribute")
+    predictor_group.add_argument(
+        "--predictor",
+        help="UNVERIFIED testing surrogate as module:attribute; production should use --model-dir",
+    )
     predictor_group.add_argument(
         "--model-dir",
         help="Strict train_ipmsm_lightgbm v2 bundle containing metadata.json and models",

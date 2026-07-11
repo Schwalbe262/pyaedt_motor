@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from pathlib import Path
 import pickle
 import tempfile
@@ -55,6 +56,10 @@ def metadata() -> dict:
         "primary_test_r2_gate_complete": True,
         "primary_test_r2_gate_passed": True,
         "primary_test_r2": {target: 0.96 for target in bundle.PRIMARY_R2_TARGETS},
+        "voltage_r2_threshold": 0.95,
+        "voltage_test_r2": 0.96,
+        "voltage_test_r2_gate_complete": True,
+        "voltage_test_r2_gate_passed": True,
         "input_columns": list(INPUT_COLUMNS),
         "modeled_output_columns": [
             bundle.TORQUE_TARGET,
@@ -138,6 +143,8 @@ class SurrogateBundleTests(unittest.TestCase):
         self.assertTrue(prediction["in_domain"])
         self.assertEqual(prediction["ood_features"], ())
         self.assertEqual(loaded.summary()["targets"][bundle.TORQUE_TARGET]["ensemble_members"], 2)
+        self.assertEqual(len(bundle.PRIMARY_R2_TARGETS), 8)
+        self.assertNotIn(bundle.VOLTAGE_TARGET, bundle.PRIMARY_R2_TARGETS)
 
     def test_batch_and_scalar_envelopes_are_equivalent_with_one_call_per_estimator(self) -> None:
         rows = [prediction_features() for _ in range(3)]
@@ -202,6 +209,14 @@ class SurrogateBundleTests(unittest.TestCase):
                 lambda raw: raw.__setitem__("primary_test_r2_gate_passed", False),
             ),
             (
+                "voltage_test_r2_gate_complete must be true",
+                lambda raw: raw.__setitem__("voltage_test_r2_gate_complete", False),
+            ),
+            (
+                "voltage_test_r2_gate_passed must be true",
+                lambda raw: raw.__setitem__("voltage_test_r2_gate_passed", False),
+            ),
+            (
                 "feature_bounds is missing",
                 lambda raw: raw["feature_bounds"].pop("input_beta_dq_deg"),
             ),
@@ -224,6 +239,43 @@ class SurrogateBundleTests(unittest.TestCase):
                 mutate(raw)
                 root = write_bundle(Path(tmp) / "model", metadata_value=raw)
                 with self.assertRaisesRegex(bundle.SurrogateBundleError, expected):
+                    bundle.load_surrogate_bundle(root)
+
+    def test_voltage_r2_metadata_is_required_and_thresholded(self) -> None:
+        required_fields = (
+            "voltage_r2_threshold",
+            "voltage_test_r2",
+            "voltage_test_r2_gate_complete",
+            "voltage_test_r2_gate_passed",
+        )
+        for field in required_fields:
+            with self.subTest(missing=field), tempfile.TemporaryDirectory() as tmp:
+                raw = metadata()
+                raw.pop(field)
+                root = write_bundle(Path(tmp) / "model", metadata_value=raw)
+                with self.assertRaises(bundle.SurrogateBundleError) as caught:
+                    bundle.load_surrogate_bundle(root)
+                self.assertIn(f"missing required field: metadata.{field}", str(caught.exception))
+
+        low_cases = (
+            ({"voltage_test_r2": 0.94}, ">= 0.95"),
+            ({"voltage_r2_threshold": 0.97}, ">= 0.97"),
+        )
+        for changes, expected in low_cases:
+            with self.subTest(changes=changes), tempfile.TemporaryDirectory() as tmp:
+                raw = metadata()
+                raw.update(changes)
+                root = write_bundle(Path(tmp) / "model", metadata_value=raw)
+                with self.assertRaises(bundle.SurrogateBundleError) as caught:
+                    bundle.load_surrogate_bundle(root)
+                self.assertIn(expected, str(caught.exception))
+
+        for field in ("voltage_r2_threshold", "voltage_test_r2"):
+            with self.subTest(nonfinite=field), tempfile.TemporaryDirectory() as tmp:
+                raw = metadata()
+                raw[field] = math.nan
+                root = write_bundle(Path(tmp) / "model", metadata_value=raw)
+                with self.assertRaisesRegex(bundle.SurrogateBundleError, f"metadata.{field} must be a finite number"):
                     bundle.load_surrogate_bundle(root)
 
     def test_missing_artifact_and_invalid_conformal_rank_are_rejected(self) -> None:
