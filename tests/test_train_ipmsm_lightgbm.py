@@ -463,6 +463,35 @@ class TrainIpmsmLightgbmTests(unittest.TestCase):
 
         self.assertEqual(predictions, [3.0, 3.0])
 
+    def test_predict_model_members_preserves_each_ensemble_prediction(self) -> None:
+        class ConstantModel:
+            def __init__(self, value: float) -> None:
+                self.value = value
+
+            def predict(self, rows: list[object]) -> list[float]:
+                return [self.value] * len(rows)
+
+        predictions = trainer.predict_model_members(
+            (ConstantModel(1.0), ConstantModel(3.0), ConstantModel(5.0)),
+            ["a", "b"],
+        )
+
+        self.assertEqual(predictions, [[1.0, 1.0], [3.0, 3.0], [5.0, 5.0]])
+
+    def test_artifact_record_binds_exact_bytes_and_ensemble_size(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "model.pkl"
+            path.write_bytes(b"audited-model-bytes")
+
+            record = trainer.artifact_record(path, ensemble_members=5)
+
+        self.assertEqual(record["path"], str(path))
+        self.assertEqual(
+            record["sha256"],
+            hashlib.sha256(b"audited-model-bytes").hexdigest(),
+        )
+        self.assertEqual(record["ensemble_members"], 5)
+
     def test_split_conformal_uses_finite_sample_corrected_absolute_quantile(self) -> None:
         result = trainer.split_conformal_absolute_residual(
             [0.0, 0.0, 0.0, 0.0],

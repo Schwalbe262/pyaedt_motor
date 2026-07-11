@@ -1141,7 +1141,20 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
                 {
                     "model_paths": {"torque": str(model_path)},
                     "auxiliary_model_paths": {"voltage": str(model_path)},
+                    "model_artifacts": {
+                        "torque": {
+                            "path": str(model_path),
+                            "sha256": "1" * 64,
+                            "ensemble_members": 5,
+                        }
+                    },
                     "metrics_path": str(model_dir / "metrics.csv"),
+                    "training_artifacts": {
+                        "metrics": {
+                            "path": str(model_dir / "metrics.csv"),
+                            "sha256": "2" * 64,
+                        }
+                    },
                     "tuning_trials_path": "",
                 },
             )
@@ -1154,6 +1167,11 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
             expected = paths["combined_output"] / "models" / "torque.pkl"
             self.assertEqual(Path(metadata["model_paths"]["torque"]), expected)
             self.assertEqual(Path(metadata["auxiliary_model_paths"]["voltage"]), expected)
+            self.assertEqual(Path(metadata["model_artifacts"]["torque"]["path"]), expected)
+            self.assertEqual(
+                Path(metadata["training_artifacts"]["metrics"]["path"]),
+                paths["combined_output"] / "models" / "metrics.csv",
+            )
             self.assertTrue(model_path.is_file())
 
     def test_combined_pipeline_uses_both_case_plans_and_new_training_paths(self) -> None:

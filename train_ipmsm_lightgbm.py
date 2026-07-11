@@ -28,6 +28,7 @@ R2_THRESHOLD = 0.95
 V2_CONFORMAL_COVERAGE = 0.95
 V2_MODEL_SELECTION_FRACTION = 0.20
 V2_DEFAULT_ENSEMBLE_SIZE = 5
+V2_ARTIFACT_CONTRACT_SCHEMA_VERSION = "ipmsm_v2_training_artifacts_v1"
 V2_TEST_EVALUATION_SCOPE_ALL = "all_preassigned_test"
 V2_TEST_EVALUATION_SCOPE_AUDIT_CASE_PLAN = "audit_case_plan_test"
 
@@ -934,11 +935,7 @@ def build_model(lgb: Any, params: dict[str, Any], seed: int, n_jobs: int) -> Any
 
 def predict_model(model: Any, x: Any) -> Any:
     if isinstance(model, (list, tuple)):
-        if not model:
-            raise ValueError("model ensemble must not be empty")
-        member_predictions = [list(predict_model(member, x)) for member in model]
-        if len({len(values) for values in member_predictions}) != 1:
-            raise ValueError("model ensemble members returned different row counts")
+        member_predictions = predict_model_members(model, x)
         return [
             sum(values) / len(values)
             for values in zip(*member_predictions)
@@ -947,6 +944,20 @@ def predict_model(model: Any, x: Any) -> Any:
     if best_iter is not None and best_iter > 0:
         return model.predict(x, num_iteration=best_iter)
     return model.predict(x)
+
+
+def predict_model_members(model: Any, x: Any) -> list[list[float]]:
+    """Return auditable per-member predictions without collapsing an ensemble."""
+
+    members = list(model) if isinstance(model, (list, tuple)) else [model]
+    if not members:
+        raise ValueError("model ensemble must not be empty")
+    if any(isinstance(member, (list, tuple)) for member in members):
+        raise ValueError("nested model ensembles are not supported")
+    member_predictions = [list(predict_model(member, x)) for member in members]
+    if len({len(values) for values in member_predictions}) != 1:
+        raise ValueError("model ensemble members returned different row counts")
+    return member_predictions
 
 
 def sample_params(rng: random.Random, search_space: dict[str, tuple[Any, ...]] = PARAM_SEARCH_SPACE) -> dict[str, Any]:
@@ -1522,6 +1533,21 @@ def safe_model_name(target_col: str) -> str:
     return target_col.replace("/", "_").replace(" ", "_")
 
 
+def artifact_record(path: Path, *, ensemble_members: int | None = None) -> dict[str, Any]:
+    """Bind a produced artifact to its exact bytes for downstream continuation audits."""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    record: dict[str, Any] = {"path": str(path), "sha256": digest.hexdigest()}
+    if ensemble_members is not None:
+        if ensemble_members < 1:
+            raise ValueError("ensemble_members must be >= 1")
+        record["ensemble_members"] = int(ensemble_members)
+    return record
+
+
 def write_metrics_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as file:
@@ -1668,6 +1694,7 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
     model_selection_split = build_v2_model_selection_split(prepared, split, seed=args.seed) if args.v2 else None
     models: dict[str, Any] = {}
     model_paths: dict[str, str] = {}
+    model_artifacts: dict[str, dict[str, Any]] = {}
     best_params_by_target: dict[str, dict[str, Any]] = {}
     metric_rows: list[dict[str, Any]] = []
     auxiliary_metric_rows: list[dict[str, Any]] = []
@@ -1743,6 +1770,11 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
         with model_path.open("wb") as file:
             pickle.dump(model, file)
         model_paths[target_col] = str(model_path)
+        member_count = len(model) if isinstance(model, (list, tuple)) else 1
+        model_artifacts[target_col] = artifact_record(
+            model_path,
+            ensemble_members=member_count,
+        )
 
     metrics_path = args.model_dir / "metrics.csv"
     auxiliary_metrics_path = args.model_dir / "auxiliary_metrics.csv"
@@ -1752,6 +1784,19 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
     if args.v2:
         write_metrics_csv(auxiliary_metrics_path, auxiliary_metric_rows)
     write_tuning_csv(tuning_path, tuning_records)
+    training_artifacts = {
+        "metrics": artifact_record(metrics_path),
+        **(
+            {"auxiliary_metrics": artifact_record(auxiliary_metrics_path)}
+            if args.v2
+            else {}
+        ),
+        **(
+            {"tuning_trials": artifact_record(tuning_path)}
+            if tuning_records
+            else {}
+        ),
+    }
     threshold_summary, failures = summarize_test_threshold(metric_rows, args.r2_threshold)
     primary_test_r2 = primary_test_r2_by_target(metric_rows) if args.v2 else {}
     primary_gate_complete = set(primary_test_r2) == set(V2_PRIMARY_EVALUATION_OUTPUT_COLUMNS)
@@ -1781,6 +1826,9 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
 
     metadata = {
         "training_schema": prepared.schema_version,
+        "artifact_contract_schema_version": (
+            V2_ARTIFACT_CONTRACT_SCHEMA_VERSION if args.v2 else ""
+        ),
         "data_paths": [str(path) for path in args.data],
         "drop_duplicate_case_id": bool(args.drop_duplicate_case_id),
         "source_files": sorted(prepared.raw_df["source_file"].dropna().unique().tolist()) if "source_file" in prepared.raw_df.columns else [],
@@ -1837,6 +1885,7 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
         "stable_target_seed": True,
         "best_params_by_target": best_params_by_target,
         "model_paths": model_paths,
+        "model_artifacts": model_artifacts,
         "auxiliary_model_paths": {
             column: model_paths[column]
             for column in prepared.auxiliary_output_columns
@@ -1844,6 +1893,7 @@ def run_training(args: argparse.Namespace, deps: TrainingDependencies) -> int:
         "metrics_path": str(metrics_path),
         "auxiliary_metrics_path": str(auxiliary_metrics_path) if args.v2 else "",
         "tuning_trials_path": str(tuning_path) if tuning_records else "",
+        "training_artifacts": training_artifacts,
     }
     with metadata_path.open("w", encoding="utf-8") as file:
         json.dump(metadata, file, ensure_ascii=False, indent=2)

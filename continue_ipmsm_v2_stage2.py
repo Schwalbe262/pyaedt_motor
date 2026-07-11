@@ -1133,6 +1133,25 @@ def _relocate_staged_model_metadata(args: argparse.Namespace, staging: Path) -> 
     for field in ("metrics_path", "auxiliary_metrics_path", "tuning_trials_path"):
         if field in metadata:
             metadata[field] = relocate(metadata.get(field), f"metadata.{field}")
+    for field in ("model_artifacts", "training_artifacts"):
+        if field not in metadata:
+            continue
+        raw_artifacts = metadata.get(field)
+        if not isinstance(raw_artifacts, Mapping):
+            raise ContinuationGateError(f"staged metadata.{field} must be an object")
+        relocated: dict[str, dict[str, Any]] = {}
+        for name, raw_record in raw_artifacts.items():
+            if not isinstance(raw_record, Mapping):
+                raise ContinuationGateError(
+                    f"staged metadata.{field}.{name} must be an object"
+                )
+            record = dict(raw_record)
+            record["path"] = relocate(
+                record.get("path"),
+                f"metadata.{field}.{name}.path",
+            )
+            relocated[str(name)] = record
+        metadata[field] = relocated
     _atomic_write_json(metadata_path, metadata)
 
 
