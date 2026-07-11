@@ -3046,3 +3046,536 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: R2 target remains unmet, and batch5 still has no ok rows in fetched partial evidence.
 - Next action: continue filtered polling/refill at batch5 case101+ and only retrain after a material ok-row increase.
 - Token usage: active goal counter reported 28,236,174 tokens used; Codex SQLite token sampler remains unavailable.
+
+## 2026-06-17 17:26:54 +09:00 - Loop 233
+
+- Part: deterministic FEA mesh/time profile convergence tooling.
+- Goal: implement the planned 72-solve Stage A and 180-solve Stage B workflow without cancelling existing batch4/batch5 jobs or submitting live solves from this coding pass.
+- Hypothesis: deterministic representative source selection plus reference-ultra ranking gates can make the next convergence experiment reproducible before spending scheduler capacity.
+- Actions: added Stage A/B profile definitions, `select_ipmsm_reference_cases.py`, `rank_ipmsm_quality_profiles.py`, `/api/tasks` FEA defaults with deterministic dedupe keys, focused tests, and `FEA_MESH_TIME_PROFILE_OPTIMIZATION_REPORT.md`.
+- Candidates/options considered: submit live 252 FEA jobs now versus implement dry-run-first tooling. Chose tooling only because active scheduler capacity must be checked immediately before spending slots.
+- Metrics: `python -m unittest discover -s tests` ran 206 tests and passed; `git diff --check` reported no whitespace errors and only LF-to-CRLF warnings.
+- Result: Stage A/B case generation, Stage A ranking, and Stage B profile handoff are locally verified and documented.
+- Failure reason: no live AEDT convergence solves were submitted in this loop; production profile remains unchanged until result evidence exists.
+- Next action: when scheduler slots open, generate Stage A cases, dry-run `/api/tasks` payloads, submit within active_nonterminal <= 200, rank completed Stage A results, then generate Stage B with the top two candidate profiles.
+- Token usage: `codex_ops.py record-current-codex-thread-usage` still failed because no local Codex SQLite DB was found.
+
+## 2026-06-17 17:44:33 +09:00 - Loop 234
+
+- Part: Stage A convergence execution and cap correction.
+- Goal: start the planned Stage A profile convergence solves while preserving batch4/batch5 and the active FEA cap.
+- Hypothesis: the new Stage A selector can produce a non-overlapping representative case plan and run in open scheduler slots.
+- Actions: built a 1,000-source batch1-5 exclusion file; fixed replay source identity to prefer `input_source_case_id`; generated `profile_stage_a_cases.csv`; dry-ran and submitted Stage A tasks 9692-9763; audited scheduler DB after discovering `/api/tasks` exposed only the newest task window; cancelled only new Stage A excess; refilled newly opened slots with rows 21-25 as tasks 9768-9772; added `submit_ipmsm_profile_stage.py` DB-cap guard plus tests; updated the report.
+- Candidates/options considered: cancel batch4/batch5 versus cancel new Stage A excess. Chose to preserve batch4/batch5 exactly as planned and cancel only new Stage A tasks.
+- Metrics: Stage A plan rows=72, sources=12, profile_counts=12 each, excluded_overlap=0, conservative_rule_hits=0; DB active_nonterminal was 252 after over-submit and 200 after correction/refill; final Stage A DB status is running=25/cancelled=52, with logical rows 1-25 active and rows 26-72 pending; full `python -m unittest discover -s tests` passed 210 tests; `git diff --check` had only CRLF warnings.
+- Result: Stage A has started with logical rows 1-25 active under the cap; rows 26-72 are ready for later slot-gated resubmission.
+- Failure reason: full 72-solve Stage A is not complete yet because the active cap currently allows only 25 logical Stage A rows.
+- Next action: poll Stage A rows 1-25 for result summaries; as batch4/batch5 finish and DB-confirmed slots open, resubmit Stage A rows 26-72 with `submit_ipmsm_profile_stage.py`.
+- Token usage: no new token sample available; previous Codex SQLite lookup failed in this environment.
+
+## 2026-06-17 18:51:25 +09:00 - Loop 235
+
+- Part: Stage A profile convergence slot-gated execution and report update.
+- Goal: continue the planned Stage A FEA profile solves without cancelling batch4/batch5 or refilling production.
+- Hypothesis: DB-based polling plus capped infra retries can occupy Stage A rows while keeping active queued/running FEA <=200 and avoiding repeated gRPC startup failures as quality evidence.
+- Actions: enhanced `submit_ipmsm_profile_stage.py` with WSL DB querying, result fetch, infra retry classification, retry-attempt cap, and `max_workers_per_node`; updated `rank_ipmsm_quality_profiles.py` to prefer retry/complete rows over old infra-failure duplicates; submitted remaining Stage A logical rows through row072; saved completed probes; updated `FEA_MESH_TIME_PROFILE_OPTIMIZATION_REPORT.md`.
+- Candidates/options considered: keep retrying all gRPC failures indefinitely versus cap infra result-file attempts. Chose a cap of 2 local infra result files per case to avoid runaway retries while preserving one retry opportunity.
+- Metrics: latest DB sample active_nonterminal=189; Stage A DB history completed=12, queued=32, running=36, cancelled=52; all 72 logical Stage A rows are occupied by completed/nonterminal evidence; 12 local Stage A probe files saved; full tests passed 219; `git diff --check` had only CRLF warnings; `py_compile` passed with `PYTHONPYCACHEPREFIX=simul_log_smoke\pycache_validate`.
+- Result: Stage A is fully submitted under the active cap, with production refill still paused. Stage B ranking is blocked on remote Stage A completions.
+- Failure reason: Stage A solve outputs are not complete yet; several early rows are AEDT `analysis=False` or gRPC startup failures, and most Stage A rows remain queued/running.
+- Next action: continue polling/fetching Stage A completed probes; when enough complete groups exist, run `rank_ipmsm_quality_profiles.py`, generate Stage B with `reference_ultra` plus top two candidates, and submit Stage B under the same DB cap.
+- Token usage: active goal counter is available via `get_goal`, but no `codex_ops.py` SQLite sample was available in this environment.
+
+## 2026-06-17 19:02:06 +09:00 - Loop 236
+
+- Part: Stage A profile convergence polling continuation.
+- Goal: fetch completed Stage A probes and advance toward Stage A ranking without restarting production refill.
+- Hypothesis: completed probes will gradually reveal complete fixed-geometry profile groups; gRPC startup failures should remain capped infra retries and not count as profile-quality evidence.
+- Actions: ran the WSL DB-backed Stage A sync helper repeatedly; fetched new completed probes for rows 31, 32, 35, 36, 37, 40, and 41; submitted capped infra retries for rows 36 and 37; kept production refill paused.
+- Candidates/options considered: use open active slots for production refill versus leave them open after all Stage A rows were occupied. Chose to leave them open to honor the profile-convergence plan.
+- Metrics: latest active_nonterminal=177; Stage A DB rows completed=19, queued=31, running=32, cancelled_history=52; local Stage A probes=19 files / 24 rows; result row counts ok=2, infra_grpc=18, analysis_false=4; complete ok 6-profile groups=0.
+- Result: Stage A remains fully submitted and partially fetched, but there is not yet enough reference/complete-group evidence for ranking or Stage B generation.
+- Failure reason: remote Stage A solves are still running/queued, and no complete ok profile group exists yet.
+- Next action: continue Stage A polling/fetch; once `reference_ultra` and candidate rows form complete ok groups, run the ranker and generate Stage B.
+- Token usage: active goal counter reported 1,875,095 tokens used; `codex_ops.py` SQLite token sampler remains unavailable.
+
+## 2026-06-17 19:06:28 +09:00 - Loop 237
+
+- Part: Stage A blocked audit after repeated remote-wait turns.
+- Goal: determine whether the profile convergence plan can advance to Stage A ranking or Stage B.
+- Hypothesis: if new `reference_ultra`/candidate ok rows have completed, ranking can proceed; otherwise the remaining blocker is external scheduler/AEDT completion.
+- Actions: reran DB-backed Stage A sync multiple times; inspected long-running reference/candidate process logs; confirmed representative long tasks are at `Solving design setup PPT_Transient`; kept production refill paused.
+- Candidates/options considered: rank partial evidence versus wait for complete ok groups. Chose wait because current evidence has zero complete ok 6-profile groups and no complete reference group.
+- Metrics: latest active_nonterminal=174; Stage A DB rows completed=19, queued=31, running=32, cancelled_history=52; local Stage A probes remain 19 files / 24 rows with ok=2, infra_grpc=18, analysis_false=4, complete ok groups=0.
+- Result: no further deterministic local work can complete Stage A/B until remote Stage A tasks finish and produce enough ok reference/candidate rows.
+- Failure reason: external scheduler/AEDT tasks are still running/queued; Stage A ranking and Stage B generation are blocked on remote completion evidence.
+- Next action: resume by running `submit_ipmsm_profile_stage.py --wsl-db /home/peets/NEC/slurm_scheduler/data/slurm_scheduler.db --cases simul_log_smoke\profile_stage_a_cases.csv --result-root simul_log_smoke\profile_stage_a_results --active-cap 200 --max-workers-per-node 1 --fetch-completed --retry-infra-failed-results --submit`, then rank once complete ok groups exist.
+- Token usage: active goal counter reported 1,920,903 tokens used; `codex_ops.py` SQLite token sampler remains unavailable.
+
+## 2026-06-18 18:19:38 +09:00 - Loop 238
+
+- Part: non-r1 profile convergence rerun on `dhj02`.
+- Goal: exclude `r1jae262` and use other scheduler environments to rerun mesh/time profile comparison within the 200-simulation cap.
+- Hypothesis: `dhj02` has PyAEDT/Ansys available but needs its own worktree and capability-free scheduler payloads because its allocations do not advertise `conda:pyaedt2026v1`.
+- Actions: smoked `dhj02` PyAEDT imports; bootstrapped `/gpfs/home1/dhj02/slurm_scheduler/ipmsm_pyaedt_motor_nonr1`; added profile-stage overrides for partition/node/env setup/capability/env profile; generated 198 non-r1 cases; submitted tasks 10877-11082 with `fea_bursty`, `max_workers_per_node=8`, explicit module+conda activation, and empty scheduler capability/env profile; updated report and handoff.
+- Candidates/options considered: direct use of `r1jae262` worktree, `/tasks/git`, or `dhj02` clone. Chose `dhj02` clone to honor the non-r1 constraint and avoid relying on `r1jae262` filesystem paths.
+- Metrics: case plan rows=198, sources=33, profiles=6, conservative-rule hits=0; latest non-r1 DB status running=8, queued=190, completed=0, failed=0; first wave attached to allocation 678 on n108 after n113 high-CPU soft block; task 10877 reached `Solving design setup PPT_Transient`; full tests passed 219; `git diff --check` had only CRLF warnings.
+- Result: non-r1 simulations are submitted and actively solving, but profile ranking is not yet possible.
+- Failure reason: no non-r1 result rows have completed yet; current blocker is remote AEDT solve duration.
+- Next action: poll `ipmsm-profile-nonr1-dhj02-%`, run non-r1 `submit_ipmsm_profile_stage.py --fetch-completed` from the report when tasks complete, then rank only after complete fixed-geometry groups exist.
+- Token usage: not sampled by `codex_ops.py` yet in this loop.
+
+## 2026-06-21 06:26:43 +09:00 - Loop 239
+
+- Part: non-r1 `dhj02` result fetch, full ranking, and report closeout.
+- Goal: determine whether more profile convergence work is needed after the non-r1 198-solve run.
+- Hypothesis: enough fixed-geometry groups have completed to make a stable production-profile decision even if a few walltime failures remain.
+- Actions: polled scheduler DB; fetched all completed non-r1 result probes; ran `rank_ipmsm_quality_profiles.py` on the 194 local result files; mapped scheduler walltime failures and result-row AEDT failures; updated `FEA_MESH_TIME_PROFILE_OPTIMIZATION_REPORT.md` and `HANDOFF_CURRENT.md`.
+- Candidates/options considered: retry 4 walltime failures immediately versus close the ranking decision. Chose close the decision first because 29 complete reference groups already show every non-reference profile failing the loss gates, so the 4 retries are cleanup rather than decision-critical.
+- Metrics: DB status completed=194/failed=4; local result rows=194 with ok=191/failed=3; complete ok 6-profile groups=27; rank reference-complete groups=29; production candidates=0; full rank output `simul_log_smoke/profile_nonr1_dhj02_rank_full.csv`; focused tests passed 16; `git diff --check` had only existing CRLF warnings.
+- Result: do not switch production profile from `mesh_time_fine`; no tested candidate passed all gates against `reference_ultra`.
+- Failure reason: all non-reference profiles still failed core-loss/total-loss gates; `mesh_time_fine` and `mesh_loss_fine` also failed torque-ripple p90.
+- Next action: design a second-pass profile focused on loss and torque-ripple convergence; retry walltime cases 102/108/173/198 only if a completely filled comparison matrix is needed.
+- Token usage: `codex_ops.py record-current-codex-thread-usage` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 06:37:56 +09:00 - Loop 240
+
+- Part: non-r1 `dhj02` second-pass profile submission.
+- Goal: continue the R2/FEA quality campaign by testing loss-focused profile candidates outside `r1jae262` while staying under the active 200-simulation cap.
+- Hypothesis: because `time_150` nearly passed the core/total loss gates and already passed torque ripple, additional time resolution on the same 33 geometries can show whether a production-safe profile exists without rerunning `reference_ultra`.
+- Actions: added `time_180`, `time_210`, and `time_180_midmesh`; added `generate_ipmsm_second_pass_cases.py`; generated `simul_log_smoke/profile_secondpass_dhj02_time180_time210_midmesh_cases.csv`; verified payload fields; submitted 99 `/api/tasks` rows on `dhj02`; updated report and handoff.
+- Candidates/options considered: rerun missing `reference_ultra` walltime rows, run a new 60-source Stage B, or reuse the 33-source non-r1 reference matrix with new profiles only. Chose reuse because it is faster and directly targets the failed gates.
+- Metrics: case plan rows=99, sources=33, profiles=3, duplicate case IDs=0; submitted task ids 12338-12436; DB status queued=99, active_nonterminal=99, open_slots=101; focused tests passed 23.
+- Result: second-pass simulations are queued under cap; production profile remains unchanged until completed rows are fetched and ranked.
+- Failure reason: no second-pass solver result rows exist yet; current blocker is remote scheduler/AEDT completion.
+- Next action: fetch completed `profile_secondpass_dhj02` probes, combine them with existing non-r1 result probes, and run `rank_ipmsm_quality_profiles.py` to decide whether any second-pass profile passes all gates.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label second-pass-dhj02` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 06:55:06 +09:00 - Loop 241
+
+- Part: non-r1 `dhj02` second-pass loss-mesh expansion.
+- Goal: use remaining open FEA slots to make concrete progress toward higher-quality simulation evidence for the R2 target.
+- Hypothesis: if `time_150` was near the loss gates, then higher time resolution combined with fine/loss mesh variants on the same 33 reference geometries can identify whether loss convergence is time-only or mesh/time coupled.
+- Actions: added `time_180_finemesh`, `time_180_lossmesh`, and `time_210_lossmesh`; generated `simul_log_smoke/profile_secondpass2_dhj02_lossmesh_cases.csv`; verified dry-run payload; submitted the remaining second-pass expansion under `ipmsm-profile-secondpass2-dhj02`; updated report and handoff.
+- Candidates/options considered: wait for the first 99 queued rows versus fill open slots with non-overlapping candidate profiles. Chose to fill slots because active cap had 101 openings and all candidates reuse the existing reference matrix.
+- Metrics: new case plan rows=99, sources=33, profiles=3, duplicate case IDs=0; submitted task ids 12437-12536; combined second-pass DB status queued=198, active_nonterminal=198, open_slots=2; completed fetch returned no result rows yet.
+- Result: two second-pass batches are queued under cap; production profile remains unchanged until completed rows are ranked.
+- Failure reason: no second-pass solver result rows exist yet; current blocker is remote scheduler/AEDT completion.
+- Next action: fetch completed `profile_secondpass_dhj02` and `profile_secondpass2_dhj02` probes, combine both with existing non-r1 result probes, then rank all candidate profiles against `reference_ultra`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label second-pass2-dhj02` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:03:16 +09:00 - Loop 242
+
+- Part: second-pass run audit and local R2 baseline check.
+- Goal: verify whether the queued second-pass simulations are actually running and keep local R2 evidence current while waiting for solver output.
+- Hypothesis: scheduler DB plus per-case logs can distinguish real AEDT solve progress from queued bookkeeping; local training probes can identify any immediate non-simulation model improvement.
+- Actions: fetched second-pass scheduler summaries; inspected task 12338 task/result/log summaries; reran latest p098 LightGBM baseline with `--disable-tuning`; ran scratch `log1p` target-transform and derived-geometry-feature probes; updated report and handoff.
+- Candidates/options considered: promote target transforms or derived features versus wait for new simulation data. Chose not to promote because neither probe improved the minimum R2.
+- Metrics: `profile_secondpass_dhj02` running=51/attaching=7/queued=41, `profile_secondpass2_dhj02` queued=99, combined active_nonterminal=198/open_slots=2; task 12338 reached `Solving design setup PPT_Transient`; p098 disable-tuning verification has 8/8 failures, min R2=0.696437289560, avg R2=0.820707430876.
+- Result: first second-pass wave is genuinely in AEDT solve; local model-only probes do not close the R2 gap.
+- Failure reason: no completed second-pass result rows have been fetched yet, and current local data/model still misses the R2 target by a wide margin.
+- Next action: keep polling/fetching second-pass completed probes; once rows arrive, combine both second-pass result sets with existing non-r1 reference rows and run `rank_ipmsm_quality_profiles.py`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label second-pass-running-audit` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:07:06 +09:00 - Loop 243
+
+- Part: second-pass ranking automation.
+- Goal: make the next R2/FEA decision reproducible as soon as second-pass result probes arrive.
+- Hypothesis: a small local helper can combine existing non-r1 reference probes with both second-pass result roots and reuse the established production ranking gates without manual glob errors.
+- Actions: added `rank_ipmsm_second_pass_profiles.py`, tests, report command, and handoff entry; ran the helper on current fetched roots.
+- Candidates/options considered: keep only manual PowerShell globs versus add a focused Python helper. Chose the helper because it reduces operator error across three result roots.
+- Metrics: helper smoke discovered 194 current result files and wrote `simul_log_smoke/profile_secondpass_dhj02_rank_current.csv`; production_candidates=0 because no second-pass result rows have completed; latest closeout sample has `profile_secondpass_dhj02` running=96/queued=3 and `profile_secondpass2_dhj02` queued=99; py_compile passed; focused ranker tests passed 8.
+- Result: second-pass rank can now be rerun with one command after fetch.
+- Failure reason: ranking still cannot select a second-pass profile until remote AEDT tasks produce completed result rows.
+- Next action: keep polling/fetching `profile_secondpass_dhj02` and `profile_secondpass2_dhj02`; run `python rank_ipmsm_second_pass_profiles.py` after new rows are fetched.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label second-pass-rank-helper` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:10:43 +09:00 - Loop 244
+
+- Part: reference cleanup retry and rank helper root update.
+- Goal: use the final two active slots to improve the reference matrix for second-pass ranking.
+- Hypothesis: retrying previous walltime-missing `reference_ultra` rows can raise complete reference coverage without starting unrelated production refill.
+- Actions: submitted non-r1 refretry cases 102 and 108 with prefix `ipmsm-profile-nonr1-dhj02-refretry`; updated `rank_ipmsm_second_pass_profiles.py` default roots to include the refretry result root; updated report and handoff.
+- Candidates/options considered: leave two slots idle versus retry reference rows. Chose reference retries because they directly improve convergence ranking evidence and stay within the 200 active cap.
+- Metrics: submitted task ids 12541 and 12542; latest closeout sample has `profile_secondpass_dhj02` running=99, `profile_secondpass2_dhj02` running=21/queued=78, refretry queued=2, DB active_nonterminal=200/open_slots=0; helper smoke still discovered 194 current result files and production_candidates=0 because refretry and second-pass rows are not complete yet; focused helper tests passed 3.
+- Result: all 200 active slots are now occupied by second-pass or reference-cleanup convergence work.
+- Failure reason: no new completed result rows have been fetched yet.
+- Next action: poll/fetch `profile_secondpass_dhj02`, `profile_secondpass2_dhj02`, and `profile_nonr1_dhj02_refretry`; rerun `python rank_ipmsm_second_pass_profiles.py` after fetched rows increase.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label refretry-submit` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:13:23 +09:00 - Loop 245
+
+- Part: second-pass running audit.
+- Goal: verify whether second-pass solves continue to advance toward result rows.
+- Hypothesis: if representative logs are in AEDT solve/setup and scheduler status is running, the active work is meaningful even before result CSVs are written.
+- Actions: fetched scheduler summaries for both second-pass prefixes and refretry; inspected representative per-case logs for task 12338 and task 12437; updated report and handoff.
+- Candidates/options considered: wait silently versus record progress evidence. Chose to record because no completed rows exist yet and operator visibility matters.
+- Metrics: `profile_secondpass_dhj02` running=99; `profile_secondpass2_dhj02` running=45/queued=54; refretry queued=2; active_nonterminal=200/open_slots=0; task 12338 remains at `Solving design setup PPT_Transient`; task 12437 reached AEDT model setup/mesh initialization; fetched completed rows=0.
+- Result: both second-pass waves have entered real PyAEDT/AEDT execution, but rank remains blocked on completed result rows.
+- Failure reason: no completed result probes are available yet.
+- Next action: continue polling/fetching all three prefixes and run `rank_ipmsm_second_pass_profiles.py` once fetched rows increase.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label second-pass-running-audit-2` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:17:19 +09:00 - Loop 246
+
+- Part: second-pass sync wrapper.
+- Goal: reduce manual command risk for repeated fetch/rank loops while waiting for second-pass solves.
+- Hypothesis: a wrapper around the three known prefixes can prevent path/prefix mistakes and immediately rerank when new result probes appear.
+- Actions: added `sync_ipmsm_second_pass_profiles.py` and tests; fixed the wrapper rank path to consume the rank helper's text output; ran `python sync_ipmsm_second_pass_profiles.py --rank`.
+- Candidates/options considered: continue manual three-command polling versus add one safe wrapper. Chose the wrapper because repeated long commands already showed typo risk and the wrapper is read-only/fetch-only.
+- Metrics: wrapper output has `secondpass` running=99/fetched_rows=0, `secondpass2` running=93/queued=6/fetched_rows=0, `refretry` queued=2/fetched_rows=0; rank helper saw 194 files and production_candidates=0; wrapper tests passed 5.
+- Result: current fetch+rank status can now be reproduced with one command.
+- Failure reason: remote AEDT tasks have not produced completed result rows yet.
+- Next action: rerun `python sync_ipmsm_second_pass_profiles.py --rank` until fetched_rows increases, then inspect `simul_log_smoke/profile_secondpass_dhj02_rank_current.csv`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label second-pass-sync-wrapper` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:21:04 +09:00 - Loop 247
+
+- Part: second-pass running audit.
+- Goal: answer whether more action is needed while the non-r1 second-pass convergence solves are active.
+- Hypothesis: if the scheduler DB reports all planned tasks running and representative logs are in AEDT solve, the right action is to wait/fetch rather than submit or cancel.
+- Actions: reran `python sync_ipmsm_second_pass_profiles.py --rank`; parsed the saved summary; inspected representative logs for tasks 12338, 12437, and 12541; updated report and handoff.
+- Candidates/options considered: submit more work versus preserve the active cap and wait for result rows. Chose to preserve the cap because `active_nonterminal=200` and open slots are 0.
+- Metrics: `profile_secondpass_dhj02` running=99, `profile_secondpass2_dhj02` running=99, `profile_nonr1_dhj02_refretry` running=2, active_nonterminal=200/open_slots=0, fetched_rows=0; tasks 12338 and 12437 both reached `Solving design setup PPT_Transient`; rank still sees 194 existing files and 0 production candidates.
+- Result: simulations are properly running; no new profile decision is possible until completed rows are fetched.
+- Failure reason: completed second-pass/refretry result probes are not available yet.
+- Next action: rerun `python sync_ipmsm_second_pass_profiles.py --rank` after solve time elapses; when fetched_rows increases, inspect `simul_log_smoke/profile_secondpass_dhj02_rank_current.csv`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label second-pass-running-audit-3` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:29:04 +09:00 - Loop 248
+
+- Part: second-pass wait-window model audit.
+- Goal: keep moving toward the R2 target while all 200 FEA slots are occupied by second-pass convergence solves.
+- Hypothesis: if completed rows are not expected yet, local model/data probes can still test whether a trainer-only change could close the R2 gap.
+- Actions: reran `sync_ipmsm_second_pass_profiles.py --rank`; inspected representative runtime evidence from the non-r1 rank CSV; benchmarked ExtraTrees, RandomForest, HistGradientBoosting, parsed mesh/profile features, and old-only versus combined training subsets; removed temporary subset CSVs; updated report and handoff.
+- Candidates/options considered: switch trainer model class, add parsed mesh/profile features, retrain old-only, or wait for more FEA rows. Chose not to promote trainer changes because no probe materially improved minimum R2.
+- Metrics: secondpass running=99, secondpass2 running=99, refretry running=2, active_nonterminal=200/open_slots=0, fetched_rows=0; prior non-r1 elapsed averages are `time_150` 17,048.816s and `reference_ultra` 21,781.901s; best alternate scratch model was HGB at min R2=0.700231251295/avg R2=0.821319746564; parsed mesh/profile feature probe min R2=0.693040250414; old-only scratch min R2=0.713909239828 versus combined scratch min R2=0.692435710622.
+- Result: no local trainer-only change is justified; the next meaningful improvement depends on completed high-quality FEA rows and second-pass profile ranking.
+- Failure reason: current data remains insufficient/noisy for `R^2 >= 0.95`, and second-pass result probes are not complete yet.
+- Next action: rerun `python sync_ipmsm_second_pass_profiles.py --rank` after solve time elapses; when fetched_rows increases, rank profiles and retrain only after a material high-quality row increase.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label second-pass-model-wait-audit` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:32:31 +09:00 - Loop 249
+
+- Part: residual hotspot audit for next simulation planning.
+- Goal: identify whether current R2 failure is driven by duplicate-input label conflicts or by regions needing more high-quality coverage.
+- Hypothesis: if exact duplicate inputs have divergent outputs, cleanup is needed before more simulation; otherwise residual concentration can guide future case selection after slots open.
+- Actions: inspected representative second-pass logs; ran a loss-residual hotspot probe on the p098 prepared split; checked exact duplicate model-input keys after filtering; updated report and handoff.
+- Candidates/options considered: duplicate cleanup versus targeted high-quality coverage. Chose targeted coverage because no exact duplicate input groups exist.
+- Metrics: second-pass samples remain in/near AEDT solve; residual hotspot output `simul_log_smoke/residual_loss_hotspots_p098_20260621.csv`; filtered `valid_rows=10356`, `unique_input_keys=10356`, duplicate_groups=0; highest loss-error bins include high stator outer radius, high magnet setback, longer teeth, and larger rotator gap.
+- Result: no duplicate-label cleanup path is available; next useful simulation plan should increase high-quality coverage, with attention to the mild loss-error hotspot regions after the second-pass profile decision.
+- Failure reason: R2 target remains unmet and second-pass result probes are still not complete.
+- Next action: rerun `python sync_ipmsm_second_pass_profiles.py --rank` after solve time elapses; if a candidate profile passes, use it for the next coverage batch and include hotspot-region sampling.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label second-pass-residual-hotspot-audit` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:36:00 +09:00 - Loop 250
+
+- Part: residual-hotspot next-batch planning.
+- Goal: prepare a concrete next coverage batch while all 200 current FEA slots remain occupied.
+- Hypothesis: the p098 loss residual hotspot CSV can guide a deterministic non-overlapping 200-row plan for the next high-quality coverage wave after slots open.
+- Actions: added `residual-hotspot` selection mode to `select_ipmsm_replay_cases.py`; added focused tests; generated `simul_log_smoke/batch6_hotspot_mtf_candidate_cases.csv` using `mesh_time_fine` as the fallback profile; validated uniqueness, exclusion overlap, profile counts, and hotspot scores.
+- Candidates/options considered: wait without preparation versus prepare a fallback `mesh_time_fine` plan now. Chose fallback planning because the second-pass winning profile is not known yet, and this plan can be regenerated with the winner later.
+- Metrics: selector tests passed 10; generated plan rows=200, unique_case_ids=200, unique_source_case_ids=200, excluded_overlap=0, profiles=`mesh_time_fine`, score_zero_count=0, candidates=9277 after status/output/sanity/geometry/source/rule filters.
+- Result: next coverage batch can be submitted quickly when slots open if no better second-pass profile passes; no live submission was made because active_nonterminal remains 200.
+- Failure reason: R2 target remains unmet and second-pass results are not complete enough to pick a better profile.
+- Next action: rerun `python sync_ipmsm_second_pass_profiles.py --rank` after solve time elapses; if a second-pass profile passes, regenerate the hotspot plan with that profile before submitting.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label residual-hotspot-selector-plan` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:39:16 +09:00 - Loop 251
+
+- Part: secondpass2 infrastructure retry refill.
+- Goal: preserve second-pass profile-ranking coverage while staying at the 200 active FEA cap.
+- Hypothesis: completed gRPC connection failures are infrastructure misses and should be retried before interpreting secondpass2 ranking.
+- Actions: reran `sync_ipmsm_second_pass_profiles.py --rank`; inspected fetched secondpass2 result rows; used `submit_ipmsm_profile_stage.py --retry-infra-failed-results --submit` for cases 72, 76, 80, and 84; reran sync/rank summary.
+- Candidates/options considered: fill open slots with hotspot production fallback versus retry profile-convergence infra failures. Chose infra retries because they directly preserve the current profile comparison matrix.
+- Metrics: initial sync showed secondpass2 completed=1/running=98 with fetched_rows=1 and open slots; fetch then found cases 72/76/80/84 as retryable gRPC failures; retry task ids are 12552-12555; final sync has secondpass running=99, secondpass2 completed=4/queued=4/running=95, refretry running=2, active_nonterminal=200/open_slots=0, rank result_files=198 and production_candidates=0.
+- Result: current open slots were refilled with profile-convergence retries, not unrelated production work.
+- Failure reason: usable second-pass quality rows are still not available; the first secondpass2 completions were infrastructure failures.
+- Next action: keep polling `python sync_ipmsm_second_pass_profiles.py --rank`; when retries or running solves produce usable rows, re-evaluate candidate profiles.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label secondpass2-infra-retry-fill` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:42:17 +09:00 - Loop 252
+
+- Part: second-pass retry automation hardening.
+- Goal: make repeated second-pass polling able to detect and optionally refill retryable infrastructure failures without manual case-number reconstruction.
+- Hypothesis: an explicit opt-in wrapper flag can keep normal fetch/rank behavior read-only while enabling cap-guarded retry submission when slots open.
+- Actions: added `--retry-infra-failed-results` and `--submit-retries` to `sync_ipmsm_second_pass_profiles.py`; added tests; ran detection-only wrapper status.
+- Candidates/options considered: keep manual retry commands versus add opt-in wrapper support. Chose wrapper support because future infra failures can be handled consistently while default behavior remains fetch/rank-only.
+- Metrics: `python -m unittest tests.test_sync_ipmsm_second_pass_profiles` passed 7 tests; detection-only status has secondpass running=99, secondpass2 completed=4/running=99 with retryable cases 72/76/80/84 but planned=[], refretry running=2, active_nonterminal=200/open_slots=0, production_candidates=0.
+- Result: retry handling is more reproducible; no new submission was made in the detection-only run.
+- Failure reason: usable second-pass quality rows are still not available, and the current cap is full.
+- Next action: continue polling with `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results`; add `--submit-retries` only when open slots exist and retryable infra cases are not already occupied.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label sync-wrapper-retry-detect` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:45:05 +09:00 - Loop 253
+
+- Part: retry-aware second-pass polling.
+- Goal: check whether second-pass retries or running solves have produced usable rows toward profile selection.
+- Hypothesis: if retry tasks are already occupied and active cap is full, no new submission should be made until a usable row or open slot appears.
+- Actions: ran `sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`; inspected retry submit manifests and representative retry process logs for tasks 12552-12555; updated report and handoff.
+- Candidates/options considered: submit hotspot fallback batch versus wait. Chose wait because active_nonterminal=200/open_slots=0 and profile-convergence retry tasks are already occupied.
+- Metrics: secondpass running=99, secondpass2 completed=4/running=99, refretry running=2, retryable cases 72/76/80/84, planned=[], submitted_count=0, production_candidates=0; retry process logs 12552-12555 currently have 0 lines.
+- Result: no additional submission was made; current work remains in flight.
+- Failure reason: no usable second-pass quality rows are available yet.
+- Next action: continue polling with `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`; inspect rank only after fetched usable rows increase.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label retry-aware-sync-no-new-rows` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:47:36 +09:00 - Loop 254
+
+- Part: rank usable/infra observability.
+- Goal: make second-pass rank output distinguish usable complete rows from retryable infrastructure failures.
+- Hypothesis: row-count diagnostics in the rank stdout prevent misreading production_candidates=0 as a real candidate-profile failure before usable second-pass rows exist.
+- Actions: added `row_status_summary` to `rank_ipmsm_second_pass_profiles.py`; added tests; regenerated current rank output; reran retry-aware sync.
+- Candidates/options considered: change ranking gates versus add diagnostics only. Chose diagnostics only because the existing complete-group gates already reject incomplete/infra rows correctly.
+- Metrics: rank tests passed 4; current rank output is result_files=198, result_rows=198, ok_rows=191, failed_rows=7, complete_rows=191, retryable_infra_rows=4, production_candidates=0; sync status remains secondpass running=99, secondpass2 completed=4/running=99, refretry running=2, active_nonterminal=200/open_slots=0.
+- Result: current status is clearer: there are still no usable second-pass candidate rows, only the old complete non-r1 matrix plus four retryable infra failures.
+- Failure reason: R2 target remains unmet and second-pass solves have not produced usable candidate evidence yet.
+- Next action: continue `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`; when complete second-pass rows appear, inspect profile gates before retraining.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label rank-usable-infra-summary` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:50:08 +09:00 - Loop 255
+
+- Part: stage-local result observability.
+- Goal: make the retry-aware wrapper show whether usable evidence exists per second-pass stage, not just in the combined rank.
+- Hypothesis: per-stage local result counts will prevent confusing old non-r1 complete rows with new second-pass candidate evidence.
+- Actions: added `summarize_result_root` to `sync_ipmsm_second_pass_profiles.py`; added tests; reran retry-aware sync and updated report/handoff.
+- Candidates/options considered: rely on combined rank stdout versus expose per-stage local summaries. Chose per-stage summaries because current combined complete_rows=191 comes from old non-r1 rows, not second-pass candidates.
+- Metrics: wrapper tests passed 8; current local summaries are secondpass files=0/complete=0, secondpass2 files=4/failed=4/retryable_infra=4/complete=0, refretry files=0/complete=0; rank remains production_candidates=0 and active_nonterminal=200/open_slots=0.
+- Result: current evidence is unambiguous: no usable second-pass candidate row has completed yet.
+- Failure reason: R2 target remains unmet and candidate profile evidence is still running or retrying.
+- Next action: keep polling with `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`; inspect profile rank after local second-pass complete rows increase.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label stage-local-result-summary` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:53:05 +09:00 - Loop 256
+
+- Part: retry manifest/log-path check.
+- Goal: verify whether 0-line retry logs are a path mismatch or just not-yet-emitted process output.
+- Hypothesis: if dry-run manifests point to the same process-log directories being fetched, the 0-line logs indicate queued/early retry tasks rather than a tooling mistake.
+- Actions: reran retry-aware sync; inspected retry process logs for tasks 12552-12555; inspected retry dry-run manifests for cases 72/76/80/84; updated report and handoff.
+- Candidates/options considered: alter log paths versus continue polling. Chose continue polling because manifest command paths match the checked log paths.
+- Metrics: secondpass running=99, secondpass2 completed=4/running=99 with local files=4/failed=4/retryable_infra=4/complete=0, refretry running=2, active_nonterminal=200/open_slots=0; retry process logs 12552-12555 remain 0 lines.
+- Result: no new submission or profile decision; logging path is verified.
+- Failure reason: no usable second-pass candidate rows have completed yet.
+- Next action: keep polling with `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label retry-manifest-log-path-check` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:54:52 +09:00 - Loop 257
+
+- Part: retry-aware second-pass polling.
+- Goal: check whether any second-pass/refretry task produced usable rows or opened slots.
+- Hypothesis: if active cap remains full and stage-local complete rows are still zero, profile selection and retraining remain premature.
+- Actions: ran `sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`; updated report and handoff with the unchanged state.
+- Candidates/options considered: submit hotspot fallback versus wait. Chose wait because active_nonterminal=200/open_slots=0 and the current profile-convergence tasks are still occupied.
+- Metrics: secondpass running=99/local complete=0, secondpass2 completed=4/running=99/local failed=4/retryable_infra=4/complete=0, refretry running=2/local complete=0, production_candidates=0.
+- Result: no additional submission and no retraining; current work remains in flight.
+- Failure reason: no usable second-pass candidate rows are available yet.
+- Next action: keep polling with `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label retry-aware-sync-no-change` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:56:39 +09:00 - Loop 258
+
+- Part: retry task metadata verification.
+- Goal: distinguish no-output retry tasks from failed submissions.
+- Hypothesis: scheduler task metadata can show whether retry tasks are attached/running even when stdout/stderr and process logs are empty.
+- Actions: inspected tasks 12552, 12555, 12338, and 12437 with filtered task metadata/stdout/stderr; updated report and handoff.
+- Candidates/options considered: resubmit retries again versus wait. Chose wait because retry tasks are already running.
+- Metrics: tasks 12552 and 12555 are status/state `running`, allocation 1508, Slurm 687404, with started_at set; tasks 12338 and 12437 are also running; stdout/stderr summaries remain 0 lines.
+- Result: no new submission; retry tasks are confirmed occupied.
+- Failure reason: no usable second-pass candidate rows have completed yet.
+- Next action: keep polling with `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label retry-task-metadata-running` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:58:19 +09:00 - Loop 259
+
+- Part: retry-aware sync and runtime-window check.
+- Goal: verify whether the no-result state is still normal versus a likely stall.
+- Hypothesis: scheduler metadata timestamps are UTC while process logs are KST, so process-log solve timestamps are the safer basis for elapsed solve time.
+- Actions: ran retry-aware sync/rank; checked representative task metadata; compared process-log solve timestamps with current KST/UTC time; updated report and handoff.
+- Candidates/options considered: intervene for long runtime versus keep waiting. Chose wait because process logs show solve entry around 06:59/07:13 KST, still below the prior 4.7-6.1 hour average runtime.
+- Metrics: secondpass running=99/local complete=0, secondpass2 completed=4/running=99/local complete=0/retryable_infra=4, refretry running=2/local complete=0, active_nonterminal=200/open_slots=0, production_candidates=0.
+- Result: no new submission and no retrain; current solves remain in the expected wait window.
+- Failure reason: no usable second-pass candidate rows have completed yet.
+- Next action: keep polling with `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label retry-sync-timezone-check` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 07:59:40 +09:00 - Loop 260
+
+- Part: retry-aware second-pass polling.
+- Goal: check for usable second-pass rows, retry submissions, or open slots.
+- Hypothesis: if stage-local complete rows remain zero and active cap is full, no submission or retrain should run.
+- Actions: ran `sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`; updated handoff with unchanged status.
+- Candidates/options considered: submit fallback coverage versus wait. Chose wait because active_nonterminal=200/open_slots=0 and no second-pass usable rows exist.
+- Metrics: secondpass running=99/local complete=0, secondpass2 completed=4/running=99/local failed=4/retryable_infra=4/complete=0, refretry running=2/local complete=0, production_candidates=0.
+- Result: no new submission and no retrain.
+- Failure reason: current solve/retry work remains in flight.
+- Next action: keep polling with `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label retry-aware-sync-no-change-2` failed because no local Codex SQLite DB was found.
+
+## 2026-06-21 08:00:54 +09:00 - Loop 261
+
+- Part: retry-aware second-pass blocked audit.
+- Goal: determine whether any local action remains toward R2>=0.95 before second-pass FEA rows complete.
+- Hypothesis: if retry-aware sync remains unchanged with active cap full and no usable second-pass rows, further progress requires external FEA completion.
+- Actions: ran `sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`; updated report and handoff.
+- Candidates/options considered: submit fallback coverage, retry again, retrain, or wait. Chose wait because active_nonterminal=200/open_slots=0, retry cases are already occupied, and no usable second-pass candidate rows exist.
+- Metrics: secondpass running=99/local complete=0, secondpass2 completed=4/running=99/local failed=4/retryable_infra=4/complete=0, refretry running=2/local complete=0, production_candidates=0.
+- Result: no safe local action remains in this moment; the same external-completion blocker has repeated across consecutive goal turns.
+- Failure reason: all capacity is occupied by running FEA and no usable second-pass results have completed.
+- Next action: after external FEA state changes, rerun `python sync_ipmsm_second_pass_profiles.py --rank --retry-infra-failed-results --submit-retries`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label retry-aware-sync-external-block` failed because no local Codex SQLite DB was found.
+
+## 2026-06-23 06:10:44 +09:00 - Loop 262
+
+- Part: second-pass final fetch/rank report.
+- Goal: report current work and determine whether completed non-r1 second-pass profiles justify changing production settings.
+- Hypothesis: if all second-pass/refretry probes are fetched and no profile passes the ranking gates, production should remain on `mesh_time_fine`.
+- Actions: checked scheduler DB status, let the pending fetch finish, reran `rank_ipmsm_second_pass_profiles.py`, updated `FEA_MESH_TIME_PROFILE_OPTIMIZATION_REPORT.md`, and updated handoff.
+- Candidates/options considered: switch to a faster/new profile versus keep current production settings. Chose keep current settings because no non-reference profile passed all gates.
+- Metrics: DB active_nonterminal=0/open_slots=200; local results nonr1=194 files, refretry=2, secondpass=99, secondpass2=100; final rank result_files=395/result_rows=399/ok_rows=388/failed_rows=11/complete_rows=388/retryable_infra_rows=8/production_candidates=0; closest `time_150` core-loss p90 error is 5.533% versus the 5% gate.
+- Result: second-pass simulation submission and fetch are complete enough for the profile decision; no production profile change.
+- Failure reason: all candidates still miss at least one production gate, mainly core-loss p90 error and/or runtime ratio.
+- Next action: use open capacity for a new non-overlapping coverage batch or design a stricter core-loss-focused second-pass profile; do not switch production away from `mesh_time_fine`.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label secondpass-final-rank-report` failed because no local Codex SQLite DB was found.
+
+## 2026-07-11 01:10:47 +09:00 - IPMSM v2 implementation
+
+- Part: full-360 FEA/beta, v2 data/surrogate, and nested NSGA-II implementation.
+- Goal: create an executable path to R2>=0.95 and constrained volume/efficiency optimization without accepting low-quality FEA labels.
+- Hypothesis: fixing hidden inputs, symmetry/beta frames, grouped splits, calibration leakage, and uncertainty gates will remove the known structural blockers.
+- Actions: implemented signed back-EMF zero calibration, loaded MTPA validation, non-overlapping grouped DOE, exact batch merge, physics/repeat gates, 5-seed ensemble plus isolated conformal calibration, strict bundle loading, batched inner control, and NSGA-II FEA export.
+- Candidates/options: rejected loaded torque-max electrical-zero calibration, mixed no-load/load training fingerprints, output-IQR deletion, and optimizer use of sub-threshold models.
+- Metrics: full local suite passed 321 tests; touched Python compile passed; pymoo 0.6.2 dependency probe and `git diff --check` passed.
+- Result: implementation and workflow guide are complete; optimizer refuses any bundle whose eight primary test R2 values are below 0.95.
+- Failure reason: no new AEDT foundation data was solved in this loop, so empirical R2>=0.95 is not yet demonstrated.
+- Next action: calibrate zero, run the first <=200 active-case v2 FEA windows, merge/validate, train, and add excluded-hash batches until the strict gate passes.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label ipmsm-v2-implementation` failed because no local Codex SQLite DB was found.
+
+## 2026-07-11 01:34:00 +09:00 - IPMSM v2 scheduler project and beta-zero submission
+
+- Part/goal: deploy the v2 workflow and start physical dq-zero calibration without self-gating on the shared campaign cap.
+- Actions: pushed commits `9e91153`, `499c005`, and `04c96b8`; created scheduler project `PYAEDT_MOTOR_IPMSM_V2`; deployed commit `04c96b8` on five accounts; added a fail-closed project-active cap of 100.
+- Metrics: full suite 327/327 and scheduler-helper 17/17 pass; live project active count=2; task `26092` is 600 rpm and task `26093` is 1200 rpm, each 4 CPU/32 GB, `fea_bursty`, `pyaedt2026v1`, AEDT v252.
+- Result: both deterministic-dedupe no-load solves are submitted and queued; scheduler currently reports zero fit slots.
+- Scope note: these are 12S8P topology/electrical-zero cases, not authoritative actual-motor MTPA points; the PPT rated-point and winding-property conflicts remain unresolved.
+- Next action: monitor 26092/26093, fetch filtered outputs, merge, run zero-manifest analysis, then generate the loaded beta sweep and first 196-case DOE in project-active windows of at most 100.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label ipmsm-v2-project-beta-zero-submit` failed because no local Codex SQLite DB was found.
+
+## 2026-07-11 02:18:12 +09:00 - IPMSM v2 running calibration and campaign hardening
+
+- Part/goal: start the two-speed dq-zero solve and make 100-task v2 campaigns safely resumable and collectible.
+- Actions: raised smoke priority without bypassing physical gates; tasks 26092/26093 attached to harry261/n108; added one-case campaign submit/collect, strict history/dedupe/result/fingerprint/plan matching, and two-speed zero-manifest gates.
+- Scheduler: committed/pushed `31c3fcc` and `3f3c62f`; restarted through PID 179592; verified health, `$HOME` remote-file reads, task project fields, and server `max_active_tasks=100`; running tasks survived.
+- Metrics: both logs reached `Solving design setup PPT_Transient` with no error markers; pyaedt suite 360/360 and scheduler suite 266/266 pass; project deployed at `b308ab3` on five accounts.
+- Decision: v2 ground truth remains homogeneous `reference_ultra`; `mesh_time_fine` is ~22% faster but fails core/total-loss fidelity gates. Campaign timeout minimum is 12 h.
+- Result: solve and result-recovery path are live; no empirical zero/R2/Pareto result exists yet.
+- Next action: on task completion, fail-closed fetch/merge, create the zero manifest, then submit loaded beta sweep and the first 196-case DOE in <=100 active windows.
+- Token usage: `codex_ops.py record-current-codex-thread-usage --label ipmsm-v2-running-calibration-campaign-hardening` failed because no local Codex SQLite DB was found.
+
+## 2026-07-11 02:36:07 +09:00 - Beta-zero external solve wait audit
+
+- Part/goal: determine whether calibration results are ready for zero manifest and downstream DOE.
+- Evidence: tasks 26092/26093 remain running with exit_code null and result bytes 0; logs contain no error marker and remain at `Solving design setup PPT_Transient`.
+- Runtime health: allocation 7859 is active, last_active_at 17:35:58 UTC, node load 19.8%, memory used 31.5%, 706533 MB free, FEA requested/owned CPUs 8/64.
+- Result: no safe fetch/merge/analyze action exists until AEDT writes terminal result rows; deterministic task IDs remain authoritative and must not be resubmitted.
+- Next action: after either task changes state, inspect terminal status/logs; only if both complete with exit 0 run strict fetch, merge, and two-speed zero analysis.
+
+## 2026-07-11 13:41:20 +09:00 - Beta calibration resumed and loaded sweep launched
+
+- Part/goal: recover completed zero cases, establish physical dq zero, and advance the quality-gated MTPA/data campaign without another orchestration stop.
+- Hypothesis: signed two-speed back-EMF agreement plus a loaded beta sweep can validate the dq convention before expensive foundation DOE.
+- Actions: strictly fetched/merged tasks 26092/26093, generated/applied the zero manifest, submitted tasks 26094-26103, added collector `--wait`, voltage R2 gating, and background collect/analyze processes.
+- Candidates/options: kept homogeneous `reference_ultra`; rejected `time_150` as training fidelity because core-loss p90 error is 5.533% > 5%; staged DOE as 700 plus conditional non-overlapping 300.
+- Metrics: zero `-91.6640201073 deg`, speed deviation `0.04994 deg`, resultant `0.9999996201`; beta tasks active 10/failures 0; full suite 371/371; project cap 100.
+- Result: commits `5f4e720`/`94b2268` pushed; collector PID 151580 and beta-analyze watcher PID 61192 survive the turn and write only after strict success.
+- Failure reason: the earlier stop was an orchestration boundary nine minutes before zero tasks completed, not an AEDT failure; no current failure exists.
+- Next action: inspect background outcome, deploy the latest commit after current tasks finish, then submit stage1 foundation windows and train against primary 8/8 plus voltage R2>=0.95 gates.
+- Token usage: current goal reported 1,664,726 tokens at the mid-loop check; `codex_ops.py` recording failed because no local Codex SQLite DB was found.
+
+## 2026-07-11 14:33:19 +09:00 - Strict MTPA pass and stage1 foundation launch
+
+- Part/goal: close the beta convention gate and start quality-preserving surrogate foundation data with autonomous capped refill.
+- Hypothesis: exact loaded-beta replay plus homogeneous reference-ultra grouped DOE can support the R2>=0.95 and constrained NSGA-II path without fidelity leakage.
+- Actions: collected tasks 26094-26103, passed strict beta replay, added/validated campaign runner and DB-filtered history API, restarted scheduler, deployed `f0941ea`, and launched stage1 plus validation/training watchers.
+- Candidates/options: selected best beta 30 deg; retained stage1 700 plus conditional non-overlapping stage2 300; rejected faster `time_150` as training fidelity.
+- Metrics: beta 10/10, torque 44.9647 Nm, max dq error 3.51e-7; scheduler 275/275 and PyAEDT 395/395 tests pass; first stage1 wave 100 unique tasks, cap 100.
+- Result: scheduler `8c1eefb` and PyAEDT `f0941ea` pushed; runner PID 179528 and train watcher PID 157424 are live; task IDs 26104-26203 use the required 4 CPU/32 GB/12 h FEA contract.
+- Failure reason: no current failure; empirical stage1 dataset/R2/Pareto evidence remains pending external FEA completion.
+- Next action: node smoke audit, continuous refill/atomic collect, strict validate/train, conditional stage2 only on gate failure, then nested NSGA-II and reference-ultra Pareto verification.
+- Token usage: current goal accounting is available to the orchestrator; local `codex_ops.py` recording remains unavailable without the Codex SQLite DB.
+
+## 2026-07-11 14:45:21 +09:00 - Stage1 first-wave node smoke
+
+- Part/goal: verify the first capped foundation wave reaches Maxwell solve safely across deployed accounts/nodes.
+- Hypothesis/actions: sampled short logs on n110/n111/n112/n113/n114/n116 and checked Slurm accounting for the only failure without mutating tasks.
+- Candidates/options: kept 32 GB and retry limit 1 because task 26141 MaxRSS was 2.08 GiB and Slurm showed neither OOM nor allocation cancellation; avoided an unsupported memory-policy change.
+- Metrics: 100 active/queued slots, six node smokes reached `Solving design setup PPT_Transient`; task 26141 step 730781.2 ended SIGKILL 9:0, and retry 26204 was queued.
+- Result/failure reason: bootstrap/module/AEDT startup passed on all sampled nodes; 26141 is an unknown external/host SIGKILL, not a confirmed cgroup OOM.
+- Next action: let retry 26204 run, stop only if the same case exceeds its one-retry limit, otherwise continue capped refill and atomic collection.
+- Token usage: local recorder remains unavailable because no Codex SQLite DB is present.
+
+## 2026-07-11 14:51:00 +09:00 - Stage1 apparent-stall audit
+
+- Part/goal: distinguish a stopped campaign from normal long-running Maxwell FEA.
+- Actions/metrics: verified runner PID 179528 and watcher PID 157424 alive; filtered API advanced from running=52/queued=48 to running=65/attaching=13/queued=22, with 100 nonterminal tasks and retry 26204 queued.
+- Result/failure reason: campaign is progressing through node attachment/solve, not stopped; no case has completed yet, and the only failure remains task 26141's unclassified exit 137.
+- Next action: keep the capped runner active and inspect retry/result evidence when the first solves finish; do not change memory from the current non-OOM evidence.
+
+## 2026-07-11 17:05:45 +09:00 - Stage1 recovery and optimization continuation
+
+- Part/goal: restore the interrupted local orchestration and complete the automatic R2 gate-to-NSGA-II-to-Pareto-FEA path.
+- Hypothesis: homogeneous `reference_ultra` data plus strict provenance/checkpoint gates can improve model quality without mixed-fidelity leakage or duplicate FEA.
+- Actions: safely resumed Stage1, added conditional Stage2 and optimization continuations, strict bundle/provenance/comparator gates, atomic merge/output publication, hard-kill checkpoints, and a waiting optimization watcher.
+- Candidates/options: retained Stage1 700 plus non-overlapping conditional Stage2 300, cap 100, primary8+voltage R2>=0.95, max 12 Pareto candidates x 2 operating points; kept analytical beta only as an inner-search seed.
+- Metrics: commit `97d12b3` pushed; 485/485 tests pass; scheduler project max_active=100; latest Stage1 completed=49/failed-history=1/queued=2/running=98; PIDs runner/train/Stage2/optimization are 186176/72248/83936/89456.
+- Result: the campaign is progressing and auto-refilling; all downstream gates are connected, while no R2 or Pareto result is claimed before FEA completion.
+- Failure reason: the apparent stop came from unsafe Windows `os.kill(pid,0)` liveness probing; WinAPI read-only probing now covers both continuation and optimizer checkpoint claims.
+- Next action: monitor filtered Stage1 summaries, then inspect the atomic validation/R2 decision and conditional Stage2/NSGA/Pareto evidence as each watcher completes.
+- Token usage: local `codex_ops.py` recorder remains unavailable because no Codex SQLite DB is present.
+
+## 2026-07-11 18:02:06 +09:00 - Windows mapped-drive atomic publication
+
+- Part/goal: restore fresh replacement-plan publication on mapped `Y:` while preserving no-overwrite and pair rollback/recovery guarantees.
+- Actions: added a shared publisher with Windows remote-drive/WinError-50 atomic rename, file-identity receipts, optional persisted proof, and integrated every production hard-link publication site.
+- Metrics: focused 96/96 and full 511/511 tests pass; actual `Y:` temporary CLI publication, race preservation, rollback ownership, and proof recovery passed.
+- Result/failure reason: mapped-drive hard links are no longer required; unrelated errors and foreign destination identities remain fail-closed, and no live runner/scheduler/pipeline action was executed.
+- Next action: parent can publish the regenerated Stage1 plan and restart through the existing guarded workflow, then monitor filtered scheduler evidence.
+- Token usage: `codex_ops.py` was attempted; the local Codex SQLite database is unavailable.
+## 2026-07-11 18:30:48 +09:00 - IPMSM v2 campaign recovery
+- Part/goal: recover the stopped 700-case Stage1 chain without admitting duplicate or failed FEA rows.
+- Hypothesis: local orchestrators were stopped after unsafe ATTACHING recovery duplicated executions; tokenized launch recovery plus result-row auditing would permit safe refill.
+- Actions: pushed/deployed scheduler `54152b8`, backed up/checked SQLite, restarted once, pushed PyAEDT `0145a67`/`be3dff7`, audited 116 completed results, and generated r2 with six clean-retry IDs plus the deterministic failed-geometry replacement.
+- Candidates/options: accepting bit-identical duplicate rows was rejected; exact one-row results or clean reruns are required.
+- Metrics: scheduler tests 278/278; PyAEDT focused 130/130 and full 511/511; r2 700 rows/112 designs/28 repeats/hash `6ef6dae7...01e3`; latest runner scheduler_ok=122/result_ok=120/active=100/submitted=78.
+- Result: scheduler has no post-fix recovered/recovery_held events; runner `136612` and training/Stage2/optimization watchers `201580/183904/184348` are alive.
+- Failure reason: prior local runner was intentionally stopped because legacy startup recovery relaunched ATTACHING work and result files accumulated duplicate rows; one geometry also returned analysis=False.
+- Next action: monitor the remaining pre-fix tasks for more duplicate rows, then let strict R2, conditional Stage2, NSGA-II, and reference-ultra Pareto FEA gates proceed.
+- Token usage: unavailable; `codex_ops.py` previously reported no local Codex SQLite source.
+
+## 2026-07-11 19:09:50 +09:00 - Independent R2, physical beta, and strict speed hardening
+- Part/goal: make the post-Stage1 path prove the requested model quality, physical beta, Pareto design, and speed comparison without selection or legacy-fidelity leakage.
+- Hypothesis: untouched Stage2 test rows, local beta FEA probes, and strict-v2 paired profiles remove the remaining indirect evidence gaps.
+- Actions: pushed `129b2ba`, `550ae3a`, `277a035`, and `19a82bf`; connected speed watcher `42256`; removed one orphaned unittest process after exact identity verification.
+- Candidates/options: rejected legacy symmetry/beta speed references and single-point beta validation; retained the explicit conservative 65.1 Nm@1200 plus 7.5 kW@5000 target assumption.
+- Metrics: full 523/523 tests pass; final combined audit is Stage2-only 66 rows/11 geometries; Pareto FEA is up to 12x2x3=72 rows and requires at least 2 validated candidates when multiple are planned.
+- Result: live Stage1 remains active=100 with scheduler_ok=137/result_ok=136/missing=463/submitted=93 and no runner error hit; only 3 legacy active tasks remain.
+- Failure reason: prior speed plan reused legacy symmetry/beta rows, combined R2 reused Stage1-selected test evidence, and final FEA tested beta at one point only.
+- Next action: finish Stage1, evaluate strict R2/conditional Stage2, run checkpointed NSGA-II plus beta-neighbor FEA, then submit/rank the strict-v2 24-case speed experiment.
+- Token usage: unavailable because the local Codex SQLite source is absent.
+
+## 2026-07-11 19:40:00 +09:00 - Conditional Stage3-to-optimization routing
+- Part/goal: remove the only post-Stage2 orchestration gap while Stage1 FEA continues at cap 100.
+- Hypothesis/actions: the old optimization watcher consumed only the Stage2 decision; verified its encoded command, stopped PID 184348 only, and atomically replaced its PID file with smart watcher 216116.
+- Metrics: Stage1 scheduler_ok/result_ok=148/148, active=100, missing=452, retry=0; all six runner/watchers are alive; Stage3 watcher=177604.
+- Result: Stage2 `complete` routes directly to NSGA-II; `combined_r2_failed` waits for sealed Stage3 and requires its `complete` decision before NSGA-II.
+- Failure reason: the previous watcher would terminate on the intentional Stage2 R2-failure branch instead of consuming the Stage3 continuation decision.
+- Next action: continue filtered Stage1 monitoring; no extra submission while project active remains 100/100.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-11 22:11:09 +09:00 - Live IPMSM pipeline dashboard and durable recovery
+- Part/goal: expose the full Stage1-to-Pareto/speed pipeline, model R2, physical beta, scheduler nodes/tasks, and process health in one read-only local Web UI.
+- Hypothesis/actions: bounded artifact/log readers plus cached scheduler/API audits can report exact result evidence without mutating live FEA; deployed loopback dashboard and PT15M watchdog, replaced the blocking legacy watcher with the durable supervisor, and kept the project cap at 100.
+- Candidates/options: public hosting was rejected because the UI reads internal UNC artifacts and scheduler state; status freshness and scheduler liveness remain separate signals.
+- Metrics: commit `b69a252`; focused 27/27 and full 586/586 tests; live HTTP 200/CSP/nosniff/no CORS; Stage1 scheduler_ok/result_ok=256/256, active=100, missing=344, retry=0.
+- Result/failure reason: dashboard and pipeline tasks are Running; the apparent stall was dead legacy orchestration plus one watcher holding the supervisor guard, and the durable chain has remained alive since 21:45 KST.
+- Next action: monitor `http://127.0.0.1:8765` through Stage1 completion and let the sealed surrogate/Stage2/Stage3/NSGA-II/Pareto/speed gates continue automatically.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

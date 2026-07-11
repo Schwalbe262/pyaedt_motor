@@ -676,3 +676,54 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `analyze_ipmsm_output_outliers.py` applies the same IQR rule per target and writes metric-level counts plus combined row counts.
 - Evidence: p092 combined and replay-only runs matched training removal counts exactly, and both showed removals dominated by efficiency and torque targets, with solid loss next.
 - Remaining risk: target attribution does not identify whether the root cause is simulation physics, report extraction, operating point physics, or model/outlier policy.
+
+## 2026-07-11 17:05:45 +09:00 - Insight 73
+
+- Source loop: `note.md` 2026-07-11 Stage1 recovery and optimization continuation.
+- Improvement: on Windows, process-liveness checks must use read-only `OpenProcess` plus `GetExitCodeProcess`, never `os.kill(pid, 0)`.
+- Before: the POSIX-style probe terminated the live Stage1 runner while trying to test liveness, and the same unsafe pattern remained in the NSGA checkpoint claim.
+- After: Stage2/optimization continuation and NSGA checkpoint recovery use WinAPI read-only probes; `os.kill(pid, 0)` remains only behind a non-Windows branch.
+- Evidence: Stage1 resumed without duplicate tasks, progressed to 49 completed while holding cap 100, the four local processes remained alive, and the Windows no-`os.kill` regression plus the full 485-test suite passed.
+- Remaining risk: external wrappers outside these Python entrypoints must still be audited before adding PID probes.
+
+## 2026-07-11 18:02:06 +09:00 - Insight 74
+
+- Source loop: `note.md` Windows mapped-drive atomic publication.
+- Improvement: use Windows no-replace rename directly on mapped/UNC drives and as the narrow WinError-50 fallback; retain destination file identity and an optional pre-publication proof for rollback/recovery.
+- Before: fresh artifact writers depended on `os.link`, which can fail with WinError 50 or stall on mapped drives and cannot retain an inode stage after rename fallback.
+- After: one shared helper preserves atomic no-overwrite behavior, verifies receipt ownership before rollback, and lets multi-file transactions recover a hard-kill orphan from a persisted proof.
+- Evidence: actual `Y:` no-replace/ownership/proof tests and mocked error/race tests passed, along with focused 96/96 and full 511/511 suites.
+- Remaining risk: file-identity rollback remains filesystem-dependent and intentionally refuses cleanup when the mapped filesystem cannot supply or revalidate a nonzero inode.
+## 2026-07-11 18:30:48 +09:00 - Insight 75
+
+- Source loop: `note.md` IPMSM v2 campaign recovery.
+- Improvement: persist a unique ATTACHING claim token and `launch_started_at` before any remote launch side effect; startup recovery may requeue only tokened claims whose launch boundary was never crossed.
+- Before: a restart blindly requeued unacknowledged ATTACHING rows, and one task was relaunched up to eight times while remote result paths accumulated duplicate rows.
+- After: queued-to-ATTACHING and terminal updates use token CAS; ambiguous launched claims are held rather than replayed, and result consumers independently require exactly one valid row.
+- Evidence: scheduler 278/278 tests pass; after deploying `54152b8`, restart produced zero recovered/recovery_held events, while new tasks populated attach tokens/launch timestamps and the campaign safely returned to active cap 100.
+- Remaining risk: tasks already launched by the legacy scheduler can still finish with duplicate rows, so they remain fail-closed and require deterministic clean-retry IDs.
+## 2026-07-11 19:09:50 +09:00 - Insight 76
+
+- Source loop: `note.md` Independent R2, physical beta, and strict speed hardening.
+- Improvement: after a test set triggers conditional data acquisition, final acceptance must use a separately bound untouched audit cohort rather than aggregating the triggering test rows again.
+- Before: Stage1 test performance selected Stage2, while combined-model test metrics pooled Stage1 and Stage2 test geometries and could reuse selection evidence.
+- After: combined training keeps fit/calibration partitions unchanged but restricts decisive primary8+voltage metrics to the exact Stage2 test case plan, whose path, SHA256, row/group counts, and ordered case-ID hash are recorded and revalidated on resume.
+- Evidence: the real plans reduce the decisive cohort from 204 pooled rows to 66 Stage2-only rows across 11 geometries with zero Stage1 test rows; focused 113 tests and the full 523-test suite pass.
+- Remaining risk: 66 rows may have wider metric uncertainty, so a failure must trigger genuinely fresh data rather than relaxing the R2 threshold or reusing the audit cohort.
+
+## 2026-07-11 19:40:00 +09:00 - Insight 77
+
+- Source loop: `note.md` conditional Stage3-to-optimization routing.
+- Improvement: downstream optimization must select the latest successful continuation decision, not assume the first conditional acquisition stage passed.
+- Before: the optimization watcher accepted only Stage2 and exited on the valid `combined_r2_failed` state.
+- After: it branches on the exact Stage2 terminal status, waits for Stage3 only when required, requires Stage3 `complete`, and passes that selected decision unchanged into the audited optimizer.
+- Evidence: watcher PID 216116 is alive; decoded-command checks confirm both waits, Stage3 completion guard, selected upstream argument, and cap 100.
+- Remaining risk: the watcher is a live encoded process; a host reboot still requires the same identity-checked relaunch procedure.
+
+## 2026-07-11 22:11:09 +09:00 - Insight 78
+- Source loop: `note.md` live IPMSM pipeline dashboard and durable recovery.
+- Improvement: derive operator status from verified artifacts plus scheduler liveness, and treat local PID markers as descriptive rather than authoritative execution locks.
+- Before: dead orchestration could look healthy, while a surviving legacy watcher blocked restart; conversely, long FEA with 100 active tasks could look stale because result counts naturally pause.
+- After: active scheduler work keeps the dashboard running, zero active work plus a verified 12-minute progress stall degrades it, and Task Scheduler relaunches a single durable supervisor/dashboard via PT15M IgnoreNew watchdogs.
+- Evidence: the UI exposed the zero/refill gap, the recovered campaign returned to 100/100 with result_ok=256, 27 focused and 586 full tests passed, and live response/security checks plus independent final review found no blockers.
+- Remaining risk: loopback availability still depends on the Windows host and scheduler/UNC reachability; warnings remain visible when only one evidence source is fresh.
