@@ -1,0 +1,1555 @@
+"""Read-only live state collection for the IPMSM v2 dashboard.
+
+The collector deliberately exposes a small allow-listed view of scheduler and
+artifact state.  It never submits tasks, opens result CSVs in full, executes a
+pipeline action, or signals a process.
+"""
+
+from __future__ import annotations
+
+import csv
+import copy
+import hashlib
+import json
+import math
+import os
+import re
+import threading
+import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable, Mapping, Sequence
+from urllib import error, parse, request
+
+import supervise_ipmsm_v2_pipeline as pipeline_supervisor
+
+
+SCHEMA_VERSION = "ipmsm-v2-dashboard-status-v1"
+DEFAULT_PROJECT = "PYAEDT_MOTOR_IPMSM_V2"
+DEFAULT_SCHEDULER_URL = "http://127.0.0.1:8000"
+DEFAULT_CONTRACT = Path(
+    "simul_log_smoke/beta_zero_recovery_26092_26093/"
+    "foundation_pipeline_contract_v1.json"
+)
+DEFAULT_REFRESH_SECONDS = 5.0
+DEFAULT_SCHEDULER_REFRESH_SECONDS = 15.0
+DEFAULT_TIMEOUT_SECONDS = 3.0
+DECISION_AUDIT_CACHE_SECONDS = 300.0
+CONTRACT_AUDIT_CACHE_SECONDS = 300.0
+MAX_TAIL_BYTES = 128 * 1024
+MAX_JSON_BYTES = 16 * 1024 * 1024
+ACTIVE_STATUSES = frozenset({"queued", "attaching", "running"})
+TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+TASK_PREFIXES = {
+    "stage1": "ipmsm-v2-foundation-s1-",
+    "stage2": "ipmsm-v2-foundation-s2-",
+    "stage3": "ipmsm-v2-foundation-s3-",
+    "pareto": "ipmsm-v2-pareto-fea-",
+    "speed": "ipmsm-profile-thirdpass-speed-strict-v2-v1-",
+}
+
+STATUS_RE = re.compile(
+    r"^run_ipmsm_v2 "
+    r"scheduler_ok=(?P<scheduler_ok>\d+) "
+    r"result_ok=(?P<result_ok>\d+) "
+    r"active=(?P<active>\d+) "
+    r"pending=(?P<pending>\d+) "
+    r"missing=(?P<missing>\d+) "
+    r"retry=(?P<retry>\d+) "
+    r"project_active=(?P<project_active>\d+) "
+    r"submitted=(?P<submitted>\d+) "
+    r"elapsed_s=(?P<elapsed_s>\d+(?:\.\d+)?)$"
+)
+SETTLING_RE = re.compile(r"^wait_ipmsm_v2_result_audit pending=(?P<pending>\d+)\b")
+
+TARGET_LABELS = {
+    "output_torque_last_avg_nm": "평균 토크",
+    "output_torque_last_max_nm": "최대 토크",
+    "output_solidloss_last_avg_w": "자석/도체 손실",
+    "output_coreloss_last_avg_w": "철손",
+    "output_ld_last_avg_h": "Ld",
+    "output_lq_last_avg_h": "Lq",
+    "output_total_loss_last_avg_w": "총손실",
+    "output_efficiency_last_pct": "효율",
+    "output_phase_voltage_last_peak_abs_v": "상전압 피크",
+}
+
+PROCESS_LABELS = {
+    "supervisor": "Durable pipeline supervisor",
+    "stage1_runner": "Stage 1 FEA 러너",
+    "stage1_training": "Surrogate 학습 감시",
+    "stage2": "Stage 2 감시",
+    "stage3": "Stage 3 감시",
+    "optimization": "NSGA-II / Pareto 감시",
+    "speed": "속도 검증 감시",
+}
+
+_DECISION_CACHE_LOCK = threading.Lock()
+_DECISION_CACHE: dict[tuple[str, str], tuple[int, int, float, dict[str, Any]]] = {}
+_CONTRACT_CACHE_LOCK = threading.Lock()
+_CONTRACT_CACHE: dict[str, tuple[int, int, float, dict[str, Any], dict[str, Any]]] = {}
+
+
+class DashboardDataError(RuntimeError):
+    """A live input is missing, malformed, or temporarily unavailable."""
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise DashboardDataError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_constant(value: str) -> None:
+    raise DashboardDataError(f"non-finite JSON constant: {value}")
+
+
+def read_json_file(path: Path, *, max_bytes: int = MAX_JSON_BYTES) -> dict[str, Any]:
+    try:
+        size = path.stat().st_size
+        if size <= 0 or size > max_bytes:
+            raise DashboardDataError(f"JSON size is outside the dashboard limit: {size}")
+        payload = path.read_bytes()
+        value = json.loads(
+            payload.decode("utf-8-sig"),
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_constant,
+        )
+    except DashboardDataError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise DashboardDataError(f"cannot read JSON artifact: {path.name}") from exc
+    if not isinstance(value, dict):
+        raise DashboardDataError(f"JSON artifact is not an object: {path.name}")
+    return value
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return parsed
+
+
+def _safe_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _clip_text(value: Any, limit: int = 120) -> str:
+    text = str(value or "").strip().replace("\r", " ").replace("\n", " ")
+    return text[:limit]
+
+
+def _iso_timestamp(epoch: float | None = None) -> str:
+    return datetime.fromtimestamp(epoch or time.time(), timezone.utc).isoformat()
+
+
+def _parse_scheduler_time(value: Any) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _normalized_scheduler_time(value: Any) -> str:
+    parsed = _parse_scheduler_time(value)
+    return parsed.isoformat() if parsed is not None else ""
+
+
+def _read_complete_tail_lines(path: Path, limit: int = MAX_TAIL_BYTES) -> list[str]:
+    """Read only complete newline-terminated lines from a bounded file tail."""
+
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            offset = max(0, size - limit)
+            stream.seek(offset)
+            payload = stream.read(limit)
+    except OSError as exc:
+        raise DashboardDataError(f"cannot read runner status log: {path.name}") from exc
+    if offset:
+        newline = payload.find(b"\n")
+        payload = b"" if newline < 0 else payload[newline + 1 :]
+    if not payload.endswith((b"\n", b"\r")):
+        newline = payload.rfind(b"\n")
+        payload = b"" if newline < 0 else payload[: newline + 1]
+    try:
+        return payload.decode("utf-8", errors="replace").splitlines()
+    except UnicodeError as exc:  # pragma: no cover - errors=replace is defensive
+        raise DashboardDataError(f"cannot decode runner status log: {path.name}") from exc
+
+
+def parse_campaign_log(path: Path, *, total_cases: int, cap: int) -> dict[str, Any]:
+    lines = _read_complete_tail_lines(path)
+    samples: list[dict[str, Any]] = []
+    settling = 0
+    for line in lines:
+        match = STATUS_RE.fullmatch(line.strip())
+        if match:
+            row = {name: int(value) for name, value in match.groupdict().items() if name != "elapsed_s"}
+            row["elapsed_s"] = float(match.group("elapsed_s"))
+            samples.append(row)
+            settling = 0
+        settle_match = SETTLING_RE.match(line.strip())
+        if settle_match:
+            settling = int(settle_match.group("pending"))
+    if not samples:
+        raise DashboardDataError("runner log contains no complete status record")
+    current = dict(samples[-1])
+    count_total = sum(
+        current[name] for name in ("scheduler_ok", "active", "pending", "missing", "retry")
+    )
+    warnings: list[str] = []
+    if count_total != total_cases:
+        warnings.append(f"Stage 1 상태 합계가 계획 {total_cases}건과 일치하지 않습니다.")
+    if current["result_ok"] > current["scheduler_ok"]:
+        warnings.append("검증 결과 수가 스케줄러 완료 수보다 큽니다.")
+    if current["project_active"] > cap:
+        warnings.append("프로젝트 활성 작업 수가 설정된 cap을 초과했습니다.")
+
+    rate = 0.0
+    latest_elapsed = current["elapsed_s"]
+    window = [row for row in samples if latest_elapsed - row["elapsed_s"] <= 6 * 3600]
+    if len(window) >= 2:
+        base = window[0]
+        span_hours = (latest_elapsed - base["elapsed_s"]) / 3600.0
+        completed_delta = current["result_ok"] - base["result_ok"]
+        if span_hours >= 0.25 and completed_delta >= 0:
+            rate = completed_delta / span_hours
+    remaining = max(0, total_cases - current["result_ok"])
+    eta_hours = remaining / rate if rate > 0 else None
+    try:
+        modified = path.stat().st_mtime
+    except OSError:
+        modified = None
+    current.update(
+        {
+            "total": total_cases,
+            "cap": cap,
+            "progress_pct": round(100.0 * current["result_ok"] / total_cases, 2),
+            "scheduler_progress_pct": round(100.0 * current["scheduler_ok"] / total_cases, 2),
+            "completion_rate_per_hour": round(rate, 2),
+            "eta_hours": round(eta_hours, 1) if eta_hours is not None else None,
+            "settling_results": settling,
+            "log_updated_at": _iso_timestamp(modified) if modified else "",
+            "log_age_seconds": round(max(0.0, time.time() - modified), 1) if modified else None,
+            "source_file": path.name,
+            "source_mtime_reliable": False,
+            "warnings": warnings,
+            "source_status": "degraded" if warnings else "ok",
+        }
+    )
+    return current
+
+
+def find_runner_log(artifact_dir: Path) -> Path:
+    candidates = sorted(
+        artifact_dir.glob("foundation_stage1_runner*.stderr.log"),
+        key=lambda item: item.stat().st_mtime if item.exists() else 0.0,
+        reverse=True,
+    )
+    for candidate in candidates:
+        try:
+            if any(STATUS_RE.fullmatch(line.strip()) for line in _read_complete_tail_lines(candidate)):
+                return candidate
+        except DashboardDataError:
+            continue
+    raise DashboardDataError("no Stage 1 runner status log is available")
+
+
+def _boot_epoch() -> float | None:
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            get_tick_count = ctypes.windll.kernel32.GetTickCount64
+            get_tick_count.restype = ctypes.c_ulonglong
+            return time.time() - float(get_tick_count()) / 1000.0
+        except (AttributeError, OSError, ValueError):
+            return None
+    try:
+        with Path("/proc/stat").open("r", encoding="ascii") as stream:
+            for line in stream:
+                if line.startswith("btime "):
+                    return float(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _pid_running_without_signal(pid: int) -> str:
+    """Return alive/stopped/unknown without ever signaling the process."""
+
+    if os.name != "nt":
+        proc_path = Path("/proc") / str(pid)
+        if proc_path.is_dir():
+            return "alive"
+        return "stopped" if Path("/proc").is_dir() else "unknown"
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_process.restype = wintypes.HANDLE
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        get_exit_code.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = (wintypes.HANDLE,)
+        close_handle.restype = wintypes.BOOL
+        handle = open_process(0x1000, False, pid)
+        if not handle:
+            last_error = ctypes.get_last_error()
+            if last_error == 87:
+                return "stopped"
+            return "unknown"
+        try:
+            exit_code = wintypes.DWORD()
+            if not get_exit_code(handle, ctypes.byref(exit_code)):
+                return "unknown"
+            return "alive" if exit_code.value == 259 else "stopped"
+        finally:
+            close_handle(handle)
+    except (AttributeError, OSError, ValueError):
+        return "unknown"
+
+
+def inspect_pid_file(path: Path) -> str:
+    try:
+        modified = path.stat().st_mtime
+        raw = path.read_text(encoding="utf-8-sig").strip()
+        pid = int(raw)
+    except (OSError, UnicodeError, ValueError):
+        return "unknown"
+    if pid <= 0:
+        return "unknown"
+    boot = _boot_epoch()
+    if boot is not None and modified < boot - 2.0:
+        return "unknown"
+    return _pid_running_without_signal(pid)
+
+
+def _argv_value(argv: Sequence[Any], option: str) -> str:
+    values = [str(item) for item in argv]
+    for index, item in enumerate(values[:-1]):
+        if item == option:
+            return values[index + 1]
+    return ""
+
+
+def _resolve(workdir: Path, value: Any) -> Path:
+    path = Path(str(value or ""))
+    return path if path.is_absolute() else workdir / path
+
+
+def _read_decision(
+    path: Path,
+    *,
+    schema_version: str,
+    allowed_statuses: set[str],
+    workdir: Path,
+) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        stat = path.stat()
+    except OSError:
+        return {"status": "unavailable", "decision": ""}
+    cache_key = (str(path.resolve(strict=False)), schema_version)
+    now = time.monotonic()
+    with _DECISION_CACHE_LOCK:
+        cached = _DECISION_CACHE.get(cache_key)
+    if (
+        cached is not None
+        and cached[0] == stat.st_mtime_ns
+        and cached[1] == stat.st_size
+        and now - cached[2] < DECISION_AUDIT_CACHE_SECONDS
+    ):
+        return dict(cached[3])
+    try:
+        value = pipeline_supervisor.audit_decision(
+            path,
+            schema_version=schema_version,
+            allowed_statuses=allowed_statuses,
+            workdir=workdir,
+        )
+    except Exception:
+        return {"status": "unavailable", "decision": ""}
+    result = {
+        "status": _clip_text(value.get("status"), 40),
+        "decision": _clip_text(value.get("decision"), 40),
+        "created_at": _clip_text(value.get("created_at"), 50),
+    }
+    with _DECISION_CACHE_LOCK:
+        _DECISION_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, now, dict(result))
+    return result
+
+
+def _read_primary_r2_gate(path: Path, threshold: float) -> dict[str, float]:
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            required = {"target", "split", "R2", "R2_threshold", "status"}
+            if not required.issubset(set(reader.fieldnames or [])):
+                raise DashboardDataError("R2 gate has incomplete columns")
+            result: dict[str, float] = {}
+            for row in reader:
+                if str(row.get("split") or "").strip().lower() != "test":
+                    continue
+                target = str(row.get("target") or "").strip()
+                value = _safe_float(row.get("R2"))
+                row_threshold = _safe_float(row.get("R2_threshold"))
+                if (
+                    target not in TARGET_LABELS
+                    or target == "output_phase_voltage_last_peak_abs_v"
+                    or target in result
+                    or value is None
+                    or row_threshold is None
+                    or not math.isclose(row_threshold, threshold, rel_tol=0.0, abs_tol=1e-12)
+                    or str(row.get("status") or "").strip().lower() != ("pass" if value >= threshold else "fail")
+                ):
+                    raise DashboardDataError("R2 gate row is inconsistent")
+                result[target] = value
+    except DashboardDataError:
+        raise
+    except (OSError, UnicodeError, csv.Error) as exc:
+        raise DashboardDataError("cannot read R2 gate") from exc
+    primary_targets = set(TARGET_LABELS) - {"output_phase_voltage_last_peak_abs_v"}
+    if set(result) != primary_targets:
+        raise DashboardDataError("R2 gate target coverage is incomplete")
+    return result
+
+
+def _model_metrics(metadata_paths: Sequence[tuple[str, Path, Path]], threshold: float) -> dict[str, Any]:
+    selected_stage = ""
+    selected_path: Path | None = None
+    selected_r2_path: Path | None = None
+    for stage, path, r2_path in metadata_paths:
+        if path.is_file() or r2_path.is_file():
+            selected_stage, selected_path, selected_r2_path = stage, path, r2_path
+            break
+    if selected_path is None:
+        return {
+            "available": False,
+            "stage": "",
+            "threshold": threshold,
+            "gate_status": "waiting",
+            "metrics": [
+                {"target": target, "label": label, "r2": None, "passed": False}
+                for target, label in TARGET_LABELS.items()
+            ],
+            "min_r2": None,
+            "avg_r2": None,
+            "passed_count": 0,
+            "target_count": len(TARGET_LABELS),
+        }
+    try:
+        if selected_r2_path is None:
+            raise DashboardDataError("R2 gate path is unavailable")
+        metadata = read_json_file(selected_path)
+        audited_primary = _read_primary_r2_gate(selected_r2_path, threshold)
+        primary = metadata.get("primary_test_r2")
+        if not isinstance(primary, Mapping):
+            raise DashboardDataError("metadata has no primary_test_r2 map")
+        raw_values = dict(primary)
+        if set(raw_values) != set(audited_primary):
+            raise DashboardDataError("metadata and R2 gate target coverage differ")
+        for target, value in audited_primary.items():
+            metadata_value = _safe_float(raw_values.get(target))
+            if metadata_value is None or not math.isclose(metadata_value, value, rel_tol=0.0, abs_tol=1e-12):
+                raise DashboardDataError("metadata and R2 gate values differ")
+        raw_values["output_phase_voltage_last_peak_abs_v"] = metadata.get("voltage_test_r2")
+        metrics: list[dict[str, Any]] = []
+        finite_values: list[float] = []
+        for target, label in TARGET_LABELS.items():
+            value = _safe_float(raw_values.get(target))
+            if value is not None:
+                finite_values.append(value)
+            metrics.append(
+                {
+                    "target": target,
+                    "label": label,
+                    "r2": round(value, 6) if value is not None else None,
+                    "passed": bool(value is not None and value >= threshold),
+                }
+            )
+        complete = len(finite_values) == len(TARGET_LABELS)
+        passed_count = sum(1 for item in metrics if item["passed"])
+        return {
+            "available": True,
+            "stage": selected_stage,
+            "threshold": threshold,
+            "gate_status": "passed" if complete and passed_count == len(metrics) else "failed",
+            "metrics": metrics,
+            "min_r2": round(min(finite_values), 6) if finite_values else None,
+            "avg_r2": round(sum(finite_values) / len(finite_values), 6) if finite_values else None,
+            "passed_count": passed_count,
+            "target_count": len(metrics),
+        }
+    except DashboardDataError:
+        return {
+            "available": False,
+            "stage": selected_stage,
+            "threshold": threshold,
+            "gate_status": "unavailable",
+            "metrics": [],
+            "min_r2": None,
+            "avg_r2": None,
+            "passed_count": 0,
+            "target_count": len(TARGET_LABELS),
+        }
+
+
+def _read_beta(artifact_dir: Path) -> dict[str, Any]:
+    summary_path = artifact_dir / "beta_mtpa_summary.json"
+    calibration_path = artifact_dir / "beta_zero_manifest.json"
+    try:
+        summary = read_json_file(summary_path)
+        calibration = read_json_file(calibration_path)
+        electrical_zero = _safe_float(calibration.get("electrical_zero_deg"))
+        best_beta = _safe_float(summary.get("best_beta_dq_deg"))
+        best_torque = _safe_float(summary.get("best_torque_nm"))
+        observed_error = _safe_float(summary.get("max_observed_dq_current_relative_error"))
+        maximum_error = _safe_float(summary.get("max_dq_current_relative_error"))
+        expected_rows = _safe_int(summary.get("expected_rows"), -1)
+        successful_rows = _safe_int(summary.get("successful_rows"), -1)
+        gate_failures = summary.get("gate_failures")
+        homogeneous = summary.get("homogeneous_identities")
+        convention = _clip_text(summary.get("convention"), 60)
+        hashes = {
+            "beta-plan:sha256:": str(summary.get("plan_hash") or ""),
+            "beta-results:sha256:": str(summary.get("result_hash") or ""),
+        }
+        if not (
+            summary.get("summary_schema_version") == "beta_mtpa_summary_v1"
+            and summary.get("workflow_version") == "beta_calibration_v2"
+            and summary.get("status") == "passed"
+            and summary.get("pass") is True
+            and summary.get("strict_case_plan_validation") is True
+            and isinstance(homogeneous, Mapping)
+            and bool(homogeneous)
+            and isinstance(gate_failures, list)
+            and not gate_failures
+            and expected_rows == 10
+            and successful_rows == expected_rows
+            and calibration.get("workflow_version") == "beta_calibration_v2"
+            and calibration.get("successful_rows") == 2
+            and calibration.get("convention") == convention
+            and electrical_zero is not None
+            and best_beta is not None
+            and best_torque is not None
+            and observed_error is not None
+            and maximum_error is not None
+            and 0.0 <= observed_error <= maximum_error
+            and all(
+                value.startswith(prefix)
+                and len(value.removeprefix(prefix)) == 64
+                and all(char in "0123456789abcdef" for char in value.removeprefix(prefix).lower())
+                for prefix, value in hashes.items()
+            )
+        ):
+            raise DashboardDataError("beta artifacts do not satisfy the strict gate")
+        return {
+            "available": True,
+            "passed": True,
+            "electrical_zero_deg": electrical_zero,
+            "best_beta_deg": best_beta,
+            "best_torque_nm": best_torque,
+            "dq_relative_error": observed_error,
+            "successful_rows": successful_rows,
+            "expected_rows": expected_rows,
+            "convention": convention,
+        }
+    except DashboardDataError:
+        return {"available": False, "passed": False}
+
+
+def _read_nsga_progress(checkpoint_dir: Path) -> list[dict[str, Any]]:
+    progress: list[dict[str, Any]] = []
+    if not checkpoint_dir.is_dir():
+        return progress
+    for path in sorted(checkpoint_dir.glob("seed_*.progress.json"))[:20]:
+        try:
+            item = read_json_file(path, max_bytes=512 * 1024)
+            seed = _safe_int(item.get("seed"), -1)
+            completed = _safe_int(item.get("completed_generations"), -1)
+            maximum = _safe_int(item.get("max_generations"), -1)
+            if seed < 0 or completed < 0 or maximum < 1 or completed > maximum:
+                continue
+            progress.append(
+                {
+                    "seed": seed,
+                    "status": _clip_text(item.get("status"), 20),
+                    "completed_generations": completed,
+                    "max_generations": maximum,
+                    "n_eval": _safe_int(item.get("n_eval")),
+                    "progress_pct": round(100.0 * completed / maximum, 1),
+                }
+            )
+        except DashboardDataError:
+            continue
+    return progress
+
+
+def _read_optimization_targets(path: Path) -> dict[str, Any]:
+    default_torque = 65.1
+    default_torque_speed = 1200
+    default_power = 7.5
+    default_power_speed = 5000
+    defaults = {
+        "target_torque_nm": default_torque,
+        "target_torque_speed_rpm": default_torque_speed,
+        "target_power_kw": default_power,
+        "target_power_speed_rpm": default_power_speed,
+        "torque_point_power_kw": default_torque * default_torque_speed * 2.0 * math.pi / 60_000.0,
+        "power_point_torque_nm": default_power * 60_000.0 / (default_power_speed * 2.0 * math.pi),
+        "independent_operating_points": True,
+        "source_values_inconsistent": True,
+        "population_size": 160,
+        "max_generations": 300,
+        "configured_seeds": [42, 43, 44],
+        "spec_status": "fallback",
+    }
+    try:
+        spec = read_json_file(path)
+        provenance = spec.get("_provenance")
+        assumptions = spec.get("_assumptions")
+        nsga2 = spec.get("nsga2")
+        if (
+            not isinstance(provenance, Mapping)
+            or not isinstance(assumptions, Mapping)
+            or not isinstance(nsga2, Mapping)
+        ):
+            raise DashboardDataError("optimization spec is incomplete")
+        independent = assumptions.get("torque_and_power_targets_are_treated_as_independent_requirements")
+        inconsistent = assumptions.get("ppt_power_torque_speed_values_are_not_exactly_self_consistent")
+        if independent is not True or inconsistent is not True:
+            raise DashboardDataError("optimization operating-point assumptions are not explicit")
+        values = {
+            "target_torque_nm": _safe_float(provenance.get("rated_torque_nm")),
+            "target_torque_speed_rpm": _safe_int(provenance.get("rated_speed_rpm"), -1),
+            "target_power_kw": _safe_float(provenance.get("rated_power_kw")),
+            "target_power_speed_rpm": _safe_int(provenance.get("maximum_speed_rpm"), -1),
+            "population_size": _safe_int(nsga2.get("population_size"), -1),
+            "max_generations": _safe_int(nsga2.get("max_generations"), -1),
+        }
+        seeds = nsga2.get("seeds")
+        if any(value is None or value <= 0 for value in values.values()) or not isinstance(seeds, list):
+            raise DashboardDataError("optimization spec values are invalid")
+        parsed_seeds = [_safe_int(seed, -1) for seed in seeds]
+        if not parsed_seeds or any(seed < 0 for seed in parsed_seeds):
+            raise DashboardDataError("optimization seeds are invalid")
+        torque = float(values["target_torque_nm"])
+        torque_speed = int(values["target_torque_speed_rpm"])
+        power = float(values["target_power_kw"])
+        power_speed = int(values["target_power_speed_rpm"])
+        return {
+            **values,
+            "torque_point_power_kw": torque * torque_speed * 2.0 * math.pi / 60_000.0,
+            "power_point_torque_nm": power * 60_000.0 / (power_speed * 2.0 * math.pi),
+            "independent_operating_points": True,
+            "source_values_inconsistent": True,
+            "configured_seeds": parsed_seeds,
+            "spec_status": "verified",
+        }
+    except DashboardDataError:
+        return defaults
+
+
+def _count_csv_rows(path: Path, limit: int = 100_000) -> int | None:
+    if not path.is_file():
+        return None
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+            reader = csv.reader(stream)
+            next(reader)
+            count = 0
+            for count, _ in enumerate(reader, start=1):
+                if count > limit:
+                    raise DashboardDataError("CSV row limit exceeded")
+            return count
+    except (OSError, UnicodeError, csv.Error, StopIteration):
+        return None
+
+
+def _speed_marker_is_complete(
+    marker_path: Path,
+    *,
+    contract_sha256: str,
+    artifacts: Mapping[str, Path],
+) -> bool:
+    if not marker_path.is_file():
+        return False
+    try:
+        marker = read_json_file(marker_path, max_bytes=2 * 1024 * 1024)
+        if (
+            marker.get("schema_version") != pipeline_supervisor.SPEED_MARKER_SCHEMA_VERSION
+            or marker.get("contract_sha256") != contract_sha256
+        ):
+            raise DashboardDataError("speed marker identity is invalid")
+        records = marker.get("artifacts")
+        if not isinstance(records, Mapping) or set(records) != set(artifacts):
+            raise DashboardDataError("speed marker artifact coverage is invalid")
+        for name, expected_path in artifacts.items():
+            record = records.get(name)
+            if not isinstance(record, Mapping):
+                raise DashboardDataError("speed marker artifact is invalid")
+            recorded_path = Path(str(record.get("path") or "")).resolve(strict=False)
+            digest = str(record.get("sha256") or "").lower()
+            if (
+                recorded_path != expected_path.resolve(strict=False)
+                or not expected_path.is_file()
+                or len(digest) != 64
+                or _file_sha256(expected_path) != digest
+            ):
+                raise DashboardDataError("speed marker artifact changed")
+        return True
+    except (DashboardDataError, OSError, UnicodeError, ValueError):
+        return False
+
+
+@dataclass(frozen=True)
+class DashboardConfig:
+    workdir: Path
+    contract_path: Path
+    project: str = DEFAULT_PROJECT
+    scheduler_url: str = DEFAULT_SCHEDULER_URL
+    cap: int = 100
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    runner_log: Path | None = None
+
+
+def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        stat = config.contract_path.stat()
+    except OSError as exc:
+        raise DashboardDataError("pipeline contract is unavailable") from exc
+    cache_key = str(config.contract_path.resolve(strict=False))
+    now = time.monotonic()
+    with _CONTRACT_CACHE_LOCK:
+        cached = _CONTRACT_CACHE.get(cache_key)
+    if (
+        cached is not None
+        and cached[0] == stat.st_mtime_ns
+        and cached[1] == stat.st_size
+        and now - cached[2] < CONTRACT_AUDIT_CACHE_SECONDS
+    ):
+        return cached[3], cached[4]
+    try:
+        validated = pipeline_supervisor.load_contract(config.contract_path)
+        pipeline_supervisor.audit_immutable_inputs(validated)
+    except Exception as exc:
+        raise DashboardDataError("pipeline contract audit failed") from exc
+    contract = read_json_file(config.contract_path)
+    pipeline = contract.get("pipeline")
+    if not isinstance(pipeline, dict):
+        raise DashboardDataError("pipeline contract has no pipeline object")
+    with _CONTRACT_CACHE_LOCK:
+        _CONTRACT_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, now, contract, pipeline)
+    return contract, pipeline
+
+
+def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
+    contract_document, pipeline = _pipeline_definition(config)
+    artifact_dir = config.contract_path.parent
+    stage1 = pipeline.get("stage1") if isinstance(pipeline.get("stage1"), dict) else {}
+    stage2 = pipeline.get("stage2") if isinstance(pipeline.get("stage2"), dict) else {}
+    stage3 = pipeline.get("stage3") if isinstance(pipeline.get("stage3"), dict) else {}
+    optimization = pipeline.get("optimization") if isinstance(pipeline.get("optimization"), dict) else {}
+    speed = pipeline.get("speed") if isinstance(pipeline.get("speed"), dict) else {}
+    expected_stage1 = _safe_int(stage1.get("expected_rows"), 700)
+    runner_log = config.runner_log or find_runner_log(artifact_dir)
+    campaign = parse_campaign_log(runner_log, total_cases=expected_stage1, cap=config.cap)
+
+    stage2_argv = stage2.get("argv") if isinstance(stage2.get("argv"), list) else []
+    stage3_argv = stage3.get("continuation_argv") if isinstance(stage3.get("continuation_argv"), list) else []
+    opt_argv = optimization.get("argv_template") if isinstance(optimization.get("argv_template"), list) else []
+    speed_campaign_argv = speed.get("campaign_argv") if isinstance(speed.get("campaign_argv"), list) else []
+
+    stage1_metadata = _resolve(config.workdir, stage1.get("metadata"))
+    stage2_combined = _resolve(config.workdir, _argv_value(stage2_argv, "--combined-output-dir"))
+    stage3_combined = _resolve(config.workdir, _argv_value(stage3_argv, "--combined-output-dir"))
+    model = _model_metrics(
+        (
+            ("Stage 3", stage3_combined / "models" / "metadata.json", stage3_combined / "r2_gate.csv"),
+            ("Stage 2", stage2_combined / "models" / "metadata.json", stage2_combined / "r2_gate.csv"),
+            ("Stage 1", stage1_metadata, _resolve(config.workdir, stage1.get("r2"))),
+        ),
+        _safe_float(stage1.get("r2_threshold")) or 0.95,
+    )
+
+    stage2_decision_path = _resolve(config.workdir, stage2.get("decision"))
+    stage3_decision_path = _resolve(config.workdir, stage3.get("decision"))
+    optimization_decision_path = _resolve(config.workdir, optimization.get("decision"))
+    stage2_decision = _read_decision(
+        stage2_decision_path,
+        schema_version=pipeline_supervisor.STAGE2_DECISION_SCHEMA_VERSION,
+        allowed_statuses={"stage2_started", "complete", "combined_r2_failed"},
+        workdir=config.workdir,
+    )
+    stage3_decision = _read_decision(
+        stage3_decision_path,
+        schema_version=pipeline_supervisor.STAGE2_DECISION_SCHEMA_VERSION,
+        allowed_statuses={"stage2_started", "complete", "combined_r2_failed"},
+        workdir=config.workdir,
+    )
+    optimization_decision = _read_decision(
+        optimization_decision_path,
+        schema_version=pipeline_supervisor.OPTIMIZATION_DECISION_SCHEMA_VERSION,
+        allowed_statuses={"optimization_started", "pareto_fea_started", "complete", "failed"},
+        workdir=config.workdir,
+    )
+
+    external = pipeline.get("external_pid_files")
+    if not isinstance(external, list):
+        # The canonical contract stores these at pipeline.external_pid_files.
+        external = []
+    processes: list[dict[str, Any]] = []
+    for item in external:
+        if not isinstance(item, dict):
+            continue
+        role = _clip_text(item.get("role"), 40)
+        path = _resolve(config.workdir, item.get("path"))
+        state = inspect_pid_file(path)
+        processes.append(
+            {
+                "role": role,
+                "label": PROCESS_LABELS.get(role, role.replace("_", " ")),
+                "state": state,
+                "activity": "running" if role == "stage1_runner" and state == "alive" else "waiting" if state == "alive" else state,
+            }
+        )
+    # Older generated contracts keep the list alongside the pipeline object.
+    if not processes:
+        contract = read_json_file(config.contract_path)
+        raw_external = contract.get("external_pid_files")
+        if isinstance(raw_external, list):
+            for item in raw_external:
+                if not isinstance(item, dict):
+                    continue
+                role = _clip_text(item.get("role"), 40)
+                state = inspect_pid_file(_resolve(config.workdir, item.get("path")))
+                processes.append(
+                    {
+                        "role": role,
+                        "label": PROCESS_LABELS.get(role, role.replace("_", " ")),
+                        "state": state,
+                        "activity": "running" if role == "stage1_runner" and state == "alive" else "waiting" if state == "alive" else state,
+                    }
+                )
+
+    supervisor_state = inspect_pid_file(artifact_dir / "foundation_pipeline_supervisor.pid")
+    supervisor_process = {
+        "role": "supervisor",
+        "label": PROCESS_LABELS["supervisor"],
+        "state": supervisor_state,
+        "activity": "running" if supervisor_state == "alive" else supervisor_state,
+    }
+    if supervisor_state == "alive":
+        managed_processes = [
+            item
+            if item.get("state") == "alive"
+            else {**item, "state": "managed", "activity": "managed_by_supervisor"}
+            for item in processes
+        ]
+        processes = [supervisor_process, *managed_processes]
+    else:
+        processes.insert(0, supervisor_process)
+
+    beta = _read_beta(artifact_dir)
+    checkpoint_dir = _resolve(config.workdir, _argv_value(opt_argv, "--checkpoint-dir"))
+    output_dir = _resolve(config.workdir, _argv_value(opt_argv, "--output-dir"))
+    optimization_targets = _read_optimization_targets(
+        _resolve(config.workdir, _argv_value(opt_argv, "--optimization-spec"))
+    )
+    nsga_progress = _read_nsga_progress(checkpoint_dir)
+    optimization_state = {
+        "decision": optimization_decision,
+        "seeds": nsga_progress,
+        "pareto_candidates": _count_csv_rows(output_dir / "pareto.csv"),
+        "fea_case_rows": _count_csv_rows(output_dir / "fea_cases.csv"),
+        **optimization_targets,
+        "objectives": ["모터 부피 최소화", "효율 최대화"],
+    }
+
+    speed_plan = _resolve(config.workdir, speed.get("plan"))
+    speed_result = _resolve(config.workdir, speed.get("result"))
+    speed_rank = _resolve(config.workdir, speed.get("rank"))
+    speed_top = _resolve(config.workdir, speed.get("top"))
+    speed_marker = _resolve(config.workdir, speed.get("marker"))
+    speed_artifacts = {
+        "plan": speed_plan,
+        "result": speed_result,
+        "rank": speed_rank,
+        "top": speed_top,
+    }
+    speed_complete = _speed_marker_is_complete(
+        speed_marker,
+        contract_sha256=str(contract_document.get("contract_sha256") or ""),
+        artifacts=speed_artifacts,
+    )
+    speed_state = {
+        "expected_rows": _safe_int(speed.get("expected_rows"), 24),
+        "plan_rows": _count_csv_rows(speed_plan),
+        "result_rows": _count_csv_rows(speed_result),
+        "rank_available": speed_rank.is_file(),
+        "complete": speed_complete,
+        "marker_status": "verified" if speed_complete else "invalid" if speed_marker.is_file() else "absent",
+        "task_prefix": _argv_value(speed_campaign_argv, "--task-prefix"),
+    }
+
+    stages = build_stage_timeline(
+        beta=beta,
+        campaign=campaign,
+        model=model,
+        stage2_decision=stage2_decision,
+        stage3_decision=stage3_decision,
+        optimization=optimization_state,
+        speed=speed_state,
+    )
+    current = select_current_stage(stages)
+
+    alerts: list[dict[str, str]] = []
+    if campaign["retry"]:
+        alerts.append({"level": "warning", "message": f"재시도 대기 FEA가 {campaign['retry']}건 있습니다."})
+    if campaign["settling_results"]:
+        alerts.append(
+            {
+                "level": "info",
+                "message": f"완료된 결과 {campaign['settling_results']}건의 파일 안정화를 확인 중입니다.",
+            }
+        )
+    for warning in campaign["warnings"]:
+        alerts.append({"level": "warning", "message": warning})
+    if optimization_state.get("spec_status") != "verified":
+        alerts.append({"level": "warning", "message": "최적화 spec을 검증하지 못해 기본 목표값을 표시합니다."})
+    if speed_state.get("marker_status") == "invalid":
+        alerts.append({"level": "warning", "message": "속도 검증 완료 marker 또는 artifact hash가 유효하지 않습니다."})
+    return {
+        "campaign": campaign,
+        "pipeline": {"current_stage": current["id"], "current_label": current["label"], "stages": stages},
+        "model": model,
+        "beta": beta,
+        "optimization": optimization_state,
+        "speed": speed_state,
+        "processes": processes,
+        "alerts": alerts,
+    }
+
+
+def build_stage_timeline(
+    *,
+    beta: Mapping[str, Any],
+    campaign: Mapping[str, Any],
+    model: Mapping[str, Any],
+    stage2_decision: Mapping[str, Any] | None,
+    stage3_decision: Mapping[str, Any] | None,
+    optimization: Mapping[str, Any],
+    speed: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    beta_status = "complete" if beta.get("passed") else "failed" if beta.get("available") else "unavailable"
+    campaign_complete = _safe_int(campaign.get("result_ok")) >= _safe_int(campaign.get("total"), 1)
+    campaign_status = "complete" if campaign_complete else "running"
+    if not campaign_complete:
+        model_status = "waiting"
+    elif model.get("gate_status") == "passed":
+        model_status = "complete"
+    elif model.get("gate_status") == "failed":
+        model_status = "failed"
+    else:
+        model_status = "running"
+
+    s2_status = str((stage2_decision or {}).get("status") or "")
+    s2_choice = str((stage2_decision or {}).get("decision") or "")
+    if not campaign_complete:
+        stage2_status = "conditional"
+        stage2_detail = "R² 결과에 따라 자동 실행"
+    elif stage2_decision is None:
+        stage2_status = "ready" if model_status == "failed" else "waiting"
+        stage2_detail = "Stage 1 gate 판정 대기"
+    elif s2_status == "stage2_started":
+        stage2_status = "running"
+        stage2_detail = "300-case 보강 DOE 실행 중"
+    elif s2_status == "complete" and s2_choice == "skip_stage2":
+        stage2_status = "skipped"
+        stage2_detail = "Stage 1 R² gate 통과로 생략"
+    elif s2_status == "complete":
+        stage2_status = "complete"
+        stage2_detail = "Stage 1+2 결합 gate 통과"
+    elif s2_status == "combined_r2_failed":
+        stage2_status = "failed"
+        stage2_detail = "결합 R² 미달 — Stage 3로 전환"
+    else:
+        stage2_status = "unavailable" if s2_status == "unavailable" else "waiting"
+        stage2_detail = "조건부 보강 단계"
+
+    s3_status = str((stage3_decision or {}).get("status") or "")
+    if s2_status == "complete":
+        stage3_status = "skipped"
+        stage3_detail = "Stage 2 gate 통과로 불필요"
+    elif s2_status != "combined_r2_failed":
+        stage3_status = "conditional"
+        stage3_detail = "Stage 2 R² 미달 시에만 실행"
+    elif stage3_decision is None:
+        stage3_status = "ready"
+        stage3_detail = "오차·불확실성 기반 300-case 적응 DOE 준비"
+    elif s3_status == "stage2_started":
+        stage3_status = "running"
+        stage3_detail = "적응 DOE 실행 중"
+    elif s3_status == "complete":
+        stage3_status = "complete"
+        stage3_detail = "Stage 1+2+3 결합 gate 통과"
+    elif s3_status == "combined_r2_failed":
+        stage3_status = "failed"
+        stage3_detail = "최종 R² gate 미달"
+    else:
+        stage3_status = "unavailable"
+        stage3_detail = "결정 파일 확인 필요"
+
+    opt_decision = optimization.get("decision")
+    opt_status = str(opt_decision.get("status") if isinstance(opt_decision, Mapping) else "")
+    upstream_ready = s2_status == "complete" or s3_status == "complete"
+    if opt_status in {"optimization_started", "pareto_fea_started"}:
+        optimization_status = "running"
+        optimization_detail = "NSGA-II / Pareto FEA 진행 중"
+    elif opt_status == "complete":
+        optimization_status = "complete"
+        optimization_detail = "FEA 필터 Pareto front 확정"
+    elif opt_status == "failed":
+        optimization_status = "failed"
+        optimization_detail = "최적화 결정이 실패했습니다"
+    else:
+        optimization_status = "ready" if upstream_ready else "waiting"
+        optimization_detail = "R² gate 통과 후 자동 실행"
+
+    if speed.get("complete"):
+        speed_status, speed_detail = "complete", "24-case paired 검증 완료"
+    elif speed.get("result_rows"):
+        speed_status, speed_detail = "running", "프로파일 순위 계산 대기"
+    elif speed.get("plan_rows"):
+        speed_status, speed_detail = "ready", "24-case 계획 생성 · 제출 대기"
+    else:
+        speed_status = "ready" if optimization_status == "complete" else "waiting"
+        speed_detail = "Pareto FEA 이후 cap-직렬 실행"
+
+    return [
+        {"id": "beta", "label": "물리 β 보정", "status": beta_status, "detail": "역기전력 영점 + loaded MTPA"},
+        {
+            "id": "stage1",
+            "label": "Stage 1 기준 FEA",
+            "status": campaign_status,
+            "detail": f"{_safe_int(campaign.get('result_ok'))} / {_safe_int(campaign.get('total'))} 결과 검증",
+            "progress_pct": campaign.get("progress_pct"),
+        },
+        {"id": "surrogate", "label": "Surrogate R² gate", "status": model_status, "detail": "9개 지표 모두 R² ≥ 0.95"},
+        {"id": "stage2", "label": "Stage 2 보강 DOE", "status": stage2_status, "detail": stage2_detail},
+        {"id": "stage3", "label": "Stage 3 적응 DOE", "status": stage3_status, "detail": stage3_detail},
+        {"id": "optimization", "label": "NSGA-II + Pareto FEA", "status": optimization_status, "detail": optimization_detail},
+        {"id": "speed", "label": "속도 프로파일 검증", "status": speed_status, "detail": speed_detail},
+    ]
+
+
+def select_current_stage(stages: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
+    if not stages:
+        return {"id": "unknown", "label": "상태 확인 필요", "status": "unavailable"}
+    current = next((stage for stage in stages if stage.get("status") == "running"), None)
+    if current is None:
+        current = next((stage for stage in stages if stage.get("status") == "ready"), None)
+    if current is None:
+        current = next(
+            (stage for stage in reversed(stages) if stage.get("status") in {"failed", "unavailable"}),
+            None,
+        )
+    if current is None:
+        current = next(
+            (stage for stage in stages if stage.get("status") in {"waiting", "conditional"}),
+            stages[-1],
+        )
+    return current
+
+
+def _fetch_json(url: str, timeout: float, *, max_bytes: int = 8 * 1024 * 1024) -> Any:
+    req = request.Request(url, headers={"Accept": "application/json", "User-Agent": "ipmsm-dashboard/1"})
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            content_length = _safe_int(response.headers.get("Content-Length"), -1)
+            if content_length > max_bytes:
+                raise DashboardDataError("scheduler response exceeds size limit")
+            payload = response.read(max_bytes + 1)
+    except (OSError, error.URLError, TimeoutError) as exc:
+        raise DashboardDataError("scheduler is unreachable") from exc
+    if len(payload) > max_bytes:
+        raise DashboardDataError("scheduler response exceeds size limit")
+    try:
+        return json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+    except (UnicodeError, json.JSONDecodeError, DashboardDataError) as exc:
+        raise DashboardDataError("scheduler returned invalid JSON") from exc
+
+
+def _allocation_node(task: Mapping[str, Any]) -> str:
+    for key in ("actual_node_name", "allocation_node_name", "node_name"):
+        value = _clip_text(task.get(key), 40)
+        if value:
+            return value
+    return "배정 대기"
+
+
+def _validate_scheduler_health(value: Mapping[str, Any]) -> None:
+    required = {
+        "ok": True,
+        "scheduler_thread_alive": True,
+        "scheduler_stalled": False,
+        "scheduler_ok": True,
+    }
+    for key, expected in required.items():
+        actual = value.get(key)
+        if not isinstance(actual, bool) or actual is not expected:
+            raise DashboardDataError(f"scheduler health is degraded: {key}")
+
+
+def summarize_scheduler(
+    *,
+    project: Mapping[str, Any],
+    tasks: Sequence[Mapping[str, Any]],
+    allocations: Sequence[Mapping[str, Any]],
+    cap: int,
+) -> dict[str, Any]:
+    clean_tasks = [item for item in tasks if isinstance(item, Mapping)]
+    status_counts = Counter(_clip_text(item.get("status"), 30).lower() or "unknown" for item in clean_tasks)
+    active = [item for item in clean_tasks if _clip_text(item.get("status"), 30).lower() in ACTIVE_STATUSES]
+    allocation_index = {
+        _safe_int(item.get("id"), -1): item
+        for item in allocations
+        if isinstance(item, Mapping) and _safe_int(item.get("id"), -1) >= 0
+    }
+    nodes: dict[str, dict[str, Any]] = {}
+    for task in active:
+        node = _allocation_node(task)
+        entry = nodes.setdefault(
+            node,
+            {"node": node, "active_tasks": 0, "requested_cpus": 0, "allocations": set(), "cpu_load_pct": None, "memory_used_pct": None},
+        )
+        entry["active_tasks"] += 1
+        entry["requested_cpus"] += max(0, _safe_int(task.get("cpus")))
+        allocation_id = _safe_int(task.get("allocation_id"), -1)
+        if allocation_id >= 0:
+            entry["allocations"].add(allocation_id)
+            allocation = allocation_index.get(allocation_id)
+            if allocation:
+                cpu_load = _safe_float(allocation.get("node_cpu_load_percent"))
+                memory_used = _safe_float(allocation.get("node_memory_used_percent"))
+                if cpu_load is not None:
+                    entry["cpu_load_pct"] = round(cpu_load, 1)
+                if memory_used is not None:
+                    entry["memory_used_pct"] = round(memory_used, 1)
+    node_rows = []
+    for node in sorted(nodes):
+        row = dict(nodes[node])
+        row["allocation_count"] = len(row.pop("allocations"))
+        node_rows.append(row)
+
+    def task_time(item: Mapping[str, Any]) -> datetime:
+        return (
+            _parse_scheduler_time(item.get("finished_at"))
+            or _parse_scheduler_time(item.get("started_at"))
+            or _parse_scheduler_time(item.get("created_at"))
+            or datetime.min.replace(tzinfo=timezone.utc)
+        )
+
+    recent = []
+    for item in sorted(clean_tasks, key=task_time, reverse=True)[:12]:
+        recent.append(
+            {
+                "id": _safe_int(item.get("id") or item.get("task_id"), -1),
+                "name": _clip_text(item.get("name"), 100),
+                "status": _clip_text(item.get("status"), 24).lower(),
+                "node": _allocation_node(item),
+                "started_at": _normalized_scheduler_time(item.get("started_at")),
+                "finished_at": _normalized_scheduler_time(item.get("finished_at")),
+                "exit_code": None if item.get("exit_code") in (None, "") else _safe_int(item.get("exit_code")),
+            }
+        )
+
+    now = datetime.now(timezone.utc)
+    completed_times = [
+        value
+        for item in clean_tasks
+        if _clip_text(item.get("status"), 20).lower() == "completed"
+        and (value := _parse_scheduler_time(item.get("finished_at"))) is not None
+    ]
+    completed_last_hour = sum(1 for value in completed_times if value >= now - timedelta(hours=1))
+    campaign_status: dict[str, dict[str, int]] = {}
+    for stage, prefix in TASK_PREFIXES.items():
+        counts = Counter(
+            _clip_text(item.get("status"), 30).lower() or "unknown"
+            for item in clean_tasks
+            if _clip_text(item.get("name"), 140).startswith(prefix)
+        )
+        campaign_status[stage] = dict(sorted(counts.items()))
+    return {
+        "reachable": True,
+        "stale": False,
+        "project_exists": bool(project),
+        "project": _clip_text(project.get("name"), 80),
+        "project_total_count": _safe_int(project.get("total_count"), len(clean_tasks)),
+        "active_count": len(active),
+        "cap": cap,
+        "utilization_pct": round(100.0 * len(active) / cap, 1) if cap else 0.0,
+        "status_counts": dict(sorted(status_counts.items())),
+        "completed_last_hour": completed_last_hour,
+        "campaign_status": campaign_status,
+        "nodes": node_rows,
+        "recent_tasks": recent,
+        "updated_at": _iso_timestamp(),
+    }
+
+
+def collect_scheduler_state(config: DashboardConfig) -> dict[str, Any]:
+    root = config.scheduler_url.rstrip("/")
+    query = parse.urlencode({"project": config.project, "limit": 5000})
+    urls = {
+        "health": f"{root}/api/health",
+        "project": f"{root}/api/projects/{parse.quote(config.project, safe='')}",
+        "tasks": f"{root}/api/tasks?{query}",
+        "allocations": f"{root}/api/allocations",
+    }
+    results: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=len(urls), thread_name_prefix="ipmsm-dashboard-fetch") as pool:
+        future_names = {
+            pool.submit(_fetch_json, url, config.timeout_seconds): name for name, url in urls.items()
+        }
+        for future in as_completed(future_names):
+            results[future_names[future]] = future.result()
+    if not isinstance(results.get("health"), Mapping):
+        raise DashboardDataError("scheduler health response is invalid")
+    _validate_scheduler_health(results["health"])
+    if not isinstance(results.get("project"), Mapping):
+        raise DashboardDataError("scheduler project response is invalid")
+    tasks = results.get("tasks")
+    allocations = results.get("allocations")
+    if not isinstance(tasks, list) or not isinstance(allocations, list):
+        raise DashboardDataError("scheduler list response is invalid")
+    return summarize_scheduler(
+        project=results["project"],
+        tasks=tasks,
+        allocations=allocations,
+        cap=config.cap,
+    )
+
+
+class DashboardStateStore:
+    """Single-writer cache; HTTP request threads only read encoded snapshots."""
+
+    def __init__(
+        self,
+        config: DashboardConfig,
+        *,
+        refresh_seconds: float = DEFAULT_REFRESH_SECONDS,
+        scheduler_refresh_seconds: float = DEFAULT_SCHEDULER_REFRESH_SECONDS,
+        local_collector: Callable[[DashboardConfig], dict[str, Any]] = collect_local_state,
+        scheduler_collector: Callable[[DashboardConfig], dict[str, Any]] = collect_scheduler_state,
+    ) -> None:
+        self.config = config
+        self.refresh_seconds = refresh_seconds
+        self.scheduler_refresh_seconds = scheduler_refresh_seconds
+        self.local_collector = local_collector
+        self.scheduler_collector = scheduler_collector
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._encoded = b"{}"
+        self._last_scheduler: dict[str, Any] | None = None
+        self._last_local: dict[str, Any] | None = None
+        self._last_scheduler_refresh = 0.0
+        self._campaign_elapsed: float | None = None
+        self._campaign_observed_monotonic = 0.0
+        self._campaign_observed_at = ""
+        self._campaign_freshness_verified = False
+
+    def refresh_once(self, *, force_scheduler: bool = False) -> dict[str, Any]:
+        errors: list[dict[str, str]] = []
+        local_ok = False
+        try:
+            local = self.local_collector(self.config)
+            local_ok = True
+        except Exception:
+            fallback = {
+                    "campaign": {"source_status": "unavailable", "total": 700, "result_ok": 0},
+                    "pipeline": {"current_stage": "unknown", "current_label": "상태 확인 필요", "stages": []},
+                    "model": {"available": False, "gate_status": "unavailable", "metrics": []},
+                    "beta": {"available": False, "passed": False},
+                    "optimization": {"decision": None, "seeds": []},
+                    "speed": {"complete": False},
+                    "processes": [],
+                    "alerts": [],
+                }
+            local = copy.deepcopy(self._last_local) if self._last_local is not None else fallback
+            local["stale"] = True
+            errors.append({"source": "local", "message": "로컬 진행 상태를 읽을 수 없습니다."})
+
+        now = time.monotonic()
+        campaign = local.get("campaign")
+        if isinstance(campaign, dict):
+            elapsed = _safe_float(campaign.get("elapsed_s"))
+            if elapsed is not None and elapsed != self._campaign_elapsed:
+                first_observation = self._campaign_elapsed is None
+                self._campaign_elapsed = elapsed
+                initial_age = 0.0
+                self._campaign_observed_monotonic = now - initial_age
+                self._campaign_observed_at = _iso_timestamp(time.time() - initial_age)
+                self._campaign_freshness_verified = not first_observation
+            observed_age = (
+                max(0.0, now - self._campaign_observed_monotonic)
+                if self._campaign_observed_monotonic
+                else None
+            )
+            campaign["status_observed_at"] = self._campaign_observed_at
+            campaign["status_age_seconds"] = round(observed_age, 1) if observed_age is not None else None
+            campaign["status_freshness_verified"] = self._campaign_freshness_verified
+            campaign["status_stale"] = bool(
+                _safe_int(campaign.get("result_ok")) < _safe_int(campaign.get("total"), 1)
+                and (
+                    not self._campaign_freshness_verified
+                    or (observed_age is not None and observed_age > 12 * 60)
+                )
+            )
+            if (
+                observed_age is not None
+                and observed_age > 12 * 60
+                and _safe_int(campaign.get("result_ok")) < _safe_int(campaign.get("total"), 1)
+            ):
+                local.setdefault("alerts", []).append(
+                    {"level": "warning", "message": "Stage 1 상태가 12분 이상 진전되지 않았습니다."}
+                )
+            elif campaign.get("status_stale") and not self._campaign_freshness_verified:
+                local.setdefault("alerts", []).append(
+                    {"level": "info", "message": "Stage 1 정확한 진행 수의 다음 heartbeat를 기다리고 있습니다."}
+                )
+        if local_ok:
+            local["stale"] = False
+            self._last_local = copy.deepcopy(local)
+        if force_scheduler or self._last_scheduler is None or now - self._last_scheduler_refresh >= self.scheduler_refresh_seconds:
+            try:
+                self._last_scheduler = self.scheduler_collector(self.config)
+                self._last_scheduler_refresh = now
+            except Exception:
+                if self._last_scheduler is None:
+                    self._last_scheduler = {
+                        "reachable": False,
+                        "stale": True,
+                        "project_exists": False,
+                        "project": self.config.project,
+                        "active_count": 0,
+                        "cap": self.config.cap,
+                        "status_counts": {},
+                        "nodes": [],
+                        "recent_tasks": [],
+                        "updated_at": "",
+                    }
+                else:
+                    self._last_scheduler = {**self._last_scheduler, "stale": True}
+                errors.append({"source": "scheduler", "message": "스케줄러 조회가 지연되어 마지막 정상 값을 표시합니다."})
+                self._last_scheduler_refresh = now
+
+        scheduler = dict(self._last_scheduler or {})
+        campaign_status = scheduler.get("campaign_status")
+        if isinstance(campaign_status, Mapping):
+            speed_counts = campaign_status.get("speed")
+            if isinstance(speed_counts, Mapping):
+                local.setdefault("speed", {})["scheduler_counts"] = dict(speed_counts)
+                speed_active = sum(_safe_int(speed_counts.get(status)) for status in ACTIVE_STATUSES)
+                speed_completed = _safe_int(speed_counts.get("completed"))
+                for stage in local.get("pipeline", {}).get("stages", []):
+                    if stage.get("id") != "speed" or local.get("speed", {}).get("complete"):
+                        continue
+                    if speed_active:
+                        stage.update(status="running", detail=f"paired FEA {speed_active}건 실행/배정 중")
+                    elif speed_completed:
+                        stage.update(status="running", detail=f"완료 {speed_completed}건 · 결과 검증 중")
+            pareto_counts = campaign_status.get("pareto")
+            if isinstance(pareto_counts, Mapping):
+                pareto_active = sum(_safe_int(pareto_counts.get(status)) for status in ACTIVE_STATUSES)
+                if pareto_active:
+                    for stage in local.get("pipeline", {}).get("stages", []):
+                        if stage.get("id") == "optimization":
+                            stage.update(status="running", detail=f"Pareto FEA {pareto_active}건 실행/배정 중")
+        current_stage = select_current_stage(local.get("pipeline", {}).get("stages", []))
+        local.setdefault("pipeline", {})["current_stage"] = current_stage.get("id", "unknown")
+        local["pipeline"]["current_label"] = current_stage.get("label", "상태 확인 필요")
+        scheduler_active = _safe_int(scheduler.get("active_count"))
+        campaign_result = _safe_int(local.get("campaign", {}).get("result_ok"))
+        campaign_total = _safe_int(local.get("campaign", {}).get("total"), 1)
+        automation_alive = any(
+            item.get("state") == "alive" and item.get("role") in {"supervisor", "stage1_runner"}
+            for item in local.get("processes", [])
+        )
+        campaign_status_stale = bool(local.get("campaign", {}).get("status_stale"))
+        campaign_status_age = _safe_float(local.get("campaign", {}).get("status_age_seconds"))
+        progress_stalled = bool(
+            campaign_result < campaign_total
+            and campaign_status_age is not None
+            and campaign_status_age > 12 * 60
+        )
+        stale = bool(
+            errors
+            or local.get("stale")
+            or local.get("campaign", {}).get("source_status", "ok") != "ok"
+            or scheduler.get("stale")
+            or not scheduler.get("reachable")
+            or (
+                scheduler_active == 0
+                and (progress_stalled or (campaign_status_stale and not automation_alive))
+            )
+        )
+        if (
+            not stale
+            and scheduler_active == self.config.cap
+            and not any(item.get("level") == "success" for item in local.get("alerts", []))
+        ):
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "success",
+                    "message": "멈춘 상태가 아닙니다. 프로젝트 FEA 슬롯 100개가 실행 또는 배정 중입니다.",
+                },
+            )
+        elif (
+            not stale
+            and scheduler_active < self.config.cap
+            and campaign_result < campaign_total
+            and any(
+                item.get("role") == "supervisor" and item.get("state") == "alive"
+                for item in local.get("processes", [])
+            )
+        ):
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "info",
+                    "message": "Supervisor가 새로 완료된 결과를 검증한 뒤 빈 FEA 슬롯을 다시 채우고 있습니다.",
+                },
+            )
+        if stale:
+            health = "degraded"
+            headline = "일부 상태가 오래되었거나 확인이 필요합니다"
+        elif scheduler_active == self.config.cap:
+            health = "running"
+            headline = "FEA 슬롯 100 / 100 점유"
+        elif current_stage.get("status") == "running":
+            health = "running"
+            headline = f"{current_stage.get('label', '파이프라인')} 실행 중"
+        elif scheduler_active > 0:
+            health = "running"
+            headline = "FEA 진행 중"
+        else:
+            health = "idle"
+            headline = "파이프라인 대기 또는 전환 중"
+        snapshot = {
+            "schema_version": SCHEMA_VERSION,
+            "generated_at": _iso_timestamp(),
+            "health": health,
+            "headline": headline,
+            "project": self.config.project,
+            **local,
+            "stale": stale,
+            "scheduler": scheduler,
+            "errors": errors,
+        }
+        encoded = json.dumps(
+            snapshot,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(encoded) > 256 * 1024:
+            raise DashboardDataError("dashboard snapshot exceeds 256 KiB")
+        with self._lock:
+            self._encoded = encoded
+        return snapshot
+
+    def encoded_snapshot(self) -> bytes:
+        with self._lock:
+            return self._encoded
+
+    def _publish_refresh_failure(self) -> None:
+        emergency = {
+            "schema_version": SCHEMA_VERSION,
+            "generated_at": _iso_timestamp(),
+            "health": "degraded",
+            "headline": "대시보드 상태 수집 오류",
+            "stale": True,
+            "project": self.config.project,
+            "campaign": {"source_status": "unavailable", "total": 700, "result_ok": 0},
+            "pipeline": {"current_stage": "unknown", "current_label": "상태 확인 필요", "stages": []},
+            "model": {"available": False, "gate_status": "unavailable", "metrics": []},
+            "beta": {"available": False, "passed": False},
+            "optimization": {"decision": None, "seeds": []},
+            "speed": {"complete": False},
+            "processes": [],
+            "alerts": [],
+            "scheduler": {"reachable": False, "stale": True, "active_count": 0, "nodes": [], "recent_tasks": []},
+            "errors": [{"source": "dashboard", "message": "상태 수집 중 오류가 발생해 다음 주기에 재시도합니다."}],
+        }
+        encoded = json.dumps(
+            emergency,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        with self._lock:
+            self._encoded = encoded
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self.refresh_once(force_scheduler=True)
+        self._thread = threading.Thread(target=self._run, name="ipmsm-dashboard-state", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.refresh_seconds):
+            try:
+                self.refresh_once()
+            except Exception:
+                self._publish_refresh_failure()
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=max(1.0, self.refresh_seconds + self.config.timeout_seconds))
+        self._thread = None

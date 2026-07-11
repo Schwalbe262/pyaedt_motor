@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#07111f">
+    <title>IPMSM 설계 파이프라인</title>
+    <meta
+      name="description"
+      content="IPMSM FEA, surrogate R², NSGA-II 및 Pareto 검증의 실시간 진행 대시보드"
+    >
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="IPMSM 대시보드 홈">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>
+          <strong>IPMSM Design Lab</strong>
+          <small>PYAEDT · FEA · SURROGATE · OPTIMIZATION</small>
+        </span>
+      </a>
+      <div class="topbar-actions">
+        <span class="live-badge" id="liveBadge"><i aria-hidden="true"></i><span id="liveLabel">LIVE</span></span>
+        <span class="updated" id="updatedAt" role="status" aria-live="polite">상태 불러오는 중</span>
+        <button class="icon-button" id="pauseButton" type="button" aria-pressed="false">자동 갱신 일시정지</button>
+        <button class="primary-button" id="refreshButton" type="button">지금 갱신</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="heroTitle">
+        <div class="hero-copy">
+          <div class="eyebrow"><span id="projectName">PYAEDT_MOTOR_IPMSM_V2</span><i></i><span>전체 파이프라인</span></div>
+          <h1 id="heroTitle">진행 상태를 확인하고 있습니다</h1>
+          <p id="heroDescription">스케줄러와 로컬 산출물을 읽어 현재 단계를 계산합니다.</p>
+          <div class="hero-progress-row">
+            <progress id="heroProgress" max="700" value="0" aria-label="Stage 1 검증 결과 진행률"></progress>
+            <strong id="heroProgressLabel">0 / 700</strong>
+          </div>
+        </div>
+        <div class="hero-orbit" aria-hidden="true">
+          <div class="orbit orbit-outer"><span></span><span></span><span></span><span></span></div>
+          <div class="orbit orbit-inner"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          <div class="rotor-core"><b id="heroPercent">0%</b><small>검증 완료</small></div>
+        </div>
+      </section>
+
+      <section class="alerts" id="alerts" aria-label="현재 알림" aria-live="polite"></section>
+
+      <section class="kpi-grid" aria-label="핵심 진행 지표">
+        <article class="kpi-card accent-cyan">
+          <span class="kpi-label">검증 완료</span>
+          <strong><b id="resultOk">—</b><small id="resultTotal">/ 700</small></strong>
+          <p id="resultSub">Stage 1 결과 파일 기준</p>
+        </article>
+        <article class="kpi-card accent-green">
+          <span class="kpi-label">점유 FEA 슬롯</span>
+          <strong><b id="activeSlots">—</b><small id="activeCap">/ 100</small></strong>
+          <p id="slotSub">프로젝트 cap 확인 중</p>
+        </article>
+        <article class="kpi-card accent-amber">
+          <span class="kpi-label">최근 처리 속도</span>
+          <strong><b id="completionRate">—</b><small>건/시간</small></strong>
+          <p id="rateSub">최근 상태 로그 기준</p>
+        </article>
+        <article class="kpi-card accent-violet">
+          <span class="kpi-label">예상 Stage 1 잔여</span>
+          <strong><b id="etaValue">—</b><small id="etaUnit">시간</small></strong>
+          <p id="etaSub">완료 속도에 따라 계속 보정</p>
+        </article>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="panel pipeline-panel" aria-labelledby="pipelineTitle">
+          <div class="panel-heading">
+            <div>
+              <span class="section-kicker">WORKFLOW</span>
+              <h2 id="pipelineTitle">파이프라인 단계</h2>
+            </div>
+            <span class="panel-chip" id="currentStageChip" aria-live="polite">상태 계산 중</span>
+          </div>
+          <ol class="pipeline-list" id="pipelineList"></ol>
+        </section>
+
+        <section class="panel scheduler-panel" aria-labelledby="schedulerTitle">
+          <div class="panel-heading">
+            <div>
+              <span class="section-kicker">COMPUTE</span>
+              <h2 id="schedulerTitle">Slurm 실행 현황</h2>
+            </div>
+            <span class="health-pill" id="schedulerHealth">연결 확인 중</span>
+          </div>
+          <div class="scheduler-summary">
+            <div><span>Running</span><strong id="schedulerRunning">—</strong></div>
+            <div><span>Completed</span><strong id="schedulerCompleted">—</strong></div>
+            <div><span>Failed</span><strong id="schedulerFailed">—</strong></div>
+            <div><span>최근 1시간</span><strong id="lastHour">—</strong></div>
+          </div>
+          <div class="subheading-row">
+            <h3>노드별 활성 작업</h3>
+            <span id="nodeCount">0 nodes</span>
+          </div>
+          <div class="node-grid" id="nodeGrid"></div>
+        </section>
+
+        <section class="panel model-panel" aria-labelledby="modelTitle">
+          <div class="panel-heading">
+            <div>
+              <span class="section-kicker">SURROGATE QUALITY</span>
+              <h2 id="modelTitle">R² 품질 게이트</h2>
+            </div>
+            <span class="threshold-chip">목표 ≥ <b id="r2Threshold">0.95</b></span>
+          </div>
+          <div class="model-summary">
+            <div class="score-ring">
+              <strong id="r2Passed">0</strong><span>/ 9</span><small>통과 지표</small>
+            </div>
+            <div>
+              <p class="model-state" id="modelState">Stage 1 완료 후 학습됩니다</p>
+              <p class="muted" id="modelStats">독립 test split에서 9개 지표를 평가합니다.</p>
+            </div>
+          </div>
+          <div class="metric-list" id="metricList"></div>
+        </section>
+
+        <section class="panel physics-panel" aria-labelledby="physicsTitle">
+          <div class="panel-heading">
+            <div>
+              <span class="section-kicker">PHYSICS &amp; CONTROL</span>
+              <h2 id="physicsTitle">β 보정과 설계 조건</h2>
+            </div>
+            <span class="health-pill" id="betaGate">확인 중</span>
+          </div>
+          <div class="beta-visual">
+            <div class="beta-dial" aria-hidden="true"><span>β</span></div>
+            <div class="beta-values">
+              <div><span>전기각 영점</span><strong id="electricalZero">—</strong></div>
+              <div><span>최고 토크 β (sweep)</span><strong id="bestBeta">—</strong></div>
+              <div><span>최적 토크</span><strong id="bestTorque">—</strong></div>
+              <div><span>dq 재구성 오차</span><strong id="dqError">—</strong></div>
+            </div>
+          </div>
+          <div class="optimization-brief">
+            <h3>NSGA-II 설계 목표</h3>
+            <div class="constraint-grid">
+              <div><span>정격 토크</span><strong id="targetTorque">65.1 N·m</strong><small id="targetTorqueSpeed">@ 1,200 rpm</small></div>
+              <div><span>정격 파워</span><strong id="targetPower">7.5 kW</strong><small id="targetPowerSpeed">@ 5,000 rpm</small></div>
+            </div>
+            <p class="constraint-note" id="constraintNote">두 목표는 PPT 수치 불일치 때문에 서로 독립된 운전점 제약으로 평가됩니다.</p>
+            <div class="objective-row"><span>OBJECTIVES</span><b>부피 ↓</b><b>효율 ↑</b></div>
+            <div class="nsga-progress" id="nsgaProgress" aria-label="NSGA-II seed 진행률"></div>
+          </div>
+        </section>
+
+        <section class="panel automation-panel" aria-labelledby="automationTitle">
+          <div class="panel-heading">
+            <div>
+              <span class="section-kicker">AUTOMATION</span>
+              <h2 id="automationTitle">자동 실행 체인</h2>
+            </div>
+            <span class="muted">watcher는 대기 상태도 정상입니다</span>
+          </div>
+          <div class="process-grid" id="processGrid"></div>
+          <div class="subheading-row speed-heading">
+            <h3>후속 검증</h3>
+            <span id="speedStatus">대기</span>
+          </div>
+          <div class="speed-track">
+            <div><span>Speed paired FEA</span><strong id="speedRows">0 / 24</strong></div>
+            <progress id="speedProgress" max="24" value="0" aria-label="속도 프로파일 FEA 진행률"></progress>
+          </div>
+        </section>
+
+        <section class="panel tasks-panel" aria-labelledby="tasksTitle">
+          <div class="panel-heading">
+            <div>
+              <span class="section-kicker">RECENT ACTIVITY</span>
+              <h2 id="tasksTitle">최근 스케줄러 작업</h2>
+            </div>
+            <span class="muted" id="taskTotal">프로젝트 이력 확인 중</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Task</th><th>Node</th><th>Status</th><th>시각</th></tr></thead>
+              <tbody id="taskRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer>
+      <span>읽기 전용 로컬 모니터 · 스케줄러 제출/취소 기능 없음</span>
+      <span id="footerSchema">IPMSM dashboard</span>
+    </footer>
+  </body>
+</html>
