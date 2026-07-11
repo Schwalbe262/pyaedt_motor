@@ -48,6 +48,8 @@ def history_task(
     }
     if exit_code is not None:
         record["exit_code"] = exit_code
+    if status == "completed":
+        record["finished_at"] = "2020-01-01 00:00:00"
     return record
 
 
@@ -65,6 +67,19 @@ def fake_collect(argv: list[str]) -> int:
         )
     )
     return 0
+
+
+def fake_result_audit(
+    args,
+    completed_tasks,
+    selected_rows,
+    history,
+    validated_task_ids,
+):
+    del args, selected_rows, history
+    for task in completed_tasks:
+        validated_task_ids[task.dedupe_key] = task.row_number
+    return ()
 
 
 def beta_gate_files(
@@ -132,6 +147,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
             self.assertFalse(args.submit)
             self.assertEqual(args.project_active_cap, 100)
             self.assertEqual(args.terminal_retry_limit, 1)
+            self.assertEqual(args.completed_result_settle_seconds, 300.0)
             self.assertEqual(args.poll_interval_seconds, 30.0)
             self.assertEqual(args.overall_timeout_seconds, 604800.0)
             for option, value in (
@@ -140,6 +156,8 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                 ("--overall-timeout-seconds", "0"),
                 ("--overall-timeout-seconds", "inf"),
                 ("--terminal-retry-limit", "-1"),
+                ("--completed-result-settle-seconds", "-1"),
+                ("--completed-result-settle-seconds", "nan"),
             ):
                 with self.subTest(option=option, value=value):
                     invalid = runner.build_parser().parse_args(cli(output_dir, option, value))
@@ -342,6 +360,134 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     self.assertEqual(state.active, (task,))
                     self.assertEqual(state.candidates, ())
 
+    def test_completed_result_audit_validates_latest_result_once(self) -> None:
+        rows = [{"case_id": "case-001", "design_hash": "design-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            args = runner.build_parser().parse_args(cli(output_dir))
+            task = campaign_tasks(output_dir, rows)[0]
+            history = [history_task(task, 17, "completed", exit_code=0)]
+            validated: dict[str, int] = {}
+            result_row = {"case_id": "case-001", "status": "ok"}
+            with (
+                mock.patch.object(
+                    runner.collector,
+                    "fetch_task_remote_file",
+                    return_value="one-row-result",
+                ) as fetch,
+                mock.patch.object(
+                    runner.collector,
+                    "_one_remote_result",
+                    return_value=(["case_id", "status"], result_row),
+                ) as parse,
+                mock.patch.object(
+                    runner.collector,
+                    "validate_result_matches_plan",
+                ) as validate,
+            ):
+                self.assertEqual(
+                    runner.audit_completed_result_rows(
+                        args,
+                        [task],
+                        rows,
+                        history,
+                        validated,
+                    ),
+                    (),
+                )
+                self.assertEqual(
+                    runner.audit_completed_result_rows(
+                        args,
+                        [task],
+                        rows,
+                        history,
+                        validated,
+                    ),
+                    (),
+                )
+
+            self.assertEqual(validated, {task.dedupe_key: 17})
+            fetch.assert_called_once()
+            parse.assert_called_once_with("one-row-result", "case-001", "design-a")
+            validate.assert_called_once_with(rows[0], result_row)
+
+    def test_completed_result_audit_rejects_structured_failed_row(self) -> None:
+        rows = [{"case_id": "case-001", "design_hash": "design-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            args = runner.build_parser().parse_args(cli(output_dir))
+            task = campaign_tasks(output_dir, rows)[0]
+            history = [history_task(task, 17, "completed", exit_code=0)]
+            with (
+                mock.patch.object(
+                    runner.collector,
+                    "fetch_task_remote_file",
+                    return_value="failed-row",
+                ),
+                mock.patch.object(
+                    runner.collector,
+                    "_one_remote_result",
+                    side_effect=RuntimeError("status='failed'"),
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "status='failed'"):
+                    runner.audit_completed_result_rows(
+                        args,
+                        [task],
+                        rows,
+                        history,
+                        {},
+                    )
+
+    def test_completed_result_audit_waits_for_remote_file_visibility(self) -> None:
+        rows = [{"case_id": "case-001", "design_hash": "design-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            args = runner.build_parser().parse_args(cli(output_dir))
+            task = campaign_tasks(output_dir, rows)[0]
+            history = [history_task(task, 17, "completed", exit_code=0)]
+            validated: dict[str, int] = {}
+            with mock.patch.object(
+                runner.collector,
+                "fetch_task_remote_file",
+                side_effect=OSError("remote result is not visible yet"),
+            ):
+                pending = runner.audit_completed_result_rows(
+                    args,
+                    [task],
+                    rows,
+                    history,
+                    validated,
+                )
+
+            self.assertEqual(len(pending), 1)
+            self.assertIn("case-001:OSError", pending[0])
+            self.assertEqual(validated, {})
+
+    def test_completed_result_audit_waits_for_append_only_settle_window(self) -> None:
+        rows = [{"case_id": "case-001", "design_hash": "design-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            args = runner.build_parser().parse_args(cli(output_dir))
+            task = campaign_tasks(output_dir, rows)[0]
+            history = [history_task(task, 17, "completed", exit_code=0)]
+            history[0]["finished_at"] = "2999-01-01 00:00:00"
+            with mock.patch.object(
+                runner.collector,
+                "fetch_task_remote_file",
+            ) as fetch:
+                pending = runner.audit_completed_result_rows(
+                    args,
+                    [task],
+                    rows,
+                    history,
+                    {},
+                )
+
+            self.assertEqual(len(pending), 1)
+            self.assertIn("case-001:settling", pending[0])
+            fetch.assert_not_called()
+
     def test_submit_refills_each_open_slot_without_duplicating_active_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -399,6 +545,13 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                 )
                 collect = stack.enter_context(
                     mock.patch.object(runner.collector, "main", side_effect=fake_collect)
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        runner,
+                        "audit_completed_result_rows",
+                        side_effect=fake_result_audit,
+                    )
                 )
                 sleep = stack.enter_context(mock.patch.object(runner.time, "sleep"))
                 with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -474,6 +627,13 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     )
                 )
                 stack.enter_context(mock.patch.object(runner.collector, "main", side_effect=fake_collect))
+                stack.enter_context(
+                    mock.patch.object(
+                        runner,
+                        "audit_completed_result_rows",
+                        side_effect=fake_result_audit,
+                    )
+                )
                 stack.enter_context(mock.patch.object(runner.time, "sleep"))
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     runner.main(cli(output_dir, "--submit", *beta_args))
@@ -571,6 +731,13 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     mock.patch.object(runner.submit_campaign, "post_scheduler_task")
                 )
                 stack.enter_context(mock.patch.object(runner.collector, "main", side_effect=collect))
+                stack.enter_context(
+                    mock.patch.object(
+                        runner,
+                        "audit_completed_result_rows",
+                        side_effect=fake_result_audit,
+                    )
+                )
                 with contextlib.redirect_stdout(stdout):
                     runner.main(cli(output_dir, *identity, "--submit", *beta_args))
 

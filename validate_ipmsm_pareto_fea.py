@@ -21,6 +21,7 @@ import sys
 import tempfile
 from typing import Any, Mapping, Sequence
 
+from atomic_publish import PublishReceipt, publish_no_replace, rollback_owned_output
 from ipmsm_optimization import (
     BETA_CONVENTION,
     OptimizationSpec,
@@ -1325,32 +1326,29 @@ def _stage_text(path: Path, text: str) -> Path:
     return temp_path
 
 
-def _publish_no_replace(staged_path: Path, output_path: Path) -> None:
+def _publish_no_replace(staged_path: Path, output_path: Path) -> PublishReceipt:
     """Atomically publish one staged inode without replacing an existing path."""
 
     try:
-        os.link(staged_path, output_path)
+        return publish_no_replace(staged_path, output_path)
     except FileExistsError as exc:
         raise ParetoFEAValidationError(
             f"refusing to overwrite raced validation output: {output_path}"
         ) from exc
     except OSError as exc:
+        if output_path.exists():
+            raise ParetoFEAValidationError(
+                f"refusing to overwrite raced validation output: {output_path}"
+            ) from exc
         raise ParetoFEAValidationError(
-            f"atomic no-replace hardlink publish failed for {output_path}: {exc}"
+            f"atomic no-replace publish failed for {output_path}: {exc}"
         ) from exc
 
 
-def _rollback_published_inode(staged_path: Path, output_path: Path) -> None:
+def _rollback_published_inode(receipt: PublishReceipt) -> None:
     """Remove our publication only while the destination still names our inode."""
 
-    try:
-        if os.path.samefile(staged_path, output_path):
-            output_path.unlink()
-    except FileNotFoundError:
-        return
-    except OSError:
-        # An external replacement or an uninspectable path must never be deleted.
-        return
+    rollback_owned_output(receipt)
 
 
 def write_atomic_outputs(
@@ -1368,7 +1366,7 @@ def write_atomic_outputs(
         raise ParetoFEAValidationError(f"refusing to overwrite existing validation output(s): {existing}")
 
     staged: list[Path] = []
-    published_rows = False
+    published_rows: PublishReceipt | None = None
     row_temp: Path | None = None
     try:
         summary_temp = _stage_text(summary_path, _json_text(summary))
@@ -1376,12 +1374,11 @@ def write_atomic_outputs(
         if rows_path is not None:
             row_temp = _stage_text(rows_path, _row_csv_text(rows))
             staged.append(row_temp)
-            _publish_no_replace(row_temp, rows_path)
-            published_rows = True
+            published_rows = _publish_no_replace(row_temp, rows_path)
         _publish_no_replace(summary_temp, summary_path)
     except Exception:
-        if published_rows and row_temp is not None and rows_path is not None:
-            _rollback_published_inode(row_temp, rows_path)
+        if published_rows is not None:
+            _rollback_published_inode(published_rows)
         raise
     finally:
         for path in staged:

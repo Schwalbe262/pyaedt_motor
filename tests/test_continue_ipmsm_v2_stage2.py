@@ -1070,6 +1070,15 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
                 continuation._atomic_create_json(path, {"status": "new"}, "decision")
             self.assertEqual(path.read_text(encoding="utf-8"), "external")
 
+    def test_atomic_create_uses_windows_no_replace_fallback_for_winerror_50(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decision.json"
+            unsupported = OSError("mapped drive hard links are unsupported")
+            unsupported.winerror = 50
+            with mock.patch.object(continuation.os, "link", side_effect=unsupported):
+                continuation._atomic_create_json(path, {"status": "new"}, "decision")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"status": "new"})
+
     def test_staged_model_metadata_is_rebased_to_atomic_final_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             paths = fixture(Path(tmp), primary_r2=0.90)

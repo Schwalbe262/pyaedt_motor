@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import csv
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import io
 import json
 import math
@@ -25,6 +26,7 @@ KNOWN_STATUSES = ACTIVE_STATUSES | TERMINAL_RETRY_STATUSES | {"completed"}
 DEFAULT_POLL_INTERVAL_SECONDS = 30.0
 DEFAULT_OVERALL_TIMEOUT_SECONDS = 604_800.0
 DEFAULT_TERMINAL_RETRY_LIMIT = 1
+DEFAULT_COMPLETED_RESULT_SETTLE_SECONDS = 300.0
 STATUS_HEARTBEAT_POLLS = 10
 BETA_PATH_ARGUMENTS = (
     "beta_summary",
@@ -80,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_TERMINAL_RETRY_LIMIT,
         help="Maximum failed/cancelled attempts that may each be followed by a retry.",
+    )
+    parser.add_argument(
+        "--completed-result-settle-seconds",
+        type=float,
+        default=DEFAULT_COMPLETED_RESULT_SETTLE_SECONDS,
+        help="Wait this long after scheduler completion before trusting an append-only result CSV.",
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
@@ -139,6 +147,11 @@ def validate_args(args: argparse.Namespace) -> None:
         raise RuntimeError("--overall-timeout-seconds must be finite and > 0")
     if args.terminal_retry_limit < 0:
         raise RuntimeError("--terminal-retry-limit must be >= 0")
+    if (
+        not math.isfinite(args.completed_result_settle_seconds)
+        or args.completed_result_settle_seconds < 0
+    ):
+        raise RuntimeError("--completed-result-settle-seconds must be finite and >= 0")
     if args.write_manifest is not None:
         raise RuntimeError("--write-manifest is not supported by the campaign runner")
     beta_paths = [getattr(args, name) for name in BETA_PATH_ARGUMENTS]
@@ -436,6 +449,94 @@ def classify_campaign_state(
     )
 
 
+def audit_completed_result_rows(
+    args: argparse.Namespace,
+    completed_tasks: Iterable[submit_campaign.CampaignTask],
+    selected_rows: list[dict[str, Any]],
+    history: Iterable[dict[str, Any]],
+    validated_task_ids: dict[str, int],
+) -> tuple[str, ...]:
+    """Validate each newly completed scheduler task's one-row result immediately.
+
+    A scheduler exit code of zero only proves that the wrapper ran.  Maxwell can
+    still return ``analysis=False`` and write a structured failed row, so such a
+    task must never be counted as usable campaign progress.
+    """
+
+    history_by_dedupe = _history_by_dedupe(history, args.project)
+    pending: list[str] = []
+    for task in completed_tasks:
+        successful = [
+            item
+            for item in history_by_dedupe.get(task.dedupe_key, [])
+            if str(item.get("status") or "").strip().lower() == "completed"
+            and _exit_code(item) == 0
+            and isinstance(_task_id(item), int)
+        ]
+        if not successful:
+            raise RuntimeError(
+                f"completed result audit cannot resolve a successful task for case_id={task.case_id!r}"
+            )
+        latest_id = max(int(_task_id(item)) for item in successful)
+        latest = [item for item in successful if _task_id(item) == latest_id]
+        if len(latest) != 1:
+            raise RuntimeError(
+                f"completed result audit found an ambiguous latest task for case_id={task.case_id!r}"
+            )
+        if validated_task_ids.get(task.dedupe_key) == latest_id:
+            continue
+        finished_raw = str(latest[0].get("finished_at") or "").strip()
+        if not finished_raw:
+            pending.append(f"{task.case_id}:settling:missing_finished_at")
+            continue
+        try:
+            finished_at = datetime.fromisoformat(finished_raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise RuntimeError(
+                f"completed result audit has invalid finished_at for case_id={task.case_id!r}: "
+                f"{finished_raw!r}"
+            ) from exc
+        if finished_at.tzinfo is None:
+            finished_at = finished_at.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - finished_at.astimezone(timezone.utc)).total_seconds()
+        if age_seconds < args.completed_result_settle_seconds:
+            pending.append(
+                f"{task.case_id}:settling:{max(0.0, args.completed_result_settle_seconds - age_seconds):.1f}s"
+            )
+            continue
+        plan_index = task.row_number - args.case_start_index
+        if not 0 <= plan_index < len(selected_rows):
+            raise RuntimeError(
+                f"completed result audit plan index is invalid for case_id={task.case_id!r}"
+            )
+        plan_row = selected_rows[plan_index]
+        if str(plan_row.get("case_id") or "").strip() != task.case_id:
+            raise RuntimeError(
+                f"completed result audit plan identity changed for case_id={task.case_id!r}"
+            )
+        try:
+            text = collector.fetch_task_remote_file(
+                args.scheduler_url,
+                latest_id,
+                task.result_csv,
+                "remote_cwd",
+                args.timeout,
+            )
+        except Exception as exc:
+            message = str(exc).replace("\r", " ").replace("\n", " ")[:160]
+            pending.append(f"{task.case_id}:{type(exc).__name__}:{message}")
+            continue
+        expected_design_hash = str(plan_row.get("design_hash") or "").strip()
+        _, result_row = collector._one_remote_result(
+            text,
+            task.case_id,
+            expected_design_hash,
+        )
+        collector.validate_result_matches_plan(plan_row, result_row)
+        validated_task_ids[task.dedupe_key] = latest_id
+    return tuple(pending)
+
+
 def read_scheduler_snapshot(args: argparse.Namespace) -> SchedulerSnapshot:
     try:
         history = submit_campaign.get_scheduler_task_history(
@@ -511,9 +612,11 @@ def _status_signature(
     state: CampaignState,
     snapshot: SchedulerSnapshot,
     submitted: int,
+    validated_results: int,
 ) -> tuple[int, ...]:
     return (
         len(state.successful),
+        validated_results,
         len(state.active),
         len(state.pending),
         len(state.missing),
@@ -528,10 +631,12 @@ def _emit_status(
     snapshot: SchedulerSnapshot,
     submitted: int,
     elapsed: float,
+    validated_results: int,
 ) -> None:
     print(
         "run_ipmsm_v2 "
-        f"ok={len(state.successful)} active={len(state.active)} "
+        f"scheduler_ok={len(state.successful)} result_ok={validated_results} "
+        f"active={len(state.active)} "
         f"pending={len(state.pending)} missing={len(state.missing)} "
         f"retry={len(state.retryable)} project_active={snapshot.project_active_count} "
         f"submitted={submitted} elapsed_s={elapsed:.1f}",
@@ -605,6 +710,7 @@ def main(argv: list[str] | None = None) -> int:
         first_row_number=args.case_start_index,
     )
     pending: dict[str, PendingSubmission] = {}
+    validated_task_ids: dict[str, int] = {}
     submitted = 0
 
     if not args.submit:
@@ -639,7 +745,33 @@ def main(argv: list[str] | None = None) -> int:
             pending,
             args.terminal_retry_limit,
         )
-        if len(state.successful) == len(tasks):
+        result_audit_pending = audit_completed_result_rows(
+            args,
+            state.successful,
+            selected_rows,
+            snapshot.history,
+            validated_task_ids,
+        )
+        if not result_audit_pending and len(validated_task_ids) != len(state.successful):
+            raise RuntimeError(
+                "completed result audit coverage mismatch: "
+                f"scheduler_completed={len(state.successful)} result_validated={len(validated_task_ids)}"
+            )
+        if result_audit_pending:
+            elapsed = time.monotonic() - started
+            if elapsed >= args.overall_timeout_seconds:
+                raise RuntimeError(
+                    f"campaign timeout while waiting for {len(result_audit_pending)} completed result(s); "
+                    "no output files were written"
+                )
+            preview = ",".join(result_audit_pending[:3])
+            if len(result_audit_pending) > 3:
+                preview += f",...(+{len(result_audit_pending) - 3})"
+            print(
+                f"wait_ipmsm_v2_result_audit pending={len(result_audit_pending)} {preview}",
+                file=sys.stderr,
+            )
+        if len(state.successful) == len(tasks) and not result_audit_pending:
             collected = collect_completed_campaign(args)
             output = {
                 **collected,
@@ -711,9 +843,20 @@ def main(argv: list[str] | None = None) -> int:
                     "no output files were written"
                 )
 
-        signature = _status_signature(state, snapshot, submitted)
+        signature = _status_signature(
+            state,
+            snapshot,
+            submitted,
+            len(validated_task_ids),
+        )
         if signature != previous_signature or polls % STATUS_HEARTBEAT_POLLS == 0:
-            _emit_status(state, snapshot, submitted, elapsed)
+            _emit_status(
+                state,
+                snapshot,
+                submitted,
+                elapsed,
+                len(validated_task_ids),
+            )
         previous_signature = signature
         polls += 1
         remaining = args.overall_timeout_seconds - elapsed

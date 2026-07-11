@@ -7,6 +7,7 @@ from dataclasses import replace
 import io
 import json
 import math
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -833,6 +834,30 @@ class OptimizerCliTests(unittest.TestCase):
                 )
             )
 
+    @unittest.skipUnless(os.name == "nt", "Windows rename fallback is Windows-only")
+    def test_output_pair_publishes_with_winerror_50_rename_fallback(self) -> None:
+        spec, row = candidate()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pareto = root / "pareto.csv"
+            fea = root / "fea.csv"
+            unsupported = OSError("mapped drive hard links are unsupported")
+            unsupported.winerror = 50
+            with mock.patch.object(cli.os, "link", side_effect=unsupported):
+                result = cli.write_optimization_csv_pair(
+                    pareto,
+                    fea,
+                    [row],
+                    [row],
+                    spec,
+                )
+            self.assertEqual(result[:2], (pareto, fea))
+            self.assertTrue(pareto.is_file())
+            self.assertTrue(fea.is_file())
+            self.assertFalse(cli._pair_stage_tokens(pareto))
+            self.assertFalse(cli._pair_stage_tokens(fea))
+            self.assertFalse(cli._pair_proof_tokens(fea))
+
     def test_pareto_publish_race_rolls_back_only_owned_fea_inode(self) -> None:
         spec, row = candidate()
         with tempfile.TemporaryDirectory() as tmp:
@@ -911,6 +936,31 @@ class OptimizerCliTests(unittest.TestCase):
 
             self.assertFalse(cli.recover_incomplete_csv_pair(pareto, fea))
             self.assertEqual(fea.read_text(encoding="utf-8"), "external-fea")
+
+    @unittest.skipUnless(os.name == "nt", "Windows rename fallback is Windows-only")
+    def test_crash_orphan_fea_rename_fallback_is_recovered_from_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pareto = root / "pareto.csv"
+            fea = root / "fea.csv"
+            token = "renamecrash"
+            pareto_stage = cli._pair_stage_path(pareto, token)
+            fea_stage = cli._pair_stage_path(fea, token)
+            proof = cli._pair_proof_path(fea, token)
+            pareto_stage.write_bytes(b"pareto-stage")
+            fea_stage.write_bytes(b"fea-stage")
+            unsupported = OSError("mapped drive hard links are unsupported")
+            unsupported.winerror = 50
+            with mock.patch.object(cli.os, "link", side_effect=unsupported):
+                receipt = cli.publish_no_replace(fea_stage, fea, proof_path=proof)
+
+            self.assertEqual(receipt.strategy, "windows_rename")
+            self.assertFalse(fea_stage.exists())
+            self.assertTrue(proof.exists())
+            self.assertTrue(cli.recover_incomplete_csv_pair(pareto, fea))
+            self.assertFalse(fea.exists())
+            self.assertFalse(pareto_stage.exists())
+            self.assertFalse(proof.exists())
 
     def test_model_dir_checkpoint_cli_prepares_identity_and_passes_resume_state(self) -> None:
         spec, row = candidate()

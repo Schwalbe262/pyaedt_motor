@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import merge_ipmsm_v2_results as merger
 
@@ -138,6 +139,19 @@ class MergeIpmsmV2ResultsTests(unittest.TestCase):
 
             self.assertEqual(output.read_bytes(), before)
             self.assertEqual(list(output.parent.glob(f".{output.name}.*.tmp")), [])
+
+    def test_write_csv_uses_windows_no_replace_fallback_for_winerror_50(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "merged.csv"
+            unsupported = OSError("mapped drive hard links are unsupported")
+            unsupported.winerror = 50
+            with mock.patch.object(merger.os, "link", side_effect=unsupported):
+                merger.write_csv(
+                    output,
+                    ["case_id", "status"],
+                    [{"case_id": "a", "status": "ok"}],
+                )
+            self.assertTrue(output.read_bytes().startswith(b"\xef\xbb\xbf"))
 
 
 if __name__ == "__main__":

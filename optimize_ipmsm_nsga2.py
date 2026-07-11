@@ -27,6 +27,13 @@ import tempfile
 import uuid
 from typing import Any, Iterable, Mapping, Sequence
 
+from atomic_publish import (
+    PublishReceipt,
+    cleanup_publish_receipt,
+    publish_no_replace,
+    recover_owned_output,
+    rollback_owned_output,
+)
 from ipmsm_optimization import (
     BETA_CONVENTION,
     OptimizationCandidate,
@@ -134,9 +141,9 @@ def _atomic_write_bytes(
             stream.flush()
             os.fsync(stream.fileno())
         if fresh_only:
-            # A hard-link publish is atomic and never replaces an output that
-            # appeared after the initial existence check (unlike os.replace).
-            os.link(temporary, output)
+            # This publish is atomic and never replaces an output that appeared
+            # after the initial existence check (unlike os.replace).
+            publish_no_replace(temporary, output)
         else:
             os.replace(temporary, output)
     finally:
@@ -1290,10 +1297,29 @@ def _pair_stage_path(output: str | Path, token: str) -> Path:
     return target.parent / f".{target.name}{PAIR_STAGE_MARKER}{token}.stage"
 
 
+def _pair_proof_path(output: str | Path, token: str) -> Path:
+    return _pair_stage_path(output, token).with_suffix(".stage.proof")
+
+
 def _pair_stage_tokens(output: str | Path) -> set[str]:
     target = Path(output)
     prefix = f".{target.name}{PAIR_STAGE_MARKER}"
     suffix = ".stage"
+    if not target.parent.is_dir():
+        return set()
+    return {
+        item.name[len(prefix):-len(suffix)]
+        for item in target.parent.iterdir()
+        if item.name.startswith(prefix)
+        and item.name.endswith(suffix)
+        and len(item.name) > len(prefix) + len(suffix)
+    }
+
+
+def _pair_proof_tokens(output: str | Path) -> set[str]:
+    target = Path(output)
+    prefix = f".{target.name}{PAIR_STAGE_MARKER}"
+    suffix = ".stage.proof"
     if not target.parent.is_dir():
         return set()
     return {
@@ -1319,22 +1345,6 @@ def _remove_stage(path: str | Path) -> None:
         pass
 
 
-def _rollback_owned_output(stage: str | Path, output: str | Path) -> bool:
-    """Remove output only when it still points at this transaction's inode."""
-
-    if not os.path.lexists(output):
-        return True
-    if not _samefile(stage, output):
-        return True
-    try:
-        Path(output).unlink()
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
 def recover_incomplete_csv_pair(
     pareto_path: str | Path,
     fea_path: str | Path,
@@ -1345,12 +1355,19 @@ def recover_incomplete_csv_pair(
     fea = Path(fea_path)
     if os.path.lexists(pareto) or not os.path.lexists(fea):
         return False
-    for token in sorted(_pair_stage_tokens(fea)):
+    tokens = _pair_stage_tokens(fea) | _pair_proof_tokens(fea)
+    for token in sorted(tokens):
         fea_stage = _pair_stage_path(fea, token)
-        if not _samefile(fea_stage, fea):
-            continue
+        fea_proof = _pair_proof_path(fea, token)
         pareto_stage = _pair_stage_path(pareto, token)
-        fea.unlink()
+        if _samefile(fea_stage, fea):
+            fea.unlink()
+            _remove_stage(fea_proof)
+        elif fea_proof.is_file():
+            if not recover_owned_output(fea_proof, fea):
+                continue
+        else:
+            continue
         _remove_stage(fea_stage)
         _remove_stage(pareto_stage)
         return True
@@ -1387,18 +1404,24 @@ def write_optimization_csv_pair(
     pareto_stage = _pair_stage_path(pareto, token)
     fea_stage = _pair_stage_path(fea, token)
     preserve_stages = False
+    fea_receipt: PublishReceipt | None = None
     try:
         _atomic_write_bytes(pareto_stage, pareto_payload, fresh_only=True)
         _atomic_write_bytes(fea_stage, fea_payload, fresh_only=True)
-        os.link(fea_stage, fea)
+        fea_receipt = publish_no_replace(
+            fea_stage,
+            fea,
+            proof_path=_pair_proof_path(fea, token),
+        )
         try:
-            os.link(pareto_stage, pareto)
+            publish_no_replace(pareto_stage, pareto)
         except BaseException:
-            if not _samefile(pareto_stage, pareto):
-                preserve_stages = not _rollback_owned_output(fea_stage, fea)
+            preserve_stages = not rollback_owned_output(fea_receipt)
             raise
     finally:
         if not preserve_stages:
+            if fea_receipt is not None:
+                cleanup_publish_receipt(fea_receipt)
             _remove_stage(fea_stage)
             _remove_stage(pareto_stage)
     return pareto, fea, provenance

@@ -23,6 +23,7 @@ import tempfile
 from typing import Any, Iterable, Mapping
 import uuid
 
+from atomic_publish import publish_no_replace
 import merge_ipmsm_v2_results as merger
 import run_ipmsm_v2_campaign as campaign_runner
 import train_ipmsm_lightgbm as trainer
@@ -875,7 +876,7 @@ def _atomic_create_json(path: Path, value: Mapping[str, Any], label: str) -> Non
             stream.flush()
             os.fsync(stream.fileno())
         try:
-            os.link(temporary, path)
+            publish_no_replace(temporary, path)
         except FileExistsError as exc:
             raise ContinuationGateError(f"{label} already exists: {path}") from exc
         except OSError as exc:

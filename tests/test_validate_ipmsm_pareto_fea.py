@@ -773,7 +773,7 @@ class ParetoFEAValidatorTests(unittest.TestCase):
                 with self.assertRaisesRegex(validator.ParetoFEAValidationError, "raced validation output"):
                     validator.write_atomic_outputs(summary_path, summary, rows_path, rows)
 
-            self.assertEqual(summary_path.read_text(encoding="utf-8"), "external-summary")
+            self.assertFalse(summary_path.exists())
             self.assertEqual(rows_path.read_text(encoding="utf-8"), "external-replacement")
 
     def test_hardlink_unavailable_fails_without_publishing_outputs(self) -> None:
@@ -783,10 +783,23 @@ class ParetoFEAValidatorTests(unittest.TestCase):
             summary_path = Path(tmp) / "publish" / "summary.json"
             rows_path = Path(tmp) / "publish" / "rows.csv"
             with mock.patch.object(validator.os, "link", side_effect=OSError("hardlink disabled")):
-                with self.assertRaisesRegex(validator.ParetoFEAValidationError, "hardlink publish failed"):
+                with self.assertRaisesRegex(validator.ParetoFEAValidationError, "no-replace publish failed"):
                     validator.write_atomic_outputs(summary_path, summary, rows_path, rows)
             self.assertFalse(summary_path.exists())
             self.assertFalse(rows_path.exists())
+
+    def test_winerror_50_publishes_validation_pair_with_rename_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = ValidationFixture(Path(tmp))
+            summary, rows = fixture.validate()
+            summary_path = Path(tmp) / "publish" / "summary.json"
+            rows_path = Path(tmp) / "publish" / "rows.csv"
+            unsupported = OSError("mapped drive hard links are unsupported")
+            unsupported.winerror = 50
+            with mock.patch.object(validator.os, "link", side_effect=unsupported):
+                validator.write_atomic_outputs(summary_path, summary, rows_path, rows)
+            self.assertTrue(summary_path.is_file())
+            self.assertTrue(rows_path.is_file())
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ from pathlib import Path
 import tempfile
 from typing import Iterable
 
+from atomic_publish import publish_no_replace
+
 
 def read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
@@ -122,7 +124,7 @@ def write_csv(path: Path, fieldnames: list[str], rows: Iterable[dict[str, str]])
             output.flush()
             os.fsync(output.fileno())
         try:
-            os.link(temporary, path)
+            publish_no_replace(temporary, path)
         except FileExistsError as exc:
             raise FileExistsError(f"refusing to overwrite existing merged output: {path}") from exc
         except OSError as exc:
