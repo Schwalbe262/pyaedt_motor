@@ -3718,3 +3718,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: Stage1=507/700, active=100/100, errors=0; coordinator 15/15, related 105/105, shared `.venv` 744/744; tamper/retry/settle fuzz found no P0/P1. No v4 root/task was created before the official R²/Pareto gates.
 - Failure/next: system Python lacked pandas/scipy, while project `.venv` passed; queued-inclusive cap relies on serialized phases because the server lacks transactional queued-task CAS. Finish Stage1/gates, then initialize, import MTPA evidence, and launch `run --submit --watch`.
 - Token usage: unavailable; run `codex_ops.py` if a local Codex SQLite database becomes available.
+
+## 2026-07-12 07:50:48 +09:00 - Stage-aware overall progress dashboard
+- Part/goal: make the live Web UI truthful after Stage1 and expose the whole β→FEA→R²→DOE→NSGA/Pareto→speed→target-load chain.
+- Hypothesis/actions: added exact per-stage runtime counters, current-stage-only progress, complete/partial scheduler-history evidence, downstream task overlays, target-load failure/stale detail, alert overflow, and a cache-honest reload control; restarted only the dashboard task.
+- Metrics/result: dashboard 57/57 and full 748/748 pass; HTTP/static/healthz return 200 with CSP; live PID 157348, resolved=1/8, Stage1=508/700 (72.57%), project #2 cap/active=100/100, history=634/634 complete.
+- Failure/next: in-app browser remained unavailable, so visual validation used source/DOM contracts plus live HTTP; keep Stage1 running to 700, then use the same UI for the official R² and conditional downstream transitions.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database. No simulation or scheduler task was submitted, cancelled, or restarted.

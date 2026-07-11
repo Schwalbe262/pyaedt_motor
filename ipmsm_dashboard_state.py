@@ -86,7 +86,16 @@ TASK_PREFIXES = {
     "stage3": "ipmsm-v2-foundation-s3-",
     "pareto": "ipmsm-v2-pareto-fea-",
     "speed": "ipmsm-profile-thirdpass-speed-strict-v2-v1-",
+    "target_load": "ipmsm-target-load-v4-",
 }
+RUNTIME_SCHEDULER_STATUSES = (
+    "queued",
+    "attaching",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+)
 STAGE1_TASK_NAME_RE = re.compile(
     r"^ipmsm-v2-foundation-s1-v2s1_\d{4}_(?:rated_torque|rated_power_at_max_speed)_\d{2}$"
 )
@@ -931,6 +940,59 @@ def _count_csv_rows(path: Path, limit: int = 100_000) -> int | None:
         return None
 
 
+def _positive_argv_int(argv: Sequence[Any], option: str) -> int | None:
+    value = _safe_int(_argv_value(argv, option), -1)
+    return value if value > 0 else None
+
+
+def _runtime_scheduler_counts(value: Any) -> dict[str, int]:
+    source = value if isinstance(value, Mapping) else {}
+    return {
+        status: max(0, _safe_int(source.get(status)))
+        for status in RUNTIME_SCHEDULER_STATUSES
+    }
+
+
+def _runtime_counter(
+    *,
+    completed: int | None,
+    total: int | None,
+    unit: str,
+    planned: int | None = None,
+    scheduler_counts: Any = None,
+) -> dict[str, Any]:
+    normalized_completed = (
+        completed
+        if isinstance(completed, int) and not isinstance(completed, bool) and completed >= 0
+        else None
+    )
+    normalized_total = (
+        total
+        if isinstance(total, int) and not isinstance(total, bool) and total > 0
+        else None
+    )
+    normalized_planned = (
+        planned
+        if isinstance(planned, int) and not isinstance(planned, bool) and planned >= 0
+        else None
+    )
+    progress_pct = None
+    if (
+        normalized_completed is not None
+        and normalized_total is not None
+        and normalized_completed <= normalized_total
+    ):
+        progress_pct = round(100.0 * normalized_completed / normalized_total, 2)
+    return {
+        "completed": normalized_completed,
+        "total": normalized_total,
+        "unit": _clip_text(unit, 40),
+        "progress_pct": progress_pct,
+        "planned": normalized_planned,
+        "scheduler_counts": _runtime_scheduler_counts(scheduler_counts),
+    }
+
+
 def _speed_marker_is_complete(
     marker_path: Path,
     *,
@@ -1268,6 +1330,75 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
     opt_argv = optimization.get("argv_template") if isinstance(optimization.get("argv_template"), list) else []
     speed_campaign_argv = speed.get("campaign_argv") if isinstance(speed.get("campaign_argv"), list) else []
 
+    stage2_plan_value = _argv_value(stage2_argv, "--stage2-case-plan")
+    stage2_output_value = _argv_value(stage2_argv, "--stage2-output-dir")
+    stage2_plan_path = (
+        _resolve(config.workdir, stage2_plan_value) if stage2_plan_value else None
+    )
+    stage2_result_path = (
+        _resolve(config.workdir, stage2_output_value) / "merged_results.csv"
+        if stage2_output_value
+        else None
+    )
+    stage2_plan_rows = (
+        _count_csv_rows(stage2_plan_path)
+        if stage2_plan_path is not None
+        else None
+    )
+    stage2_result_rows = (
+        _count_csv_rows(stage2_result_path)
+        if stage2_result_path is not None
+        else None
+    )
+    stage2_prior_expected = _positive_argv_int(stage2_argv, "--expected-stage1-rows")
+    stage2_combined_expected = _positive_argv_int(stage2_argv, "--expected-combined-rows")
+    stage2_expected_rows = (
+        stage2_combined_expected - stage2_prior_expected
+        if (
+            stage2_prior_expected is not None
+            and stage2_combined_expected is not None
+            and stage2_combined_expected > stage2_prior_expected
+        )
+        else stage2_plan_rows
+    )
+
+    stage3_plan_value = str(stage3.get("plan") or "").strip()
+    stage3_output_value = _argv_value(stage3_argv, "--stage2-output-dir")
+    stage3_plan_path = (
+        _resolve(config.workdir, stage3_plan_value) if stage3_plan_value else None
+    )
+    stage3_result_path = (
+        _resolve(config.workdir, stage3_output_value) / "merged_results.csv"
+        if stage3_output_value
+        else None
+    )
+    stage3_plan_rows = (
+        _count_csv_rows(stage3_plan_path)
+        if stage3_plan_path is not None
+        else None
+    )
+    stage3_result_rows = (
+        _count_csv_rows(stage3_result_path)
+        if stage3_result_path is not None
+        else None
+    )
+    stage3_expected_rows = _safe_int(stage3.get("expected_rows"), -1)
+    if stage3_expected_rows <= 0:
+        stage3_prior_expected = _positive_argv_int(stage3_argv, "--expected-stage1-rows")
+        stage3_combined_expected = _positive_argv_int(
+            stage3_argv,
+            "--expected-combined-rows",
+        )
+        stage3_expected_rows = (
+            stage3_combined_expected - stage3_prior_expected
+            if (
+                stage3_prior_expected is not None
+                and stage3_combined_expected is not None
+                and stage3_combined_expected > stage3_prior_expected
+            )
+            else stage3_plan_rows
+        )
+
     stage1_metadata = _resolve(config.workdir, stage1.get("metadata"))
     stage2_combined = _resolve(config.workdir, _argv_value(stage2_argv, "--combined-output-dir"))
     stage3_combined = _resolve(config.workdir, _argv_value(stage3_argv, "--combined-output-dir"))
@@ -1429,6 +1560,48 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         speed=speed_state,
         target_load=target_load_state,
     )
+    local_runtime = {
+        "stage2": _runtime_counter(
+            completed=(
+                stage2_result_rows
+                if stage2_result_rows is not None
+                else 0
+                if stage2_result_path is not None and not stage2_result_path.exists()
+                else None
+            ),
+            total=stage2_expected_rows,
+            unit="result_rows",
+            planned=(
+                stage2_plan_rows
+                if stage2_plan_rows is not None
+                else 0
+                if stage2_plan_path is not None and not stage2_plan_path.exists()
+                else None
+            ),
+        ),
+        "stage3": _runtime_counter(
+            completed=(
+                stage3_result_rows
+                if stage3_result_rows is not None
+                else 0
+                if stage3_result_path is not None and not stage3_result_path.exists()
+                else None
+            ),
+            total=stage3_expected_rows,
+            unit="result_rows",
+            planned=(
+                stage3_plan_rows
+                if stage3_plan_rows is not None
+                else 0
+                if stage3_plan_path is not None and not stage3_plan_path.exists()
+                else None
+            ),
+        ),
+    }
+    for stage in stages:
+        runtime = local_runtime.get(str(stage.get("id") or ""))
+        if runtime is not None:
+            stage["runtime"] = runtime
     current = select_current_stage(stages)
 
     alerts: list[dict[str, str]] = []
@@ -1639,6 +1812,204 @@ def select_current_stage(stages: Sequence[Mapping[str, Any]]) -> Mapping[str, An
             stages[-1],
         )
     return current
+
+
+def _attach_stage_runtimes(
+    local: dict[str, Any],
+    scheduler: Mapping[str, Any],
+) -> None:
+    pipeline = local.get("pipeline")
+    if not isinstance(pipeline, dict) or not isinstance(pipeline.get("stages"), list):
+        return
+    stages = pipeline["stages"]
+    campaign_status = (
+        scheduler.get("campaign_status")
+        if isinstance(scheduler.get("campaign_status"), Mapping)
+        else {}
+    )
+
+    def scheduler_counts(stage_id: str) -> dict[str, int]:
+        value = campaign_status.get(stage_id)
+        return _runtime_scheduler_counts(value)
+
+    campaign = local.get("campaign") if isinstance(local.get("campaign"), Mapping) else {}
+    model = local.get("model") if isinstance(local.get("model"), Mapping) else {}
+    optimization = (
+        local.get("optimization")
+        if isinstance(local.get("optimization"), Mapping)
+        else {}
+    )
+    speed = local.get("speed") if isinstance(local.get("speed"), Mapping) else {}
+    target_load = (
+        local.get("target_load")
+        if isinstance(local.get("target_load"), Mapping)
+        else {}
+    )
+    target_counts = (
+        target_load.get("counts")
+        if isinstance(target_load.get("counts"), Mapping)
+        else {}
+    )
+
+    seed_rows = optimization.get("seeds")
+    seeds = [item for item in seed_rows if isinstance(item, Mapping)] if isinstance(seed_rows, list) else []
+    configured = optimization.get("configured_seeds")
+    configured_seeds = (
+        [value for value in configured if isinstance(value, int) and not isinstance(value, bool)]
+        if isinstance(configured, list)
+        else []
+    )
+    maximum_generations = _safe_int(optimization.get("max_generations"), -1)
+    seed_progress = {
+        _safe_int(item.get("seed"), -1): max(0, _safe_int(item.get("completed_generations")))
+        for item in seeds
+        if _safe_int(item.get("seed"), -1) >= 0
+    }
+    nsga_total = (
+        len(configured_seeds) * maximum_generations
+        if configured_seeds and maximum_generations > 0
+        else None
+    )
+    nsga_completed = (
+        sum(seed_progress.get(seed, 0) for seed in configured_seeds)
+        if nsga_total is not None
+        else None
+    )
+    optimization_decision = optimization.get("decision")
+    optimization_status = (
+        str(optimization_decision.get("status") or "")
+        if isinstance(optimization_decision, Mapping)
+        else ""
+    )
+    pareto_rows = optimization.get("fea_case_rows")
+    pareto_total = (
+        pareto_rows
+        if isinstance(pareto_rows, int) and not isinstance(pareto_rows, bool) and pareto_rows > 0
+        else None
+    )
+    pareto_phase = optimization_status in {"pareto_fea_started", "complete"}
+    pareto_scheduler = scheduler_counts("pareto")
+    history_complete = scheduler.get("history_complete") is True
+
+    runtimes: dict[str, dict[str, Any]] = {
+        "beta": _runtime_counter(
+            completed=None,
+            total=None,
+            unit="physics_gate",
+        ),
+        "stage1": _runtime_counter(
+            completed=max(0, _safe_int(campaign.get("result_ok"))),
+            total=_safe_int(campaign.get("total"), -1),
+            unit="validated_results",
+            planned=_safe_int(campaign.get("total"), -1),
+            scheduler_counts=scheduler_counts("stage1"),
+        ),
+        "surrogate": _runtime_counter(
+            completed=(
+                max(0, _safe_int(model.get("passed_count")))
+                if model.get("available") is True or model.get("gate_status") == "waiting"
+                else None
+            ),
+            total=_safe_int(model.get("target_count"), -1),
+            unit="r2_targets_passed",
+            planned=_safe_int(model.get("target_count"), -1),
+        ),
+        "optimization": _runtime_counter(
+            completed=(
+                pareto_scheduler["completed"]
+                if pareto_phase and history_complete
+                else None
+                if pareto_phase
+                else nsga_completed
+            ),
+            total=pareto_total if pareto_phase else nsga_total,
+            unit="pareto_fea_tasks" if pareto_phase else "nsga_seed_generations",
+            planned=pareto_total if pareto_phase else len(configured_seeds),
+            scheduler_counts=pareto_scheduler,
+        ),
+        "speed": _runtime_counter(
+            completed=(
+                _safe_int(speed.get("expected_rows"), -1)
+                if speed.get("complete") is True
+                else max(0, _safe_int(speed.get("result_rows")))
+                if speed.get("result_rows") is not None
+                else 0
+            ),
+            total=_safe_int(speed.get("expected_rows"), -1),
+            unit="validated_rows",
+            planned=(
+                max(0, _safe_int(speed.get("plan_rows")))
+                if speed.get("plan_rows") is not None
+                else None
+            ),
+            scheduler_counts=scheduler_counts("speed"),
+        ),
+        "target_load": _runtime_counter(
+            completed=max(0, _safe_int(target_counts.get("probes_matched"))),
+            total=_safe_int(target_counts.get("probes_total"), -1),
+            unit="matched_probes",
+            planned=(
+                max(0, _safe_int(target_counts.get("probes_total")))
+                if target_counts.get("probes_total") is not None
+                else None
+            ),
+            scheduler_counts=scheduler_counts("target_load"),
+        ),
+    }
+
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        stage_id = str(stage.get("id") or "")
+        if stage_id in {"stage2", "stage3"}:
+            existing = stage.get("runtime") if isinstance(stage.get("runtime"), Mapping) else {}
+            runtimes[stage_id] = _runtime_counter(
+                completed=existing.get("completed"),
+                total=existing.get("total"),
+                unit="result_rows",
+                planned=existing.get("planned"),
+                scheduler_counts=scheduler_counts(stage_id),
+            )
+        runtime = runtimes.get(stage_id)
+        if runtime is not None:
+            stage["runtime"] = runtime
+
+
+def build_overall_progress(stages: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    clean_stages = [stage for stage in stages if isinstance(stage, Mapping)]
+    current = select_current_stage(clean_stages)
+    current_id = _clip_text(current.get("id"), 40)
+    current_index = next(
+        (index for index, stage in enumerate(clean_stages) if stage is current),
+        -1,
+    )
+    resolved_statuses = {"complete", "skipped"}
+    next_stage = next(
+        (
+            stage
+            for stage in clean_stages[current_index + 1 :]
+            if str(stage.get("status") or "") not in resolved_statuses
+        ),
+        None,
+    )
+    runtime = current.get("runtime") if isinstance(current.get("runtime"), Mapping) else {}
+    return {
+        "resolved_stages": sum(
+            str(stage.get("status") or "") in resolved_statuses
+            for stage in clean_stages
+        ),
+        "total_stages": len(clean_stages),
+        "current_stage": current_id,
+        "current_label": _clip_text(current.get("label"), 80),
+        "current_status": _clip_text(current.get("status"), 24),
+        "completed": runtime.get("completed"),
+        "total": runtime.get("total"),
+        "unit": _clip_text(runtime.get("unit"), 40),
+        "progress_pct": runtime.get("progress_pct"),
+        "next_stage": _clip_text(next_stage.get("id"), 40) if next_stage is not None else "",
+        "next_label": _clip_text(next_stage.get("label"), 80) if next_stage is not None else "",
+        "next_detail": _clip_text(next_stage.get("detail"), 160) if next_stage is not None else "",
+    }
 
 
 def _fetch_json(url: str, timeout: float, *, max_bytes: int = 8 * 1024 * 1024) -> Any:
@@ -1971,6 +2342,8 @@ def summarize_scheduler(
         )
         if stage_completed_times:
             campaign_last_completed_at[stage] = _iso_timestamp(max(stage_completed_times).timestamp())
+    project_total_count = _safe_int(project.get("total_count"), len(clean_tasks))
+    history_returned_count = len(clean_tasks)
     return {
         "reachable": True,
         "stale": False,
@@ -1981,7 +2354,9 @@ def summarize_scheduler(
         "project_updated_at": _normalized_scheduler_time(project.get("updated_at")),
         "deployment_count": len(clean_deployments),
         "deployed_count": deployed_count,
-        "project_total_count": _safe_int(project.get("total_count"), len(clean_tasks)),
+        "project_total_count": project_total_count,
+        "history_returned_count": history_returned_count,
+        "history_complete": history_returned_count == project_total_count,
         "active_count": len(active),
         "configured_cap": cap,
         "server_cap": server_cap,
@@ -2097,6 +2472,7 @@ class DashboardStateStore:
                     "beta": {"available": False, "passed": False},
                     "optimization": {"decision": None, "seeds": []},
                     "speed": {"complete": False},
+                    "target_load": _empty_target_load_state(),
                     "processes": [],
                     "alerts": [],
                 }
@@ -2233,9 +2609,11 @@ class DashboardStateStore:
                     for stage in local.get("pipeline", {}).get("stages", []):
                         if stage.get("id") == "optimization":
                             stage.update(status="running", detail=f"Pareto FEA {pareto_active}건 실행/배정 중")
+        _attach_stage_runtimes(local, scheduler)
         current_stage = select_current_stage(local.get("pipeline", {}).get("stages", []))
         local.setdefault("pipeline", {})["current_stage"] = current_stage.get("id", "unknown")
         local["pipeline"]["current_label"] = current_stage.get("label", "상태 확인 필요")
+        local["overall"] = build_overall_progress(local["pipeline"].get("stages", []))
         scheduler_active = _safe_int(scheduler.get("active_count"))
         scheduler_cap = _safe_int(scheduler.get("cap"), self.config.cap)
         project_identity_ok = bool(scheduler.get("project_matches", True))
@@ -2472,6 +2850,7 @@ class DashboardStateStore:
             "project": self.config.project,
             "campaign": {"source_status": "unavailable", "total": 700, "result_ok": 0},
             "pipeline": {"current_stage": "unknown", "current_label": "상태 확인 필요", "stages": []},
+            "overall": build_overall_progress([]),
             "model": {"available": False, "gate_status": "unavailable", "metrics": []},
             "beta": {"available": False, "passed": False},
             "optimization": {"decision": None, "seeds": []},
@@ -2486,6 +2865,7 @@ class DashboardStateStore:
                 "official_gate_eligible": False,
             },
             "speed": {"complete": False},
+            "target_load": _empty_target_load_state(),
             "processes": [],
             "alerts": [],
             "scheduler": {"reachable": False, "stale": True, "active_count": 0, "nodes": [], "recent_tasks": []},

@@ -26,25 +26,25 @@
         <span class="live-badge" id="liveBadge"><i aria-hidden="true"></i><span id="liveLabel">LIVE</span></span>
         <span class="updated" id="updatedAt" role="status" aria-live="polite">상태 불러오는 중</span>
         <button class="icon-button" id="pauseButton" type="button" aria-pressed="false">자동 갱신 일시정지</button>
-        <button class="primary-button" id="refreshButton" type="button">지금 갱신</button>
+        <button class="primary-button" id="refreshButton" type="button">최신 스냅샷 다시 불러오기</button>
       </div>
     </header>
 
     <main>
       <section class="hero" aria-labelledby="heroTitle">
         <div class="hero-copy">
-          <div class="eyebrow"><span id="projectName">PYAEDT_MOTOR_IPMSM_V2</span><i></i><span>전체 파이프라인</span></div>
+          <div class="eyebrow"><span id="projectName">PYAEDT_MOTOR_IPMSM_V2</span><i></i><span id="resolvedStages">해결된 단계 0 / 0</span></div>
           <h1 id="heroTitle">진행 상태를 확인하고 있습니다</h1>
           <p id="heroDescription">스케줄러와 로컬 산출물을 읽어 현재 단계를 계산합니다.</p>
           <div class="hero-progress-row">
-            <progress id="heroProgress" max="700" value="0" aria-label="Stage 1 검증 결과 진행률"></progress>
-            <strong id="heroProgressLabel">0 / 700</strong>
+            <progress id="heroProgress" max="1" value="0" aria-label="현재 단계 진행률"></progress>
+            <strong id="heroProgressLabel">단계 수치 대기</strong>
           </div>
         </div>
         <div class="hero-orbit" aria-hidden="true">
           <div class="orbit orbit-outer"><span></span><span></span><span></span><span></span></div>
           <div class="orbit orbit-inner"><span></span><span></span><span></span><span></span><span></span><span></span></div>
-          <div class="rotor-core"><b id="heroPercent">0%</b><small>검증 완료</small></div>
+          <div class="rotor-core"><b id="heroPercent">—</b><small id="heroPercentLabel">현재 단계</small></div>
         </div>
       </section>
 
@@ -70,7 +70,7 @@
 
       <section class="kpi-grid" aria-label="핵심 진행 지표">
         <article class="kpi-card accent-cyan">
-          <span class="kpi-label">검증 완료</span>
+          <span class="kpi-label">Stage 1 검증 결과</span>
           <strong><b id="resultOk">—</b><small id="resultTotal">/ 700</small></strong>
           <p id="resultSub">Stage 1 결과 파일 기준</p>
         </article>
@@ -80,12 +80,12 @@
           <p id="slotSub">프로젝트 cap 확인 중</p>
         </article>
         <article class="kpi-card accent-amber">
-          <span class="kpi-label">최근 처리 속도</span>
+          <span class="kpi-label">Stage 1 최근 처리 속도</span>
           <strong><b id="completionRate">—</b><small>건/시간</small></strong>
           <p id="rateSub">최근 상태 로그 기준</p>
         </article>
         <article class="kpi-card accent-violet">
-          <span class="kpi-label">예상 Stage 1 잔여</span>
+          <span class="kpi-label">Stage 1 예상 잔여</span>
           <strong><b id="etaValue">—</b><small id="etaUnit">시간</small></strong>
           <p id="etaSub">완료 속도에 따라 계속 보정</p>
         </article>
@@ -116,6 +116,7 @@
             <strong id="schedulerProject">PYAEDT_MOTOR_IPMSM_V2</strong>
             <small id="projectIdentity">등록 및 cap 확인 중</small>
           </div>
+          <div class="history-coverage warning" id="schedulerHistory" role="status">이력 범위 확인 중</div>
           <div class="scheduler-summary">
             <div><span>Running</span><strong id="schedulerRunning">—</strong></div>
             <div><span>완료 시도</span><strong id="schedulerCompleted">—</strong></div>
@@ -212,6 +213,8 @@
               </div>
               <progress id="targetLoadProgress" max="1" value="0" aria-label="Target-load β probe 진행률"></progress>
               <p id="targetLoadCurrent">R² gate와 Pareto 후보 확정 후 시작합니다.</p>
+              <p class="target-load-scheduler" id="targetLoadScheduler">Scheduler 조정 작업 대기</p>
+              <p class="target-load-failure" id="targetLoadFailure" role="alert" hidden></p>
               <div class="target-load-candidates" id="targetLoadCandidates"></div>
             </div>
           </div>

@@ -3,6 +3,8 @@
 const POLL_MS = 10000;
 const FETCH_TIMEOUT_MS = 8000;
 const SNAPSHOT_STALE_MS = 30000;
+const REFRESH_LABEL = "최신 스냅샷 다시 불러오기";
+const REFRESH_LOADING_LABEL = "최신 스냅샷 불러오는 중…";
 let paused = false;
 let polling = false;
 let timer = null;
@@ -28,10 +30,137 @@ const provisionalLabels = {
   output_torque_last_max_nm: "최대 토크",
   output_total_loss_last_avg_w: "총손실",
 };
+const runtimeUnitLabels = {
+  physics_gate: "물리 gate",
+  validated_results: "검증 결과",
+  r2_targets_passed: "R² 통과 지표",
+  result_rows: "결과",
+  nsga_seed_generations: "세대",
+  pareto_fea_tasks: "FEA 작업",
+  validated_rows: "검증 결과",
+  matched_probes: "매칭 probe",
+};
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const integer = (value, fallback = 0) => Number.isInteger(value) ? value : fallback;
+const count = (value) => Number.isInteger(value) && value >= 0 ? value : null;
 const decimal = (value, digits = 1) => finite(value) ? value.toFixed(digits) : "—";
+
+function stageRuntime(stage) {
+  const runtime = stage && typeof stage.runtime === "object" && stage.runtime !== null
+    ? stage.runtime
+    : {};
+  const completed = count(runtime.completed);
+  const total = count(runtime.total);
+  const suppliedProgress = finite(runtime.progress_pct) ? runtime.progress_pct : null;
+  const rawUnit = typeof runtime.unit === "string" ? runtime.unit.trim() : "";
+  const progressPct = suppliedProgress !== null
+    ? Math.max(0, Math.min(100, suppliedProgress))
+    : completed !== null && total !== null && total > 0
+      ? Math.max(0, Math.min(100, 100 * completed / total))
+      : null;
+  return {
+    completed,
+    total,
+    rawUnit,
+    unit: runtimeUnitLabels[rawUnit] || rawUnit,
+    progressPct,
+    planned: count(runtime.planned),
+    schedulerCounts: runtime.scheduler_counts && typeof runtime.scheduler_counts === "object"
+      ? runtime.scheduler_counts
+      : {},
+  };
+}
+
+function runtimeCounter(runtime, includePercent = true) {
+  const parts = [];
+  if (runtime.completed !== null && runtime.total !== null) {
+    parts.push(`${runtime.completed.toLocaleString("ko-KR")} / ${runtime.total.toLocaleString("ko-KR")}${runtime.unit ? ` ${runtime.unit}` : ""}`);
+  } else if (runtime.completed !== null) {
+    parts.push(`${runtime.completed.toLocaleString("ko-KR")}${runtime.unit ? ` ${runtime.unit}` : ""}`);
+  }
+  if (includePercent && runtime.progressPct !== null) parts.push(`${runtime.progressPct.toFixed(1)}%`);
+  if (runtime.planned !== null && (runtime.total === null || runtime.planned !== runtime.total)) {
+    parts.push(runtime.rawUnit === "nsga_seed_generations"
+      ? `계획 seed ${runtime.planned.toLocaleString("ko-KR")}개`
+      : `계획 ${runtime.planned.toLocaleString("ko-KR")}${runtime.unit ? ` ${runtime.unit}` : ""}`);
+  }
+  return parts.join(" · ");
+}
+
+function schedulerComposition(rawCounts) {
+  const counts = rawCounts && typeof rawCounts === "object" ? rawCounts : {};
+  const active = integer(counts.queued) + integer(counts.attaching) + integer(counts.running);
+  const completed = integer(counts.completed);
+  const failed = integer(counts.failed) + integer(counts.cancelled);
+  return { active, completed, failed };
+}
+
+function overallState(data) {
+  const pipeline = data.pipeline || {};
+  const stages = Array.isArray(pipeline.stages) ? pipeline.stages : [];
+  const overall = data.overall && typeof data.overall === "object" ? data.overall : {};
+  const currentId = overall.current_stage || pipeline.current_stage || "";
+  const currentStage = stages.find((stage) => stage.id === currentId)
+    || stages.find((stage) => stage.status === "running")
+    || stages.find((stage) => stage.status === "ready")
+    || stages.find((stage) => !["complete", "skipped"].includes(stage.status))
+    || stages[stages.length - 1]
+    || {};
+  const exactRuntime = {
+    runtime: {
+      completed: overall.completed,
+      total: overall.total,
+      unit: overall.unit,
+      progress_pct: overall.progress_pct,
+      planned: currentStage.runtime?.planned,
+      scheduler_counts: currentStage.runtime?.scheduler_counts,
+    },
+  };
+  const hasExactRuntime = count(overall.completed) !== null
+    || count(overall.total) !== null
+    || finite(overall.progress_pct);
+  let runtime = hasExactRuntime ? stageRuntime(exactRuntime) : stageRuntime(currentStage);
+  const resolved = count(overall.resolved_stages)
+    ?? stages.filter((stage) => ["complete", "skipped"].includes(stage.status)).length;
+  const totalStages = count(overall.total_stages) ?? stages.length;
+
+  // Current v1 snapshots predate stage runtime counters. Keep their Stage 1
+  // result counter as a clearly scoped fallback, never as whole-project progress.
+  if (!hasExactRuntime && !runtimeCounter(runtime) && currentStage.id === "stage1") {
+    const campaign = data.campaign || {};
+    const completed = count(campaign.result_ok);
+    const total = count(campaign.total);
+    runtime = stageRuntime({
+      runtime: {
+        completed,
+        total,
+        unit: "검증 결과",
+        progress_pct: finite(campaign.progress_pct) ? campaign.progress_pct : undefined,
+        scheduler_counts: currentStage.runtime?.scheduler_counts,
+      },
+    });
+  }
+
+  const currentIndex = stages.indexOf(currentStage);
+  const nextStage = stages.find((stage) => stage.id === overall.next_stage)
+    || stages.slice(Math.max(0, currentIndex + 1)).find((stage) => !["complete", "skipped"].includes(stage.status))
+    || null;
+  return {
+    stages,
+    currentStage,
+    currentId: overall.current_stage || currentStage.id || "unknown",
+    currentLabel: overall.current_label || currentStage.label || pipeline.current_label || "현재 단계 확인 필요",
+    currentStatus: overall.current_status || currentStage.status || "waiting",
+    currentDetail: currentStage.detail || "현재 단계 산출물을 확인합니다.",
+    runtime,
+    resolved,
+    totalStages,
+    nextStageId: overall.next_stage || nextStage?.id || "",
+    nextLabel: overall.next_label || nextStage?.label || "계획된 다음 단계 없음",
+    nextDetail: overall.next_detail || nextStage?.detail || "현재 단계의 최종 검증을 기다립니다.",
+  };
+}
 
 function localTime(value) {
   if (!value) return "—";
@@ -99,40 +228,92 @@ function renderAlerts(data) {
   empty(container);
   const alerts = Array.isArray(data.alerts) ? data.alerts : [];
   const errors = Array.isArray(data.errors) ? data.errors : [];
-  [...errors.map((item) => ({ level: "error", message: item.message })), ...alerts]
-    .slice(0, 4)
-    .forEach((item) => {
-      const alert = element("div", `alert ${item.level || "info"}`, item.message || "상태 확인 필요");
-      alert.setAttribute("role", item.level === "error" ? "alert" : "status");
-      container.appendChild(alert);
-    });
+  const combined = [...errors.map((item) => ({ level: "error", message: item.message })), ...alerts];
+  combined.slice(0, 4).forEach((item) => {
+    const alert = element("div", `alert ${item.level || "info"}`, item.message || "상태 확인 필요");
+    alert.setAttribute("role", item.level === "error" ? "alert" : "status");
+    container.appendChild(alert);
+  });
+  const overflow = Math.max(0, combined.length - 4);
+  if (overflow) {
+    const summary = element("div", "alert overflow", `추가 알림 ${overflow}건 · 아래 단계별 카드에서 상세 상태를 확인하세요.`);
+    summary.setAttribute("role", "status");
+    container.appendChild(summary);
+  }
+}
+
+function blockerState(data, state) {
+  const targetFailure = data.target_load?.failure;
+  if (targetFailure && (targetFailure.code || targetFailure.message)) {
+    return {
+      summary: `Target-load 실패${targetFailure.code ? ` · ${targetFailure.code}` : ""}`,
+      detail: targetFailure.message || "Target-load 실패 증거를 확인해야 합니다.",
+    };
+  }
+  const errors = Array.isArray(data.errors) ? data.errors : [];
+  const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+  const typedError = errors[0] || alerts.find((item) => item.level === "error");
+  if (typedError) {
+    return { summary: `${state.currentLabel} 확인 필요`, detail: typedError.message || "상태 무결성을 확인해야 합니다." };
+  }
+  if (["failed", "unavailable"].includes(state.currentStatus)) {
+    return { summary: `${state.currentLabel} ${statusKorean[state.currentStatus]}`, detail: state.currentDetail };
+  }
+  const optimizationStage = state.stages.find((stage) => stage.id === "optimization");
+  if (
+    data.optimization?.requires_user_confirmation === true
+    && !["complete", "skipped"].includes(optimizationStage?.status)
+  ) {
+    return {
+      summary: "향후 최적화 입력 확인",
+      detail: "Production NSGA-II 전 운전점 수치·duty·권선 가정을 확인해야 합니다.",
+    };
+  }
+  return {
+    summary: "현재 확인된 차단 없음",
+    detail: state.nextStageId
+      ? `${state.currentLabel} 검증 후 ${state.nextLabel}(으)로 진행합니다.`
+      : "남은 산출물의 최종 무결성을 확인합니다.",
+  };
 }
 
 function renderOverview(data) {
-  const campaign = data.campaign || {};
-  const scheduler = data.scheduler || {};
-  const pipeline = data.pipeline || {};
-  const optimization = data.optimization || {};
-  const total = integer(campaign.total, 700);
-  const complete = integer(campaign.result_ok);
-  const remaining = Math.max(0, total - complete);
-  const active = scheduler.reachable ? integer(scheduler.active_count) : integer(campaign.active);
-  const cap = integer(scheduler.cap, integer(campaign.cap, 100));
-
-  setText("currentSummary", pipeline.current_label || "현재 단계 확인 필요");
-  setText("currentDetail", `${complete} / ${total} 결과 검증 · FEA ${active} / ${cap} 활성`);
-  if (remaining > 0) {
-    setText("nextSummary", "700-row 공식 Surrogate R² gate");
-    setText("nextDetail", `${remaining}개 결과 남음 · 검증 후 8 primary + 전압 R²를 판정`);
-  } else {
-    setText("nextSummary", "공식 모델 학습·감사");
-    setText("nextDetail", "R² 결과에 따라 Stage 2 생략 또는 보강 DOE로 자동 전환");
+  const state = overallState(data);
+  const counter = runtimeCounter(state.runtime);
+  const composition = schedulerComposition(state.runtime.schedulerCounts);
+  const currentParts = [counter, state.currentDetail].filter(Boolean);
+  if (composition.active || composition.completed || composition.failed) {
+    currentParts.push(`scheduler 활성 ${composition.active} · 완료 ${composition.completed} · 실패 ${composition.failed}`);
   }
-  const specPending = optimization.requires_user_confirmation === true;
-  setText("blockerSummary", specPending ? "공식 R² gate + 모터 사양 확인" : "공식 R² gate");
-  setText("blockerDetail", specPending
-    ? "Production NSGA-II 전 운전점 수치·duty·권선 가정 결정 필요"
-    : "9개 품질 지표가 모두 R² ≥ 0.95여야 최적화 시작");
+
+  setText("resolvedStages", `해결된 단계 ${state.resolved} / ${state.totalStages}`);
+  setText("heroTitle", `${state.currentLabel} · ${statusKorean[state.currentStatus] || state.currentStatus}`);
+  setText("heroDescription", `${state.currentDetail} 해결된 단계는 ${state.resolved}/${state.totalStages}이며, 아래 진행률은 현재 단계만 표시합니다.`);
+  setText("heroPercent", state.runtime.progressPct === null ? "—" : `${state.runtime.progressPct.toFixed(1)}%`);
+  setText("heroPercentLabel", state.currentLabel);
+  const progress = byId("heroProgress");
+  progress.setAttribute("aria-label", `${state.currentLabel} 진행률`);
+  if (state.runtime.completed !== null && state.runtime.total !== null && state.runtime.total > 0) {
+    progress.max = state.runtime.total;
+    progress.value = Math.min(state.runtime.completed, state.runtime.total);
+    setText("heroProgressLabel", counter);
+  } else if (state.runtime.progressPct !== null) {
+    progress.max = 100;
+    progress.value = state.runtime.progressPct;
+    setText("heroProgressLabel", `${state.runtime.progressPct.toFixed(1)}%`);
+  } else {
+    progress.max = 1;
+    progress.value = 0;
+    setText("heroProgressLabel", "단계 수치 대기");
+  }
+
+  setText("currentSummary", `${state.currentLabel} · ${statusKorean[state.currentStatus] || state.currentStatus}`);
+  setText("currentDetail", currentParts.join(" · "));
+  setText("nextSummary", state.nextLabel);
+  setText("nextDetail", state.nextDetail);
+  const blocker = blockerState(data, state);
+  setText("blockerSummary", blocker.summary);
+  setText("blockerDetail", blocker.detail);
 }
 
 function renderCampaign(data) {
@@ -145,12 +326,6 @@ function renderCampaign(data) {
   const schedulerCounts = scheduler.status_counts || {};
   const running = integer(schedulerCounts.running);
   const assigning = integer(schedulerCounts.queued) + integer(schedulerCounts.attaching);
-  const progress = finite(campaign.progress_pct) ? campaign.progress_pct : 0;
-  const heroProgress = byId("heroProgress");
-  heroProgress.max = total;
-  heroProgress.value = Math.min(result, total);
-  setText("heroProgressLabel", `${result.toLocaleString("ko-KR")} / ${total.toLocaleString("ko-KR")}`);
-  setText("heroPercent", `${progress.toFixed(1)}%`);
   setText("resultOk", result.toLocaleString("ko-KR"));
   setText("resultTotal", `/ ${total.toLocaleString("ko-KR")}`);
   setText("resultSub", `scheduler 완료 ${integer(campaign.scheduler_ok)}건 · 안정화 ${integer(campaign.settling_results)}건`);
@@ -165,22 +340,12 @@ function renderCampaign(data) {
   setText("etaSub", finite(campaign.eta_hours)
     ? `${estimatedFinish(campaign.eta_hours)} 예상 · 후속 단계 제외`
     : "완료 표본이 더 필요합니다 · 후속 단계 제외");
-  const supervisorAlive = Array.isArray(data.processes)
-    && data.processes.some((item) => item.role === "supervisor" && item.state === "alive");
-  setText("heroDescription", active >= cap && integer(campaign.retry) === 0
-    ? `${cap}개 슬롯 점유 · 실제 실행 ${running}건 · 배정/대기 ${assigning}건입니다.`
-    : supervisorAlive
-      ? `활성 ${active}건 · supervisor가 완료 결과를 검증한 뒤 빈 슬롯을 다시 채우는 중입니다.`
-      : `활성 ${active}건 · 결과 검증 ${result}건 · 재시도 ${integer(campaign.retry)}건`);
 }
 
 function renderPipeline(data) {
-  const pipeline = data.pipeline || {};
-  const stages = Array.isArray(pipeline.stages) ? pipeline.stages : [];
-  setText("currentStageChip", pipeline.current_label || "상태 확인 필요");
-  setText("heroTitle", data.health === "running"
-    ? `${pipeline.current_label || "Stage 1"} · ${data.headline || "실행 중"}`
-    : pipeline.current_label || data.headline || "진행 상태 확인 필요");
+  const state = overallState(data);
+  const stages = state.stages;
+  setText("currentStageChip", `${state.currentLabel} · ${state.resolved}/${state.totalStages}`);
   const list = byId("pipelineList");
   empty(list);
   stages.forEach((stage, index) => {
@@ -189,8 +354,17 @@ function renderPipeline(data) {
     const copy = element("div", "stage-copy");
     copy.appendChild(element("strong", "", stage.label || "—"));
     copy.appendChild(element("small", "", stage.detail || ""));
+    const runtime = stage.id === state.currentId ? state.runtime : stageRuntime(stage);
+    const taskComposition = schedulerComposition(runtime.schedulerCounts);
+    if (taskComposition.active || taskComposition.completed || taskComposition.failed) {
+      copy.appendChild(element("small", "stage-runtime-tasks", `FEA 활성 ${taskComposition.active} · 완료 ${taskComposition.completed} · 실패 ${taskComposition.failed}`));
+    }
     item.appendChild(copy);
-    item.appendChild(element("span", "stage-status", statusKorean[stage.status] || stage.status || "대기"));
+    const meta = element("div", "stage-meta");
+    meta.appendChild(element("span", "stage-status", statusKorean[stage.status] || stage.status || "대기"));
+    const counterText = runtimeCounter(runtime);
+    if (counterText) meta.appendChild(element("small", "stage-counter", counterText));
+    item.appendChild(meta);
     list.appendChild(item);
   });
 }
@@ -199,12 +373,17 @@ function renderScheduler(data) {
   const scheduler = data.scheduler || {};
   const counts = scheduler.status_counts || {};
   const health = byId("schedulerHealth");
+  const historyReturned = count(scheduler.history_returned_count);
+  const historyComplete = scheduler.history_complete;
   const identityOk = scheduler.project_exists === true
     && scheduler.project_matches !== false
     && scheduler.cap_matches !== false;
-  if (scheduler.reachable && !scheduler.stale && identityOk) {
+  if (scheduler.reachable && !scheduler.stale && identityOk && historyComplete !== false) {
     health.textContent = "정상 연결";
     health.className = "health-pill complete";
+  } else if (scheduler.reachable && identityOk && historyComplete === false) {
+    health.textContent = "이력 부분 조회";
+    health.className = "health-pill warning";
   } else if (scheduler.reachable && !identityOk) {
     health.textContent = "프로젝트 확인 필요";
     health.className = "health-pill failed";
@@ -219,7 +398,21 @@ function renderScheduler(data) {
   setText("schedulerCompleted", integer(counts.completed));
   setText("schedulerFailed", integer(counts.failed));
   setText("lastHour", integer(scheduler.completed_last_hour));
-  setText("taskTotal", `raw task 이력 ${integer(scheduler.project_total_count).toLocaleString("ko-KR")}건 · 재시도 포함`);
+  const projectTotal = count(scheduler.project_total_count);
+  const history = byId("schedulerHistory");
+  if (historyComplete === true) {
+    history.textContent = `Task 이력 전체 조회 · ${(historyReturned ?? projectTotal ?? 0).toLocaleString("ko-KR")} / ${(projectTotal ?? historyReturned ?? 0).toLocaleString("ko-KR")}건`;
+    history.className = "history-coverage complete";
+  } else if (historyComplete === false) {
+    history.textContent = `Task 이력 부분 조회 · ${historyReturned === null ? "—" : historyReturned.toLocaleString("ko-KR")} / ${projectTotal === null ? "—" : projectTotal.toLocaleString("ko-KR")}건 · 합계를 완전한 이력으로 해석하지 않음`;
+    history.className = "history-coverage partial";
+  } else {
+    history.textContent = "Task 이력 범위 미보고 · 기존 v1 snapshot";
+    history.className = "history-coverage warning";
+  }
+  setText("taskTotal", historyReturned !== null
+    ? `표시 이력 ${historyReturned.toLocaleString("ko-KR")}건${projectTotal !== null ? ` / project ${projectTotal.toLocaleString("ko-KR")}건` : ""} · 재시도 포함`
+    : `project task ${integer(scheduler.project_total_count).toLocaleString("ko-KR")}건 · 이력 범위 확인 대기`);
   setText("schedulerProject", scheduler.project || data.project || "—");
   const projectIdentity = byId("projectIdentity");
   const deploymentText = integer(scheduler.deployment_count) > 0
@@ -408,7 +601,10 @@ function renderPhysics(data) {
 function renderTargetLoad(data) {
   const targetLoad = data.target_load || {};
   const counts = targetLoad.counts || {};
+  const schedulerCounts = targetLoad.scheduler_counts || {};
+  const scheduler = schedulerComposition(schedulerCounts);
   const rawStatus = targetLoad.status || "waiting_for_surrogate_gate";
+  const stale = targetLoad.stale === true;
   const labels = {
     waiting_for_surrogate_gate: "R² gate 대기",
     waiting_for_optimization: "Pareto 대기",
@@ -420,7 +616,9 @@ function renderTargetLoad(data) {
   const gate = byId("targetLoadGate");
   gate.textContent = targetLoad.integrity_status === "invalid"
     ? "진행 파일 오류"
-    : labels[rawStatus] || "상태 확인";
+    : stale
+      ? `갱신 지연 · ${labels[rawStatus] || "상태 확인"}`
+      : labels[rawStatus] || "상태 확인";
   gate.className = `health-pill ${rawStatus === "complete" ? "complete" : rawStatus === "failed" || targetLoad.integrity_status === "invalid" ? "failed" : "warning"}`;
 
   const candidatesTotal = integer(counts.candidates_total);
@@ -431,28 +629,42 @@ function renderTargetLoad(data) {
   setText("targetLoadProbeCount", `${probesMatched} / ${probesTotal}`);
   setText("targetLoadAttemptCount", `${integer(counts.attempts_issued)} 발행 · ${integer(counts.attempts_active)} 활성`);
   setText("targetLoadMtpaCount", `${integer(counts.fixed_mtpa_validated)} 검증`);
+  setText("targetLoadScheduler", `Scheduler 활성 ${scheduler.active} · 완료 ${scheduler.completed} · 실패 ${scheduler.failed}`);
   const progress = byId("targetLoadProgress");
   progress.max = Math.max(1, probesTotal || candidatesTotal);
   progress.value = probesTotal ? Math.min(probesTotal, probesMatched) : Math.min(candidatesTotal, candidatesFinalized);
 
   const current = targetLoad.current_probe;
+  const stalePrefix = stale ? "갱신 지연 · " : "";
   if (current && current.candidate_id) {
     setText(
       "targetLoadCurrent",
-      `${current.candidate_id} · ${current.operating_point_id || "운전점"} · ${current.beta_validation_role || "β"} · attempt ${integer(current.attempt_index)}`,
+      `${stalePrefix}${current.candidate_id} · ${current.operating_point_id || "운전점"} · ${current.beta_validation_role || "β"} · attempt ${integer(current.attempt_index)}`,
     );
   } else if (targetLoad.available) {
-    setText("targetLoadCurrent", `v4 ${targetLoad.workflow_revision || ""} · ${targetLoad.stale ? "갱신 지연" : "진행 파일 검증됨"}`);
+    setText("targetLoadCurrent", `v4 ${targetLoad.workflow_revision || ""} · ${stale ? "갱신 지연" : "진행 파일 검증됨"}`);
   } else {
     setText("targetLoadCurrent", "R² gate·Pareto·속도 검증 후 v4 progress root를 생성합니다.");
+  }
+  byId("targetLoadCurrent").classList.toggle("stale", stale);
+
+  const failure = targetLoad.failure && typeof targetLoad.failure === "object" ? targetLoad.failure : null;
+  const failureNode = byId("targetLoadFailure");
+  if (failure && (failure.code || failure.message)) {
+    failureNode.hidden = false;
+    failureNode.textContent = `실패${failure.code ? ` ${failure.code}` : ""}${failure.message ? ` · ${failure.message}` : ""}`;
+  } else {
+    failureNode.hidden = true;
+    failureNode.textContent = "";
   }
 
   const container = byId("targetLoadCandidates");
   empty(container);
-  const candidates = Array.isArray(targetLoad.candidate_summaries)
-    ? targetLoad.candidate_summaries.slice(0, 5)
+  const allCandidates = Array.isArray(targetLoad.candidate_summaries)
+    ? targetLoad.candidate_summaries
     : [];
-  candidates.forEach((candidate) => {
+  const visibleCandidates = allCandidates.slice(0, 5);
+  visibleCandidates.forEach((candidate) => {
     const row = element("div", "target-load-candidate");
     row.appendChild(element("strong", "", candidate.candidate_id || "candidate"));
     const volumeCm3 = finite(candidate.objective_active_volume_m3)
@@ -464,6 +676,10 @@ function renderTargetLoad(data) {
       : candidate.status || "대기"));
     container.appendChild(row);
   });
+  const candidateOverflow = Math.max(0, allCandidates.length - visibleCandidates.length, candidatesFinalized - visibleCandidates.length);
+  if (candidateOverflow) {
+    container.appendChild(element("div", "target-load-overflow", `+${candidateOverflow} 후보 더 있음`));
+  }
 }
 
 function renderProcesses(data) {
@@ -572,6 +788,7 @@ async function refresh() {
   if (polling) return;
   polling = true;
   byId("refreshButton").disabled = true;
+  setText("refreshButton", REFRESH_LOADING_LABEL);
   const controller = new AbortController();
   const requestTimeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -594,6 +811,7 @@ async function refresh() {
     clearTimeout(requestTimeout);
     polling = false;
     byId("refreshButton").disabled = false;
+    setText("refreshButton", REFRESH_LABEL);
   }
 }
 

@@ -401,6 +401,37 @@ class TargetLoadProgressTests(unittest.TestCase):
 
 
 class TimelineTests(unittest.TestCase):
+    RUNTIME_FIELDS = {
+        "completed",
+        "total",
+        "unit",
+        "progress_pct",
+        "planned",
+        "scheduler_counts",
+    }
+    SCHEDULER_COUNT_FIELDS = {
+        "queued",
+        "attaching",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+    }
+    OVERALL_FIELDS = {
+        "resolved_stages",
+        "total_stages",
+        "current_stage",
+        "current_label",
+        "current_status",
+        "completed",
+        "total",
+        "unit",
+        "progress_pct",
+        "next_stage",
+        "next_label",
+        "next_detail",
+    }
+
     def base_args(self) -> dict[str, object]:
         return {
             "beta": {"available": True, "passed": True},
@@ -445,6 +476,198 @@ class TimelineTests(unittest.TestCase):
         stages[1]["status"] = "failed"
         stages[2]["status"] = "ready"
         self.assertEqual(dashboard.select_current_stage(stages)["id"], "stage3")
+
+    def test_every_stage_runtime_is_exact_and_overall_uses_current_stage_counter(self) -> None:
+        stages = [
+            {"id": "beta", "label": "Beta", "status": "complete", "detail": "done"},
+            {"id": "stage1", "label": "Stage 1", "status": "running", "detail": "FEA"},
+            {"id": "surrogate", "label": "Surrogate", "status": "waiting", "detail": "gate"},
+            {
+                "id": "stage2",
+                "label": "Stage 2",
+                "status": "conditional",
+                "detail": "DOE",
+                "runtime": {"completed": 120, "total": 300, "planned": 300},
+            },
+            {
+                "id": "stage3",
+                "label": "Stage 3",
+                "status": "conditional",
+                "detail": "adaptive DOE",
+                "runtime": {"completed": None, "total": 450, "planned": 450},
+            },
+            {"id": "optimization", "label": "NSGA-II", "status": "waiting", "detail": "search"},
+            {"id": "speed", "label": "Speed", "status": "waiting", "detail": "paired FEA"},
+            {
+                "id": "target_load",
+                "label": "Target load",
+                "status": "waiting",
+                "detail": "probe",
+            },
+        ]
+        local = {
+            "pipeline": {"stages": stages},
+            "campaign": {"result_ok": 507, "total": 700},
+            "model": {
+                "available": False,
+                "gate_status": "waiting",
+                "passed_count": 0,
+                "target_count": 9,
+            },
+            "optimization": {
+                "decision": None,
+                "configured_seeds": [42, 43],
+                "max_generations": 300,
+                "seeds": [
+                    {"seed": 42, "completed_generations": 10},
+                    {"seed": 43, "completed_generations": 20},
+                ],
+                "fea_case_rows": None,
+            },
+            "speed": {
+                "complete": False,
+                "expected_rows": 24,
+                "plan_rows": None,
+                "result_rows": None,
+            },
+            "target_load": {"counts": {"probes_matched": 3, "probes_total": 12}},
+        }
+        scheduler = {
+            "history_complete": True,
+            "campaign_status": {
+                "stage1": {"queued": 3, "running": 7, "completed": 507, "failed": 1},
+                "stage2": {"completed": 120},
+                "stage3": {"queued": 2},
+                "target_load": {"running": 1, "completed": 3},
+            },
+        }
+
+        dashboard._attach_stage_runtimes(local, scheduler)
+        by_id = {stage["id"]: stage for stage in stages}
+
+        self.assertEqual(set(by_id), {
+            "beta",
+            "stage1",
+            "surrogate",
+            "stage2",
+            "stage3",
+            "optimization",
+            "speed",
+            "target_load",
+        })
+        for stage in stages:
+            runtime = stage["runtime"]
+            self.assertEqual(set(runtime), self.RUNTIME_FIELDS, stage["id"])
+            self.assertEqual(
+                set(runtime["scheduler_counts"]),
+                self.SCHEDULER_COUNT_FIELDS,
+                stage["id"],
+            )
+
+        self.assertEqual(
+            by_id["beta"]["runtime"],
+            {
+                "completed": None,
+                "total": None,
+                "unit": "physics_gate",
+                "progress_pct": None,
+                "planned": None,
+                "scheduler_counts": {field: 0 for field in self.SCHEDULER_COUNT_FIELDS},
+            },
+        )
+        self.assertEqual(
+            by_id["stage1"]["runtime"],
+            {
+                "completed": 507,
+                "total": 700,
+                "unit": "validated_results",
+                "progress_pct": 72.43,
+                "planned": 700,
+                "scheduler_counts": {
+                    "queued": 3,
+                    "attaching": 0,
+                    "running": 7,
+                    "completed": 507,
+                    "failed": 1,
+                    "cancelled": 0,
+                },
+            },
+        )
+        expected_counters = {
+            "surrogate": (0, 9, "r2_targets_passed", 0.0, 9),
+            "stage2": (120, 300, "result_rows", 40.0, 300),
+            "stage3": (None, 450, "result_rows", None, 450),
+            "optimization": (30, 600, "nsga_seed_generations", 5.0, 2),
+            "speed": (0, 24, "validated_rows", 0.0, None),
+            "target_load": (3, 12, "matched_probes", 25.0, 12),
+        }
+        for stage_id, expected in expected_counters.items():
+            runtime = by_id[stage_id]["runtime"]
+            self.assertEqual(
+                (
+                    runtime["completed"],
+                    runtime["total"],
+                    runtime["unit"],
+                    runtime["progress_pct"],
+                    runtime["planned"],
+                ),
+                expected,
+                stage_id,
+            )
+        self.assertEqual(by_id["stage2"]["runtime"]["scheduler_counts"]["completed"], 120)
+        self.assertEqual(by_id["stage3"]["runtime"]["scheduler_counts"]["queued"], 2)
+        self.assertEqual(by_id["target_load"]["runtime"]["scheduler_counts"]["running"], 1)
+
+        overall = dashboard.build_overall_progress(stages)
+        self.assertEqual(set(overall), self.OVERALL_FIELDS)
+        self.assertEqual(overall["resolved_stages"], 1)
+        self.assertEqual(overall["total_stages"], 8)
+        self.assertEqual(overall["current_stage"], "stage1")
+        self.assertEqual(overall["current_label"], "Stage 1")
+        self.assertEqual(overall["current_status"], "running")
+        self.assertEqual(overall["completed"], 507)
+        self.assertEqual(overall["total"], 700)
+        self.assertEqual(overall["unit"], "validated_results")
+        self.assertEqual(overall["progress_pct"], 72.43)
+        self.assertNotEqual(overall["progress_pct"], 100.0 * 1 / 8)
+        self.assertEqual(overall["next_stage"], "surrogate")
+        self.assertEqual(overall["next_label"], "Surrogate")
+        self.assertEqual(overall["next_detail"], "gate")
+
+    def test_overall_counts_only_complete_or_skipped_as_resolved(self) -> None:
+        stages = [
+            {"id": "beta", "label": "Beta", "status": "complete", "detail": "done"},
+            {"id": "stage1", "label": "Stage 1", "status": "complete", "detail": "done"},
+            {"id": "surrogate", "label": "Surrogate", "status": "complete", "detail": "done"},
+            {"id": "stage2", "label": "Stage 2", "status": "complete", "detail": "done"},
+            {"id": "stage3", "label": "Stage 3", "status": "skipped", "detail": "not needed"},
+            {
+                "id": "optimization",
+                "label": "NSGA-II",
+                "status": "running",
+                "detail": "searching",
+                "runtime": dashboard._runtime_counter(
+                    completed=30,
+                    total=900,
+                    unit="nsga_seed_generations",
+                    planned=3,
+                ),
+            },
+            {"id": "speed", "label": "Speed", "status": "failed", "detail": "failed"},
+            {"id": "target_load", "label": "Target load", "status": "waiting", "detail": "wait"},
+        ]
+
+        overall = dashboard.build_overall_progress(stages)
+
+        self.assertEqual(set(overall), self.OVERALL_FIELDS)
+        self.assertEqual(overall["resolved_stages"], 5)
+        self.assertEqual(overall["total_stages"], 8)
+        self.assertEqual(overall["current_stage"], "optimization")
+        self.assertEqual(overall["completed"], 30)
+        self.assertEqual(overall["total"], 900)
+        self.assertEqual(overall["progress_pct"], 3.33)
+        self.assertNotEqual(overall["progress_pct"], 100.0 * 5 / 8)
+        self.assertEqual(overall["next_stage"], "speed")
 
 
 class ArtifactTests(unittest.TestCase):
@@ -815,6 +1038,58 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(result["campaign_completed_last_hour"]["stage1"], 1)
         self.assertEqual(result["campaign_completed_last_hour"]["speed"], 1)
         self.assertIn("stage1", result["campaign_last_completed_at"])
+
+    def test_scheduler_history_coverage_and_target_load_prefix_counts_are_explicit(self) -> None:
+        tasks = [
+            {"id": 1, "name": "ipmsm-target-load-v4-probe-a", "status": "queued"},
+            {
+                "id": 2,
+                "name": "ipmsm-target-load-v4-probe-b",
+                "status": "completed",
+                "exit_code": 0,
+            },
+            {"id": 3, "name": "ipmsm-target-load-v4-probe-c", "status": "failed"},
+            {"id": 4, "name": "ipmsm-v2-foundation-s2-case-a", "status": "running"},
+        ]
+        complete = dashboard.summarize_scheduler(
+            project={
+                "id": 2,
+                "name": dashboard.DEFAULT_PROJECT,
+                "total_count": len(tasks),
+                "max_active_tasks": 100,
+            },
+            tasks=tasks,
+            allocations=[],
+            cap=100,
+        )
+        partial = dashboard.summarize_scheduler(
+            project={
+                "id": 2,
+                "name": dashboard.DEFAULT_PROJECT,
+                "total_count": len(tasks) + 6,
+                "max_active_tasks": 100,
+            },
+            tasks=tasks,
+            allocations=[],
+            cap=100,
+        )
+
+        self.assertEqual(complete["history_returned_count"], 4)
+        self.assertEqual(complete["project_total_count"], 4)
+        self.assertTrue(complete["history_complete"])
+        self.assertEqual(
+            complete["campaign_status"]["target_load"],
+            {"completed": 1, "failed": 1, "queued": 1},
+        )
+        self.assertEqual(complete["campaign_status"]["stage2"], {"running": 1})
+
+        self.assertEqual(partial["history_returned_count"], 4)
+        self.assertEqual(partial["project_total_count"], 10)
+        self.assertFalse(partial["history_complete"])
+        self.assertEqual(
+            partial["campaign_status"]["target_load"],
+            {"completed": 1, "failed": 1, "queued": 1},
+        )
 
     def test_failed_or_noncanonical_stage1_tasks_are_not_progress_evidence(self) -> None:
         finished_at = datetime.now(timezone.utc).isoformat()
@@ -1450,6 +1725,43 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(result["health"], "degraded")
         self.assertTrue(result["stale"])
         self.assertEqual(result["errors"][0]["source"], "dashboard")
+        self.assertEqual(set(result["overall"]), TimelineTests.OVERALL_FIELDS)
+        self.assertEqual(result["overall"]["resolved_stages"], 0)
+        self.assertEqual(result["overall"]["total_stages"], 0)
+        self.assertEqual(result["overall"]["completed"], None)
+        self.assertEqual(result["overall"]["total"], None)
+        self.assertEqual(result["overall"]["progress_pct"], None)
+        self.assertEqual(result["target_load"]["integrity_status"], "absent")
+        self.assertEqual(result["target_load"]["status"], "waiting_for_surrogate_gate")
+
+    def test_local_collection_failure_keeps_safe_overall_and_target_load_shapes(self) -> None:
+        def unavailable(_: dashboard.DashboardConfig) -> dict[str, object]:
+            raise dashboard.DashboardDataError("local unavailable")
+
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 0,
+            "cap": 100,
+            "project_matches": True,
+            "cap_matches": True,
+            "history_complete": True,
+            "campaign_status": {},
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=unavailable,
+            scheduler_collector=lambda _: scheduler,
+        )
+
+        result = store.refresh_once(force_scheduler=True)
+
+        self.assertEqual(result["health"], "degraded")
+        self.assertTrue(result["stale"])
+        self.assertEqual(set(result["overall"]), TimelineTests.OVERALL_FIELDS)
+        self.assertEqual(result["overall"]["total_stages"], 0)
+        self.assertEqual(result["target_load"]["integrity_status"], "absent")
+        self.assertFalse(result["target_load"]["available"])
 
 
 class HttpTests(unittest.TestCase):
@@ -1513,12 +1825,27 @@ class HttpTests(unittest.TestCase):
         self.assertIn('setText("liveLabel", paused ? "PAUSED"', app)
         self.assertIn('output_efficiency_last_pct: "효율"', app)
         self.assertNotIn("output_efficiency_last_avg_pct", app)
+        self.assertIn("function overallState(data)", app)
+        self.assertIn("overall.resolved_stages", app)
+        self.assertIn("planned: count(runtime.planned)", app)
+        self.assertIn("scheduler.history_returned_count", app)
+        self.assertIn("scheduler.history_complete", app)
+        self.assertIn("const overflow = Math.max(0, combined.length - 4)", app)
         self.assertIn("function renderTargetLoad(data)", app)
+        self.assertIn("targetLoad.scheduler_counts", app)
+        self.assertIn("failureNode.hidden = false", app)
+        self.assertIn('setText("refreshButton", REFRESH_LOADING_LABEL)', app)
+        self.assertIn('setText("refreshButton", REFRESH_LABEL)', app)
         index = (Path(server.__file__).resolve().parent / "dashboard" / "index.html").read_text(
             encoding="utf-8"
         )
+        self.assertIn('id="resolvedStages"', index)
+        self.assertIn('id="schedulerHistory"', index)
         self.assertIn('id="targetLoadProgress"', index)
         self.assertIn('id="targetLoadCandidates"', index)
+        self.assertIn('id="targetLoadScheduler"', index)
+        self.assertIn('id="targetLoadFailure"', index)
+        self.assertIn("최신 스냅샷 다시 불러오기", index)
 
     def test_mutating_methods_and_path_traversal_are_rejected(self) -> None:
         self.connection.request("POST", "/api/status", body=b"{}")
