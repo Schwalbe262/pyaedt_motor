@@ -216,3 +216,4 @@
 - Complete-only learning checkpoint has 43 designs/258 rows (23/6/14 train/cal/test), validation 258/258, min/avg primary R² -0.105/0.353 and voltage R² 0.909; it is `physics_only` and optimizer loading correctly fails closed.
 - Checkpoint-43 residual coverage found no actionable Stage2 gap: the four largest-error groups are at <=55.4 distance percentile, and the sole 95.5-percentile watch has a closer remaining Stage1 train design (0.229 vs Stage2 0.290).
 - Fixed nested 10/15/20/23-train-group curve has primary avg R² 0.080/0.197/0.005/0.353 (0/8 monotonic) but voltage 0.817/0.830/0.873/0.909 monotonic; classify as small-sample unstable and do not tune before >=30 train groups.
+- 2026-07-12 03:40 KST live dashboard audit: HTTP/health/tests pass; Stage1 is running at 443/700 (63.29%), active=100/100, rate=36.17/h, ETA=7.1h, scheduler project #2/cap/deployments match, and errors=0.

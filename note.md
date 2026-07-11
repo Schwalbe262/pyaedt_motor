@@ -3682,3 +3682,9 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: in-app browser remained unavailable, so visual layout was verified through responsive source/DOM contracts and live HTTP rather than a screenshot.
 - Next action: continue sealed Stage1 to 700 results, execute the official 9-metric R² gate, and obtain user confirmation of operating-point/duty/winding assumptions before production NSGA-II.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-12 03:40:29 +09:00 - Live Web UI handoff audit
+- Part/goal: verify the overall-progress Web UI and explain the apparent pause with live scheduler evidence.
+- Actions/metrics/result: dashboard HTTP/health and 36/36 focused tests passed; project #2/cap/deployments match, Stage1=443/700 (63.29%), active=100/100, rate=36.17/h, ETA=7.1h, errors=0; the campaign is running, not stopped.
+- Next: keep Stage1 sealed to 700 and expose the official surrogate R2 gate and conditional Stage2/3/NSGA-II transitions in the same UI.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
