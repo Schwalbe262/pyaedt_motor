@@ -150,6 +150,10 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
             self.assertEqual(args.completed_result_settle_seconds, 300.0)
             self.assertEqual(args.poll_interval_seconds, 30.0)
             self.assertEqual(args.overall_timeout_seconds, 604800.0)
+            self.assertEqual(
+                runner.normalize_allowed_quality_profiles(args.allowed_quality_profiles),
+                ("reference_ultra",),
+            )
             for option, value in (
                 ("--poll-interval-seconds", "0"),
                 ("--poll-interval-seconds", "nan"),
@@ -163,6 +167,35 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     invalid = runner.build_parser().parse_args(cli(output_dir, option, value))
                     with self.assertRaisesRegex(RuntimeError, option):
                         runner.validate_args(invalid)
+
+    def test_allowed_quality_profiles_reject_blank_and_duplicate_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            for values, message in (
+                (("",), "must not be blank"),
+                (("time_138_p12_baseline", "time_138_p12_baseline"), "duplicates"),
+            ):
+                with self.subTest(values=values):
+                    argv: list[str] = []
+                    for value in values:
+                        argv.extend(("--allowed-quality-profile", value))
+                    args = runner.build_parser().parse_args(cli(output_dir, *argv))
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        runner.validate_args(args)
+
+            args = runner.build_parser().parse_args(
+                cli(
+                    output_dir,
+                    "--allowed-quality-profile",
+                    "time_138_p12_baseline",
+                    "--allowed-quality-profile",
+                    "time_135_p12_iron525",
+                )
+            )
+            self.assertEqual(
+                runner.normalize_allowed_quality_profiles(args.allowed_quality_profiles),
+                ("time_138_p12_baseline", "time_135_p12_iron525"),
+            )
 
     def test_beta_gate_arguments_are_all_or_none_and_submit_requires_them(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -270,6 +303,109 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
             )
             self.assertFalse(output_dir.exists())
             post.assert_not_called()
+
+    def test_explicit_speed_profiles_are_allowed_without_changing_dry_run_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_dir = root / "out"
+            summary, beta_args = beta_gate_files(root)
+            rows = [
+                foundation_row(summary, "speed-138"),
+                foundation_row(summary, "speed-135"),
+            ]
+            rows[0]["quality_profile"] = "time_138_p12_baseline"
+            rows[1]["quality_profile"] = "time_135_p12_iron525"
+            profile_args = [
+                "--allowed-quality-profile",
+                "time_138_p12_baseline",
+                "--allowed-quality-profile",
+                "time_135_p12_iron525",
+            ]
+            stdout = io.StringIO()
+            with ExitStack() as stack:
+                stack.enter_context(
+                    mock.patch.object(
+                        runner.submit_campaign,
+                        "load_and_validate_cases",
+                        return_value=rows,
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(runner.submit_campaign, "get_scheduler_task_history", return_value=[])
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        runner.submit_campaign,
+                        "get_scheduler_project_summary",
+                        return_value={"total_count": 0, "max_active_tasks": 100},
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(runner.submit_campaign, "get_scheduler_tasks", return_value=[])
+                )
+                with contextlib.redirect_stdout(stdout):
+                    runner.main(cli(output_dir, *profile_args, *beta_args))
+
+            output = json.loads(stdout.getvalue())
+            self.assertEqual(output["selected_cases"], 2)
+            self.assertEqual(output["planned_submissions"], 2)
+            self.assertEqual(
+                set(output),
+                {
+                    "active_cases",
+                    "beta_gate",
+                    "missing_cases",
+                    "mode",
+                    "open_slots",
+                    "planned_submissions",
+                    "project",
+                    "project_active",
+                    "retryable_cases",
+                    "selected_cases",
+                    "successful_cases",
+                },
+            )
+
+    def test_foundation_profiles_are_exactly_bounded_and_beta_summary_stays_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            summary, _ = beta_gate_files(Path(tmp))
+            row = foundation_row(summary, "case-001")
+            row["quality_profile"] = "time_138_p12_baseline"
+            runner.validate_foundation_rows(
+                [row],
+                summary,
+                ("time_138_p12_baseline", "time_135_p12_iron525"),
+            )
+
+            row["quality_profile"] = "unknown_profile"
+            with self.assertRaisesRegex(RuntimeError, "quality_profile mismatch"):
+                runner.validate_foundation_rows(
+                    [row],
+                    summary,
+                    ("time_138_p12_baseline", "time_135_p12_iron525"),
+                )
+
+            row["quality_profile"] = "time_138_p12_baseline"
+            row["model_extent"] = "periodic_sector"
+            with self.assertRaisesRegex(RuntimeError, "model_extent mismatch"):
+                runner.validate_foundation_rows(
+                    [row],
+                    summary,
+                    ("time_138_p12_baseline",),
+                )
+            row["model_extent"] = "full_360"
+
+            non_reference_summary = copy.deepcopy(summary)
+            non_reference_summary["homogeneous_identities"]["quality_profile"] = (
+                "time_138_p12_baseline"
+            )
+            row["quality_profile"] = "time_138_p12_baseline"
+            with self.assertRaisesRegex(RuntimeError, "must use homogeneous quality_profile='reference_ultra'"):
+                runner.validate_foundation_rows(
+                    [row],
+                    non_reference_summary,
+                    ("time_138_p12_baseline",),
+                )
 
     def test_tampered_and_diagnostic_beta_summaries_fail_before_scheduler_access(self) -> None:
         for diagnostic, message in (

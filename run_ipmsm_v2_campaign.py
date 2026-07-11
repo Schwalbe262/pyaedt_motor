@@ -28,6 +28,7 @@ DEFAULT_OVERALL_TIMEOUT_SECONDS = 604_800.0
 DEFAULT_TERMINAL_RETRY_LIMIT = 1
 DEFAULT_COMPLETED_RESULT_SETTLE_SECONDS = 300.0
 STATUS_HEARTBEAT_POLLS = 10
+DEFAULT_ALLOWED_QUALITY_PROFILES = ("reference_ultra",)
 BETA_PATH_ARGUMENTS = (
     "beta_summary",
     "beta_case_plan",
@@ -99,6 +100,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta-case-plan", type=Path)
     parser.add_argument("--beta-results", type=Path)
     parser.add_argument("--beta-calibration-manifest", type=Path)
+    parser.add_argument(
+        "--allowed-quality-profile",
+        action="append",
+        dest="allowed_quality_profiles",
+        help=(
+            "Exact foundation quality profile to allow; repeat for an audited multi-profile "
+            "experiment. Defaults to reference_ultra only."
+        ),
+    )
     return parser
 
 
@@ -139,6 +149,7 @@ def _collector_argv(args: argparse.Namespace) -> list[str]:
 
 def validate_args(args: argparse.Namespace) -> None:
     submit_campaign.validate_args(args)
+    normalize_allowed_quality_profiles(args.allowed_quality_profiles)
     if not math.isfinite(args.timeout) or args.timeout <= 0.0:
         raise RuntimeError("--timeout must be finite and > 0")
     if not math.isfinite(args.poll_interval_seconds) or args.poll_interval_seconds <= 0.0:
@@ -255,10 +266,22 @@ def _foundation_float(row: Mapping[str, Any], field: str, case_id: str) -> float
     return value
 
 
+def normalize_allowed_quality_profiles(values: Iterable[object] | None) -> tuple[str, ...]:
+    raw_values = DEFAULT_ALLOWED_QUALITY_PROFILES if values is None else tuple(values)
+    normalized = tuple(str(value or "").strip() for value in raw_values)
+    if any(not value for value in normalized):
+        raise RuntimeError("--allowed-quality-profile values must not be blank")
+    if len(set(normalized)) != len(normalized):
+        raise RuntimeError("--allowed-quality-profile values must not contain duplicates")
+    return normalized
+
+
 def validate_foundation_rows(
     rows: Iterable[Mapping[str, Any]],
     summary: Mapping[str, Any],
+    allowed_quality_profiles: Iterable[object] | None = None,
 ) -> None:
+    allowed_profiles = normalize_allowed_quality_profiles(allowed_quality_profiles)
     calibration_id = str(summary["beta_calibration_id"])
     electrical_zero_deg = float(summary["electrical_zero_deg"])
     stage_lower, stage_upper = (float(value) for value in summary["stage_beta_bounds_deg"])
@@ -271,7 +294,6 @@ def validate_foundation_rows(
         case_id = str(row.get("case_id") or f"row-{index}").strip()
         required_text = {
             "dataset_schema_version": "ipmsm_v2",
-            "quality_profile": "reference_ultra",
             "model_extent": "full_360",
             "beta_convention": "dq_current_advance_v2",
             "beta_calibration_id": calibration_id,
@@ -283,6 +305,12 @@ def validate_foundation_rows(
                     f"foundation case {case_id!r} {field} mismatch: "
                     f"expected={expected!r} actual={actual!r}"
                 )
+        quality_profile = _foundation_text(row, "quality_profile", case_id)
+        if quality_profile not in allowed_profiles:
+            raise RuntimeError(
+                f"foundation case {case_id!r} quality_profile mismatch: "
+                f"allowed={list(allowed_profiles)!r} actual={quality_profile!r}"
+            )
         symmetry = _foundation_float(row, "symmetry_factor", case_id)
         if not math.isclose(symmetry, 1.0, rel_tol=0.0, abs_tol=1e-12):
             raise RuntimeError(f"foundation case {case_id!r} must use symmetry_factor=1")
@@ -703,7 +731,11 @@ def main(argv: list[str] | None = None) -> int:
         args.case_limit,
     )
     if beta_summary is not None:
-        validate_foundation_rows(selected_rows, beta_summary)
+        validate_foundation_rows(
+            selected_rows,
+            beta_summary,
+            normalize_allowed_quality_profiles(args.allowed_quality_profiles),
+        )
     tasks = submit_campaign.build_campaign_tasks(
         args,
         selected_rows,
