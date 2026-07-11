@@ -8,6 +8,12 @@ import tempfile
 import unittest
 
 import rank_ipmsm_second_pass_profiles as second_pass_rank
+import generate_ipmsm_second_pass_cases as speed_cases
+from tests.test_generate_ipmsm_second_pass_cases import (
+    strict_reference_result,
+    strict_source_plan_row,
+    write_union_rows,
+)
 
 
 def result_row(source_case_id: str, profile: str, *, elapsed_s: float, core: float = 10.0) -> dict[str, str]:
@@ -52,7 +58,7 @@ class RankIpmsmSecondPassProfilesTests(unittest.TestCase):
             Path("simul_log_smoke/profile_nonr1_dhj02_refretry_results"),
             second_pass_rank.DEFAULT_RESULT_ROOTS,
         )
-        self.assertIn(
+        self.assertNotIn(
             Path("simul_log_smoke/profile_thirdpass_speed_dhj02_results"),
             second_pass_rank.DEFAULT_RESULT_ROOTS,
         )
@@ -143,6 +149,74 @@ class RankIpmsmSecondPassProfilesTests(unittest.TestCase):
             by_profile = {row["quality_profile"]: row for row in rows}
             self.assertEqual(by_profile["time_180_lossmesh"]["production_candidate"], "yes")
             self.assertIn("time_180_lossmesh", top_profiles.read_text(encoding="utf-8"))
+
+    def test_strict_scope_uses_exact_twelve_references_and_twenty_four_candidates(self) -> None:
+        source_plan = [strict_source_plan_row(index) for index in range(1, 13)]
+        references = [strict_reference_result(row) for row in source_plan]
+        selected = speed_cases.select_strict_speed_sources(source_plan, references)
+        profiles = speed_cases.parse_profiles("time_138_p12_baseline,time_135_p12_iron525")
+        candidate_plan = speed_cases.expand_strict_speed_rows(selected, profiles, "strict_speed")
+        candidates = []
+        for plan_row in candidate_plan:
+            result = strict_reference_result(plan_row)
+            result["input_source_case_id"] = plan_row["reference_case_id"]
+            result["input_setup_fingerprint"] = f"setup_v2:sha256:{plan_row['quality_profile']}"
+            result["elapsed_s"] = "100" if plan_row["quality_profile"] == "time_138_p12_baseline" else "90"
+            candidates.append(result)
+        unrelated = strict_source_plan_row(99)
+        unrelated_reference = strict_reference_result(unrelated)
+
+        scoped = second_pass_rank.strict_scoped_rows(
+            candidate_plan,
+            [*references, unrelated_reference],
+            candidates,
+        )
+        self.assertEqual(len(scoped), 36)
+        self.assertNotIn(unrelated["case_id"], {row["case_id"] for row in scoped})
+        rank_rows = second_pass_rank.profile_rank.build_profile_rank_rows(
+            scoped,
+            reference_profile="reference_ultra",
+            runtime_baseline_profile="reference_ultra",
+        )
+        by_profile = {row["quality_profile"]: row for row in rank_rows}
+        self.assertEqual(by_profile["time_135_p12_iron525"]["reference_complete_groups"], "12")
+        self.assertEqual(by_profile["time_135_p12_iron525"]["complete_groups"], "12")
+        self.assertEqual(by_profile["time_135_p12_iron525"]["production_candidate"], "yes")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_path = root / "plan.csv"
+            reference_path = root / "reference.csv"
+            candidate_path = root / "candidates.csv"
+            output = root / "rank.csv"
+            top = root / "top.txt"
+            write_union_rows(plan_path, candidate_plan)
+            write_union_rows(reference_path, [*references, unrelated_reference])
+            write_union_rows(candidate_path, candidates)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = second_pass_rank.main(
+                    [
+                        "--strict-speed-plan",
+                        str(plan_path),
+                        "--strict-reference-results",
+                        str(reference_path),
+                        "--strict-candidate-results",
+                        str(candidate_path),
+                        "--output",
+                        str(output),
+                        "--top-profiles-output",
+                        str(top),
+                        "--fail-if-no-production-candidate",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertIn("strict_scope=true", stdout.getvalue())
+            self.assertTrue(output.is_file())
+
+        candidates[0]["input_material_fingerprint"] = ""
+        with self.assertRaisesRegex(ValueError, "input_material_fingerprint"):
+            second_pass_rank.strict_scoped_rows(candidate_plan, references, candidates)
 
 
 if __name__ == "__main__":
