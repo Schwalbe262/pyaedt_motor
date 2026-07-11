@@ -205,9 +205,10 @@
 - Stage1 is homogeneous `reference_ultra`, 700 rows/112 geometries/28 repeats; stage2 is conditional non-overlapping 300 rows/48 geometries/12 repeats.
 - Stage1 r2 plan hash is `6ef6dae7...01e3`: 700 rows/112 designs/28 repeats, failed geometry replaced, 6 duplicate-result cases renamed `_clean_retry_01`, and Stage2 design overlap remains zero.
 - Task `26141` remains the sole unknown SIGKILL (MaxRSS 2.08 GiB < 32 GiB, no OOM evidence); safe Windows PID probes replaced the `os.kill(pid,0)` pattern that accidentally stopped the first local runner.
-- Durable supervisor PID `82008` has run since 21:45 KST; latest Stage1 is scheduler_ok/result_ok=269/267, active=100, missing=331, retry=0, and dashboard PID `147688` serves the live state.
+- Durable supervisor PID `82008` has run since 21:45 KST; latest Stage1 is scheduler_ok/result_ok=274/272, active=100, missing=326, retry=0, and dashboard PID `147688` serves the live state.
 - Faster `time_150` remains screening-only because core-loss p90 error `5.533% > 5%`; mixed-fidelity v2 training is forbidden.
 - Next: monitor Stage1 at the dashboard; Stage2 failure routes through sealed Stage3 before NSGA-II, while a pass routes directly; beta-neighbor Pareto FEA and 12x2 strict-v2 speed remain cap-serialized.
 - Windows fresh-output publication now uses shared identity-checked no-replace logic: mapped `Y:` drives bypass hard links for atomic rename, WinError 50 falls back likewise, and optimizer pair recovery preserves a proof; focused 96/96 and full 511/511 tests pass without touching live tasks.
 - Dashboard closeout passed 27 focused and 586 full tests; live API readback confirmed latest fields, CSP/nosniff, no CORS, active cap 100, and no final-review blockers.
 - Rate-limited snapshot auditor `becd3d6` enforces max-in-flight 1, 10 reads/30s and 429 backoff; live mapped-drive publish classified 42 base-complete designs as `physics_only`, and its 6/6 v2 sample plus full 598 tests passed.
+- Complete-only learning checkpoint has 43 designs/258 rows (23/6/14 train/cal/test), validation 258/258, min/avg primary R² -0.105/0.353 and voltage R² 0.909; it is `physics_only` and optimizer loading correctly fails closed.

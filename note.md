@@ -3599,3 +3599,13 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: the first collector directory publish used `os.replace` and hit WinError 5; Windows `os.rename` and Linux `renameat2(RENAME_NOREPLACE)` now provide fail-closed publication.
 - Next action: wait for at least 60 complete designs before any provisional learning-curve smoke, and reserve the actual R²>=0.95 decision for the full 700-row supervisor gate.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-11 23:22:11 +09:00 - Complete-design learning checkpoint 43
+- Part/goal: establish a clean early learning-curve baseline and smoke the real v2 trainer without opening the official surrogate/optimization gate.
+- Hypothesis/actions: collected every complete base design under the remote-read policy, validated the merged dataset, trained a separate no-tuning five-member ensemble, and attempted optimizer-bundle loading.
+- Candidates/options: excluded the incomplete 44th group and all future repeats; omitted `--fail-on-threshold` and the full-plan audit, and isolated every data/model/R² path from the contract outputs.
+- Metrics: 43 designs/258 rows, split groups 23/6/14 and rows 138/36/84, invalid/outlier removals 0, primary min/avg R²=-0.105099/0.352877, core/total loss R²=0.851752/0.872294, voltage R²=0.909032, 8/8 primary failures.
+- Result: validation passed 258/258 with failures=0; live monitoring showed result_ok 269->272, active=100, retry=0, no 429/stall/tick failures; optimizer loader rejected the diagnostic model because the primary gate did not pass.
+- Failure reason: only 23 train groups (18 fit/5 holdout) are available, below the 60-design 30/10/10 provisional minimum, so torque/Ld/Lq/solid-loss/efficiency R² is not yet decision-grade.
+- Next action: repeat the same seed/no-tuning checkpoint at >=60 complete designs, but leave the official R²>=0.95 and Stage2 decision to the sealed 700-row supervisor artifact.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

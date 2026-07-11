@@ -735,3 +735,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: one reader uses 0.5s deterministic jitter, 10 requests per 30-second window, bounded 429 backoff, complete-base-design selection, and platform-specific no-replace directory rename.
 - Evidence: live 6-row snapshot published on mapped `Y:`, duplicate output was rejected, v2 validation passed 6/6, and focused 12 plus full 598 tests passed.
 - Remaining risk: snapshots before 60 complete designs are physics-only diagnostics; repeat drift and the official R² gate still require the later plan rows/full 700-row artifact.
+
+## 2026-07-11 23:22:11 +09:00 - Insight 80
+- Source loop: `note.md` complete-design learning checkpoint 43.
+- Improvement: learning-curve checkpoints must include only complete preassigned geometry groups, use fixed no-tuning settings, and remain cryptographically and path-wise separate from the official gate.
+- Before: a prefix snapshot could contain a partially completed train group and produce an unstable but superficially valid R² report that downstream code might misuse.
+- After: complete six-row base bundles preserve exact train/calibration/test groups, explicit 60/80-design evidence levels label early results, and the optimizer adapter still requires the official passed primary and voltage gates.
+- Evidence: the 43-design checkpoint retained 258/258 rows with zero invalid/outlier removals, produced a reproducible weak baseline, and was rejected by `load_surrogate_bundle` exactly at `primary_test_r2_gate_passed`.
+- Remaining risk: no repeat rows are complete yet, and 23 train groups are insufficient to infer whether the full tuned 700-row model will reach R² 0.95.
