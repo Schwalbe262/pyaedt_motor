@@ -3688,3 +3688,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Actions/metrics/result: dashboard HTTP/health and 36/36 focused tests passed; project #2/cap/deployments match, Stage1=443/700 (63.29%), active=100/100, rate=36.17/h, ETA=7.1h, errors=0; the campaign is running, not stopped.
 - Next: keep Stage1 sealed to 700 and expose the official surrogate R2 gate and conditional Stage2/3/NSGA-II transitions in the same UI.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-12 04:10:48 +09:00 - Frozen surrogate confirmation and target-load matching
+- Part/goal: prepare unbiased surrogate-family confirmation and bounded current matching while Stage1 continues at cap 100.
+- Hypothesis/actions: froze the exact v5 selection and untouched v3 8x6 cohort with committed trust anchors and LF-stable source bytes; added read-once provenance, manifest-before-CSV/lock-before-prediction publication, exact full-plan identity/split checks, simultaneous LightGBM control, torque max>=avg validity, and chronological bounded current proposals.
+- Metrics/result: actual v5/v3 hashes validate, untouched=48 rows/8 groups, matcher fuzz=100,000 histories with 0 scale/bound/duplicate violations, focused=45/45 and full=695/695 tests; independent final audits found no P0/P1. Live Stage1=459/700, active=100/100, ETA=6.6h, errors=0.
+- Failure/next: confirmation cannot run before the sealed 700-row dataset exists, and matcher is not integrated into immutable v3 optimization code; finish Stage1 official gate, then run one-shot untouched confirmation and integrate sequential per-beta current attempts through a new revision.
+- Token usage: unavailable; `codex_ops.py` has no local Codex SQLite database.

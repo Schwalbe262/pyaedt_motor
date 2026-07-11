@@ -217,3 +217,5 @@
 - Checkpoint-43 residual coverage found no actionable Stage2 gap: the four largest-error groups are at <=55.4 distance percentile, and the sole 95.5-percentile watch has a closer remaining Stage1 train design (0.229 vs Stage2 0.290).
 - Fixed nested 10/15/20/23-train-group curve has primary avg R² 0.080/0.197/0.005/0.353 (0/8 monotonic) but voltage 0.817/0.830/0.873/0.909 monotonic; classify as small-sample unstable and do not tune before >=30 train groups.
 - 2026-07-12 03:40 KST live dashboard audit: HTTP/health/tests pass; Stage1 is running at 443/700 (63.29%), active=100/100, rate=36.17/h, ETA=7.1h, scheduler project #2/cap/deployments match, and errors=0.
+- 2026-07-12 04:04 KST Stage1 remains healthy at 459/700, active=100/100, rate=36.38/h, ETA=6.6h, errors=0; official gate is still waiting.
+- Frozen v5 family selection plus the manifest-first untouched v3 cohort (8 geometries/48 rows) now have a one-shot hash-anchored confirmation runner; target-load current matching is hardened but remains intentionally unintegrated until the live v3 campaign finishes.

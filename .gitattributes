@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# These source files are bound by SHA256 in sealed IPMSM v2 evidence manifests.
+/build_ipmsm_untouched_test_plan.py text eol=lf
+/confirm_ipmsm_v2_model_families.py text eol=lf
+/diagnose_ipmsm_v2_model_families.py text eol=lf
+/train_ipmsm_lightgbm.py text eol=lf

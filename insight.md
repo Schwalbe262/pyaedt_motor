@@ -775,3 +775,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: project name/id, server/local cap, deployment count, and snapshot counts/splits are allow-listed and audited; identity/cap mismatch degrades health, while provisional metrics remain explicitly non-official.
 - Evidence: live project #2 reports cap 100=100 and deployments 5/5; the dashboard shows exact 60/360 despite live readiness >60, and focused 36/36 plus full 650/650 tests pass.
 - Remaining risk: browser-level visual regression is not automated; static DOM contracts, responsive CSS review, and live HTTP checks currently cover deployment correctness.
+
+## 2026-07-12 04:10:48 +09:00 - Insight 85
+- Source loop: `note.md` frozen surrogate confirmation and target-load matching.
+- Improvement: once model-family candidates have been adapted after viewing a test cohort, confirmation must hard-anchor the exact selection and a disjoint cohort before reading its predictions, with a simultaneous baseline on the same rows.
+- Before: the adaptive exact-60 test guided candidate-family changes, so another run that merely reselected families or accepted caller-supplied hashes could relabel reused evidence as confirmation.
+- After: committed v5/v3 SHA anchors, LF-stable hashed sources, read-once inputs, manifest-first cohort publication, lock-before-prediction, exact 700-row identity/split checks, frozen family mapping, and an untouched same-cohort LightGBM control make the one-shot decision fail closed.
+- Evidence: the real frozen artifacts validate at 8 geometries/48 rows; mutation/order/identity/physics tests and two independent audits pass, with focused 45/45 and full 695/695 suites green.
+- Remaining risk: statistical confirmation still awaits all 700 sealed Stage1 results; a negative result must not trigger reuse of these 48 rows for another confirmation choice.
