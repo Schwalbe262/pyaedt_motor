@@ -231,15 +231,25 @@ PROCESS_LABELS = {
 _DECISION_CACHE_LOCK = threading.Lock()
 _DECISION_CACHE: dict[tuple[str, str], tuple[int, int, float, dict[str, Any]]] = {}
 _CONTRACT_CACHE_LOCK = threading.Lock()
-_CONTRACT_CACHE: dict[str, tuple[int, int, float, dict[str, Any], dict[str, Any]]] = {}
+_CONTRACT_CACHE: dict[
+    str,
+    tuple[
+        tuple[int, int, int, int],
+        tuple[Path, ...],
+        tuple[tuple[int, int, int, int], ...],
+        dict[str, Any],
+        dict[str, Any],
+    ],
+] = {}
 _GOVERNANCE_CACHE_LOCK = threading.Lock()
 _GOVERNANCE_CACHE: dict[
     str,
     tuple[
         tuple[int, int, int, int],
-        float,
         tuple[Path, Path, Path, Path],
         tuple[tuple[int, int, int, int] | None, ...],
+        tuple[Path, ...],
+        tuple[tuple[int, int, int, int], ...],
         dict[str, Any],
     ],
 ] = {}
@@ -3044,17 +3054,43 @@ def _same_existing_file(left: Path, right: Path) -> bool:
 
 def _governance_file_signature(path: Path) -> tuple[int, int, int, int] | None:
     try:
-        value = path.stat()
+        value = os.lstat(path)
     except FileNotFoundError:
         return None
     except OSError as exc:
         raise DashboardDataError("governance artifact is unavailable") from exc
+    if not stat.S_ISREG(value.st_mode) or bool(getattr(value, "st_reparse_tag", 0)):
+        raise DashboardDataError("governance artifact has an invalid path type")
     return (
         int(value.st_dev),
         int(value.st_ino),
         int(value.st_size),
         int(value.st_mtime_ns),
     )
+
+
+def _immutable_contract_paths(contract: Any) -> tuple[Path, ...]:
+    paths = {
+        Path(item.path)
+        for item in getattr(contract, "immutable_inputs", ())
+        if getattr(item, "path", None) is not None
+    }
+    base = getattr(contract, "base_contract", None)
+    paths.update(
+        Path(item.path)
+        for item in getattr(base, "immutable_inputs", ())
+        if getattr(item, "path", None) is not None
+    )
+    return tuple(sorted(paths, key=lambda path: os.path.normcase(os.path.abspath(path))))
+
+
+def _required_file_signatures(
+    paths: Sequence[Path],
+) -> tuple[tuple[int, int, int, int], ...]:
+    signatures = tuple(_governance_file_signature(path) for path in paths)
+    if any(signature is None for signature in signatures):
+        raise DashboardDataError("immutable contract input is unavailable")
+    return tuple(signature for signature in signatures if signature is not None)
 
 
 def _official_r2_summary(contract: Any, official: Any) -> dict[str, Any]:
@@ -3098,26 +3134,22 @@ def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
     if source_signature is None:
         return _empty_governance_state()
     cache_key = os.path.normcase(os.path.abspath(source))
-    now = time.monotonic()
     with _GOVERNANCE_CACHE_LOCK:
         cached = _GOVERNANCE_CACHE.get(cache_key)
-    if (
-        cached is not None
-        and cached[0] == source_signature
-        and now - cached[1] < CONTRACT_AUDIT_CACHE_SECONDS
-    ):
+    if cached is not None and cached[0] == source_signature:
         try:
             dynamic_signature = tuple(
-                _governance_file_signature(path) for path in cached[2]
+                _governance_file_signature(path) for path in cached[1]
             )
+            immutable_signature = _required_file_signatures(cached[3])
         except DashboardDataError:
             dynamic_signature = ()
-        if dynamic_signature == cached[3]:
-            return copy.deepcopy(cached[4])
+            immutable_signature = ()
+        if dynamic_signature == cached[2] and immutable_signature == cached[4]:
+            return copy.deepcopy(cached[5])
     try:
         supervisor = importlib.import_module("supervise_ipmsm_v2_pipeline_v4")
         contract = supervisor.load_contract(source)
-        supervisor.audit_contract(contract)
         if not _same_existing_file(
             Path(contract.base_contract_binding.path), config.contract_path
         ):
@@ -3134,10 +3166,12 @@ def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
         authority.confirmation,
         authority.receipt,
     )
+    immutable_paths = _immutable_contract_paths(contract)
     try:
         before_signature = tuple(
             _governance_file_signature(path) for path in dynamic_paths
         )
+        immutable_signature = _required_file_signatures(immutable_paths)
     except DashboardDataError:
         return _invalid_governance_state()
     official_present = before_signature[0] is not None
@@ -3227,15 +3261,24 @@ def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
         after_signature = tuple(
             _governance_file_signature(path) for path in dynamic_paths
         )
+        immutable_signature_after = _required_file_signatures(immutable_paths)
+        source_signature_after = _governance_file_signature(source)
     except DashboardDataError:
         after_signature = ()
-    if after_signature == before_signature:
+        immutable_signature_after = ()
+        source_signature_after = None
+    if (
+        source_signature_after == source_signature
+        and after_signature == before_signature
+        and immutable_signature_after == immutable_signature
+    ):
         with _GOVERNANCE_CACHE_LOCK:
             _GOVERNANCE_CACHE[cache_key] = (
                 source_signature,
-                time.monotonic(),
                 dynamic_paths,
                 before_signature,
+                immutable_paths,
+                immutable_signature,
                 copy.deepcopy(state),
             )
     return state
@@ -3295,14 +3338,27 @@ def _stage1_collection_state(
     }
 
 
-def _stage1_stable_result_text(path: Path) -> tuple[str, str]:
+def _stage1_stable_result_text(
+    path: Path,
+    *,
+    verified_parent: Path | None = None,
+) -> tuple[str, str]:
     """Read and hash one bounded raw result while rejecting link/replacement races."""
 
-    if _path_contains_symlink(path):
+    if verified_parent is None:
+        invalid_path = _path_contains_symlink(path)
+    else:
+        invalid_path = os.path.normcase(os.path.abspath(path.parent)) != os.path.normcase(
+            os.path.abspath(verified_parent)
+        )
+    if invalid_path:
         raise DashboardDataError("Stage 1 case result has an invalid path type")
     try:
         pathname_before = os.lstat(path)
-        if not stat.S_ISREG(pathname_before.st_mode):
+        if (
+            not stat.S_ISREG(pathname_before.st_mode)
+            or bool(getattr(pathname_before, "st_reparse_tag", 0))
+        ):
             raise DashboardDataError("Stage 1 case result has an invalid path type")
         digest = hashlib.sha256()
         payload = bytearray()
@@ -3330,9 +3386,58 @@ def _stage1_stable_result_text(path: Path) -> tuple[str, str]:
         _quality_profile_stat_identity(opened_after),
         _quality_profile_stat_identity(pathname_after),
     }
-    if len(identities) != 1 or _path_contains_symlink(path):
+    path_became_invalid = bool(getattr(pathname_after, "st_reparse_tag", 0))
+    if verified_parent is None:
+        path_became_invalid = path_became_invalid or _path_contains_symlink(path)
+    if len(identities) != 1 or path_became_invalid:
         raise DashboardDataError("Stage 1 case result changed during audit")
     return text, digest.hexdigest()
+
+
+def _stage1_result_entries(
+    results_dir: Path,
+    *,
+    expected_rows: int,
+) -> tuple[list[Path], tuple[tuple[int, int, int, int], ...]]:
+    """Enumerate direct result children with one network directory scan.
+
+    ``Path.is_file`` and a second ``lstat`` per child are especially expensive
+    on RaiDrive.  ``DirEntry.stat`` reuses metadata returned by ``scandir``;
+    the verified parent path plus direct-child, no-link checks preserve the
+    same fail-closed layout contract without hundreds of redundant round trips.
+    """
+
+    try:
+        with os.scandir(results_dir) as stream:
+            entries = sorted(stream, key=lambda entry: entry.name)
+    except OSError as exc:
+        raise DashboardDataError("cannot enumerate Stage 1 result files") from exc
+    if len(entries) != expected_rows:
+        raise DashboardDataError("Stage 1 result-file count differs from the contract")
+
+    paths: list[Path] = []
+    identities: list[tuple[int, int, int, int]] = []
+    try:
+        for entry in entries:
+            path = Path(entry.path)
+            info = entry.stat(follow_symlinks=False)
+            if (
+                path.suffix.lower() != ".csv"
+                or entry.is_symlink()
+                or not entry.is_file(follow_symlinks=False)
+                or not stat.S_ISREG(info.st_mode)
+                or bool(getattr(info, "st_reparse_tag", 0))
+            ):
+                raise DashboardDataError(
+                    "Stage 1 result directory contains an invalid CSV entry"
+                )
+            paths.append(path)
+            identities.append(_quality_profile_stat_identity(info))
+    except DashboardDataError:
+        raise
+    except OSError as exc:
+        raise DashboardDataError("cannot inspect Stage 1 result files") from exc
+    return paths, tuple(identities)
 
 
 def inspect_stage1_collection(
@@ -3373,28 +3478,20 @@ def inspect_stage1_collection(
         _quality_profile_require_regular_file(merged, label="Stage 1 merged results")
         if _path_contains_symlink(results_dir) or not results_dir.is_dir():
             raise DashboardDataError("Stage 1 result directory has an invalid path type")
-        try:
-            result_entries = sorted(results_dir.iterdir(), key=lambda item: item.name)
-        except OSError as exc:
-            raise DashboardDataError("cannot enumerate Stage 1 result files") from exc
-        if len(result_entries) != expected_rows:
-            raise DashboardDataError("Stage 1 result-file count differs from the contract")
-        for entry in result_entries:
-            if entry.suffix.lower() != ".csv":
-                raise DashboardDataError("Stage 1 result directory contains a non-CSV entry")
-            _quality_profile_require_regular_file(entry, label="Stage 1 case result")
-
-        identity_paths = (
+        result_entries, result_identities = _stage1_result_entries(
+            results_dir,
+            expected_rows=expected_rows,
+        )
+        outer_identity_paths = (
             output_dir,
             case_plan,
             selected_plan,
             merged,
             results_dir,
-            *result_entries,
         )
         signature = tuple(
-            _quality_profile_stat_identity(os.lstat(path)) for path in identity_paths
-        )
+            _quality_profile_stat_identity(os.lstat(path)) for path in outer_identity_paths
+        ) + result_identities
         merged_result_bytes = signature[3][2]
         raw_result_bytes = sum(identity[2] for identity in signature[5:])
         if raw_result_bytes > MAX_STAGE1_COLLECTION_RAW_BYTES:
@@ -3444,6 +3541,7 @@ def inspect_stage1_collection(
             raise DashboardDataError("Stage 1 case-plan count differs from the contract")
         entries_by_name = {entry.name: entry for entry in result_entries}
         expected_names: set[str] = set()
+        ordered_entries: list[Path] = []
         raw_headers: list[str] = []
         raw_row_sha256: list[str] = []
         fingerprint_values = {
@@ -3460,7 +3558,33 @@ def inspect_stage1_collection(
             entry = entries_by_name.get(name)
             if entry is None:
                 raise DashboardDataError("Stage 1 result filename differs from the case plan")
-            text, result_sha256 = _stage1_stable_result_text(entry)
+            ordered_entries.append(entry)
+        if set(entries_by_name) != expected_names:
+            raise DashboardDataError("Stage 1 result filenames differ from the case plan")
+
+        workers = max(1, min(16, len(ordered_entries)))
+        with ThreadPoolExecutor(
+            max_workers=workers,
+            thread_name_prefix="ipmsm-stage1-audit",
+        ) as pool:
+            stable_results = list(
+                pool.map(
+                    lambda entry: _stage1_stable_result_text(
+                        entry,
+                        verified_parent=results_dir,
+                    ),
+                    ordered_entries,
+                )
+            )
+
+        for plan_row, (text, result_sha256), entry in zip(
+            plan_rows,
+            stable_results,
+            ordered_entries,
+            strict=True,
+        ):
+            case_id = str(plan_row.get("case_id") or "").strip()
+            name = entry.name
             headers, result_row = campaign_collector._one_remote_result(
                 text,
                 case_id,
@@ -3481,8 +3605,6 @@ def inspect_stage1_collection(
             for column, values in fingerprint_values.items():
                 values.add(str(result_row.get(column) or "").strip())
             tree_records.append(f"{name}\0{result_sha256}\n")
-        if set(entries_by_name) != expected_names:
-            raise DashboardDataError("Stage 1 result filenames differ from the case plan")
         if any(len(values) != 1 or "" in values for values in fingerprint_values.values()):
             raise DashboardDataError("Stage 1 raw results mix or omit fingerprints")
 
@@ -3502,10 +3624,18 @@ def inspect_stage1_collection(
             or [_canonical_json_sha256(row) for row in merged_rows] != raw_row_sha256
         ):
             raise DashboardDataError("Stage 1 merged results differ from raw case results")
-        signature_after = tuple(
-            _quality_profile_stat_identity(os.lstat(path)) for path in identity_paths
+        result_entries_after, result_identities_after = _stage1_result_entries(
+            results_dir,
+            expected_rows=expected_rows,
         )
-        if signature_after != signature:
+        signature_after = tuple(
+            _quality_profile_stat_identity(os.lstat(path)) for path in outer_identity_paths
+        ) + result_identities_after
+        if (
+            [entry.name for entry in result_entries_after]
+            != [entry.name for entry in result_entries]
+            or signature_after != signature
+        ):
             raise DashboardDataError("Stage 1 collection changed during audit")
         result_tree_sha256 = hashlib.sha256(
             "".join(sorted(tree_records)).encode("utf-8")
@@ -3530,7 +3660,11 @@ def inspect_stage1_collection(
         )
 
     with _STAGE1_COLLECTION_CACHE_LOCK:
-        _STAGE1_COLLECTION_CACHE[cache_key] = (signature, now, copy.deepcopy(audited))
+        _STAGE1_COLLECTION_CACHE[cache_key] = (
+            signature,
+            time.monotonic(),
+            copy.deepcopy(audited),
+        )
     return audited
 
 
@@ -3583,20 +3717,21 @@ def reconcile_campaign_with_stage1_collection(
 
 def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
-        stat = config.contract_path.stat()
-    except OSError as exc:
+        source_signature = _governance_file_signature(config.contract_path)
+    except DashboardDataError as exc:
         raise DashboardDataError("pipeline contract is unavailable") from exc
+    if source_signature is None:
+        raise DashboardDataError("pipeline contract is unavailable")
     cache_key = str(config.contract_path.resolve(strict=False))
-    now = time.monotonic()
     with _CONTRACT_CACHE_LOCK:
         cached = _CONTRACT_CACHE.get(cache_key)
-    if (
-        cached is not None
-        and cached[0] == stat.st_mtime_ns
-        and cached[1] == stat.st_size
-        and now - cached[2] < CONTRACT_AUDIT_CACHE_SECONDS
-    ):
-        return cached[3], cached[4]
+    if cached is not None and cached[0] == source_signature:
+        try:
+            immutable_signature = _required_file_signatures(cached[1])
+        except DashboardDataError:
+            immutable_signature = ()
+        if immutable_signature == cached[2]:
+            return cached[3], cached[4]
     try:
         validated = pipeline_supervisor.load_contract(config.contract_path)
         pipeline_supervisor.audit_immutable_inputs(validated)
@@ -3606,8 +3741,22 @@ def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[
     pipeline = contract.get("pipeline")
     if not isinstance(pipeline, dict):
         raise DashboardDataError("pipeline contract has no pipeline object")
+    immutable_paths = _immutable_contract_paths(validated)
+    try:
+        immutable_signature = _required_file_signatures(immutable_paths)
+        source_signature_after = _governance_file_signature(config.contract_path)
+    except DashboardDataError as exc:
+        raise DashboardDataError("pipeline contract changed during audit") from exc
+    if source_signature_after != source_signature:
+        raise DashboardDataError("pipeline contract changed during audit")
     with _CONTRACT_CACHE_LOCK:
-        _CONTRACT_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, now, contract, pipeline)
+        _CONTRACT_CACHE[cache_key] = (
+            source_signature,
+            immutable_paths,
+            immutable_signature,
+            contract,
+            pipeline,
+        )
     return contract, pipeline
 
 
@@ -5277,9 +5426,42 @@ class DashboardStateStore:
                     "message": "Stage 1 검증 완료 수가 30분 이상 증가하지 않았습니다.",
                 },
             )
+        current_stage_id = str(current_stage.get("id") or "")
+        current_runtime = (
+            current_stage.get("runtime")
+            if isinstance(current_stage.get("runtime"), Mapping)
+            else {}
+        )
+        current_scheduler_counts = (
+            current_runtime.get("scheduler_counts")
+            if isinstance(current_runtime.get("scheduler_counts"), Mapping)
+            else {}
+        )
         if (
             not stale
             and scheduler_active == scheduler_cap
+            and current_stage_id in {"stage2", "stage3"}
+        ):
+            stage_completed = _safe_int(current_scheduler_counts.get("completed"))
+            stage_running = _safe_int(current_scheduler_counts.get("running"))
+            stage_failed = _safe_int(current_scheduler_counts.get("failed"))
+            validated_rows = _safe_int(current_runtime.get("completed"))
+            expected_rows = _safe_int(current_runtime.get("total"))
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "warning" if stage_failed else "success",
+                    "message": (
+                        f"{current_stage.get('label', current_stage_id)} · 검증 결과 "
+                        f"{validated_rows}/{expected_rows} · Slurm 완료 {stage_completed} · "
+                        f"실행 {stage_running} · 실패 {stage_failed}"
+                    ),
+                },
+            )
+        elif (
+            not stale
+            and scheduler_active == scheduler_cap
+            and campaign_result < campaign_total
             and result_progress_verified
             and not result_progress_delayed
             and not any(item.get("level") == "success" for item in local.get("alerts", []))

@@ -203,6 +203,47 @@ const freshAtomicView = {
   resultTotal: byId("resultTotal").textContent,
   resultSub: byId("resultSub").textContent,
 };
+const stage2Active = JSON.parse(JSON.stringify(freshAtomic));
+stage2Active.pipeline.current_stage = "stage2";
+stage2Active.pipeline.current_label = "Stage 2 보강 DOE";
+stage2Active.pipeline.stages[1].status = "complete";
+stage2Active.pipeline.stages[3] = {
+  id: "stage2",
+  label: "Stage 2 보강 DOE",
+  status: "running",
+  runtime: {
+    completed: 0,
+    total: 300,
+    unit: "result_rows",
+    progress_pct: 0,
+    scheduler_counts: { completed: 0, running: 100, queued: 0, attaching: 0, failed: 0 },
+  },
+};
+stage2Active.overall = {
+  current_stage: "stage2",
+  current_label: "Stage 2 보강 DOE",
+  current_status: "running",
+  resolved_stages: 2,
+  total_stages: 8,
+  completed: 0,
+  total: 300,
+  unit: "result_rows",
+  progress_pct: 0,
+};
+stage2Active.scheduler = { reachable: true, stale: false, active_count: 100, cap: 100 };
+context.__stage2Active = stage2Active;
+vm.runInContext("renderCampaign(__stage2Active)", context);
+const stage2View = {
+  resultOk: byId("resultOk").textContent,
+  activeSlots: byId("activeSlots").textContent,
+  rateLabel: byId("rateLabel").textContent,
+  validated: byId("completionRate").textContent,
+  validatedTotal: byId("completionRateUnit").textContent,
+  rateSub: byId("rateSub").textContent,
+  etaLabel: byId("etaLabel").textContent,
+  running: byId("etaValue").textContent,
+  etaSub: byId("etaSub").textContent,
+};
 
 const qualityExperiment = {
   integrity_status: "verified",
@@ -300,6 +341,7 @@ process.stdout.write(JSON.stringify({
   stale: staleView,
   staleAtomic: staleAtomicView,
   freshAtomic: freshAtomicView,
+  stage2: stage2View,
   qualityRunning,
   qualityStale,
   qualityInvalid,
@@ -353,6 +395,15 @@ process.stdout.write(JSON.stringify({
         self.assertIn("atomic collection 700 / 700 검증 완료", result["freshAtomic"]["resultSub"])
         self.assertIn("과거 기록(비권위)", result["freshAtomic"]["resultSub"])
         self.assertNotIn("696", result["freshAtomic"]["resultSub"])
+        self.assertEqual(result["stage2"]["resultOk"], "700")
+        self.assertEqual(result["stage2"]["activeSlots"], "100")
+        self.assertEqual(result["stage2"]["rateLabel"], "Stage 2 보강 DOE 검증 결과")
+        self.assertEqual(result["stage2"]["validated"], "0")
+        self.assertEqual(result["stage2"]["validatedTotal"], "/ 300")
+        self.assertIn("Slurm 완료 0", result["stage2"]["rateSub"])
+        self.assertEqual(result["stage2"]["etaLabel"], "Stage 2 보강 DOE 실행 중")
+        self.assertEqual(result["stage2"]["running"], "100")
+        self.assertIn("실패 0", result["stage2"]["etaSub"])
         self.assertEqual(result["qualityRunning"]["state"], "running")
         self.assertEqual(result["qualityRunning"]["status"], "실행 중")
         self.assertEqual(result["qualityRunning"]["progress"], 5)

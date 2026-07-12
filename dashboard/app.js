@@ -698,6 +698,7 @@ function renderOverview(data) {
 function renderCampaign(data) {
   const campaign = data.campaign || {};
   const scheduler = data.scheduler || {};
+  const current = overallState(data);
   const total = integer(campaign.total, 700);
   const result = integer(campaign.result_ok);
   const active = scheduler.reachable ? integer(scheduler.active_count) : integer(campaign.active);
@@ -733,14 +734,48 @@ function renderCampaign(data) {
       ? `실행 ${running} · 배정/대기 ${assigning}`
       : `${scheduler.reachable === false ? "Scheduler 연결 확인 필요" : "상태 갱신 지연"} · 마지막 관측 ${active} / ${cap}`,
   );
-  setText("completionRate", decimal(campaign.completion_rate_per_hour, 1));
-  setText("rateSub", "최근 최대 6시간 · 검증 완료 증가량 기준");
-  const eta = durationHours(campaign.eta_hours);
-  setText("etaValue", eta.value);
-  setText("etaUnit", eta.unit);
-  setText("etaSub", finite(campaign.eta_hours)
-    ? `${estimatedFinish(campaign.eta_hours)} 예상 · 후속 단계 제외`
-    : "완료 표본이 더 필요합니다 · 후속 단계 제외");
+  if (["stage2", "stage3"].includes(current.currentId)) {
+    const counts = current.runtime.schedulerCounts || {};
+    const completedTasks = integer(counts.completed);
+    const runningTasks = integer(counts.running);
+    const queuedTasks = integer(counts.queued) + integer(counts.attaching);
+    const failedTasks = integer(counts.failed);
+    setText("rateLabel", `${current.currentLabel} 검증 결과`);
+    setText(
+      "completionRate",
+      current.runtime.completed === null
+        ? "—"
+        : current.runtime.completed.toLocaleString("ko-KR"),
+    );
+    setText(
+      "completionRateUnit",
+      current.runtime.total === null
+        ? current.runtime.unit || "건"
+        : `/ ${current.runtime.total.toLocaleString("ko-KR")}`,
+    );
+    setText("rateSub", `Slurm 완료 ${completedTasks} · 결과 검증과 구분`);
+    setText("etaLabel", `${current.currentLabel} 실행 중`);
+    setText("etaValue", schedulerFresh ? runningTasks.toLocaleString("ko-KR") : "—");
+    setText("etaUnit", "건");
+    setText(
+      "etaSub",
+      schedulerFresh
+        ? `배정/대기 ${queuedTasks} · 실패 ${failedTasks}`
+        : `마지막 관측 실행 ${runningTasks} · 상태 갱신 필요`,
+    );
+  } else {
+    setText("rateLabel", "Stage 1 최근 처리 속도");
+    setText("completionRate", decimal(campaign.completion_rate_per_hour, 1));
+    setText("completionRateUnit", "건/시간");
+    setText("rateSub", "최근 최대 6시간 · 검증 완료 증가량 기준");
+    const eta = durationHours(campaign.eta_hours);
+    setText("etaLabel", "Stage 1 예상 잔여");
+    setText("etaValue", eta.value);
+    setText("etaUnit", eta.unit);
+    setText("etaSub", finite(campaign.eta_hours)
+      ? `${estimatedFinish(campaign.eta_hours)} 예상 · 후속 단계 제외`
+      : "완료 표본이 더 필요합니다 · 후속 단계 제외");
+  }
 }
 
 function renderPipeline(data) {

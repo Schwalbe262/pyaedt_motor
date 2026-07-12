@@ -238,3 +238,10 @@
 - Coordinator 29/29 (one Windows POSIX-only skip), target-load related 94/94, independent P0/P1 audit, and shared `.venv` 828/828 pass; containment now rejects reparse/symlink/hardlink aliases and no live v4 root/task was created.
 - 2026-07-12 10:39 KST: live Stage1=575/700, active=100/100, missing=25, retry=0, ETA~7.1h; project #2/cap match and dashboard health/stall/stale/error checks are clean.
 - Next: finish Stage1, run the official 9-target R² gate/frozen-family confirmation, then initialize the v4 root, import original per-case Pareto MTPA evidence, and run the coordinator with `--submit`.
+- 2026-07-12 22:02 KST: WEB UI no longer stalls on synchronous RaiDrive re-audits; Stage1 deep audit is 3.249 s/cache hit 0.015 s, immutable caches are stat-identity-bound, and the live 5-minute boundary stayed health=ok with ~3 s snapshot age.
+- The UI now separates Stage1 authoritative 700/700, current Stage2 validated rows, Slurm completed tasks, running/queued/failed, and never promotes runner provenance 696.
+- Stage2 live status is completed=8, failed=0, running=99 plus one attaching/assigned slot, active=100/cap100; supervisor refill is working and first four checked result rows are status=ok at 51.37-56.07 min.
+- Current Stage2 is affinity-fixed but not node-exclusive: 79/100 initial tasks shared nodes with other jobs on disjoint Slurm cores; do not cancel the healthy wave, and decide future exclusivity from measured runtime/throughput.
+- Stage2 DOE is leakage-safe and space-filling, but +42% train rows cannot guarantee R²>=0.95; repeats cover only 1200 rpm, so preserve the 66-row/11-geometry audit and route a miss to sealed residual-adaptive Stage3.
+- Authoritative beta evidence is discrete 30.0 deg on one reference geometry; after v4r3, use additive v4r4/v5 geometry-zero relabel + physical-beta retraining, then candidate-specific MTPA/FW FEA maps before NSGA-II.
+- Next: keep monitoring Stage2 collection/refill/failures, inspect all 300 rows and the 9-target gate, then request production target/duty/winding/volume confirmation before optimization.

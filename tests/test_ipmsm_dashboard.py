@@ -314,6 +314,36 @@ class Stage1CollectionTests(unittest.TestCase):
         self.assertEqual(verified["status"], "verified")
         self.assertEqual(invalid["status"], "invalid")
 
+    def test_slow_audit_cache_age_starts_when_verified_result_is_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            fixture, config, _ = self._collection_fixture(root)
+            stage1 = fixture.pipeline["stage1"]
+            assert isinstance(stage1, dict)
+            with mock.patch.object(
+                dashboard.time,
+                "monotonic",
+                side_effect=(100.0, 1_000.0, 1_001.0),
+            ), mock.patch.object(
+                dashboard,
+                "_stage1_stable_result_text",
+                wraps=dashboard._stage1_stable_result_text,
+            ) as read_result:
+                first = dashboard.inspect_stage1_collection(
+                    config,
+                    stage1,
+                    expected_rows=2,
+                )
+                second = dashboard.inspect_stage1_collection(
+                    config,
+                    stage1,
+                    expected_rows=2,
+                )
+
+        self.assertEqual(first["status"], "verified")
+        self.assertEqual(second, first)
+        self.assertEqual(read_result.call_count, 2)
+
     def test_collection_size_caps_fail_closed_before_parsing(self) -> None:
         for constant in (
             "MAX_STAGE1_COLLECTION_RAW_BYTES",
@@ -774,6 +804,76 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(after["status"], "awaiting_confirmation")
         self.assertEqual(supervisor.load_contract.call_count, 2)
         supervisor.audit_official_stage1.assert_called_once_with(contract)
+
+    def test_governance_cache_invalidates_when_immutable_identity_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base.json"
+            v4 = root / "v4.json"
+            pinned = root / "pinned.py"
+            for path in (base, v4, pinned):
+                path.write_text("{}", encoding="utf-8")
+            contract = SimpleNamespace(
+                source=v4,
+                immutable_inputs=(SimpleNamespace(path=pinned),),
+                base_contract_binding=SimpleNamespace(path=base),
+                base_contract=SimpleNamespace(
+                    immutable_inputs=(),
+                    stage1=SimpleNamespace(r2_threshold=0.95),
+                ),
+                stage1_official=SimpleNamespace(completion=root / "completion.json"),
+                optimization_confirmation=SimpleNamespace(
+                    declaration=root / "declaration.json",
+                    confirmation=root / "confirmation.json",
+                    receipt=root / "receipt.json",
+                ),
+            )
+            supervisor = SimpleNamespace(
+                load_contract=mock.Mock(return_value=contract),
+                audit_contract=mock.Mock(),
+            )
+            config = dashboard.DashboardConfig(root, base, v4_contract_path=v4)
+            with mock.patch.object(
+                dashboard.importlib,
+                "import_module",
+                return_value=supervisor,
+            ):
+                first = dashboard.collect_governance_state(config)
+                second = dashboard.collect_governance_state(config)
+                pinned.write_text("changed", encoding="utf-8")
+                third = dashboard.collect_governance_state(config)
+
+        self.assertEqual(first, second)
+        self.assertEqual(third["contract"]["status"], "verified")
+        self.assertEqual(supervisor.load_contract.call_count, 2)
+
+    def test_base_contract_cache_is_bound_to_immutable_input_identities(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "base.json"
+            pinned = root / "pinned.py"
+            source.write_text(json.dumps({"pipeline": {}}), encoding="utf-8")
+            pinned.write_text("initial", encoding="utf-8")
+            validated = SimpleNamespace(
+                immutable_inputs=(SimpleNamespace(path=pinned),),
+            )
+            config = dashboard.DashboardConfig(root, source)
+            with mock.patch.object(
+                dashboard.pipeline_supervisor,
+                "load_contract",
+                return_value=validated,
+            ) as load_contract, mock.patch.object(
+                dashboard.pipeline_supervisor,
+                "audit_immutable_inputs",
+            ):
+                first = dashboard._pipeline_definition(config)
+                second = dashboard._pipeline_definition(config)
+                pinned.write_text("changed-content", encoding="utf-8")
+                third = dashboard._pipeline_definition(config)
+
+        self.assertEqual(first, second)
+        self.assertEqual(third, first)
+        self.assertEqual(load_contract.call_count, 2)
 
     def test_invalid_receipt_is_fail_closed_without_exception_or_path_leak(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3165,6 +3265,74 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(stalled["campaign"]["result_progress_stalled"])
         self.assertEqual(stalled["health"], "degraded")
         self.assertTrue(stalled["stale"])
+
+    def test_stage2_full_cap_alert_uses_current_stage_counters(self) -> None:
+        def local(_: dashboard.DashboardConfig) -> dict[str, object]:
+            return {
+                "campaign": {
+                    "elapsed_s": 100.0,
+                    "active": 0,
+                    "total": 700,
+                    "result_ok": 700,
+                    "result_progress_log_transition_verified": True,
+                },
+                "pipeline": {
+                    "current_stage": "stage2",
+                    "current_label": "Stage 2 보강 DOE",
+                    "stages": [
+                        {"id": "stage1", "label": "Stage 1", "status": "complete"},
+                        {
+                            "id": "stage2",
+                            "label": "Stage 2 보강 DOE",
+                            "status": "running",
+                            "runtime": {
+                                "completed": 0,
+                                "total": 300,
+                                "planned": 300,
+                                "unit": "result_rows",
+                            },
+                        },
+                    ],
+                },
+                "model": {"available": False},
+                "beta": {"available": True},
+                "optimization": {"decision": None},
+                "speed": {"complete": False},
+                "processes": [{"role": "supervisor", "state": "alive"}],
+                "alerts": [],
+            }
+
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 100,
+            "cap": 100,
+            "campaign_status": {
+                "stage2": {
+                    "completed": 0,
+                    "running": 100,
+                    "queued": 0,
+                    "attaching": 0,
+                    "failed": 0,
+                }
+            },
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=local,
+            scheduler_collector=lambda _: scheduler,
+        )
+        result = store.refresh_once(force_scheduler=True)
+        messages = [item["message"] for item in result["alerts"]]
+
+        self.assertTrue(
+            any(
+                "Stage 2 보강 DOE · 검증 결과 0/300 · Slurm 완료 0 · 실행 100 · 실패 0"
+                in message
+                for message in messages
+            )
+        )
+        self.assertFalse(any("마지막 검증 결과 증가" in message for message in messages))
 
     def test_result_count_regression_degrades_even_with_full_scheduler_cap(self) -> None:
         state = {"elapsed": 1.0, "result_ok": 10}

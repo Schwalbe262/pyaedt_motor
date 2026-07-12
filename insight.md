@@ -871,3 +871,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: the zero-task decision is SHA-preserved, v4r3 published a fresh bound decision, and 100 Stage2 tasks launched under the revised immutable source set.
 - Evidence: 30/30 real RaiDrive restaging probe, focused 39/39 tests, base revision indexes 7/13 only, and v4r3 tasks 28872-28971 running.
 - Remaining risk: generic receipt recovery for a rename that commits after returning an error is still deferred because `atomic_publish.py` is pinned by the active Stage2 execution contract.
+
+## 2026-07-12 22:02:00 +09:00 - Insight 97
+- Source loop: the live dashboard snapshot writer repeatedly froze while synchronously re-auditing immutable artifacts over RaiDrive.
+- Improvement: bind immutable audit caches to watched file identities, timestamp them at successful publication, and enumerate large direct-child collections once with cached `DirEntry.stat` metadata plus bounded parallel content verification.
+- Before: a Stage1/v4 refresh took about 13 minutes, its start-time cache timestamp was already expired when published, and the next loop immediately repeated the deep audit.
+- After: the 700-result deep audit takes 3.249 s, a cache hit takes 0.015 s, and the live service remains health=ok with ~3 s snapshot age across the five-minute boundary.
+- Evidence: raw modification/replacement tests still fail closed, immutable identity changes invalidate base/governance caches, full dashboard tests pass 108/108, and three production refresh samples plus the TTL-boundary sample stayed fresh.
+- Remaining risk: stat identity does not defend against an adversary that can rewrite bytes while perfectly restoring inode/size/mtime; production source control and the next cryptographic audit remain the authority for that threat model.

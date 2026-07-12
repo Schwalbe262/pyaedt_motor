@@ -3830,3 +3830,12 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Data-quality/runtime proof: pre/post baseline 9284.797/2878.284 s (3.226x) and candidate 9520.286/2852.047 s (3.338x); both comparisons are `ok` and all 569 numeric output fields are exactly equal.
 - Failure/next: a RaiDrive rename may report WinError 5 before its destination becomes visible; current restaging succeeded, but general late-success receipt recovery must wait until pinned Stage2 sources can change safely after this campaign.
 - Token usage: closeout sampler was already attempted in this execution loop and remains unavailable.
+
+## 2026-07-12 22:02:00 +09:00 - Live Stage2 dashboard unstall and first results
+- Part/goal: stop the WEB UI from appearing frozen while preserving fail-closed Stage1/v4 authority checks and expose current Stage2 execution separately from historical Stage1 provenance.
+- Hypothesis/actions: replaced 700 per-file parent-chain probes with one scandir identity pass, bounded cache-miss reads to 16 workers, fixed cache publication timestamps, made base/v4 caches immutable-identity-bound, added Stage2 task/result KPIs, and restarted only the dashboard after a port-8766 canary.
+- Candidates/options: retained immediate raw tamper invalidation and exact 0/300 validated-row semantics; rejected a longer health timeout, counting running tasks as completed results, and cancelling the healthy non-exclusive Stage2 wave.
+- Metrics/result: production Stage1 deep audit=3.249 s/cache hit=0.015 s versus ~13 min freeze; dashboard 108/108 tests pass; live 5-minute boundary health=ok/snapshot age~3 s; Stage2 completed=8, failed=0, active=100 with automatic refill.
+- Runtime/data evidence: first four Stage2 results are status=ok at 51.37-56.07 min; CPU-affinity remains roughly 2.8-3.1x faster than the old 154-159 min range, while current allocations are core-disjoint but not node-exclusive.
+- Failure/next: Stage2 validated merged rows remain 0 until collector publication; monitor filtered task/result evidence, audit 300/48/12 identities and R² slices, then allow sealed Stage3 if any of 9 targets misses 0.95.
+- Token usage: unavailable; no token sampler result was exposed in this environment.
