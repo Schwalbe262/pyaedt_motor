@@ -302,4 +302,5 @@
 - Dashboard commit `6d87d88` is deployed from LF325 at `http://127.0.0.1:8765`: health running, stale false, errors0, official 9-row model table visible, Stage2 50/50, ancillary plan integrity verified.
 - Model-family diagnostic v3 commit `2828d2e` separates legacy finite-pair metadata R2 from strict metrics; current 700-row baseline/selected families both have one invalid derived-efficiency row and remain non-promotable.
 - Beta is candidate-specific in surrogate current×beta search; post-Pareto v4r6 must run strict target-load current matching/local-beta validation before final volume-efficiency nondominated publication.
+- RaiDrive 2025.9.0 logged repeated cross-project SFTP index failures, then crashed/restarted at07:03; official motor execution remains C-native and current RaiDrive log has no post-restart errors.
 - Next: monitor result/refill/infra retries through all 129 eligible cases, publish the 1000-row combined gate, and enter residual-adaptive Stage3 if R2 remains below0.95.
