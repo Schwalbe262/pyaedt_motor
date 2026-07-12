@@ -27,7 +27,7 @@ import re
 import sys
 import tempfile
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from urllib import parse, request
 
 import atomic_publish
@@ -450,6 +450,15 @@ def _finite(value: object, label: str) -> float:
     return result
 
 
+def _sequential_float_sum(values: Iterable[float]) -> float:
+    """Preserve the sealed Python 3.11 left-to-right float aggregation."""
+
+    total = 0.0
+    for value in values:
+        total += value
+    return total
+
+
 def parse_torque_raw(
     payload: bytes,
     *,
@@ -517,7 +526,7 @@ def parse_torque_raw(
         "torque_unit": torque_unit,
         "torque_scale_to_nm": torque_scale,
         "last_cycle_samples": len(selected),
-        "normalized_last_avg_nm": sum(selected) / len(selected),
+        "normalized_last_avg_nm": _sequential_float_sum(selected) / len(selected),
     }
 
 
@@ -537,7 +546,7 @@ def apparent_power_gate(result_row: Mapping[str, str]) -> dict[str, Any]:
             f"phase{phase}_current_last_rms_a",
         )
         terms.append(abs(voltage) * abs(current))
-    apparent = sum(terms)
+    apparent = _sequential_float_sum(terms)
     mech_power = _finite(result_row.get("output_mech_power_last_w"), "mech_power_last_w")
     total_loss = _finite(result_row.get("output_total_loss_last_avg_w"), "total_loss_last_avg_w")
     numerator = abs(mech_power) + total_loss

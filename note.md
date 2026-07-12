@@ -3903,3 +3903,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: make the Stage1 rebuild consume the published replay receipt without weakening scheduler task identity.
 - Actions/result: the live four tasks prove `entrypoint=subprocess_run.py`; replaced the incorrect `simulation1.sh` fixture/authority, added a coherent task+history tamper regression, and passed targeted real-shape/dry-run tests 2/2.
 - Failure/next: regenerate the LF source snapshot and rerun the real 700-row dry-run before any collection publication.
+
+## 2026-07-13 02:49:00 +09:00 - LF Stage2 authority and Stage1 recovery completed
+- Part/goal: replace the CRLF diagnostic audit with Git-blob LF authority and rebuild the one contaminated Stage1 row without writing RaiDrive.
+- Actions/result: completed the GET-only audit at receipt `8c316422...1590e`, sanitized 172 final checkpoints, and locally published/reverified the 700-row Stage1 collection at receipt `c87a468c...f33e1` with 699 unchanged and one task29328 remap.
+- Metrics/failure/next: Stage2 classes171/27/1/101, active/pending/429=0; Python3.14 exposed a 1-ULP built-in `sum` change, so explicit sequential aggregation now passes the real receipt under 3.11/3.14 and 26/26 Python3.14 tests; implement safe logical-Y/physical-C mirror revision before base publication.

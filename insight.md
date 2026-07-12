@@ -903,3 +903,19 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: the final source passed 23 focused and 54 related tests, and the 511-second 300-case audit completed locally with zero HTTP errors while Y inputs remained read-only.
 - Evidence: commit `9c7faab`, receipt `50405c72...82018`, 172/172 final checkpoints revalidated, and no further Y-source write after the popup.
 - Remaining risk: the final sanitized audit authority still needs one controlled no-replace transfer to Y after the mount is stable.
+
+## 2026-07-13 02:34:00 +09:00 - Insight 101
+- Source loop: the first local Stage2 audit completed successfully but its CRLF working-tree source hashes differed from the LF files that production and Git blobs authorize.
+- Improvement: derive evidence-producing source from an LF Git archive and verify every recorded source hash against both the Git blob and production bytes before accepting the receipt.
+- Before: receipt `50405c72...82018` had correct physics counts but bound the CRLF parser and was diagnostic only.
+- After: receipt `8c316422...1590e` binds auditor `033c2a5e...fd19` and parser `3d1e8044...aff0915`, covers 300/300, and passes the official immutable-checkpoint loader.
+- Evidence: 172 final checkpoints, classifications171/27/1/101, active/pending/429=0, and report-to-receipt hash replay exact.
+- Remaining risk: the sanitized authority remains local until a safe physical-mirror contract or controlled RaiDrive transfer is available.
+
+## 2026-07-13 02:49:00 +09:00 - Insight 102
+- Source loop: the sealed Stage1 receipt reverified under Python 3.11 but failed under Python 3.14 by one ULP in a three-term apparent-power sum.
+- Improvement: use an explicit left-to-right float accumulator for evidence fields whose exact bytes were sealed, instead of version-dependent built-in `sum(float)` behavior.
+- Before: the same task29328 bytes produced `1632.4858313499717` on 3.11 and `1632.4858313499715` on 3.14, blocking exact authority replay.
+- After: both runtimes reproduce the sealed receipt and verify the 700-row recovery as existing_verified.
+- Evidence: real receipt `c87a468c...f33e1` passes under both runtimes; Python3.14 related tests pass 26/26.
+- Remaining risk: other exact floating aggregates should use explicitly specified algorithms before their values become cross-runtime authority.

@@ -264,3 +264,7 @@
 - Local v3 Stage2 audit is complete/ready at receipt `50405c72...82018`: coverage 300/300, physics_ok171, sole torque suspect task28880, retryable infrastructure27, unsubmitted101, active/pending0, and 172 final checkpoints validated.
 - `revise_ipmsm_v2_torque_recovery_base_v4r4.py` now gates a cap50 v4r4 base on all four recovery authorities, 299 preserved Stage2 dedupes, task28880-only physical contamination, and fresh output namespaces; tests pass 12/12, no base/wrapper published.
 - Stage1 rebuild provenance now matches the live replay task entrypoint `subprocess_run.py` (the fixture incorrectly used `simulation1.sh`); targeted real-shape/dry-run tests pass 2/2, with no collection published yet.
+- The authoritative LF Stage2 audit is receipt `8c316422...1590e`: coverage300/300, physics_ok171, infra27, torque suspect task28880 only, unsubmitted101, active/pending/429=0; the earlier `50405c72...82018` CRLF run is diagnostic only.
+- Local LF Stage1 recovery is published and reverified at receipt `c87a468c...f33e1`: rows700, unchanged699, remapped1 from task29328, validator failures0, merged SHA `ff4add3e...124a`.
+- Float evidence aggregation now uses explicit left-to-right addition, preserving the sealed receipt exactly under Python 3.11 and 3.14; related Python3.14 tests pass 26/26.
+- Next: add an explicit fail-closed physical-mirror mode to the v4r4 base revision so logical Y authority remains sealed while no RaiDrive write is required.

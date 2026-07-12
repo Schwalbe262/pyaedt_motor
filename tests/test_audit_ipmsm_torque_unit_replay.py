@@ -225,6 +225,11 @@ class TorqueReplayForensicsTests(unittest.TestCase):
             remote_fetcher=self._fetch,
         )
 
+    def test_float_aggregation_preserves_sealed_sequential_rounding(self) -> None:
+        values = [1.0e16, 1.0, -1.0e16]
+        with mock.patch("builtins.sum", side_effect=AssertionError("version-dependent sum")):
+            self.assertEqual(audit._sequential_float_sum(values), 0.0)
+
     def test_dry_run_fetch_scope_and_no_replace_publication(self) -> None:
         dry_run = self._audit(False)
         self.assertEqual(dry_run["status"], "verified")
