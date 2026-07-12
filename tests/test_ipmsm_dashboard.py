@@ -751,6 +751,16 @@ class GovernanceTests(unittest.TestCase):
             dashboard._model_with_official_fallback(stage2, governance),
             stage2,
         )
+        invalid_stage2 = {
+            "available": False,
+            "stage": "Stage 2",
+            "gate_status": "unavailable",
+            "metrics": [],
+        }
+        self.assertEqual(
+            dashboard._model_with_official_fallback(invalid_stage2, governance),
+            invalid_stage2,
+        )
 
     def test_verified_v4_authorities_are_allow_listed_and_authorize_only_exact_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

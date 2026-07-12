@@ -3528,7 +3528,13 @@ def _model_with_official_fallback(
     current: Mapping[str, Any],
     governance: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if current.get("available") is True:
+    selected_stage = str(current.get("stage") or "").strip()
+    gate_status = str(current.get("gate_status") or "").strip().lower()
+    if (
+        current.get("available") is True
+        or selected_stage
+        or gate_status not in {"", "waiting"}
+    ):
         return dict(current)
     official = _official_model_metrics(governance)
     return official if official is not None else dict(current)
