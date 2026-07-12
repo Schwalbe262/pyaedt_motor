@@ -3861,3 +3861,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: live cap 100->50, active naturally declined below 50, config-preserved=true, dashboard configured/server/project caps all 50 with `cap_matches=true`; focused regression 235/235 (1 skip), campaign runner 21/21, parser-default audit 6/6.
 - Failure/next: v4r3 contract remains intentionally invalid/stopped; bind cap50 into the new v4r4 contract, finish torque replay/Stage2 audits, then resume only the clean recovery plan.
 - Token usage: sampler attempted once; local Codex SQLite database is unavailable.
+
+## 2026-07-13 00:36:00 +09:00 - Resumable Stage2 v4r3 physics auditor
+- Part/goal: inspect every old Stage2 result for hidden torque-unit or physical contamination before sealing the v4r4 replacement set.
+- Hypothesis/actions: added a GET-only one-request-at-a-time auditor that reconstructs exact task/dedupe identity, paces at >=1 s with 429 backoff, fetches only completed exit-zero results, applies the current canonical physics gate, and stores reusable evidence only in immutable hash-named checkpoints.
+- Metrics/result: focused/related tests 112/112; dry-run remains write-free; readiness is false for active or successful-result-pending cases; live two-GET task28880 probe reproduces only `apparent_power_bound` at mech+loss/apparent ratio 105.198292.
+- Failure/next: six old Stage2 tasks and three replay tasks remain active; after terminal state, run the full 300-case `--publish` scan and require `replacement_set_ready_to_seal=true` before publishing revised plans.
+- Token usage: sampler already attempted in this execution loop; local Codex SQLite is unavailable.

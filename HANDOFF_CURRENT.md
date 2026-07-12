@@ -255,3 +255,5 @@
 - 2026-07-13 00:19 KST: user reduced the live project concurrency policy from 100 to 50; Scheduler project #2 now reports `max_active_tasks=50`, preserved all mutable project config, and no running FEA was cancelled because active was already below 50.
 - Submission, Stage2, optimization, target-load, dashboard, speed-pilot, and torque-replay defaults/launchers now use and enforce cap50; focused regression passed 235/235 (1 skip) plus campaign runner 21/21.
 - Dashboard and torque-replay supervisors were restarted locally with cap50; UI reports configured/server/project cap 50 with `cap_matches=true`, while v4r3 remains intentionally stopped and contract-degraded pending v4r4 recovery.
+- `audit_ipmsm_stage2_v4r3_results.py` is a GET-only, 1 req/s resumable full-Stage2 physics auditor with immutable per-result checkpoints and explicit `replacement_set_ready_to_seal`; focused/related tests pass 112/112.
+- A two-GET live probe reclassified task 28880 as `torque_unit_suspect` with only `apparent_power_bound` (ratio 105.198292); the full 300-case scan remains unrun until the last active v4r3 tasks finish.
