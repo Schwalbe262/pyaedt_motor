@@ -3759,8 +3759,16 @@ class SchedulerTests(unittest.TestCase):
             local_collector=unavailable,
             scheduler_collector=lambda _: scheduler,
         )
-
-        result = store.refresh_once(force_scheduler=True)
+        absent_collection = dashboard._stage1_collection_state(
+            status="absent",
+            expected_rows=700,
+        )
+        with mock.patch.object(
+            dashboard,
+            "inspect_stage1_collection",
+            return_value=absent_collection,
+        ):
+            result = store.refresh_once(force_scheduler=True)
 
         self.assertEqual(result["health"], "degraded")
         self.assertTrue(result["stale"])
@@ -3778,11 +3786,45 @@ class SchedulerTests(unittest.TestCase):
             local_collector=contract_invalid,
             scheduler_collector=lambda _: scheduler,
         )
-        contract_result = contract_store.refresh_once(force_scheduler=True)
+        with mock.patch.object(
+            dashboard,
+            "inspect_stage1_collection",
+            return_value=absent_collection,
+        ):
+            contract_result = contract_store.refresh_once(force_scheduler=True)
         self.assertEqual(
             contract_result["errors"][0]["code"],
             "pipeline_contract_audit_failed",
         )
+
+    def test_contract_failure_keeps_verified_stage1_and_stage2_shape(self) -> None:
+        local = {
+            "campaign": {"source_status": "unavailable", "total": 700, "result_ok": 0},
+            "model": {"available": False},
+        }
+        collection = dashboard._stage1_collection_state(
+            status="verified",
+            expected_rows=700,
+            rows=700,
+            result_files=700,
+            selected_plan_sha256="a" * 64,
+            merged_results_sha256="b" * 64,
+            result_tree_sha256="c" * 64,
+            raw_result_bytes=700,
+            merged_result_bytes=700,
+            merged_file="merged_results.csv",
+        )
+        with mock.patch.object(dashboard, "inspect_stage1_collection", return_value=collection):
+            recovered = dashboard.recover_contract_failure_progress(
+                dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+                local,
+            )
+        self.assertEqual(recovered["campaign"]["result_ok"], 700)
+        self.assertEqual(recovered["stage1_collection"]["status"], "verified")
+        self.assertEqual(recovered["pipeline"]["current_stage"], "stage2")
+        stage2 = next(item for item in recovered["pipeline"]["stages"] if item["id"] == "stage2")
+        self.assertEqual(stage2["runtime"]["total"], 300)
+        self.assertFalse(recovered["model"]["available"])
 
 
 class HttpTests(unittest.TestCase):

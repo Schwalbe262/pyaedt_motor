@@ -215,6 +215,14 @@ TARGET_LABELS = {
     "output_efficiency_last_pct": "효율",
     "output_phase_voltage_last_peak_abs_v": "상전압 피크",
 }
+FALLBACK_STAGE1_COLLECTION = {
+    "case_plan": (
+        "simul_log_smoke/beta_zero_recovery_26092_26093/"
+        "ipmsm_v2_foundation_stage1_700_cases_r4.csv"
+    ),
+    "result": "collected/ipmsm_v2_foundation_stage1_700/merged_results.csv",
+    "output_dir": "collected/ipmsm_v2_foundation_stage1_700",
+}
 
 PROCESS_LABELS = {
     "supervisor": "Durable pipeline supervisor",
@@ -3715,6 +3723,100 @@ def reconcile_campaign_with_stage1_collection(
     return reconciled
 
 
+def recover_contract_failure_progress(
+    config: DashboardConfig,
+    local: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep independently audited counts visible while governance stays closed."""
+
+    recovered = copy.deepcopy(dict(local))
+    collection = inspect_stage1_collection(
+        config,
+        FALLBACK_STAGE1_COLLECTION,
+        expected_rows=700,
+    )
+    if collection.get("status") != "verified" or collection.get("complete") is not True:
+        return recovered
+    campaign = reconcile_campaign_with_stage1_collection(
+        recovered.get("campaign", {}),
+        collection,
+    )
+    model = _model_metrics((), 0.95)
+    stages = [
+        {
+            "id": "beta",
+            "label": "물리 β 보정",
+            "status": "unavailable",
+            "detail": "계약 복구 전 물리 보정 authority 확인 필요",
+        },
+        {
+            "id": "stage1",
+            "label": "Stage 1 기준 FEA",
+            "status": "complete",
+            "detail": "700 / 700 atomic collection 검증",
+        },
+        {
+            "id": "surrogate",
+            "label": "Surrogate R² gate",
+            "status": "unavailable",
+            "detail": "v4r4 계약 복구 후 공식 R² 재평가",
+        },
+        {
+            "id": "stage2",
+            "label": "Stage 2 보강 DOE",
+            "status": "running",
+            "detail": "Slurm 진행 중 · 로컬 수집/검증은 복구 계약 대기",
+            "runtime": _runtime_counter(
+                completed=0,
+                total=300,
+                unit="result_rows",
+                planned=300,
+            ),
+        },
+        {
+            "id": "stage3",
+            "label": "Stage 3 적응 DOE",
+            "status": "conditional",
+            "detail": "Stage 2 R² 미달 시에만 실행",
+            "runtime": _runtime_counter(
+                completed=0,
+                total=300,
+                unit="result_rows",
+                planned=300,
+            ),
+        },
+        {
+            "id": "optimization",
+            "label": "NSGA-II + Pareto FEA",
+            "status": "waiting",
+            "detail": "R² gate와 production 입력 승인 대기",
+        },
+        {
+            "id": "speed",
+            "label": "속도 프로파일 검증",
+            "status": "waiting",
+            "detail": "Pareto FEA 이후 실행",
+        },
+        {
+            "id": "target_load",
+            "label": "Target-load + β-neighbor FEA",
+            "status": "waiting",
+            "detail": "R² gate · Pareto · 속도 검증 이후 실행",
+        },
+    ]
+    recovered.update(
+        campaign=campaign,
+        stage1_collection=collection,
+        pipeline={
+            "current_stage": "stage2",
+            "current_label": "Stage 2 보강 DOE",
+            "stages": stages,
+        },
+        model=model,
+    )
+    return recovered
+
+
 def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         source_signature = _governance_file_signature(config.contract_path)
@@ -5090,6 +5192,10 @@ class DashboardStateStore:
                     "alerts": [],
                 }
             local = copy.deepcopy(self._last_local) if self._last_local is not None else fallback
+            try:
+                local = recover_contract_failure_progress(self.config, local)
+            except (DashboardDataError, OSError, ValueError, RuntimeError, csv.Error):
+                pass
             # A stale last-good snapshot is useful for counts, but never for
             # production authorization.  Recompute the fail-closed governance
             # view and close the optimization gate whenever local collection
