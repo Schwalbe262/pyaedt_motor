@@ -268,3 +268,6 @@
 - Local LF Stage1 recovery is published and reverified at receipt `c87a468c...f33e1`: rows700, unchanged699, remapped1 from task29328, validator failures0, merged SHA `ff4add3e...124a`.
 - Float evidence aggregation now uses explicit left-to-right addition, preserving the sealed receipt exactly under Python 3.11 and 3.14; related Python3.14 tests pass 26/26.
 - Next: add an explicit fail-closed physical-mirror mode to the v4r4 base revision so logical Y authority remains sealed while no RaiDrive write is required.
+- `--authority-mirror-root` now maps sealed logical Y references to exact C mirror paths without serializing C into the base; official v4r3 base/wrapper 4-pin, cwd/scope, and no-replace output are enforced.
+- The revision replays the complete Stage1 rebuild, snapshots original/rebuilt 1,404 files, binds forensic payloads, and pre/post-verifies the Stage2 decision plus 172 final checkpoints; independent final review found P0/P1=0.
+- Actual LF mirror dry-runs under Python3.11/3.14 produce identical contract SHA `093bdd63...e6943`; focused22/22 and related55/55 pass, and no local/Y base is published yet.

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import copy
 from contextlib import redirect_stdout
+from dataclasses import dataclass, replace
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -18,6 +20,11 @@ import supervise_ipmsm_v2_pipeline as supervisor
 
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class FakeCampaignEvidence:
+    identity: dict[str, object]
 
 
 def sha(path: Path) -> str:
@@ -141,6 +148,315 @@ class TorqueRecoveryBaseRevisionTests(unittest.TestCase):
         self.rehash(changed, revision.supervisor_v4.CONTRACT_SCHEMA_VERSION)
         with self.assertRaisesRegex(revision.RevisionError, "base hash binding"):
             revision.validate_source_pair(base, base_document, wrapper, changed)
+
+    def test_official_logical_pair_accepts_exact_physical_mirror_only(self) -> None:
+        base = revision._read_stable_snapshot(REPO / revision.SOURCE_BASE, "mirror base")
+        wrapper = revision._read_stable_snapshot(
+            REPO / revision.SOURCE_WRAPPER, "mirror wrapper"
+        )
+        base_document = revision._decode_json(base.payload, "mirror base")
+        wrapper_document = revision._decode_json(wrapper.payload, "mirror wrapper")
+        logical = revision.validate_source_pair(
+            base, base_document, wrapper, wrapper_document
+        )
+        with mock.patch.object(Path, "cwd", return_value=REPO):
+            paths = revision._authority_path_map(logical, REPO)
+        self.assertTrue(paths.mirror_enabled)
+        revision._require_physical_reference(
+            base.path, revision.SOURCE_BASE, paths, "mirror base"
+        )
+        revision._validate_official_mirror_source_pair(
+            base, base_document, wrapper, wrapper_document
+        )
+        with self.assertRaisesRegex(revision.RevisionError, "official authority"):
+            revision._validate_official_mirror_source_pair(
+                replace(base, sha256="0" * 64),
+                base_document,
+                wrapper,
+                wrapper_document,
+            )
+
+    def test_mirror_mapping_rejects_wrong_cwd_and_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            logical = root / "logical"
+            mirror = root / "mirror"
+            logical.mkdir()
+            mirror.mkdir()
+            with self.assertRaisesRegex(revision.RevisionError, "cwd"):
+                revision._authority_path_map(logical, mirror)
+            with mock.patch.object(Path, "cwd", return_value=mirror):
+                paths = revision._authority_path_map(logical, mirror)
+            self.assertEqual(
+                revision._physical_reference("nested/file.json", paths, "mapped"),
+                revision._absolute(mirror / "nested/file.json"),
+            )
+            with self.assertRaisesRegex(revision.RevisionError, "escapes logical"):
+                revision._physical_reference("../outside.json", paths, "escaped")
+
+    def test_mirror_cli_escape_is_rejected_before_any_authority_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            mirror = root / "mirror"
+            outside = root / "outside-base.json"
+            mirror.mkdir()
+            outside.write_bytes(b"outside")
+            values = {
+                "source_base": outside,
+                "source_wrapper": mirror / revision.SOURCE_WRAPPER,
+                "recovery_manifest": mirror / revision.RECOVERY_MANIFEST,
+                "forensic_receipt": mirror / revision.FORENSIC_RECEIPT,
+                "stage1_rebuild_receipt": mirror / revision.STAGE1_REBUILD_RECEIPT,
+                "stage2_audit_receipt": mirror / revision.STAGE2_AUDIT_RECEIPT,
+                "output": mirror / revision.OUTPUT_BASE,
+                "authority_mirror_root": mirror,
+            }
+            args = SimpleNamespace(**values)
+            with (
+                mock.patch.object(Path, "cwd", return_value=mirror),
+                mock.patch.object(revision, "_read_stable_snapshot") as read,
+                self.assertRaisesRegex(revision.RevisionError, "exact physical mapping"),
+            ):
+                revision.load_authority_context(args)
+            read.assert_not_called()
+
+    def test_recovery_and_forensic_preflights_reject_path_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            logical = root / "logical"
+            physical = root / "physical"
+            logical.mkdir()
+            physical.mkdir()
+            paths = revision.AuthorityPathMap(logical, physical, True)
+            manifest = {
+                "source_plans": {
+                    "stage1": {"path": revision.STAGE1_SOURCE_PLAN},
+                    "stage2": {"path": revision.STAGE2_SOURCE_PLAN},
+                },
+                "revised_plans": {
+                    "stage1": {"path": revision.STAGE1_PLAN},
+                    "stage2": {"path": revision.STAGE2_PLAN},
+                },
+                "sealed_replay": {
+                    "plan_path": recovery_plans.DEFAULT_REPLAY_PLAN.as_posix(),
+                    "manifest_path": recovery_plans.DEFAULT_REPLAY_MANIFEST.as_posix(),
+                },
+            }
+            revision._preflight_recovery_manifest_paths(manifest, paths)
+            escaped_manifest = copy.deepcopy(manifest)
+            escaped_manifest["source_plans"]["stage1"]["path"] = "../outside.csv"
+            with self.assertRaisesRegex(revision.RevisionError, "reference changed"):
+                revision._preflight_recovery_manifest_paths(escaped_manifest, paths)
+
+            output_dir = Path(revision.FORENSIC_RECEIPT).parent.as_posix()
+            cases = []
+            for case_id in revision.stage1_rebuild.forensic_audit.REPLAY_CASE_IDS:
+                cases.append(
+                    {
+                        "case_id": case_id,
+                        "result": {
+                            "local_path": f"{output_dir}/results/{case_id}.csv"
+                        },
+                        "raw_torque": {
+                            "local_path": (
+                                f"{output_dir}/raw/{case_id}/"
+                                f"{case_id}_PPT_Torque.csv"
+                            )
+                        },
+                    }
+                )
+            forensic = {
+                "publication": {
+                    "output_dir": output_dir,
+                    "receipt_path": revision.FORENSIC_RECEIPT,
+                },
+                "cases": cases,
+            }
+            revision._preflight_forensic_receipt_paths(forensic, paths)
+            escaped_forensic = copy.deepcopy(forensic)
+            escaped_forensic["cases"][0]["result"]["local_path"] = "../outside.csv"
+            with self.assertRaisesRegex(revision.RevisionError, "reference changed"):
+                revision._preflight_forensic_receipt_paths(escaped_forensic, paths)
+
+    def test_collection_and_stage2_snapshots_detect_post_validation_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            collection = root / "collection"
+            nested = collection / "results"
+            nested.mkdir(parents=True)
+            (collection / "selected.csv").write_bytes(b"selected")
+            result = nested / "one.csv"
+            result.write_bytes(b"one")
+            files, directories = revision._snapshot_collection_tree(collection, "collection")
+            self.assertEqual(len(files), 2)
+            self.assertEqual(len(directories), 2)
+            revision._snapshot_exact_payload(result, b"one", "validated result")
+            with self.assertRaisesRegex(revision.RevisionError, "between validation"):
+                revision._snapshot_exact_payload(result, b"different", "validated result")
+            result.write_bytes(b"changed")
+            with self.assertRaisesRegex(revision.RevisionError, "changed after validation"):
+                revision._assert_snapshot_unchanged(
+                    next(snapshot for snapshot in files if snapshot.path == result)
+                )
+
+    def test_stage2_snapshot_binding_checks_payload_count_and_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_path = root / "plan.csv"
+            decision_path = root / "decision.json"
+            receipt_path = root / "receipt.json"
+            checkpoint_dir = root / "checkpoints"
+            checkpoint_dir.mkdir()
+            source_path.write_bytes(b"plan")
+            decision_path.write_bytes(b"decision")
+            receipt_path.write_bytes(b"receipt")
+            for index in range(172):
+                (checkpoint_dir / f"{index:03d}.json").write_bytes(str(index).encode())
+            source = revision._read_stable_snapshot(source_path, "plan")
+            decision = revision._read_stable_snapshot(decision_path, "decision")
+            receipt = revision._read_stable_snapshot(receipt_path, "receipt")
+            checkpoints, directories = revision._snapshot_collection_tree(
+                checkpoint_dir, "checkpoints"
+            )
+            campaign = SimpleNamespace(plan_payload=b"plan", decision_payload=b"decision")
+            prior = {"case": {str(index): {} for index in range(172)}}
+            revision._validate_stage2_snapshot_binding(
+                campaign,
+                source_plan=source,
+                decision=decision,
+                receipt=receipt,
+                checkpoint_files=checkpoints,
+                checkpoint_directories=directories,
+                prior_evidence=prior,
+            )
+            with self.assertRaisesRegex(revision.RevisionError, "campaign evidence"):
+                revision._validate_stage2_snapshot_binding(
+                    SimpleNamespace(plan_payload=b"wrong", decision_payload=b"decision"),
+                    source_plan=source,
+                    decision=decision,
+                    receipt=receipt,
+                    checkpoint_files=checkpoints,
+                    checkpoint_directories=directories,
+                    prior_evidence=prior,
+                )
+            with self.assertRaisesRegex(revision.RevisionError, "172 finals"):
+                revision._validate_stage2_snapshot_binding(
+                    campaign,
+                    source_plan=source,
+                    decision=decision,
+                    receipt=receipt,
+                    checkpoint_files=checkpoints[:-1],
+                    checkpoint_directories=directories,
+                    prior_evidence=prior,
+                )
+            checkpoints[0].path.write_bytes(b"tampered")
+            with self.assertRaisesRegex(revision.RevisionError, "changed after validation"):
+                revision._validate_stage2_snapshot_binding(
+                    campaign,
+                    source_plan=source,
+                    decision=decision,
+                    receipt=receipt,
+                    checkpoint_files=checkpoints,
+                    checkpoint_directories=directories,
+                    prior_evidence=prior,
+                )
+
+    def test_official_stage1_replay_summary_is_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt_path = Path(temporary) / "receipt.json"
+            receipt_path.write_bytes(b"receipt")
+            receipt = revision._read_stable_snapshot(receipt_path, "receipt")
+            summary = {
+                "mode": "dry-run",
+                "status": "verified",
+                "publication": "existing_verified",
+                "rows": 700,
+                "unchanged": 699,
+                "remapped": 1,
+                "validator_failures": "0",
+                "receipt_sha256": receipt.sha256,
+            }
+            revision._validate_official_stage1_replay_summary(summary, receipt)
+            summary["rows"] = 699
+            with self.assertRaisesRegex(revision.RevisionError, "did not reproduce"):
+                revision._validate_official_stage1_replay_summary(summary, receipt)
+
+    def test_stage2_identity_changes_only_computed_logical_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            logical = root / "logical"
+            physical = root / "physical"
+            logical.mkdir()
+            physical.mkdir()
+            paths = revision.AuthorityPathMap(logical, physical, True)
+            campaign = FakeCampaignEvidence(
+                {
+                    "plan_path": str((physical / revision.STAGE2_SOURCE_PLAN).resolve()),
+                    "decision_path": str(
+                        (physical / revision.OLD_ROOT / "foundation_stage2_decision.json").resolve()
+                    ),
+                    "sealed": {"value": 7},
+                }
+            )
+            mapped = revision._logicalize_stage2_campaign_identity(campaign, paths)
+            self.assertEqual(mapped.identity["sealed"], {"value": 7})
+            self.assertEqual(
+                mapped.identity["plan_path"],
+                str((logical / revision.STAGE2_SOURCE_PLAN).resolve()),
+            )
+            self.assertEqual(
+                revision._changed_paths(campaign.identity, mapped.identity),
+                {("plan_path",), ("decision_path",)},
+            )
+            with self.assertRaisesRegex(revision.RevisionError, "unexpected fields"):
+                revision._logicalize_stage2_campaign_identity(
+                    campaign, revision.AuthorityPathMap(logical, logical, False)
+                )
+
+    def test_rebuild_forensic_binding_requires_exact_paths_and_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt_path = root / "forensic.receipt.json"
+            result_path = root / "result.csv"
+            raw_path = root / "torque.csv"
+            receipt_path.write_bytes(b"receipt\n")
+            result_payload = b"result\n"
+            raw_payload = b"raw\n"
+            result_path.write_bytes(result_payload)
+            raw_path.write_bytes(raw_payload)
+            receipt = revision._read_stable_snapshot(receipt_path, "forensic receipt")
+            case = SimpleNamespace(
+                result_path=result_path,
+                result_payload=result_payload,
+                raw_path=raw_path,
+                raw_payload=raw_payload,
+            )
+            forensic = SimpleNamespace(
+                cases={revision.stage1_rebuild.REPLAY_CASE_ID: case}
+            )
+            record = {
+                "receipt_path": str(receipt_path),
+                "receipt_sha256": receipt.sha256,
+                "replay_result_path": str(result_path),
+                "replay_result_sha256": hashlib.sha256(result_payload).hexdigest(),
+                "raw_torque_path": str(raw_path),
+                "raw_torque_sha256": hashlib.sha256(raw_payload).hexdigest(),
+            }
+            revision._validate_rebuild_forensic_binding(
+                record,
+                workdir=root,
+                forensic_snapshot=receipt,
+                forensic=forensic,
+            )
+            tampered = dict(record)
+            tampered["raw_torque_sha256"] = "0" * 64
+            with self.assertRaisesRegex(revision.RevisionError, "forensic hash"):
+                revision._validate_rebuild_forensic_binding(
+                    tampered,
+                    workdir=root,
+                    forensic_snapshot=receipt,
+                    forensic=forensic,
+                )
 
     def test_stage2_recovery_recomputes_299_dedupes_and_quarantine(self) -> None:
         stage1_payload, stage2_payload, manifest = recovery_plans.build_recovery_bundle(
@@ -303,6 +619,7 @@ class TorqueRecoveryBaseRevisionTests(unittest.TestCase):
                 bindings=self.bindings(),
                 snapshots=(base_snapshot, wrapper_snapshot),
                 directories=(),
+                paths=revision.AuthorityPathMap(root, root, False),
                 project_id=2,
                 project_cap=50,
                 fingerprint="f" * 64,
@@ -332,6 +649,58 @@ class TorqueRecoveryBaseRevisionTests(unittest.TestCase):
                 before, sorted(path.relative_to(root) for path in root.rglob("*"))
             )
             self.assertEqual(json.loads(captured.getvalue())["mode"], "dry-run")
+
+    def test_publish_callback_rechecks_output_scope_and_live_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "base.json"
+            wrapper = root / "wrapper.json"
+            source.write_bytes(b"base")
+            wrapper.write_bytes(b"wrapper")
+            base_snapshot = revision._read_stable_snapshot(source, "base")
+            wrapper_snapshot = revision._read_stable_snapshot(wrapper, "wrapper")
+            context = revision.AuthorityContext(
+                source_base=base_snapshot,
+                source_wrapper=wrapper_snapshot,
+                base_document={},
+                wrapper_document={},
+                bindings=self.bindings(),
+                snapshots=(base_snapshot, wrapper_snapshot),
+                directories=(),
+                paths=revision.AuthorityPathMap(root, root, False),
+                project_id=2,
+                project_cap=50,
+                fingerprint="f" * 64,
+            )
+            revised = {
+                "schema_version": supervisor.CONTRACT_SCHEMA_VERSION,
+                "contract_sha256": "c" * 64,
+                "pipeline": {},
+            }
+
+            def publish(_output, _payload, validate, _audit):
+                validate()
+                return "published"
+
+            with (
+                mock.patch.object(revision, "load_authority_context", return_value=context),
+                mock.patch.object(
+                    revision, "build_revision", return_value=(revised, frozenset())
+                ),
+                mock.patch.object(revision, "_guard_output_scope") as guard,
+                mock.patch.object(revision, "_assert_context"),
+                mock.patch.object(revision, "_read_live_project", return_value=(2, 50)) as live,
+                mock.patch.object(
+                    revision, "publish_revision_payload", side_effect=publish
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(
+                    revision.main(["--publish", "--output", str(root / "base_v4r4.json")]),
+                    0,
+                )
+            self.assertEqual(guard.call_count, 2)
+            live.assert_called_once_with(revision.SCHEDULER_URL)
 
     def test_missing_prerequisite_fails_before_creating_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -409,7 +778,10 @@ class TorqueRecoveryBaseRevisionTests(unittest.TestCase):
             for patcher in patches:
                 patcher.start()
                 self.addCleanup(patcher.stop)
-            with self.assertRaisesRegex(revision.RevisionError, "recovery manifest"):
+            with (
+                mock.patch.object(Path, "cwd", return_value=root),
+                self.assertRaisesRegex(revision.RevisionError, "recovery manifest"),
+            ):
                 revision.main(argv)
             self.assertFalse(output.exists())
             self.assertEqual(

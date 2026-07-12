@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import io
 import json
@@ -57,6 +57,19 @@ QUARANTINED_STAGE2_TASK_ID = 28880
 PROJECT = "PYAEDT_MOTOR_IPMSM_V2"
 SCHEDULER_URL = "http://127.0.0.1:8000"
 CAP = "50"
+
+OFFICIAL_SOURCE_BASE_RAW_SHA256 = (
+    "46b9887c45ecee1b48c197be73c7b1c1f234523a775d3be656f82e2730e98e08"
+)
+OFFICIAL_SOURCE_BASE_CONTRACT_SHA256 = (
+    "d0e27b188b4bd408e2661cbeb80d9e78671e9977ca94731ece475cd501c1cf5c"
+)
+OFFICIAL_SOURCE_WRAPPER_RAW_SHA256 = (
+    "c10e0052ca791daef0015df40ce30a06b6345d1d40b8f88422ff297e78ece423"
+)
+OFFICIAL_SOURCE_WRAPPER_CONTRACT_SHA256 = (
+    "30b30c33fbc996202bde7a22a92ff8bb2429b38a5843bf522734e5ec1d26e080"
+)
 
 STAGE2_SCHEDULER_IDENTITY = {
     "project": PROJECT,
@@ -165,6 +178,13 @@ class RevisionBindings:
 
 
 @dataclass(frozen=True)
+class AuthorityPathMap:
+    logical_workdir: Path
+    physical_workdir: Path
+    mirror_enabled: bool
+
+
+@dataclass(frozen=True)
 class AuthorityContext:
     source_base: FileSnapshot
     source_wrapper: FileSnapshot
@@ -173,6 +193,7 @@ class AuthorityContext:
     bindings: RevisionBindings
     snapshots: tuple[FileSnapshot, ...]
     directories: tuple[DirectorySnapshot, ...]
+    paths: AuthorityPathMap
     project_id: int
     project_cap: int
     fingerprint: str
@@ -308,6 +329,39 @@ def _assert_directory_unchanged(snapshot: DirectorySnapshot) -> None:
         raise RevisionError(f"{snapshot.label} changed after validation: {snapshot.path}")
 
 
+def _snapshot_collection_tree(
+    root: Path,
+    label: str,
+) -> tuple[list[FileSnapshot], list[DirectorySnapshot]]:
+    files: list[FileSnapshot] = []
+    directories: list[DirectorySnapshot] = []
+    pending = [_absolute(root)]
+    while pending:
+        directory = pending.pop()
+        directories.append(_read_directory_snapshot(directory, label))
+        for item in sorted(directory.iterdir(), key=lambda path: path.name):
+            try:
+                info = os.lstat(item)
+            except OSError as exc:
+                raise RevisionError(f"cannot inspect {label} entry: {item}") from exc
+            if stat.S_ISLNK(info.st_mode) or _is_reparse(info):
+                raise RevisionError(f"{label} contains a link or reparse point: {item}")
+            if stat.S_ISDIR(info.st_mode):
+                pending.append(item)
+            elif stat.S_ISREG(info.st_mode):
+                files.append(_read_stable_snapshot(item, f"{label} file"))
+            else:
+                raise RevisionError(f"{label} contains an unsupported entry: {item}")
+    return files, directories
+
+
+def _snapshot_exact_payload(path: Path, payload: bytes, label: str) -> FileSnapshot:
+    snapshot = _read_stable_snapshot(path, label)
+    if snapshot.payload != payload:
+        raise RevisionError(f"{label} changed between validation and snapshot")
+    return snapshot
+
+
 def _decode_json(payload: bytes, label: str) -> dict[str, Any]:
     try:
         value = json.loads(
@@ -401,6 +455,92 @@ def _require_reference_path(actual: Path, expected_reference: str, workdir: Path
     expected = _resolve_reference(expected_reference, workdir, label)
     if not _same_path(actual, expected):
         raise RevisionError(f"{label} must be {expected_reference}: {actual}")
+
+
+def _authority_path_map(
+    logical_workdir: Path,
+    mirror_root: Path | None,
+) -> AuthorityPathMap:
+    logical = _absolute(logical_workdir)
+    physical = logical if mirror_root is None else _absolute(mirror_root)
+    _reject_link_components(physical, "authority physical workdir")
+    try:
+        info = os.lstat(physical)
+    except OSError as exc:
+        raise RevisionError(f"cannot inspect authority physical workdir: {physical}") from exc
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or _is_reparse(info):
+        raise RevisionError("authority physical workdir is not a regular non-reparse directory")
+    mirror_enabled = mirror_root is not None
+    if not _same_path(Path.cwd(), physical):
+        raise RevisionError("authority validation requires cwd to equal the physical workdir")
+    if mirror_enabled:
+        if _same_path(logical, physical):
+            raise RevisionError("authority mirror root must differ from logical pipeline.workdir")
+        if _within(logical, physical) or _within(physical, logical):
+            raise RevisionError("authority logical and physical workdirs must not overlap")
+    return AuthorityPathMap(logical, physical, mirror_enabled)
+
+
+def _physical_reference(
+    reference: str,
+    paths: AuthorityPathMap,
+    label: str,
+) -> Path:
+    logical = _resolve_reference(reference, paths.logical_workdir, f"logical {label}")
+    try:
+        logical_root = paths.logical_workdir.resolve(strict=False)
+        relative = logical.resolve(strict=False).relative_to(logical_root)
+    except (OSError, ValueError) as exc:
+        raise RevisionError(f"{label} escapes logical pipeline.workdir: {reference}") from exc
+    physical = _absolute(paths.physical_workdir / relative)
+    if not _within(physical, paths.physical_workdir):
+        raise RevisionError(f"{label} escapes authority physical workdir: {physical}")
+    _reject_link_components(physical, label)
+    return physical
+
+
+def _require_physical_reference(
+    actual: Path,
+    expected_reference: str,
+    paths: AuthorityPathMap,
+    label: str,
+) -> None:
+    expected = _physical_reference(expected_reference, paths, label)
+    if not _same_path(actual, expected):
+        raise RevisionError(f"{label} must be the physical mirror of {expected_reference}: {actual}")
+
+
+def _preflight_mirror_cli_paths(args: argparse.Namespace) -> None:
+    raw_root = getattr(args, "authority_mirror_root", None)
+    if raw_root is None:
+        return
+    root = _absolute(raw_root)
+    _reject_link_components(root, "authority mirror root")
+    try:
+        info = os.lstat(root)
+    except OSError as exc:
+        raise RevisionError(f"cannot inspect authority mirror root: {root}") from exc
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or _is_reparse(info):
+        raise RevisionError("authority mirror root is not a regular non-reparse directory")
+    if not _same_path(Path.cwd(), root):
+        raise RevisionError("mirror mode requires cwd to equal --authority-mirror-root")
+    expected = (
+        ("source_base", SOURCE_BASE),
+        ("source_wrapper", SOURCE_WRAPPER),
+        ("recovery_manifest", RECOVERY_MANIFEST),
+        ("forensic_receipt", FORENSIC_RECEIPT),
+        ("stage1_rebuild_receipt", STAGE1_REBUILD_RECEIPT),
+        ("stage2_audit_receipt", STAGE2_AUDIT_RECEIPT),
+        ("output", OUTPUT_BASE),
+    )
+    for name, reference in expected:
+        actual = _absolute(getattr(args, name))
+        required = _absolute(root / reference)
+        _reject_link_components(actual, f"mirror CLI {name}")
+        if not _same_path(actual, required) or not _within(actual, root):
+            raise RevisionError(
+                f"mirror CLI {name} must be the exact physical mapping of {reference}"
+            )
 
 
 def _get_path(root: Any, path: JsonPath) -> Any:
@@ -526,7 +666,8 @@ def validate_source_pair(
     }:
         raise RevisionError("v4r3 wrapper base binding changed")
     bound_path = _resolve_reference(str(binding.get("path") or ""), workdir, "bound base")
-    if not _same_path(bound_path, base_snapshot.path):
+    expected_bound_path = _resolve_reference(SOURCE_BASE, workdir, "bound base authority")
+    if not _same_path(bound_path, expected_bound_path):
         raise RevisionError("v4r3 wrapper binds a different base path")
     expected_binding = {
         "raw_sha256": base_snapshot.sha256,
@@ -542,7 +683,7 @@ def validate_source_pair(
         raise RevisionError("v4r3 wrapper source-pin key set changed")
     if not isinstance(immutable, list):
         raise RevisionError("v4r3 wrapper immutable_inputs is invalid")
-    expected: set[tuple[str, str]] = {(_path_key(base_snapshot.path), base_snapshot.sha256)}
+    expected: set[tuple[str, str]] = {(_path_key(expected_bound_path), base_snapshot.sha256)}
     for key, filename in supervisor_v4.SOURCE_PIN_FILENAMES.items():
         pin = pins.get(key)
         if not isinstance(pin, dict) or set(pin) != {"path", "sha256"}:
@@ -570,6 +711,29 @@ def validate_source_pair(
     ):
         raise RevisionError("loaded v4r3 base differs from the stable source bytes")
     return workdir
+
+
+def _validate_official_mirror_source_pair(
+    base_snapshot: FileSnapshot,
+    base: Mapping[str, Any],
+    wrapper_snapshot: FileSnapshot,
+    wrapper: Mapping[str, Any],
+) -> None:
+    expected = {
+        "v4r3 base raw": (base_snapshot.sha256, OFFICIAL_SOURCE_BASE_RAW_SHA256),
+        "v4r3 base contract": (
+            base.get("contract_sha256"),
+            OFFICIAL_SOURCE_BASE_CONTRACT_SHA256,
+        ),
+        "v4r3 wrapper raw": (wrapper_snapshot.sha256, OFFICIAL_SOURCE_WRAPPER_RAW_SHA256),
+        "v4r3 wrapper contract": (
+            wrapper.get("contract_sha256"),
+            OFFICIAL_SOURCE_WRAPPER_CONTRACT_SHA256,
+        ),
+    }
+    changed = [label for label, (actual, sealed) in expected.items() if actual != sealed]
+    if changed:
+        raise RevisionError("mirror source pair differs from official authority: " + ", ".join(changed))
 
 
 def _argv_identity(argv: Sequence[Any], flag: str, expected: str, label: str) -> None:
@@ -983,6 +1147,157 @@ def _validate_forensic_scheduler_authority(receipt: Mapping[str, Any]) -> None:
         raise RevisionError("forensic receipt lacks the sealed 1 MiB remote-file bound")
 
 
+def _require_exact_record_reference(
+    record: Mapping[str, Any],
+    key: str,
+    expected_reference: str,
+    paths: AuthorityPathMap,
+    label: str,
+) -> None:
+    raw = record.get(key)
+    normalized = str(raw or "").replace("\\", "/")
+    if normalized != Path(expected_reference).as_posix():
+        raise RevisionError(f"{label} reference changed: {key}")
+    actual = _physical_reference(str(raw), paths, label)
+    expected = _physical_reference(expected_reference, paths, label)
+    if not _same_path(actual, expected):
+        raise RevisionError(f"{label} physical mapping changed: {key}")
+
+
+def _preflight_recovery_manifest_paths(
+    document: Mapping[str, Any],
+    paths: AuthorityPathMap,
+) -> None:
+    sources = document.get("source_plans")
+    revised = document.get("revised_plans")
+    replay = document.get("sealed_replay")
+    if not all(isinstance(item, dict) for item in (sources, revised, replay)):
+        raise RevisionError("recovery manifest path bindings are incomplete")
+    records = (
+        (sources.get("stage1"), "path", STAGE1_SOURCE_PLAN, "Stage1 source plan"),
+        (sources.get("stage2"), "path", STAGE2_SOURCE_PLAN, "Stage2 source plan"),
+        (revised.get("stage1"), "path", STAGE1_PLAN, "Stage1 revised plan"),
+        (revised.get("stage2"), "path", STAGE2_PLAN, "Stage2 revised plan"),
+        (
+            replay,
+            "plan_path",
+            recovery_plans.DEFAULT_REPLAY_PLAN.as_posix(),
+            "sealed replay plan",
+        ),
+        (
+            replay,
+            "manifest_path",
+            recovery_plans.DEFAULT_REPLAY_MANIFEST.as_posix(),
+            "sealed replay manifest",
+        ),
+    )
+    for record, key, expected, label in records:
+        if not isinstance(record, dict):
+            raise RevisionError(f"{label} binding is absent")
+        _require_exact_record_reference(record, key, expected, paths, label)
+
+
+def _preflight_forensic_receipt_paths(
+    document: Mapping[str, Any],
+    paths: AuthorityPathMap,
+) -> None:
+    publication = document.get("publication")
+    cases = document.get("cases")
+    if not isinstance(publication, dict) or not isinstance(cases, list):
+        raise RevisionError("forensic receipt path bindings are incomplete")
+    output_dir = Path(FORENSIC_RECEIPT).parent.as_posix()
+    _require_exact_record_reference(
+        publication, "output_dir", output_dir, paths, "forensic output directory"
+    )
+    _require_exact_record_reference(
+        publication, "receipt_path", FORENSIC_RECEIPT, paths, "forensic receipt"
+    )
+    by_case = {
+        str(item.get("case_id") or ""): item
+        for item in cases
+        if isinstance(item, dict)
+    }
+    expected_case_ids = set(stage1_rebuild.forensic_audit.REPLAY_CASE_IDS)
+    if len(cases) != len(expected_case_ids) or set(by_case) != expected_case_ids:
+        raise RevisionError("forensic receipt case path set changed")
+    for case_id, record in by_case.items():
+        result = record.get("result")
+        raw = record.get("raw_torque")
+        if not isinstance(result, dict) or not isinstance(raw, dict):
+            raise RevisionError(f"forensic case path binding is incomplete: {case_id}")
+        _require_exact_record_reference(
+            result,
+            "local_path",
+            f"{output_dir}/results/{case_id}.csv",
+            paths,
+            f"forensic result {case_id}",
+        )
+        _require_exact_record_reference(
+            raw,
+            "local_path",
+            f"{output_dir}/raw/{case_id}/{case_id}_PPT_Torque.csv",
+            paths,
+            f"forensic raw torque {case_id}",
+        )
+
+
+def _validate_rebuild_forensic_binding(
+    record: Mapping[str, Any],
+    *,
+    workdir: Path,
+    forensic_snapshot: FileSnapshot,
+    forensic: Any,
+) -> None:
+    expected_fields = {
+        "receipt_path",
+        "receipt_sha256",
+        "replay_result_path",
+        "replay_result_sha256",
+        "raw_torque_path",
+        "raw_torque_sha256",
+    }
+    if set(record) != expected_fields:
+        raise RevisionError("Stage1 rebuild forensic provenance fields changed")
+    case = forensic.cases.get(stage1_rebuild.REPLAY_CASE_ID)
+    if case is None:
+        raise RevisionError("Stage1 suspect forensic evidence is absent")
+    paths = {
+        "receipt_path": forensic_snapshot.path,
+        "replay_result_path": case.result_path,
+        "raw_torque_path": case.raw_path,
+    }
+    hashes = {
+        "receipt_sha256": forensic_snapshot.sha256,
+        "replay_result_sha256": _sha256(case.result_payload),
+        "raw_torque_sha256": _sha256(case.raw_payload),
+    }
+    for key, expected_path in paths.items():
+        actual = _resolve_reference(str(record.get(key) or ""), workdir, f"Stage1 {key}")
+        if not _same_path(actual, expected_path):
+            raise RevisionError(f"Stage1 rebuild forensic path changed: {key}")
+    for key, expected_hash in hashes.items():
+        if record.get(key) != expected_hash:
+            raise RevisionError(f"Stage1 rebuild forensic hash changed: {key}")
+
+
+def _validate_official_stage1_replay_summary(
+    summary: Mapping[str, Any],
+    receipt: FileSnapshot,
+) -> None:
+    expected = {
+        "mode": "dry-run",
+        "status": "verified",
+        "publication": "existing_verified",
+        "rows": 700,
+        "unchanged": 699,
+        "remapped": 1,
+        "validator_failures": "0",
+        "receipt_sha256": receipt.sha256,
+    }
+    if any(summary.get(key) != value for key, value in expected.items()):
+        raise RevisionError("official Stage1 rebuild replay did not reproduce its receipt")
+
+
 def _validate_rebuild_receipt(
     snapshot: FileSnapshot,
     document: Mapping[str, Any],
@@ -990,6 +1305,7 @@ def _validate_rebuild_receipt(
     workdir: Path,
     recovery: Any,
     forensic_snapshot: FileSnapshot,
+    forensic: Any,
 ) -> tuple[FileSnapshot, FileSnapshot]:
     if snapshot.payload != _canonical_json_bytes(document):
         raise RevisionError("Stage1 rebuild receipt is not canonical JSON")
@@ -1027,6 +1343,12 @@ def _validate_rebuild_receipt(
     forensic_record = document.get("forensics")
     if not isinstance(recovery_record, dict) or not isinstance(forensic_record, dict):
         raise RevisionError("Stage1 rebuild provenance is incomplete")
+    _validate_rebuild_forensic_binding(
+        forensic_record,
+        workdir=workdir,
+        forensic_snapshot=forensic_snapshot,
+        forensic=forensic,
+    )
     if (
         recovery_record.get("plan_sha256") != recovery.plan.sha256
         or recovery_record.get("manifest_sha256") != recovery.manifest_sha256
@@ -1119,8 +1441,59 @@ def _validate_rebuild_receipt(
     return selected, merged
 
 
-def _snapshot_reference(workdir: Path, reference: str, label: str) -> FileSnapshot:
-    return _read_stable_snapshot(_resolve_reference(reference, workdir, label), label)
+def _logicalize_stage2_campaign_identity(
+    campaign: stage2_audit.CampaignEvidence,
+    paths: AuthorityPathMap,
+) -> stage2_audit.CampaignEvidence:
+    identity = copy.deepcopy(campaign.identity)
+    identity["plan_path"] = str(
+        _resolve_reference(STAGE2_SOURCE_PLAN, paths.logical_workdir, "logical Stage2 plan").resolve()
+    )
+    identity["decision_path"] = str(
+        _resolve_reference(
+            f"{OLD_ROOT}/foundation_stage2_decision.json",
+            paths.logical_workdir,
+            "logical Stage2 decision",
+        ).resolve()
+    )
+    changed = _changed_paths(campaign.identity, identity)
+    expected = {("plan_path",), ("decision_path",)} if paths.mirror_enabled else set()
+    if changed != expected:
+        raise RevisionError(
+            "Stage2 physical-to-logical identity mapping changed unexpected fields: "
+            f"{sorted(map(repr, changed))}"
+        )
+    return replace(campaign, identity=identity)
+
+
+def _validate_stage2_snapshot_binding(
+    campaign: stage2_audit.CampaignEvidence,
+    *,
+    source_plan: FileSnapshot,
+    decision: FileSnapshot,
+    receipt: FileSnapshot,
+    checkpoint_files: Sequence[FileSnapshot],
+    checkpoint_directories: Sequence[DirectorySnapshot],
+    prior_evidence: Mapping[str, Mapping[str, Any]],
+) -> None:
+    if len(checkpoint_directories) != 1 or len(checkpoint_files) != 172:
+        raise RevisionError("Stage2 audit checkpoint inventory is not the sealed 172 finals")
+    if campaign.plan_payload != source_plan.payload or campaign.decision_payload != decision.payload:
+        raise RevisionError("Stage2 campaign evidence changed before snapshot binding")
+    if sum(len(by_task) for by_task in prior_evidence.values()) != 172:
+        raise RevisionError("Stage2 immutable checkpoint evidence count changed")
+    for snapshot in (source_plan, decision, receipt, *checkpoint_files):
+        _assert_snapshot_unchanged(snapshot)
+    for directory in checkpoint_directories:
+        _assert_directory_unchanged(directory)
+
+
+def _snapshot_reference(
+    paths: AuthorityPathMap,
+    reference: str,
+    label: str,
+) -> FileSnapshot:
+    return _read_stable_snapshot(_physical_reference(reference, paths, label), label)
 
 
 def _unique_snapshots(snapshots: Iterable[FileSnapshot]) -> tuple[FileSnapshot, ...]:
@@ -1147,6 +1520,7 @@ def _context_fingerprint(
     snapshots: Sequence[FileSnapshot],
     directories: Sequence[DirectorySnapshot],
     bindings: RevisionBindings,
+    paths: AuthorityPathMap,
     project_id: int,
     project_cap: int,
 ) -> str:
@@ -1179,6 +1553,11 @@ def _context_fingerprint(
             "evidence": [item.__dict__ for item in bindings.evidence],
             "sources": [item.__dict__ for item in bindings.sources],
         },
+        "authority_paths": {
+            "logical_workdir": _path_key(paths.logical_workdir),
+            "physical_workdir": _path_key(paths.physical_workdir),
+            "mirror_enabled": paths.mirror_enabled,
+        },
         "live_project": {
             "id": project_id,
             "name": PROJECT,
@@ -1189,11 +1568,15 @@ def _context_fingerprint(
 
 
 def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
+    _preflight_mirror_cli_paths(args)
     base_snapshot = _read_stable_snapshot(args.source_base, "v4r3 base contract")
     wrapper_snapshot = _read_stable_snapshot(args.source_wrapper, "v4r3 wrapper contract")
     base = _decode_json(base_snapshot.payload, "v4r3 base contract")
     wrapper = _decode_json(wrapper_snapshot.payload, "v4r3 wrapper contract")
-    workdir = validate_source_pair(base_snapshot, base, wrapper_snapshot, wrapper)
+    logical_workdir = validate_source_pair(base_snapshot, base, wrapper_snapshot, wrapper)
+    paths = _authority_path_map(logical_workdir, args.authority_mirror_root)
+    if paths.mirror_enabled:
+        _validate_official_mirror_source_pair(base_snapshot, base, wrapper_snapshot, wrapper)
     loaded_sources = {
         "atomic_publish.py": Path(atomic_publish.__file__),
         "prepare_ipmsm_torque_unit_recovery_plans.py": Path(recovery_plans.__file__),
@@ -1204,7 +1587,7 @@ def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
         Path(__file__).name: Path(__file__),
     }
     for reference, loaded_path in loaded_sources.items():
-        expected = _resolve_reference(reference, workdir, f"loaded source {reference}")
+        expected = _physical_reference(reference, paths, f"loaded source {reference}")
         if not _same_path(loaded_path, expected):
             raise RevisionError(
                 f"loaded source module differs from the workdir authority: {reference}"
@@ -1218,13 +1601,13 @@ def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
         (_absolute(args.stage2_audit_receipt), STAGE2_AUDIT_RECEIPT, "Stage2 audit receipt"),
         (_absolute(args.output), OUTPUT_BASE, "v4r4 base output"),
     ):
-        _require_reference_path(path, reference, workdir, label)
+        _require_physical_reference(path, reference, paths, label)
 
     source_immutable = _validate_source_immutable_layout(base)
     snapshots: list[FileSnapshot] = [base_snapshot, wrapper_snapshot]
     directories: list[DirectorySnapshot] = []
     for index, reference in enumerate(STATIC_IMMUTABLE_PATHS):
-        snapshot = _snapshot_reference(workdir, reference, f"static immutable input {reference}")
+        snapshot = _snapshot_reference(paths, reference, f"static immutable input {reference}")
         if snapshot.sha256 != source_immutable[index]["sha256"]:
             raise RevisionError(f"sealed non-source immutable input changed: {reference}")
         snapshots.append(snapshot)
@@ -1235,19 +1618,109 @@ def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
     stage2_receipt = _read_stable_snapshot(args.stage2_audit_receipt, "Stage2 audit receipt")
     snapshots.extend((recovery_manifest, forensic_receipt, rebuild_receipt, stage2_receipt))
 
+    recovery_manifest_document = _decode_json(
+        recovery_manifest.payload, "recovery manifest path preflight"
+    )
+    forensic_receipt_document = _decode_json(
+        forensic_receipt.payload, "forensic receipt path preflight"
+    )
+    _preflight_recovery_manifest_paths(recovery_manifest_document, paths)
+    _preflight_forensic_receipt_paths(forensic_receipt_document, paths)
+
+    original_collection = _physical_reference(
+        stage1_rebuild.DEFAULT_ORIGINAL_COLLECTION.as_posix(),
+        paths,
+        "original Stage1 collection",
+    )
+    rebuilt_collection = _physical_reference(
+        STAGE1_OUTPUT, paths, "rebuilt Stage1 collection"
+    )
+    stage1_completion = _physical_reference(
+        stage1_rebuild.DEFAULT_STAGE1_COMPLETION.as_posix(),
+        paths,
+        "Stage1 completion",
+    )
+    completion_snapshot = _read_stable_snapshot(stage1_completion, "Stage1 completion")
+    original_files, original_directories = _snapshot_collection_tree(
+        original_collection, "original Stage1 collection"
+    )
+    rebuilt_files, rebuilt_directories = _snapshot_collection_tree(
+        rebuilt_collection, "rebuilt Stage1 collection"
+    )
+    snapshots.extend((completion_snapshot, *original_files, *rebuilt_files))
+    directories.extend((*original_directories, *rebuilt_directories))
+    rebuild_replay = stage1_rebuild.rebuild_stage1(
+        recovery_plan=Path(STAGE1_PLAN),
+        recovery_manifest=Path(RECOVERY_MANIFEST),
+        forensic_receipt=Path(FORENSIC_RECEIPT),
+        original_collection=stage1_rebuild.DEFAULT_ORIGINAL_COLLECTION,
+        stage1_completion=stage1_rebuild.DEFAULT_STAGE1_COMPLETION,
+        output_collection=Path(STAGE1_OUTPUT),
+        receipt_output=Path(STAGE1_REBUILD_RECEIPT),
+        publish=False,
+    )
+    _validate_official_stage1_replay_summary(rebuild_replay, rebuild_receipt)
+    _assert_snapshot_unchanged(rebuild_receipt)
+    _assert_snapshot_unchanged(completion_snapshot)
+    for snapshot in (*original_files, *rebuilt_files):
+        _assert_snapshot_unchanged(snapshot)
+    for directory in (*original_directories, *rebuilt_directories):
+        _assert_directory_unchanged(directory)
+
     # Deterministically replay and validate the complete recovery/forensic
     # authorities using their published verifier implementation.
     recovery = stage1_rebuild.load_recovery_evidence(
-        _resolve_reference(STAGE1_PLAN, workdir, "revised Stage1 plan"),
+        _physical_reference(STAGE1_PLAN, paths, "revised Stage1 plan"),
         recovery_manifest.path,
     )
     if recovery.manifest_payload != recovery_manifest.payload:
         raise RevisionError("recovery manifest changed during deterministic replay")
+    recovery_paths = (
+        (recovery.plan.path, STAGE1_PLAN, "revised Stage1 plan"),
+        (recovery.source_plan.path, STAGE1_SOURCE_PLAN, "source Stage1 plan"),
+        (
+            recovery.replay_plan.path,
+            recovery_plans.DEFAULT_REPLAY_PLAN.as_posix(),
+            "sealed replay plan",
+        ),
+        (recovery.manifest_path, RECOVERY_MANIFEST, "recovery manifest"),
+    )
+    for actual, reference, label in recovery_paths:
+        expected = _physical_reference(reference, paths, label)
+        if not _same_path(actual, expected):
+            raise RevisionError(f"{label} escaped its physical authority mapping")
     forensic = stage1_rebuild.load_forensic_evidence(forensic_receipt.path, recovery)
     _validate_forensic_scheduler_authority(forensic.receipt)
-    for case in forensic.cases.values():
-        snapshots.append(_read_stable_snapshot(case.result_path, "forensic replay result"))
-        snapshots.append(_read_stable_snapshot(case.raw_path, "forensic raw torque"))
+    expected_forensic_output = _physical_reference(
+        Path(FORENSIC_RECEIPT).parent.as_posix(), paths, "forensic output directory"
+    )
+    if not _same_path(forensic.output_dir, expected_forensic_output) or not _same_path(
+        forensic.receipt_path, forensic_receipt.path
+    ):
+        raise RevisionError("forensic helper returned paths outside the physical authority")
+    for case_id, case in forensic.cases.items():
+        expected_result = _physical_reference(
+            f"{Path(FORENSIC_RECEIPT).parent.as_posix()}/results/{case_id}.csv",
+            paths,
+            f"forensic result {case_id}",
+        )
+        expected_raw = _physical_reference(
+            f"{Path(FORENSIC_RECEIPT).parent.as_posix()}/raw/{case_id}/"
+            f"{case_id}_PPT_Torque.csv",
+            paths,
+            f"forensic raw torque {case_id}",
+        )
+        if not _same_path(case.result_path, expected_result) or not _same_path(
+            case.raw_path, expected_raw
+        ):
+            raise RevisionError(f"forensic helper returned an escaped case path: {case_id}")
+        result_snapshot = _snapshot_exact_payload(
+            case.result_path, case.result_payload, "forensic replay result"
+        )
+        raw_snapshot = _snapshot_exact_payload(
+            case.raw_path, case.raw_payload, "forensic raw torque"
+        )
+        snapshots.extend((result_snapshot, raw_snapshot))
     if _read_stable_snapshot(forensic_receipt.path, "forensic receipt").payload != forensic_receipt.payload:
         raise RevisionError("forensic receipt changed during verification")
 
@@ -1256,9 +1729,9 @@ def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
     source_plans = manifest.get("source_plans")
     if not isinstance(revised_plans, dict) or not isinstance(source_plans, dict):
         raise RevisionError("recovery manifest plan bindings are incomplete")
-    stage1_plan = _snapshot_reference(workdir, STAGE1_PLAN, "revised Stage1 plan")
-    stage2_plan = _snapshot_reference(workdir, STAGE2_PLAN, "revised Stage2 plan")
-    source_stage2 = _snapshot_reference(workdir, STAGE2_SOURCE_PLAN, "source Stage2 plan")
+    stage1_plan = _snapshot_reference(paths, STAGE1_PLAN, "revised Stage1 plan")
+    stage2_plan = _snapshot_reference(paths, STAGE2_PLAN, "revised Stage2 plan")
+    source_stage2 = _snapshot_reference(paths, STAGE2_SOURCE_PLAN, "source Stage2 plan")
     if stage1_plan.payload != recovery.plan.payload:
         raise RevisionError("revised Stage1 plan differs from deterministic recovery")
     for stage, record, snapshot, rows in (
@@ -1268,7 +1741,9 @@ def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
     ):
         if not isinstance(record, dict):
             raise RevisionError(f"recovery manifest lacks {stage} plan binding")
-        bound = _resolve_reference(str(record.get("path") or ""), workdir, f"{stage} plan binding")
+        bound = _physical_reference(
+            str(record.get("path") or ""), paths, f"{stage} plan binding"
+        )
         if not _same_path(bound, snapshot.path) or record.get("sha256") != snapshot.sha256:
             raise RevisionError(f"recovery manifest {stage} plan binding changed")
         if record.get("rows") != rows or record.get("columns") != len(
@@ -1281,9 +1756,9 @@ def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
         (
             _read_stable_snapshot(recovery.replay_plan.path, "sealed replay plan"),
             _read_stable_snapshot(
-                _resolve_reference(
+                _physical_reference(
                     str(manifest["sealed_replay"]["manifest_path"]),
-                    workdir,
+                    paths,
                     "sealed replay manifest",
                 ),
                 "sealed replay manifest",
@@ -1295,27 +1770,41 @@ def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
     selected, merged = _validate_rebuild_receipt(
         rebuild_receipt,
         rebuild_document,
-        workdir=workdir,
+        workdir=paths.physical_workdir,
         recovery=recovery,
         forensic_snapshot=forensic_receipt,
+        forensic=forensic,
     )
     snapshots.extend((selected, merged))
-    directories.append(
-        _read_directory_snapshot(
-            _resolve_reference(f"{STAGE1_OUTPUT}/results", workdir, "rebuilt result directory"),
-            "rebuilt result directory",
-        )
-    )
 
-    old_stage2_decision = _resolve_reference(
-        f"{OLD_ROOT}/foundation_stage2_decision.json", workdir, "v4r3 Stage2 decision"
+    old_stage2_decision = _physical_reference(
+        f"{OLD_ROOT}/foundation_stage2_decision.json",
+        paths,
+        "v4r3 Stage2 decision",
+    )
+    decision_snapshot = _read_stable_snapshot(
+        old_stage2_decision, "v4r3 Stage2 decision"
+    )
+    checkpoint_dir = stage2_receipt.path.parent / stage2_audit.CHECKPOINT_DIR_NAME
+    checkpoint_files, checkpoint_directories = _snapshot_collection_tree(
+        checkpoint_dir, "Stage2 audit checkpoint directory"
     )
     campaign = stage2_audit.load_campaign_evidence(
         source_stage2.path,
         old_stage2_decision,
         expected_rows=300,
     )
-    stage2_audit._load_prior_evidence(stage2_receipt.path.parent, campaign)
+    campaign = _logicalize_stage2_campaign_identity(campaign, paths)
+    prior_stage2 = stage2_audit._load_prior_evidence(stage2_receipt.path.parent, campaign)
+    _validate_stage2_snapshot_binding(
+        campaign,
+        source_plan=source_stage2,
+        decision=decision_snapshot,
+        receipt=stage2_receipt,
+        checkpoint_files=checkpoint_files,
+        checkpoint_directories=checkpoint_directories,
+        prior_evidence=prior_stage2,
+    )
     stage2_document = _decode_json(stage2_receipt.payload, "Stage2 audit receipt")
     if stage2_receipt.payload != stage2_audit.canonical_json_bytes(stage2_document):
         raise RevisionError("Stage2 audit receipt is not canonical JSON")
@@ -1324,15 +1813,12 @@ def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
         expected_identity=campaign.identity,
         expected_case_ids={row["case_id"] for row in campaign.rows},
     )
-    snapshots.append(_read_stable_snapshot(old_stage2_decision, "v4r3 Stage2 decision"))
-    checkpoint_dir = stage2_receipt.path.parent / stage2_audit.CHECKPOINT_DIR_NAME
-    directories.append(_read_directory_snapshot(checkpoint_dir, "Stage2 audit checkpoint directory"))
-    for path in sorted(checkpoint_dir.iterdir(), key=lambda item: item.name):
-        snapshots.append(_read_stable_snapshot(path, "Stage2 immutable result checkpoint"))
+    snapshots.extend((decision_snapshot, *checkpoint_files))
+    directories.extend(checkpoint_directories)
 
     source_bindings: list[ArtifactBinding] = []
     for reference in LEGACY_SOURCE_INPUTS + RECOVERY_SOURCE_INPUTS:
-        snapshot = _snapshot_reference(workdir, reference, f"source closure {reference}")
+        snapshot = _snapshot_reference(paths, reference, f"source closure {reference}")
         source_bindings.append(ArtifactBinding(reference, snapshot.sha256))
         snapshots.append(snapshot)
     evidence_bindings = tuple(
@@ -1361,15 +1847,32 @@ def load_authority_context(args: argparse.Namespace) -> AuthorityContext:
         bindings=bindings,
         snapshots=unique,
         directories=directory_tuple,
+        paths=paths,
         project_id=project_id,
         project_cap=project_cap,
         fingerprint=_context_fingerprint(
-            unique, directory_tuple, bindings, project_id, project_cap
+            unique, directory_tuple, bindings, paths, project_id, project_cap
         ),
     )
 
 
-def _configured_fresh_paths(document: Mapping[str, Any], workdir: Path) -> tuple[Path, ...]:
+def _configured_reference(
+    reference: object,
+    workdir: Path,
+    label: str,
+    authority_paths: AuthorityPathMap | None,
+) -> Path:
+    if authority_paths is None:
+        return _resolve_reference(str(reference), workdir, label)
+    return _physical_reference(str(reference), authority_paths, label)
+
+
+def _configured_fresh_paths(
+    document: Mapping[str, Any],
+    workdir: Path,
+    *,
+    authority_paths: AuthorityPathMap | None = None,
+) -> tuple[Path, ...]:
     p = document["pipeline"]
     refs = [
         p["lock_path"],
@@ -1396,11 +1899,17 @@ def _configured_fresh_paths(document: Mapping[str, Any], workdir: Path) -> tuple
         p["speed"]["top"],
         p["speed"]["marker"],
     ]
-    return tuple(_resolve_reference(str(item), workdir, "fresh v4r4 output") for item in refs)
+    return tuple(
+        _configured_reference(item, workdir, "fresh v4r4 output", authority_paths)
+        for item in refs
+    )
 
 
 def _configured_old_output_roots(
-    document: Mapping[str, Any], workdir: Path
+    document: Mapping[str, Any],
+    workdir: Path,
+    *,
+    authority_paths: AuthorityPathMap | None = None,
 ) -> tuple[Path, ...]:
     p = document["pipeline"]
     refs = [
@@ -1429,7 +1938,10 @@ def _configured_old_output_roots(
         p["speed"]["top"],
         p["speed"]["marker"],
     ]
-    return tuple(_resolve_reference(str(item), workdir, "v4r3 output") for item in refs)
+    return tuple(
+        _configured_reference(item, workdir, "v4r3 output", authority_paths)
+        for item in refs
+    )
 
 
 def _guard_output_scope(
@@ -1438,12 +1950,16 @@ def _guard_output_scope(
     context: AuthorityContext,
 ) -> None:
     raw_workdir = Path(str(document["pipeline"]["workdir"]))
-    workdir = _absolute(
+    logical_workdir = _absolute(
         raw_workdir
         if raw_workdir.is_absolute()
         else context.source_base.path.parent / raw_workdir
     )
-    if not _within(output, workdir):
+    if not _same_path(logical_workdir, context.paths.logical_workdir):
+        raise RevisionError("revised contract changed logical pipeline.workdir")
+    workdir = context.paths.physical_workdir
+    expected_output = _physical_reference(OUTPUT_BASE, context.paths, "v4r4 base output")
+    if not _same_path(output, expected_output) or not _within(output, workdir):
         raise RevisionError("v4r4 base output must remain inside pipeline.workdir")
     _reject_link_components(output, "v4r4 base output")
     for snapshot in context.snapshots:
@@ -1453,7 +1969,9 @@ def _guard_output_scope(
             or _within(snapshot.path, output)
         ):
             raise RevisionError(f"v4r4 base output overlaps protected input: {snapshot.path}")
-    fresh = _configured_fresh_paths(document, workdir)
+    fresh = _configured_fresh_paths(
+        document, workdir, authority_paths=context.paths
+    )
     keys = [_path_key(item) for item in fresh]
     if len(keys) != len(set(keys)):
         raise RevisionError("v4r4 fresh output roots are not distinct")
@@ -1465,16 +1983,41 @@ def _guard_output_scope(
                 )
         if os.path.lexists(path):
             raise RevisionError(f"v4r4 fresh output path already exists: {path}")
-    old = _configured_old_output_roots(context.base_document, workdir)
+    old = _configured_old_output_roots(
+        context.base_document, workdir, authority_paths=context.paths
+    )
     for path in fresh:
         for prior in old:
             if _within(path, prior) or _within(prior, path):
                 raise RevisionError(
                     f"v4r4 fresh output overlaps a v4r3 output namespace: {path} and {prior}"
                 )
-    rebuilt = _resolve_reference(STAGE1_OUTPUT, workdir, "rebuilt Stage1 output")
+    rebuilt = _physical_reference(STAGE1_OUTPUT, context.paths, "rebuilt Stage1 output")
     if rebuilt.is_symlink() or not rebuilt.is_dir():
         raise RevisionError("verified rebuilt Stage1 output disappeared")
+
+
+def _audit_physical_immutable_inputs(
+    document: Mapping[str, Any],
+    paths: AuthorityPathMap,
+) -> None:
+    immutable = document["pipeline"].get("immutable_inputs")
+    if not isinstance(immutable, list) or not immutable:
+        raise RevisionError("published v4r4 base has no immutable inputs")
+    seen: set[str] = set()
+    for index, item in enumerate(immutable):
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise RevisionError(f"published immutable_inputs[{index}] shape changed")
+        reference = str(item.get("path") or "")
+        snapshot = _snapshot_reference(
+            paths, reference, f"published immutable input {reference}"
+        )
+        key = _path_key(snapshot.path)
+        if key in seen:
+            raise RevisionError("published immutable inputs contain a physical alias")
+        seen.add(key)
+        if snapshot.sha256 != item.get("sha256"):
+            raise RevisionError(f"published immutable input hash changed: {reference}")
 
 
 def _proof_path(output: Path) -> Path:
@@ -1709,6 +2252,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output", type=Path, default=Path(OUTPUT_BASE))
     parser.add_argument(
+        "--authority-mirror-root",
+        type=Path,
+        default=None,
+        help=(
+            "Read and publish through this physical mirror while preserving the sealed "
+            "logical pipeline.workdir; cwd must equal the mirror root."
+        ),
+    )
+    parser.add_argument(
         "--publish",
         action="store_true",
         help="Publish only the fresh v4r4 base. Omit for a zero-write dry run.",
@@ -1730,6 +2282,8 @@ def main(argv: list[str] | None = None) -> int:
         "output",
     ):
         setattr(args, name, _absolute(getattr(args, name)))
+    if args.authority_mirror_root is not None:
+        args.authority_mirror_root = _absolute(args.authority_mirror_root)
     context = load_authority_context(args)
     revised, changed = build_revision(context.base_document, context.bindings)
     _guard_output_scope(args.output, revised, context)
@@ -1740,6 +2294,7 @@ def main(argv: list[str] | None = None) -> int:
     publication = "would_publish"
     if args.publish:
         def validate_authority() -> None:
+            _guard_output_scope(args.output, revised, context)
             _assert_context(context)
             if _read_live_project(SCHEDULER_URL) != (
                 context.project_id,
@@ -1751,7 +2306,9 @@ def main(argv: list[str] | None = None) -> int:
             contract = supervisor.load_contract(path)
             if contract.contract_sha256 != revised["contract_sha256"]:
                 raise RevisionError("published base semantic hash changed")
-            supervisor.audit_immutable_inputs(contract)
+            if not _same_path(contract.workdir, context.paths.logical_workdir):
+                raise RevisionError("published base logical workdir changed")
+            _audit_physical_immutable_inputs(revised, context.paths)
 
         publication = publish_revision_payload(
             args.output,
@@ -1766,6 +2323,9 @@ def main(argv: list[str] | None = None) -> int:
         "source_base_sha256": context.source_base.sha256,
         "source_wrapper_sha256": context.source_wrapper.sha256,
         "authority_fingerprint": context.fingerprint,
+        "authority_mode": "mirror" if context.paths.mirror_enabled else "direct",
+        "logical_workdir": str(context.paths.logical_workdir),
+        "physical_workdir": str(context.paths.physical_workdir),
         "contract_sha256": revised["contract_sha256"],
         "changed_paths": len(changed),
         "stage2_dedupes_preserved": 299,

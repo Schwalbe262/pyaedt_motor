@@ -3908,3 +3908,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: replace the CRLF diagnostic audit with Git-blob LF authority and rebuild the one contaminated Stage1 row without writing RaiDrive.
 - Actions/result: completed the GET-only audit at receipt `8c316422...1590e`, sanitized 172 final checkpoints, and locally published/reverified the 700-row Stage1 collection at receipt `c87a468c...f33e1` with 699 unchanged and one task29328 remap.
 - Metrics/failure/next: Stage2 classes171/27/1/101, active/pending/429=0; Python3.14 exposed a 1-ULP built-in `sum` change, so explicit sequential aggregation now passes the real receipt under 3.11/3.14 and 26/26 Python3.14 tests; implement safe logical-Y/physical-C mirror revision before base publication.
+
+## 2026-07-13 03:23:00 +09:00 - Fail-closed v4r4 authority mirror verified
+- Part/goal: build the v4r4 base on local NTFS without changing the contract's sealed Y workdir or writing through RaiDrive.
+- Actions/result: added exact logical-to-physical mapping, official source-pair pins, pre-open/path-scope checks, complete Stage1 replay plus 1,404-file snapshots, forensic payload binding, Stage2 decision/checkpoint TOCTOU binding, and publish-time scope/context/live-cap rechecks.
+- Metrics/next: focused22/22, related55/55, independent P0/P1=0, Python3.11/3.14 contract SHA `093bdd63...e6943`; dry-run left local/Y base, stage, and proof absent, so commit the source then publish and re-audit the local base only.

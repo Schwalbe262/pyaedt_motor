@@ -919,3 +919,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: both runtimes reproduce the sealed receipt and verify the 700-row recovery as existing_verified.
 - Evidence: real receipt `c87a468c...f33e1` passes under both runtimes; Python3.14 related tests pass 26/26.
 - Remaining risk: other exact floating aggregates should use explicitly specified algorithms before their values become cross-runtime authority.
+
+## 2026-07-13 03:23:00 +09:00 - Insight 103
+- Source loop: the sealed v4r3 contract names a RaiDrive Y workdir, while repeated provider write failures made direct recovery publication unsafe.
+- Improvement: separate immutable logical path identity from physical I/O through an explicit, official-hash-pinned mirror root; map every known reference before open and serialize only the original logical paths.
+- Before: a C copy failed wrapper/base and Stage2 receipt identity checks, while using Y risked another delayed or ambiguous write.
+- After: C performs all reads/writes, Y remains the contract workdir, complete Stage1/Stage2 authorities replay, and publish callbacks recheck file identities, future namespaces, and live cap50.
+- Evidence: actual Python3.11/3.14 dry-runs share contract SHA `093bdd63...e6943`, 22 focused plus 55 related tests pass, and two independent reviews report P0/P1=0.
+- Remaining risk: the Stage1 receipt intentionally preserves its LF325 validator absolute path, so this authority must remain at that exact mirror location until a separately sealed portable receipt revision exists.
