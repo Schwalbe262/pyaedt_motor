@@ -3821,3 +3821,12 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: official gate 0/9, min/avg R2 0.624627/0.771923; live UI Stage1=700/700, current=`stage2/ready`, stale=false, errors0; baseline task 28644 fell from historical 9284.797 s to 2878.284 s (3.23x, 69.0% reduction); dashboard 100/100 and v4 supervisor 25/25 (1 skip) passed.
 - Failure/next: baseline 28644 used the fixed CPU set but shared n040 because the old allocation builder omitted Slurm `--exclusive`; collect 28739, finish smoke 28774 when an idle node exists, then deliberately launch the 300-row Stage2 contract before NSGA confirmation.
 - Token usage: closeout sampler was already attempted in this execution loop and remains unavailable.
+
+## 2026-07-12 21:04:00 +09:00 - V4R3 Stage2 launch and exact affinity proof
+- Part/goal: recover Stage2 from mapped-drive atomic publication failure, keep the WEB UI responsive, and prove the CPU-affinity speed change without changing simulation labels.
+- Hypothesis/actions: added bounded Windows rename retries plus fresh staging, issued an all-and-only two-source base-contract revision, archived the zero-submit late-visible v4r2 decision by hash, published v4r3 official Stage1, added a durable logged executor, and cached unchanged dashboard governance audits.
+- Candidates/options: use v4r3 only; preserve the aborted v4r2 decision as audit evidence; cancel queued exclusive smoke 28808 so Stage2 can use all 100 project slots; defer physical-exclusive live proof until the campaign releases capacity.
+- Metrics/result: v4r3 contract/completion/decision `30b30c33...6e080` / `d916cb5c...9fa44` / `6db32b67...8c727`; Stage2 task ids 28872-28971 are 100/100 running with failures0; dashboard headline=`FEA 슬롯 100 / 100 점유`, stale=false, errors0; related regression=173/173 (1 skip), final dashboard=102/102.
+- Data-quality/runtime proof: pre/post baseline 9284.797/2878.284 s (3.226x) and candidate 9520.286/2852.047 s (3.338x); both comparisons are `ok` and all 569 numeric output fields are exactly equal.
+- Failure/next: a RaiDrive rename may report WinError 5 before its destination becomes visible; current restaging succeeded, but general late-success receipt recovery must wait until pinned Stage2 sources can change safely after this campaign.
+- Token usage: closeout sampler was already attempted in this execution loop and remains unavailable.

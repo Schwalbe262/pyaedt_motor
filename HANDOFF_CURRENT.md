@@ -8,12 +8,12 @@
 - Mesh and transient setup are controlled in `module/ipmsm_ppt_setup.py`.
 - Root project-memory files are now canonical; `md/` is template/archive context.
 - Live read-only dashboard: `http://127.0.0.1:8765/`; it separates the 8-stage official pipeline from the ancillary paired-24 experiment and fail-closed collection/ranking conclusion.
-- 2026-07-12 20:08 KST: live dashboard is healthy at Stage1 700/700, v4 official gate 0/9 (min R2 0.624627), and `stage2/ready`; the stale runner 696/700 is not primary progress.
-- Official v4r2 contract `d7322815...2d8b` and completion `9be6124e...d629` are verified; production confirmation is required only before NSGA-II, not before Stage2/Stage3.
-- The v4r2 supervisor dry-run is `run_stage2_fresh` with a fresh 300-row plan; its on-demand Scheduled Task remains Disabled until the provisional operating contract is deliberately started.
-- Legacy v3 automation remains Disabled and non-authoritative; use only the audited v4r2 contract for continuation.
-- All legacy paired-24 tasks ran on the pre-fix shared 0-3 CPU mask, so its runtime ranking is withheld and the local task is Disabled; physics rows remain collectible only.
-- Post-fix baseline 28644 completed in 2878.284 s versus pre-fix 9284.797 s (3.23x faster); candidate 28739 runs on n040, while true physical-exclusive scheduler commit `d0100a0` is live and smoke 28774 waits for an idle CPU node.
+- 2026-07-12 21:04 KST: live dashboard is healthy at Stage1 700/700, official gate 0/9 (min R2 0.624627), and Stage2 100/100 running; stale=false and errors=0.
+- Official v4r3 contract `30b30c33...6e080`, completion `d916cb5c...9fa44`, and Stage2 decision `6db32b67...8c727` are verified; production confirmation remains required only before NSGA-II.
+- Scheduled Task `PYAEDT_MOTOR_IPMSM_V2_PIPELINE_V4R3` is Running; Stage2 tasks 28872-28971 occupy the sealed project cap, with 300 planned rows and automatic refill/collection active.
+- Base revision `d0e27b18...c1cf5c` changed only pinned `atomic_publish.py` and `continue_ipmsm_v2_stage2.py`; the zero-submit v4r2 late-visible decision is hash-preserved under `simul_log_smoke/v4r2`.
+- Legacy v3/v4r2 automation and pre-affinity paired-24 ranking remain non-authoritative and Disabled.
+- Exact post-affinity replays preserved all 569 numeric outputs bit-for-bit: baseline 9284.797->2878.284 s (3.226x), candidate 9520.286->2852.047 s (3.338x); physical-exclusive smoke is deferred until Stage2 releases the cap.
 
 ## Current objective
 

@@ -855,3 +855,19 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: the fixed-affinity replay took 2878.284 s (3.23x faster, 69.0% lower), and the scheduler now requires a truly idle node and emits Slurm `--exclusive` for new dedicated allocations.
 - Evidence: historical task 28293 versus task 28644 with the same setup fingerprint; scheduler core 331/331 and live restart passed, while physical smoke 28774 correctly waits because no CPU node is idle.
 - Remaining risk: the speed comparison used different node/load conditions and task 28644 was still physically shared; only the paired candidate and a completed exclusive smoke can refine causality.
+
+## 2026-07-12 21:04:00 +09:00 - Insight 95
+- Source loop: exact-case replay before and after the Slurm CPU-affinity correction.
+- Improvement: validate scheduler performance fixes against both runtime and the full numeric output vector, not runtime alone.
+- Before: baseline/candidate solves took 9284.797/9520.286 s while 4-core steps collided on CPUs 0-3.
+- After: the same cases took 2878.284/2852.047 s, or 3.226x/3.338x faster, while all 569 comparable numeric outputs remained bit-identical for both profiles.
+- Evidence: tasks 28293->28644 and 28339->28739, with `ok` status and unchanged source/setup identity per pair.
+- Remaining risk: node and co-tenant load differed, so the exact fraction attributable solely to affinity remains uncertain even though label integrity and the large speed gain are confirmed.
+
+## 2026-07-12 21:04:00 +09:00 - Insight 96
+- Source loop: RaiDrive returned WinError 5 while a no-replace Stage2 decision became visible later.
+- Improvement: remote Windows atomic creation needs bounded rename retry, fresh staged-file retry, explicit late-visible artifact archival, and a source-hash-only contract revision before resuming a sealed pipeline.
+- Before: the v4r2 executor exited before submission and left a delayed `stage2_started` decision that could not bind to a revised contract.
+- After: the zero-task decision is SHA-preserved, v4r3 published a fresh bound decision, and 100 Stage2 tasks launched under the revised immutable source set.
+- Evidence: 30/30 real RaiDrive restaging probe, focused 39/39 tests, base revision indexes 7/13 only, and v4r3 tasks 28872-28971 running.
+- Remaining risk: generic receipt recovery for a rename that commits after returning an error is still deferred because `atomic_publish.py` is pinned by the active Stage2 execution contract.
