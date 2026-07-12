@@ -224,6 +224,26 @@ FALLBACK_STAGE1_COLLECTION = {
     "result": "collected/ipmsm_v2_foundation_stage1_700/merged_results.csv",
     "output_dir": "collected/ipmsm_v2_foundation_stage1_700",
 }
+DIAGNOSTIC_STAGE1_PREVIEW_ROOT = Path(
+    "simul_log_smoke/v4r4_preview_stage1_ff4add3e_v1"
+)
+DIAGNOSTIC_STAGE1_PREVIEW_DATA = Path(
+    "collected/ipmsm_v2_foundation_stage1_700_torqueunit_fix_v1/merged_results.csv"
+)
+DIAGNOSTIC_STAGE1_PREVIEW_STAGE = "Stage1 preview (비공식)"
+DIAGNOSTIC_STAGE1_PREVIEW_ROWS = 700
+DIAGNOSTIC_STAGE1_PREVIEW_THRESHOLD = 0.95
+DIAGNOSTIC_STAGE1_PREVIEW_MODEL_TARGETS = frozenset(
+    {
+        "output_torque_last_avg_nm",
+        "output_torque_last_max_nm",
+        "output_solidloss_last_avg_w",
+        "output_coreloss_last_avg_w",
+        "output_ld_last_avg_h",
+        "output_lq_last_avg_h",
+        "output_phase_voltage_last_peak_abs_v",
+    }
+)
 
 PROCESS_LABELS = {
     "supervisor": "Durable pipeline supervisor",
@@ -2485,6 +2505,301 @@ def _model_metrics(metadata_paths: Sequence[tuple[str, Path, Path]], threshold: 
         }
 
 
+def _preview_relative_path(value: Any, *, label: str) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise DashboardDataError(f"{label} is not a relative path")
+    candidate = Path(value.strip().replace("\\", "/"))
+    if candidate.drive or candidate.is_absolute() or ".." in candidate.parts:
+        raise DashboardDataError(f"{label} is not a relative path")
+    return candidate
+
+
+def _read_preview_validation(path: Path, *, expected_rows: int) -> dict[str, Any]:
+    _quality_profile_require_regular_file(path, label="diagnostic preview validation")
+    required = {
+        "rows",
+        "ok_rows",
+        "unique_case_ids",
+        "unique_geometry_groups",
+        "repeat_pairs",
+        "failures",
+        "status",
+        "issues",
+    }
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            if not required.issubset(set(reader.fieldnames or [])):
+                raise DashboardDataError("diagnostic preview validation schema is incomplete")
+            rows = list(reader)
+    except DashboardDataError:
+        raise
+    except (OSError, UnicodeError, csv.Error) as exc:
+        raise DashboardDataError("cannot read diagnostic preview validation") from exc
+    if len(rows) != 1:
+        raise DashboardDataError("diagnostic preview validation must contain one summary row")
+    row = rows[0]
+    geometry_groups = _safe_int(row.get("unique_geometry_groups"), -1)
+    repeat_pairs = _safe_int(row.get("repeat_pairs"), -1)
+    if not (
+        _safe_int(row.get("rows"), -1) == expected_rows
+        and _safe_int(row.get("ok_rows"), -1) == expected_rows
+        and _safe_int(row.get("unique_case_ids"), -1) == expected_rows
+        and geometry_groups > 0
+        and 0 <= repeat_pairs <= expected_rows
+        and _safe_int(row.get("failures"), -1) == 0
+        and str(row.get("status") or "").strip().lower() == "pass"
+        and not str(row.get("issues") or "").strip()
+    ):
+        raise DashboardDataError("diagnostic preview validation did not pass exactly")
+    return {
+        "rows": expected_rows,
+        "unique_geometry_groups": geometry_groups,
+        "repeat_pairs": repeat_pairs,
+        "status": "pass",
+    }
+
+
+def _read_exact_preview_r2_gate(path: Path, threshold: float) -> dict[str, float]:
+    _quality_profile_require_regular_file(path, label="diagnostic preview R2 gate")
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            rows = list(reader)
+    except (OSError, UnicodeError, csv.Error) as exc:
+        raise DashboardDataError("cannot read diagnostic preview R2 gate") from exc
+    if (
+        len(rows) != len(TARGET_LABELS) - 1
+        or any(str(row.get("split") or "").strip().lower() != "test" for row in rows)
+    ):
+        raise DashboardDataError("diagnostic preview R2 gate is not the exact primary target set")
+    return _read_primary_r2_gate(path, threshold)
+
+
+def _unavailable_diagnostic_preview_model(
+    *,
+    stage: str,
+    threshold: float,
+    expected_rows: int,
+) -> dict[str, Any]:
+    return {
+        "available": False,
+        "diagnostic_only": True,
+        "stage": stage,
+        "threshold": threshold,
+        "gate_status": "unavailable",
+        "diagnostic_r2_status": "unavailable",
+        "integrity_status": "invalid",
+        "metrics": [],
+        "min_r2": None,
+        "avg_r2": None,
+        "passed_count": 0,
+        "target_count": len(TARGET_LABELS),
+        "validation_rows": 0,
+        "expected_rows": expected_rows,
+        "validation_status": "invalid",
+        "artifact_hash_count": 0,
+        "authority_verified": False,
+        "official_gate_eligible": False,
+    }
+
+
+def _read_diagnostic_preview_model(
+    workdir: Path,
+    preview_root: Path,
+    *,
+    expected_data_path: Path,
+    expected_rows: int,
+    threshold: float,
+    stage: str,
+) -> dict[str, Any]:
+    """Audit one display-only Stage 1 preview without granting gate authority."""
+
+    unavailable = _unavailable_diagnostic_preview_model(
+        stage=stage,
+        threshold=threshold,
+        expected_rows=expected_rows,
+    )
+    try:
+        if expected_rows <= 0 or not 0.0 < threshold <= 1.0:
+            raise DashboardDataError("diagnostic preview expectations are invalid")
+        if _path_contains_symlink(preview_root) or not preview_root.is_dir():
+            raise DashboardDataError("diagnostic preview root has an invalid path type")
+        resolved_workdir = workdir.resolve(strict=False)
+        resolved_root = preview_root.resolve(strict=False)
+        try:
+            preview_relative = resolved_root.relative_to(resolved_workdir)
+        except ValueError as exc:
+            raise DashboardDataError("diagnostic preview root is outside the workdir") from exc
+
+        validation = _read_preview_validation(
+            preview_root / "validation.csv",
+            expected_rows=expected_rows,
+        )
+        metadata_path = preview_root / "models" / "metadata.json"
+        r2_path = preview_root / "r2_gate.csv"
+        _quality_profile_require_regular_file(
+            metadata_path,
+            label="diagnostic preview metadata",
+        )
+        metadata = read_json_file(metadata_path)
+        audited_primary = _read_exact_preview_r2_gate(r2_path, threshold)
+
+        expected_data_relative = _preview_relative_path(
+            expected_data_path.as_posix(),
+            label="expected diagnostic preview data path",
+        )
+        data_paths = metadata.get("data_paths")
+        if (
+            not isinstance(data_paths, list)
+            or len(data_paths) != 1
+            or _preview_relative_path(
+                data_paths[0],
+                label="diagnostic preview metadata data path",
+            )
+            != expected_data_relative
+        ):
+            raise DashboardDataError("diagnostic preview metadata data path differs")
+        metadata_threshold = _safe_float(metadata.get("r2_threshold"))
+        voltage_threshold = _safe_float(metadata.get("voltage_r2_threshold"))
+        if not (
+            metadata.get("training_schema") == "ipmsm_v2"
+            and metadata.get("artifact_contract_schema_version")
+            == "ipmsm_v2_training_artifacts_v1"
+            and _safe_int(metadata.get("raw_rows"), -1) == expected_rows
+            and _safe_int(metadata.get("valid_rows"), -1) == expected_rows
+            and metadata_threshold is not None
+            and voltage_threshold is not None
+            and math.isclose(metadata_threshold, threshold, rel_tol=0.0, abs_tol=1e-12)
+            and math.isclose(voltage_threshold, threshold, rel_tol=0.0, abs_tol=1e-12)
+            and metadata.get("primary_test_r2_gate_complete") is True
+            and metadata.get("voltage_test_r2_gate_complete") is True
+        ):
+            raise DashboardDataError("diagnostic preview metadata contract differs")
+
+        primary = metadata.get("primary_test_r2")
+        if not isinstance(primary, Mapping) or set(primary) != set(audited_primary):
+            raise DashboardDataError("diagnostic preview metadata target coverage differs")
+        for target, value in audited_primary.items():
+            metadata_value = _safe_float(primary.get(target))
+            if metadata_value is None or not math.isclose(
+                metadata_value,
+                value,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            ):
+                raise DashboardDataError("diagnostic preview metadata R2 values differ")
+        primary_passed = all(value >= threshold for value in audited_primary.values())
+        if metadata.get("primary_test_r2_gate_passed") is not primary_passed:
+            raise DashboardDataError("diagnostic preview primary gate summary differs")
+
+        voltage_r2 = _safe_float(metadata.get("voltage_test_r2"))
+        if voltage_r2 is None or metadata.get("voltage_test_r2_gate_passed") is not (
+            voltage_r2 >= threshold
+        ):
+            raise DashboardDataError("diagnostic preview voltage gate summary differs")
+
+        model_paths = metadata.get("model_paths")
+        model_artifacts = metadata.get("model_artifacts")
+        if (
+            not isinstance(model_paths, Mapping)
+            or set(model_paths) != DIAGNOSTIC_STAGE1_PREVIEW_MODEL_TARGETS
+            or not isinstance(model_artifacts, Mapping)
+            or set(model_artifacts) != DIAGNOSTIC_STAGE1_PREVIEW_MODEL_TARGETS
+        ):
+            raise DashboardDataError("diagnostic preview model artifact coverage differs")
+        for target in sorted(DIAGNOSTIC_STAGE1_PREVIEW_MODEL_TARGETS):
+            artifact = model_artifacts.get(target)
+            if not isinstance(artifact, Mapping):
+                raise DashboardDataError("diagnostic preview model artifact is malformed")
+            expected_relative = preview_relative / "models" / f"{target}_lgbm.pkl"
+            artifact_relative = _preview_relative_path(
+                artifact.get("path"),
+                label="diagnostic preview model artifact path",
+            )
+            model_path_relative = _preview_relative_path(
+                model_paths.get(target),
+                label="diagnostic preview model path",
+            )
+            expected_sha256 = str(artifact.get("sha256") or "").strip().lower()
+            if (
+                artifact_relative != expected_relative
+                or model_path_relative != expected_relative
+                or not QUALITY_PROFILE_SHA256_RE.fullmatch(expected_sha256)
+            ):
+                raise DashboardDataError("diagnostic preview model artifact identity differs")
+            actual_sha256 = _quality_profile_stable_file_sha256(
+                workdir / artifact_relative,
+                label="diagnostic preview model artifact",
+            )
+            if actual_sha256 != expected_sha256:
+                raise DashboardDataError("diagnostic preview model artifact hash differs")
+
+        raw_values = dict(audited_primary)
+        raw_values["output_phase_voltage_last_peak_abs_v"] = voltage_r2
+        metrics: list[dict[str, Any]] = []
+        finite_values: list[float] = []
+        for target, label in TARGET_LABELS.items():
+            value = raw_values[target]
+            finite_values.append(value)
+            metrics.append(
+                {
+                    "target": target,
+                    "label": label,
+                    "r2": round(value, 6),
+                    "passed": value >= threshold,
+                }
+            )
+        passed_count = sum(1 for metric in metrics if metric["passed"])
+        return {
+            "available": True,
+            "diagnostic_only": True,
+            "stage": stage,
+            "threshold": threshold,
+            "gate_status": "diagnostic",
+            "diagnostic_r2_status": (
+                "passed" if passed_count == len(metrics) else "failed"
+            ),
+            "integrity_status": "verified",
+            "metrics": metrics,
+            "min_r2": round(min(finite_values), 6),
+            "avg_r2": round(sum(finite_values) / len(finite_values), 6),
+            "passed_count": passed_count,
+            "target_count": len(metrics),
+            "validation_rows": validation["rows"],
+            "expected_rows": expected_rows,
+            "validation_status": validation["status"],
+            "artifact_hash_count": len(model_artifacts),
+            "authority_verified": False,
+            "official_gate_eligible": False,
+        }
+    except (DashboardDataError, OSError, UnicodeError, csv.Error, ValueError):
+        return unavailable
+
+
+def _diagnostic_preview_checkpoint(model: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "available": model.get("available") is True,
+        "diagnostic_only": True,
+        "status": "diagnostic" if model.get("available") is True else "unavailable",
+        "stage": _clip_text(model.get("stage"), 80),
+        "threshold": model.get("threshold"),
+        "diagnostic_r2_status": _clip_text(model.get("diagnostic_r2_status"), 40),
+        "integrity_status": _clip_text(model.get("integrity_status"), 40),
+        "metrics": copy.deepcopy(list(model.get("metrics") or [])),
+        "min_r2": model.get("min_r2"),
+        "avg_r2": model.get("avg_r2"),
+        "passed_count": _safe_int(model.get("passed_count")),
+        "target_count": _safe_int(model.get("target_count"), len(TARGET_LABELS)),
+        "validation_rows": _safe_int(model.get("validation_rows")),
+        "expected_rows": _safe_int(model.get("expected_rows")),
+        "validation_status": _clip_text(model.get("validation_status"), 40),
+        "artifact_hash_count": _safe_int(model.get("artifact_hash_count")),
+        "authority_verified": False,
+        "official_gate_eligible": False,
+    }
+
+
 def _read_beta(artifact_dir: Path) -> dict[str, Any]:
     summary_path = artifact_dir / "beta_mtpa_summary.json"
     calibration_path = artifact_dir / "beta_zero_manifest.json"
@@ -3731,18 +4046,35 @@ def recover_contract_failure_progress(
     """Keep independently audited counts visible while governance stays closed."""
 
     recovered = copy.deepcopy(dict(local))
-    collection = inspect_stage1_collection(
-        config,
-        FALLBACK_STAGE1_COLLECTION,
-        expected_rows=700,
+    model = _read_diagnostic_preview_model(
+        config.workdir,
+        config.workdir / DIAGNOSTIC_STAGE1_PREVIEW_ROOT,
+        expected_data_path=DIAGNOSTIC_STAGE1_PREVIEW_DATA,
+        expected_rows=DIAGNOSTIC_STAGE1_PREVIEW_ROWS,
+        threshold=DIAGNOSTIC_STAGE1_PREVIEW_THRESHOLD,
+        stage=DIAGNOSTIC_STAGE1_PREVIEW_STAGE,
     )
+    recovered.update(
+        model=model,
+        checkpoint=_diagnostic_preview_checkpoint(model),
+    )
+    try:
+        collection = inspect_stage1_collection(
+            config,
+            FALLBACK_STAGE1_COLLECTION,
+            expected_rows=DIAGNOSTIC_STAGE1_PREVIEW_ROWS,
+        )
+    except (DashboardDataError, OSError, ValueError, RuntimeError, csv.Error):
+        return recovered
     if collection.get("status") != "verified" or collection.get("complete") is not True:
         return recovered
-    campaign = reconcile_campaign_with_stage1_collection(
-        recovered.get("campaign", {}),
-        collection,
-    )
-    model = _model_metrics((), 0.95)
+    try:
+        campaign = reconcile_campaign_with_stage1_collection(
+            recovered.get("campaign", {}),
+            collection,
+        )
+    except (DashboardDataError, OSError, ValueError, RuntimeError, csv.Error):
+        return recovered
     stages = [
         {
             "id": "beta",
@@ -3760,7 +4092,7 @@ def recover_contract_failure_progress(
             "id": "surrogate",
             "label": "Surrogate R² gate",
             "status": "unavailable",
-            "detail": "v4r4 계약 복구 후 공식 R² 재평가",
+            "detail": "Stage1 preview는 비공식 진단 전용 · v4r4 공식 R² authority 대기",
         },
         {
             "id": "stage2",
@@ -3814,6 +4146,7 @@ def recover_contract_failure_progress(
             "stages": stages,
         },
         model=model,
+        checkpoint=_diagnostic_preview_checkpoint(model),
     )
     return recovered
 
@@ -4318,6 +4651,11 @@ def build_stage_timeline(
             if str(official_stage1.get("status") or "").strip().lower() == "invalid"
             else "waiting"
         )
+    elif (
+        model.get("authority_verified") is False
+        or model.get("official_gate_eligible") is False
+    ):
+        model_gate_status = "unavailable"
     else:
         model_gate_status = str(model.get("gate_status") or "").strip().lower()
     if not campaign_complete:
@@ -5398,10 +5736,17 @@ class DashboardStateStore:
         local["quality_profile_experiment"] = quality_profile_experiment
         scheduler_checkpoint = scheduler.get("checkpoint")
         if isinstance(scheduler_checkpoint, Mapping):
+            local_checkpoint = local.get("checkpoint")
             checkpoint = dict(scheduler_checkpoint)
             execution = local.get("checkpoint_execution")
             if isinstance(execution, Mapping):
                 checkpoint["execution"] = dict(execution)
+            if (
+                isinstance(local_checkpoint, Mapping)
+                and local_checkpoint.get("diagnostic_only") is True
+                and local_checkpoint.get("official_gate_eligible") is False
+            ):
+                checkpoint["diagnostic_preview"] = copy.deepcopy(dict(local_checkpoint))
             local["checkpoint"] = checkpoint
         campaign_status = scheduler.get("campaign_status")
         if isinstance(campaign_status, Mapping):

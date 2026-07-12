@@ -279,3 +279,9 @@
 - Wrapper/publisher/base related tests pass 119/119 (3 skip), Python3.11 focused passes 72/72; full 1012-test run reached 33 missing-scipy/pandas environment errors unrelated to this change.
 - Local LF325 `contract.json` is no-replace published: raw `e58c2b1c...dc13a`, contract `b73cd808...c1d8e8`, pins31/immutable32, C/temp leaks0; repeat publish preserved bytes/mtime and left no sidecars.
 - Stage1 workspace/declaration/confirmation/authorization remain absent and NSGA-II stays gated; next is a C-mirror-only Stage1 official publisher adapter, with Y and Slurm writes still disabled.
+- Diagnostic Stage1 preview is complete on LF325: validation700/700, model hashes7/7, R2 passed0/9, min/avg0.624627/0.771923; it is display-only and cannot open the official or NSGA gate.
+- Repeat-pair noise is negligible, while the 16D geometry DOE has only 67 train groups; test distance-residual correlation is weak (Pearson0.142), so Stage3 must combine residual, uncertainty, distance, and diversity.
+- Dashboard preview support passes 114/114 tests plus py_compile/node/diff checks and is ready for LF mirror sync/restart without Y access.
+- Scheduler project #2 is cap50/active0, but its five capable remote repos have heterogeneous HEADs despite stale identical deployment metadata; do not submit Stage2 yet.
+- Scheduler full-SHA checkout fix is committed/pushed on `fix/project-env-full-sha` at `dbd23ae`; focused API/sync tests pass18/18, but the live scheduler still runs old code and global active tasks are200.
+- Next: commit/push/sync/restart the local dashboard; merge/deploy the scheduler SHA fix only in a safe global maintenance window, then freeze all five repos to one pyaedt commit before cap50 Stage2 refill.

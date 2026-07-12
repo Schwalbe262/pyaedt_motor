@@ -935,3 +935,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: local publication is byte-identical to the stock serializer, repeat-no-replace stable, Y writes stay zero, and the official publisher rejects any receipt/result path, row-count, size, or SHA drift.
 - Evidence: commit `d087c77`; independent P0/P1=0; related 119/119 (3 skip); Python3.11 focused 72/72; wrapper raw `e58c2b1c...dc13a`, contract `b73cd808...c1d8e8`, sidecars0.
 - Remaining risk: Stage1 execution still needs a separately audited C-mirror runtime adapter; the logical contract itself is not executable from C with the stock loaders.
+
+## 2026-07-13 05:19:00 +09:00 - Insight 105
+- Source loop: the recovered 700-row Stage1 preview failed all nine R2 targets despite nearly exact repeat-pair reproduction.
+- Improvement: separate solver-repeat quality from design-space generalization, and select adaptive DOE with residual, ensemble uncertainty, normalized domain distance, and diversity rather than nearest-distance alone.
+- Before: low holdout R2 could be misclassified as noisy FEA data or solved by a simple model swap/farthest-point expansion.
+- After: the exact saved models reproduce the gate, repeat noise is negligible, and all train/calibration/test groups are similarly sparse in the 16D geometry space; distance becomes a supporting signal instead of the sole selector.
+- Evidence: preview passed0/9 with min/avg R2 0.624627/0.771923; combined residual versus nearest-train distance Pearson0.1418 and Spearman0.0573, while farthest-six error is 1.269x nearest-six.
+- Remaining risk: only 23 independent test groups are available, so target-specific active subspaces and a formally revised Stage3 geometry count may still be needed to reach R2>=0.95.

@@ -379,16 +379,28 @@ function governanceContext(data) {
   };
 }
 
+function isDiagnosticPreview(model) {
+  const value = record(model);
+  return value.diagnostic_only === true
+    && value.authority_verified === false
+    && value.official_gate_eligible === false;
+}
+
 function qualityGateState(data) {
   const context = governanceContext(data);
   if (!context.active) {
-    const model = data.model || {};
+    const model = record(data.model);
+    const diagnosticOnly = isDiagnosticPreview(model);
+    const authorityVerified = Boolean(model.available) && model.authority_verified !== false;
+    const officialGateEligible = authorityVerified && model.official_gate_eligible !== false;
     return {
       v4Active: false,
-      authorityVerified: Boolean(model.available),
-      available: Boolean(model.available),
-      passed: model.gate_status === "passed",
-      failed: ["failed", "unavailable"].includes(model.gate_status),
+      diagnosticOnly,
+      authorityVerified,
+      officialGateEligible,
+      available: Boolean(model.available) && officialGateEligible,
+      passed: officialGateEligible && model.gate_status === "passed",
+      failed: !diagnosticOnly && ["failed", "unavailable"].includes(model.gate_status),
       gateStatus: model.gate_status || "waiting",
       threshold: finite(model.threshold) ? model.threshold : 0.95,
       passedCount: integer(model.passed_count),
@@ -408,7 +420,9 @@ function qualityGateState(data) {
     && official.r2_authority === "verified";
   return {
     v4Active: true,
+    diagnosticOnly: isDiagnosticPreview(data.model),
     authorityVerified,
+    officialGateEligible: authorityVerified,
     available: authorityVerified && ["passed", "failed"].includes(gateStatus),
     passed: authorityVerified && gateStatus === "passed",
     failed: contractInvalid
@@ -426,7 +440,18 @@ function qualityGateState(data) {
 
 function authorizationGateState(data) {
   const context = governanceContext(data);
-  if (!context.active) return { ...inputApprovalState(data.optimization || {}), v4Active: false };
+  if (!context.active) {
+    const input = inputApprovalState(data.optimization || {});
+    if (isDiagnosticPreview(data.model)) {
+      return {
+        ...input,
+        v4Active: false,
+        approved: false,
+        diagnosticBlocked: true,
+      };
+    }
+    return { ...input, v4Active: false, diagnosticBlocked: false };
+  }
 
   const confirmationStatus = String(context.confirmation.status || "").trim().toLowerCase();
   const authorizationStatus = String(context.authorization.status || "").trim().toLowerCase();
@@ -441,6 +466,7 @@ function authorizationGateState(data) {
     || invalidTokens.has(String(context.contract.status || "").toLowerCase());
   return {
     v4Active: true,
+    diagnosticBlocked: false,
     approved: !rejected
       && confirmed
       && receiptPresent
@@ -1039,6 +1065,54 @@ function renderQualityProfileExperiment(data) {
 
 function renderCheckpoint(data) {
   const checkpoint = data.checkpoint || data.scheduler?.checkpoint || {};
+  const nestedPreview = record(checkpoint.diagnostic_preview);
+  const preview = isDiagnosticPreview(checkpoint) ? checkpoint : nestedPreview;
+  const previewPresent = isDiagnosticPreview(preview);
+  const splitSummary = byId("checkpointSplits");
+  setText(
+    "checkpointTitle",
+    previewPresent ? preview.stage || "Stage1 preview (비공식)" : "60-design 조기 Surrogate 체크포인트",
+  );
+  splitSummary.hidden = previewPresent;
+  if (previewPresent) {
+    const expectedRows = Math.max(1, integer(preview.expected_rows, preview.validation_rows));
+    const validationRows = Math.max(0, integer(preview.validation_rows));
+    const progress = byId("checkpointProgress");
+    progress.max = expectedRows;
+    progress.value = preview.available === true ? Math.min(expectedRows, validationRows) : 0;
+    setText(
+      "checkpointProgressLabel",
+      preview.available === true
+        ? `${validationRows} / ${expectedRows} validated rows`
+        : `0 / ${expectedRows} verified rows`,
+    );
+    const status = byId("checkpointStatus");
+    status.textContent = preview.available === true ? "진단 완료 (비공식)" : "preview 감사 실패";
+    status.className = `health-pill ${preview.available === true ? "warning" : "failed"}`;
+    setText(
+      "checkpointNote",
+      preview.available === true
+        ? `DIAGNOSTIC ONLY · ${validationRows}/${expectedRows} validation ${preview.validation_status || "verified"} · R² 최소 ${decimal(preview.min_r2, 4)} · 평균 ${decimal(preview.avg_r2, 4)} · 통과 ${integer(preview.passed_count)}/${integer(preview.target_count)} · 공식 gate 아님 · optimization gate 영향 없음`
+        : "DIAGNOSTIC ONLY · preview schema/path/hash 감사를 통과하지 못했습니다. 공식 gate와 optimization gate는 닫혀 있습니다.",
+    );
+    const worst = byId("checkpointWorst");
+    empty(worst);
+    const metrics = Array.isArray(preview.metrics) ? [...preview.metrics] : [];
+    metrics
+      .filter((metric) => finite(metric.r2))
+      .sort((left, right) => left.r2 - right.r2)
+      .slice(0, 3)
+      .forEach((metric) => {
+        worst.appendChild(element("b", "", `${metric.label || metric.target}: ${decimal(metric.r2, 4)}`));
+      });
+    if (!metrics.length) worst.appendChild(element("small", "", "검증된 preview 지표 없음"));
+    setText(
+      "checkpointAction",
+      "다음: 공식 Stage 1 R² authority 복구/검증 · preview로 최적화 금지",
+    );
+    return;
+  }
+
   const execution = checkpoint.execution || {};
   const target = Math.max(1, integer(checkpoint.target_designs, 60));
   const liveComplete = Math.max(0, integer(checkpoint.complete_designs));
@@ -1328,25 +1402,39 @@ function renderFamilyConfirmation(familyValue) {
 }
 
 function renderModel(data) {
-  const model = data.model || {};
+  const model = record(data.model);
   const quality = qualityGateState(data);
-  setText("r2Threshold", quality.threshold.toFixed(2));
-  setText("r2Passed", quality.available ? quality.passedCount : "—");
-  setText("r2Total", `/ ${quality.targetCount}`);
-  const stateText = quality.passed
-    ? "모든 공식 지표가 품질 목표를 통과했습니다"
-    : quality.failed
-      ? quality.authorityVerified ? "일부 공식 지표가 R² 목표에 미달했습니다" : "공식 R² authority 무결성 확인이 필요합니다"
-      : quality.v4Active ? "v4 공식 Stage 1 completion과 R² authority를 기다립니다" : "Stage 1 완료 후 학습됩니다";
+  const diagnosticAvailable = isDiagnosticPreview(model) && model.available === true;
+  const displayThreshold = diagnosticAvailable && finite(model.threshold)
+    ? model.threshold
+    : quality.threshold;
+  const displayPassedCount = diagnosticAvailable ? integer(model.passed_count) : quality.passedCount;
+  const displayTargetCount = diagnosticAvailable
+    ? Math.max(1, integer(model.target_count, Array.isArray(model.metrics) ? model.metrics.length : 0))
+    : quality.targetCount;
+  setText("r2Threshold", displayThreshold.toFixed(2));
+  setText("r2Passed", diagnosticAvailable || quality.available ? displayPassedCount : "—");
+  setText("r2Total", `/ ${displayTargetCount}`);
+  const stateText = diagnosticAvailable
+    ? `DIAGNOSTIC ONLY · ${model.stage || "Stage1 preview (비공식)"} · 공식 gate 아님`
+    : quality.passed
+      ? "모든 공식 지표가 품질 목표를 통과했습니다"
+      : quality.failed
+        ? quality.authorityVerified ? "일부 공식 지표가 R² 목표에 미달했습니다" : "공식 R² authority 무결성 확인이 필요합니다"
+        : quality.v4Active ? "v4 공식 Stage 1 completion과 R² authority를 기다립니다" : "Stage 1 완료 후 학습됩니다";
   setText("modelState", stateText);
-  setText("modelStats", quality.available
-    ? `${quality.v4Active ? "v4 official Stage 1" : model.stage || "현재"} · 최소 R² ${decimal(quality.minR2, 4)} · 평균 R² ${decimal(quality.avgR2, 4)}`
-    : quality.v4Active
-      ? "legacy model 상태는 gate 판정에 사용하지 않습니다."
-      : "독립 test split에서 8개 primary + 전압 1개를 평가합니다.");
+  setText("modelStats", diagnosticAvailable
+    ? `${integer(model.validation_rows)} / ${integer(model.expected_rows)} validation ${model.validation_status || "verified"} · 모델 hash ${integer(model.artifact_hash_count)} / 7 감사 · 최소 R² ${decimal(model.min_r2, 4)} · 평균 R² ${decimal(model.avg_r2, 4)} · optimization gate 영향 없음`
+    : quality.available
+      ? `${quality.v4Active ? "v4 official Stage 1" : model.stage || "현재"} · 최소 R² ${decimal(quality.minR2, 4)} · 평균 R² ${decimal(quality.avgR2, 4)}`
+      : quality.v4Active
+        ? "legacy model 상태는 gate 판정에 사용하지 않습니다."
+        : "독립 test split에서 8개 primary + 전압 1개를 평가합니다.");
   const list = byId("metricList");
   empty(list);
-  const metrics = quality.v4Active ? [] : Array.isArray(model.metrics) ? model.metrics : [];
+  const metrics = diagnosticAvailable
+    ? Array.isArray(model.metrics) ? model.metrics : []
+    : quality.v4Active ? [] : Array.isArray(model.metrics) ? model.metrics : [];
   metrics.forEach((metric) => {
     const row = element("div", `metric-row ${metric.r2 === null ? "pending" : metric.passed ? "pass" : "fail"}`);
     row.appendChild(element("span", "", metric.label || metric.target || "—"));
@@ -1358,7 +1446,7 @@ function renderModel(data) {
     row.appendChild(element("strong", "", finite(metric.r2) ? metric.r2.toFixed(4) : "대기"));
     list.appendChild(row);
   });
-  if (quality.v4Active) {
+  if (quality.v4Active && !diagnosticAvailable) {
     const row = element("div", `metric-row ${quality.passed ? "pass" : quality.failed ? "fail" : "pending"}`);
     row.appendChild(element("span", "", "v4 공식 Stage 1"));
     const progress = document.createElement("progress");
@@ -1377,7 +1465,8 @@ function renderPhysics(data) {
   const optimization = data.optimization || {};
   const quality = qualityGateState(data);
   const approval = authorizationGateState(data);
-  const governanceBlocked = approval.v4Active && (!quality.passed || !approval.approved);
+  const governanceBlocked = approval.diagnosticBlocked
+    || (approval.v4Active && (!quality.passed || !approval.approved));
   const gate = byId("betaGate");
   gate.textContent = beta.passed ? "물리 gate 통과" : beta.available ? "gate 실패" : "확인 필요";
   gate.className = `health-pill ${beta.passed ? "complete" : beta.available ? "failed" : "warning"}`;
@@ -1392,7 +1481,9 @@ function renderPhysics(data) {
   const targetEvidence = `${decimal(optimization.target_torque_nm, 1)} N·m @ ${integer(optimization.target_torque_speed_rpm).toLocaleString("ko-KR")} rpm = ${decimal(optimization.torque_point_power_kw, 3)} kW · ${decimal(optimization.target_power_kw, 1)} kW @ ${integer(optimization.target_power_speed_rpm).toLocaleString("ko-KR")} rpm = ${decimal(optimization.power_point_torque_nm, 3)} N·m`;
   setText(
     "constraintNote",
-    approval.v4Active
+    approval.diagnosticBlocked
+      ? `DIAGNOSTIC ONLY preview · 공식 R² gate 아님 · Production NSGA 차단 · ${targetEvidence}`
+      : approval.v4Active
       ? approval.approved && quality.passed
         ? `v4 공식 R² authority와 authorization 검증 완료 · ${targetEvidence}`
         : approval.rejected || quality.failed

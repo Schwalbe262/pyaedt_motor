@@ -31,12 +31,13 @@ const elements = new Map();
 function makeElement() {
   return {
     addEventListener() {},
-    appendChild() {},
-    prepend() {},
-    replaceChildren() {},
+    appendChild(child) { this.children.push(child); return child; },
+    prepend(child) { this.children.unshift(child); },
+    replaceChildren(...children) { this.children = children; },
     setAttribute() {},
     removeAttribute() {},
     classList: { add() {}, remove() {}, toggle() {} },
+    children: [],
     dataset: {},
     style: {},
     textContent: "",
@@ -327,6 +328,66 @@ const qualityInvalid = {
   missing: byId("qualityExperimentMissing").textContent,
 };
 
+const diagnosticMetrics = Array.from({ length: 9 }, (_, index) => ({
+  target: `target-${index}`,
+  label: `Metric ${index}`,
+  r2: 0.90 + index * 0.01,
+  passed: index >= 5,
+}));
+const diagnosticModel = {
+  available: true,
+  diagnostic_only: true,
+  stage: "Stage1 preview (비공식)",
+  threshold: 0.95,
+  gate_status: "passed",
+  diagnostic_r2_status: "failed",
+  integrity_status: "verified",
+  metrics: diagnosticMetrics,
+  min_r2: 0.90,
+  avg_r2: 0.94,
+  passed_count: 4,
+  target_count: 9,
+  validation_rows: 700,
+  expected_rows: 700,
+  validation_status: "pass",
+  artifact_hash_count: 7,
+  authority_verified: false,
+  official_gate_eligible: false,
+};
+const diagnostic = {
+  model: diagnosticModel,
+  checkpoint: { ...diagnosticModel, status: "diagnostic" },
+  optimization: { requires_user_confirmation: false, authorization_status: "authorized" },
+  governance: {
+    status: "not_activated",
+    contract: { activated: false, status: "not_activated" },
+  },
+};
+context.__diagnostic = diagnostic;
+const diagnosticQuality = vm.runInContext("qualityGateState(__diagnostic)", context);
+const diagnosticAuthorization = vm.runInContext("authorizationGateState(__diagnostic)", context);
+vm.runInContext("renderModel(__diagnostic)", context);
+vm.runInContext("renderCheckpoint(__diagnostic)", context);
+const diagnosticView = {
+  qualityAvailable: diagnosticQuality.available,
+  qualityPassed: diagnosticQuality.passed,
+  authorityVerified: diagnosticQuality.authorityVerified,
+  officialGateEligible: diagnosticQuality.officialGateEligible,
+  authorizationApproved: diagnosticAuthorization.approved,
+  diagnosticBlocked: diagnosticAuthorization.diagnosticBlocked,
+  modelState: byId("modelState").textContent,
+  modelStats: byId("modelStats").textContent,
+  passed: byId("r2Passed").textContent,
+  total: byId("r2Total").textContent,
+  metricRows: byId("metricList").children.length,
+  checkpointTitle: byId("checkpointTitle").textContent,
+  checkpointStatus: byId("checkpointStatus").textContent,
+  checkpointNote: byId("checkpointNote").textContent,
+  checkpointWorstRows: byId("checkpointWorst").children.length,
+  checkpointAction: byId("checkpointAction").textContent,
+  checkpointSplitsHidden: byId("checkpointSplits").hidden,
+};
+
 process.stdout.write(JSON.stringify({
   contradiction: {
     resolved: contradictionState.resolved,
@@ -352,6 +413,7 @@ process.stdout.write(JSON.stringify({
   qualityRunning,
   qualityStale,
   qualityInvalid,
+  diagnosticView,
 }));
 """
         completed = subprocess.run(
@@ -442,6 +504,28 @@ process.stdout.write(JSON.stringify({
                 "missing": "—",
             },
         )
+        self.assertFalse(result["diagnosticView"]["qualityAvailable"])
+        self.assertFalse(result["diagnosticView"]["qualityPassed"])
+        self.assertFalse(result["diagnosticView"]["authorityVerified"])
+        self.assertFalse(result["diagnosticView"]["officialGateEligible"])
+        self.assertFalse(result["diagnosticView"]["authorizationApproved"])
+        self.assertTrue(result["diagnosticView"]["diagnosticBlocked"])
+        self.assertIn("DIAGNOSTIC ONLY", result["diagnosticView"]["modelState"])
+        self.assertIn("공식 gate 아님", result["diagnosticView"]["modelState"])
+        self.assertIn("optimization gate 영향 없음", result["diagnosticView"]["modelStats"])
+        self.assertEqual(result["diagnosticView"]["passed"], 4)
+        self.assertEqual(result["diagnosticView"]["total"], "/ 9")
+        self.assertEqual(result["diagnosticView"]["metricRows"], 9)
+        self.assertEqual(
+            result["diagnosticView"]["checkpointTitle"],
+            "Stage1 preview (비공식)",
+        )
+        self.assertEqual(result["diagnosticView"]["checkpointStatus"], "진단 완료 (비공식)")
+        self.assertIn("DIAGNOSTIC ONLY", result["diagnosticView"]["checkpointNote"])
+        self.assertIn("공식 gate 아님", result["diagnosticView"]["checkpointNote"])
+        self.assertEqual(result["diagnosticView"]["checkpointWorstRows"], 3)
+        self.assertIn("preview로 최적화 금지", result["diagnosticView"]["checkpointAction"])
+        self.assertTrue(result["diagnosticView"]["checkpointSplitsHidden"])
 
 
 if __name__ == "__main__":

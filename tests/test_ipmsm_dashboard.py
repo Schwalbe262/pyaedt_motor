@@ -1004,6 +1004,26 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(dashboard.select_current_stage(timeline)["id"], "surrogate")
         self.assertEqual(dashboard.build_overall_progress(timeline)["current_status"], "waiting")
 
+    def test_diagnostic_preview_cannot_open_stage_or_optimization_gate(self) -> None:
+        args = self.base_args()
+        args["model"] = {
+            "available": True,
+            "gate_status": "passed",
+            "authority_verified": False,
+            "official_gate_eligible": False,
+        }
+        timeline = dashboard.build_stage_timeline(
+            **args,
+            governance={"status": "not_activated"},
+            stage2_decision=None,
+            stage3_decision=None,
+        )
+
+        by_id = {stage["id"]: stage for stage in timeline}
+        self.assertEqual(by_id["surrogate"]["status"], "unavailable")
+        self.assertEqual(by_id["stage2"]["status"], "waiting")
+        self.assertEqual(by_id["optimization"]["status"], "waiting")
+
     def test_verified_v4_stage1_failure_makes_stage2_ready(self) -> None:
         args = self.base_args()
         args["model"] = {"available": False, "gate_status": "waiting"}
@@ -1237,6 +1257,229 @@ class TimelineTests(unittest.TestCase):
 
 
 class ArtifactTests(unittest.TestCase):
+    def _write_diagnostic_preview_fixture(
+        self,
+        workdir: Path,
+        *,
+        preview_relative: Path = Path("diagnostic_preview"),
+        data_relative: Path = Path("collected/fixture/merged_results.csv"),
+        expected_rows: int = 12,
+        threshold: float = 0.95,
+    ) -> dict[str, Path]:
+        preview = workdir / preview_relative
+        models = preview / "models"
+        models.mkdir(parents=True)
+        validation = preview / "validation.csv"
+        validation.write_text(
+            "rows,ok_rows,unique_case_ids,unique_geometry_groups,repeat_pairs,failures,status,issues\n"
+            f"{expected_rows},{expected_rows},{expected_rows},4,0,0,pass,\n",
+            encoding="utf-8",
+        )
+        voltage_target = "output_phase_voltage_last_peak_abs_v"
+        primary_targets = sorted(set(dashboard.TARGET_LABELS) - {voltage_target})
+        primary = {
+            target: 0.90 + index * 0.012
+            for index, target in enumerate(primary_targets)
+        }
+        r2 = preview / "r2_gate.csv"
+        gate_rows = ["target,split,R2,R2_threshold,status"]
+        gate_rows.extend(
+            f"{target},test,{value},{threshold},{'pass' if value >= threshold else 'fail'}"
+            for target, value in primary.items()
+        )
+        r2.write_text("\n".join(gate_rows) + "\n", encoding="utf-8")
+
+        model_paths: dict[str, str] = {}
+        model_artifacts: dict[str, dict[str, object]] = {}
+        for target in sorted(dashboard.DIAGNOSTIC_STAGE1_PREVIEW_MODEL_TARGETS):
+            artifact_path = models / f"{target}_lgbm.pkl"
+            artifact_path.write_bytes(f"fixture:{target}".encode("ascii"))
+            relative = artifact_path.relative_to(workdir)
+            portable = str(relative).replace("/", "\\")
+            model_paths[target] = portable
+            model_artifacts[target] = {
+                "path": portable,
+                "sha256": dashboard._file_sha256(artifact_path),
+                "ensemble_members": [],
+            }
+        voltage_r2 = 0.96
+        metadata = models / "metadata.json"
+        metadata.write_text(
+            json.dumps(
+                {
+                    "training_schema": "ipmsm_v2",
+                    "artifact_contract_schema_version": "ipmsm_v2_training_artifacts_v1",
+                    "data_paths": [str(data_relative).replace("/", "\\")],
+                    "raw_rows": expected_rows,
+                    "valid_rows": expected_rows,
+                    "r2_threshold": threshold,
+                    "primary_test_r2": primary,
+                    "primary_test_r2_gate_complete": True,
+                    "primary_test_r2_gate_passed": all(
+                        value >= threshold for value in primary.values()
+                    ),
+                    "voltage_r2_threshold": threshold,
+                    "voltage_test_r2": voltage_r2,
+                    "voltage_test_r2_gate_complete": True,
+                    "voltage_test_r2_gate_passed": voltage_r2 >= threshold,
+                    "model_paths": model_paths,
+                    "model_artifacts": model_artifacts,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "preview": preview,
+            "validation": validation,
+            "r2": r2,
+            "metadata": metadata,
+            "artifact": models
+            / f"{sorted(dashboard.DIAGNOSTIC_STAGE1_PREVIEW_MODEL_TARGETS)[0]}_lgbm.pkl",
+            "data_relative": data_relative,
+        }
+
+    def test_diagnostic_preview_is_displayable_but_never_gate_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            fixture = self._write_diagnostic_preview_fixture(workdir)
+            result = dashboard._read_diagnostic_preview_model(
+                workdir,
+                fixture["preview"],
+                expected_data_path=fixture["data_relative"],
+                expected_rows=12,
+                threshold=0.95,
+                stage="fixture preview",
+            )
+            checkpoint = dashboard._diagnostic_preview_checkpoint(result)
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["gate_status"], "diagnostic")
+        self.assertEqual(result["integrity_status"], "verified")
+        self.assertEqual(len(result["metrics"]), len(dashboard.TARGET_LABELS))
+        self.assertEqual(
+            result["passed_count"],
+            sum(1 for metric in result["metrics"] if metric["passed"]),
+        )
+        self.assertEqual(result["min_r2"], min(metric["r2"] for metric in result["metrics"]))
+        self.assertAlmostEqual(
+            result["avg_r2"],
+            sum(metric["r2"] for metric in result["metrics"]) / len(result["metrics"]),
+            places=6,
+        )
+        self.assertEqual(
+            result["artifact_hash_count"],
+            len(dashboard.DIAGNOSTIC_STAGE1_PREVIEW_MODEL_TARGETS),
+        )
+        self.assertFalse(result["authority_verified"])
+        self.assertFalse(result["official_gate_eligible"])
+        self.assertEqual(checkpoint["metrics"], result["metrics"])
+        self.assertEqual(checkpoint["min_r2"], result["min_r2"])
+        self.assertEqual(checkpoint["avg_r2"], result["avg_r2"])
+        self.assertEqual(checkpoint["passed_count"], result["passed_count"])
+        self.assertFalse(checkpoint["authority_verified"])
+        self.assertFalse(checkpoint["official_gate_eligible"])
+
+    def test_diagnostic_preview_audit_fails_closed_on_each_bound_authority(self) -> None:
+        def validation_failure(fixture: dict[str, Path]) -> None:
+            text = fixture["validation"].read_text(encoding="utf-8")
+            fixture["validation"].write_text(text.replace(",pass,", ",fail,"), encoding="utf-8")
+
+        def data_path_failure(fixture: dict[str, Path]) -> None:
+            value = json.loads(fixture["metadata"].read_text(encoding="utf-8"))
+            value["data_paths"] = ["collected/wrong/merged_results.csv"]
+            fixture["metadata"].write_text(json.dumps(value), encoding="utf-8")
+
+        def threshold_failure(fixture: dict[str, Path]) -> None:
+            value = json.loads(fixture["metadata"].read_text(encoding="utf-8"))
+            value["r2_threshold"] = 0.94
+            fixture["metadata"].write_text(json.dumps(value), encoding="utf-8")
+
+        def r2_coverage_failure(fixture: dict[str, Path]) -> None:
+            with fixture["r2"].open("a", encoding="utf-8") as stream:
+                stream.write("extra,train,0.99,0.95,pass\n")
+
+        def artifact_count_failure(fixture: dict[str, Path]) -> None:
+            value = json.loads(fixture["metadata"].read_text(encoding="utf-8"))
+            value["model_artifacts"].pop(next(iter(value["model_artifacts"])))
+            fixture["metadata"].write_text(json.dumps(value), encoding="utf-8")
+
+        def artifact_hash_failure(fixture: dict[str, Path]) -> None:
+            fixture["artifact"].write_bytes(b"tampered")
+
+        mutations = {
+            "validation": validation_failure,
+            "data_path": data_path_failure,
+            "threshold": threshold_failure,
+            "r2_exact_targets": r2_coverage_failure,
+            "artifact_count": artifact_count_failure,
+            "artifact_hash": artifact_hash_failure,
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                workdir = Path(tmp)
+                fixture = self._write_diagnostic_preview_fixture(workdir)
+                mutate(fixture)
+                result = dashboard._read_diagnostic_preview_model(
+                    workdir,
+                    fixture["preview"],
+                    expected_data_path=fixture["data_relative"],
+                    expected_rows=12,
+                    threshold=0.95,
+                    stage="fixture preview",
+                )
+                self.assertFalse(result["available"])
+                self.assertEqual(result["gate_status"], "unavailable")
+                self.assertEqual(result["metrics"], [])
+                self.assertFalse(result["authority_verified"])
+                self.assertFalse(result["official_gate_eligible"])
+
+    def test_contract_failure_fallback_exposes_preview_in_model_and_checkpoint_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            self._write_diagnostic_preview_fixture(
+                workdir,
+                preview_relative=dashboard.DIAGNOSTIC_STAGE1_PREVIEW_ROOT,
+                data_relative=dashboard.DIAGNOSTIC_STAGE1_PREVIEW_DATA,
+                expected_rows=dashboard.DIAGNOSTIC_STAGE1_PREVIEW_ROWS,
+                threshold=dashboard.DIAGNOSTIC_STAGE1_PREVIEW_THRESHOLD,
+            )
+            config = dashboard.DashboardConfig(workdir, workdir / "invalid-contract.json")
+            collection = {
+                "status": "verified",
+                "complete": True,
+                "rows": dashboard.DIAGNOSTIC_STAGE1_PREVIEW_ROWS,
+            }
+            campaign = {
+                "result_ok": dashboard.DIAGNOSTIC_STAGE1_PREVIEW_ROWS,
+                "total": dashboard.DIAGNOSTIC_STAGE1_PREVIEW_ROWS,
+            }
+            with mock.patch.object(
+                dashboard,
+                "inspect_stage1_collection",
+                return_value=collection,
+            ), mock.patch.object(
+                dashboard,
+                "reconcile_campaign_with_stage1_collection",
+                return_value=campaign,
+            ):
+                result = dashboard.recover_contract_failure_progress(
+                    config,
+                    {"campaign": {}, "optimization": {"decision": None}},
+                )
+
+        self.assertEqual(result["model"]["stage"], dashboard.DIAGNOSTIC_STAGE1_PREVIEW_STAGE)
+        self.assertTrue(result["model"]["available"])
+        self.assertFalse(result["model"]["authority_verified"])
+        self.assertFalse(result["model"]["official_gate_eligible"])
+        self.assertEqual(result["checkpoint"]["metrics"], result["model"]["metrics"])
+        self.assertEqual(result["checkpoint"]["min_r2"], result["model"]["min_r2"])
+        self.assertEqual(result["checkpoint"]["avg_r2"], result["model"]["avg_r2"])
+        self.assertEqual(result["checkpoint"]["passed_count"], result["model"]["passed_count"])
+        optimization = next(
+            stage for stage in result["pipeline"]["stages"] if stage["id"] == "optimization"
+        )
+        self.assertEqual(optimization["status"], "waiting")
+
     def test_supervisor_pid_marker_removes_only_its_own_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "supervisor.pid"
