@@ -3868,3 +3868,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: focused/related tests 112/112; dry-run remains write-free; readiness is false for active or successful-result-pending cases; live two-GET task28880 probe reproduces only `apparent_power_bound` at mech+loss/apparent ratio 105.198292.
 - Failure/next: six old Stage2 tasks and three replay tasks remain active; after terminal state, run the full 300-case `--publish` scan and require `replacement_set_ready_to_seal=true` before publishing revised plans.
 - Token usage: sampler already attempted in this execution loop; local Codex SQLite is unavailable.
+
+## 2026-07-13 01:18:00 +09:00 - Fail-closed Stage1 torque-unit rebuild prepared
+- Part/goal: rebuild the one contaminated Stage1 identity only from sealed replay evidence while preserving the other 699 results byte-for-byte.
+- Actions/result: added a dry-run-first 700-row rebuild with fixed replay SHA authorities, exact forensic scheduler/parser/task provenance, independent torque/power checks, no-replace directory publication, and receipt recovery; focused tests pass 19/19.
+- Failure/next: required published forensic and recovery receipts do not exist yet, so real dry-run correctly exits fail-closed and no v4r4 collection was published.

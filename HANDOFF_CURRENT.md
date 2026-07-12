@@ -257,3 +257,4 @@
 - Dashboard and torque-replay supervisors were restarted locally with cap50; UI reports configured/server/project cap 50 with `cap_matches=true`, while v4r3 remains intentionally stopped and contract-degraded pending v4r4 recovery.
 - `audit_ipmsm_stage2_v4r3_results.py` is a GET-only, 1 req/s resumable full-Stage2 physics auditor with immutable per-result checkpoints and explicit `replacement_set_ready_to_seal`; focused/related tests pass 112/112.
 - A two-GET live probe reclassified task 28880 as `torque_unit_suspect` with only `apparent_power_bound` (ratio 105.198292); the full 300-case scan remains unrun until the last active v4r3 tasks finish.
+- Stage1 v4r4 rebuild tooling now fail-closes on fixed replay authorities, exact forensic scheduler provenance, any 700-row collection drift, or non-atomic publication; focused tests pass 19/19, while real output remains gated on published forensic/recovery receipts.
