@@ -534,12 +534,14 @@ def load_forensic_evidence(
         "url": forensic_audit.DEFAULT_SCHEDULER_URL,
         "access": "read_only_get",
         "remote_file_base": forensic_audit.REMOTE_FILE_BASE,
+        "remote_file_max_bytes": forensic_audit.REMOTE_FILE_MAX_BYTES,
         "remote_file_fetches": 8,
     }
     if set(scheduler) != {
         "url",
         "access",
         "remote_file_base",
+        "remote_file_max_bytes",
         "selected_task_ids",
         "attempt_task_ids",
         "remote_file_fetches",

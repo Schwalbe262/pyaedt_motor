@@ -3873,3 +3873,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: rebuild the one contaminated Stage1 identity only from sealed replay evidence while preserving the other 699 results byte-for-byte.
 - Actions/result: added a dry-run-first 700-row rebuild with fixed replay SHA authorities, exact forensic scheduler/parser/task provenance, independent torque/power checks, no-replace directory publication, and receipt recovery; focused tests pass 19/19.
 - Failure/next: required published forensic and recovery receipts do not exist yet, so real dry-run correctly exits fail-closed and no v4r4 collection was published.
+
+## 2026-07-13 01:21:00 +09:00 - Torque-unit replay evidence published
+- Part/goal: seal four successful replay results and retained torque reports before replacing either contaminated official row.
+- Actions/result: detected the Scheduler remote-file 256 KiB tail default, requested and bounded full 1 MiB windows, verified all 4 result/raw pairs, and published 8 byte-preserved artifacts plus canonical receipt `28600d7f...2c23d0a`; task 29288 remains explicitly excluded.
+- Metrics/next: selected 29328/29297/29298/29299, torque units `mNewtonMeter/NewtonMeter`, normalized torque and mechanical power exact, apparent-power ratios 0.0582-0.2253; wait for the full Stage2 audit before publishing recovery plans.

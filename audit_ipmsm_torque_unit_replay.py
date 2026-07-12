@@ -45,6 +45,7 @@ DEFAULT_PLAN_MANIFEST = Path(
 DEFAULT_OUTPUT_DIR = Path("simul_log_smoke/v4r4/torque_unit_replay_forensics")
 RECEIPT_NAME = "receipt.canonical.json"
 REMOTE_FILE_BASE = "remote_cwd"
+REMOTE_FILE_MAX_BYTES = 1_048_576
 EXPECTED_RESULT_COLUMNS = 704
 
 REPLAY_CASE_IDS = (
@@ -345,10 +346,25 @@ def fetch_task_remote_file_bytes(
     pure = PurePosixPath(normalized)
     if not normalized or pure.is_absolute() or ".." in pure.parts:
         raise RuntimeError(f"unsafe scheduler remote-file path: {path!r}")
-    query = parse.urlencode({"path": normalized, "base": base})
+    query = parse.urlencode(
+        {
+            "path": normalized,
+            "base": base,
+            # The scheduler defaults to the last 256 KiB.  Retained Maxwell
+            # reports are larger, so omitting this would silently discard the
+            # CSV header and beginning of the transient trace.
+            "max_bytes": REMOTE_FILE_MAX_BYTES,
+        }
+    )
     url = scheduler_url.rstrip("/") + f"/api/tasks/{task_id}/remote-file?{query}"
     with request.urlopen(url, timeout=timeout) as response:
-        return response.read()
+        payload = response.read()
+    if len(payload) >= REMOTE_FILE_MAX_BYTES:
+        raise RuntimeError(
+            "scheduler remote-file response reached the forensic byte limit; "
+            "refusing potentially truncated evidence"
+        )
+    return payload
 
 
 def _exit_code(task: Mapping[str, Any]) -> int | None:
@@ -731,6 +747,7 @@ def build_forensic_receipt(
             "url": scheduler_url.rstrip("/"),
             "access": "read_only_get",
             "remote_file_base": REMOTE_FILE_BASE,
+            "remote_file_max_bytes": REMOTE_FILE_MAX_BYTES,
             "selected_task_ids": [expected.task_id for expected, _, _ in tasks],
             "attempt_task_ids": [
                 int(attempt["id"])

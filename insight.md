@@ -887,3 +887,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: `mNewtonMeter` maps to `1e-3 Nm`, unknown units fail closed, the validator flags exactly those two observed suspects, and four retained-project replays isolate proof from production data.
 - Evidence: retained export header `Moving1.Torque [mNewtonMeter]`, power-bound ratios 25.910x/105.198x before correction, related tests 118/118 (1 skip), and deployment to five accounts.
 - Remaining risk: cleaned official rows and raw per-task headers still require completed replay receipts before any retraining resumes.
+
+## 2026-07-13 01:21:00 +09:00 - Insight 99
+- Source loop: the completed torque replay forensic reader received a headerless 262,144-byte `PPT_Torque.csv` response.
+- Improvement: remote-file evidence readers must explicitly request a bounded full-file window and reject responses that reach the bound, because the Scheduler endpoint defaults to the file tail.
+- Before: the default 256 KiB tail began mid-row and falsely appeared to have no torque column.
+- After: a 1 MiB request returned the complete 667,319-byte export with `Moving1.Torque [mNewtonMeter]`; all four replay result/raw pairs verified and published.
+- Evidence: dry-run and publish both verified 4/4 with eight remote fetches; receipt SHA is `28600d7f...2c23d0a`.
+- Remaining risk: any future retained artifact at or above 1 MiB will fail closed until a larger scheduler hard limit or chunked byte-preserving API is available.

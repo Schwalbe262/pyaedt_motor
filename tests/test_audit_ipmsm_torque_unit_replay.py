@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import audit_ipmsm_torque_unit_replay as audit
 
@@ -303,6 +304,32 @@ class TorqueReplayForensicsTests(unittest.TestCase):
         raw = b"Time [s],Moving1.Torque [poundforceinch]\n0,1\n1,1\n"
         with self.assertRaisesRegex(ValueError, "unsupported AEDT report unit"):
             audit.parse_torque_raw(raw, period_s=1.0, stop_s=1.0)
+
+    def test_remote_fetch_requests_full_window_and_rejects_limit_sized_tail(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"complete"
+        with mock.patch.object(audit.request, "urlopen", return_value=response) as opened:
+            payload = audit.fetch_task_remote_file_bytes(
+                "http://scheduler.test:8000",
+                42,
+                "simulation/case/exports/PPT_Torque.csv",
+                audit.REMOTE_FILE_BASE,
+                5.0,
+            )
+        self.assertEqual(payload, b"complete")
+        self.assertIn(f"max_bytes={audit.REMOTE_FILE_MAX_BYTES}", opened.call_args.args[0])
+
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"x" * audit.REMOTE_FILE_MAX_BYTES
+        with mock.patch.object(audit.request, "urlopen", return_value=response):
+            with self.assertRaisesRegex(RuntimeError, "potentially truncated evidence"):
+                audit.fetch_task_remote_file_bytes(
+                    "http://scheduler.test:8000",
+                    42,
+                    "simulation/case/exports/PPT_Torque.csv",
+                    audit.REMOTE_FILE_BASE,
+                    5.0,
+                )
 
 
 if __name__ == "__main__":
