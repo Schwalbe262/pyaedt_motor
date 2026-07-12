@@ -218,6 +218,17 @@ stage2Active.pipeline.stages[3] = {
     unit: "result_rows",
     progress_pct: 0,
     scheduler_counts: { completed: 100, running: 99, queued: 0, attaching: 0, failed: 0 },
+    runner_progress: {
+      available: true,
+      result_ok: 198,
+      audit_pending: 16,
+      submitted: 93,
+      active: 50,
+      missing: 36,
+      retry: 0,
+      scheduler_ok: 214,
+      total: 300,
+    },
   },
 };
 stage2Active.overall = {
@@ -466,18 +477,23 @@ process.stdout.write(JSON.stringify({
         self.assertNotIn("696", result["freshAtomic"]["resultSub"])
         self.assertEqual(result["stage2"]["resultOk"], "700")
         self.assertEqual(result["stage2"]["activeSlots"], "99")
-        self.assertEqual(result["stage2"]["rateLabel"], "Stage 2 보강 DOE 검증 결과")
+        self.assertEqual(result["stage2"]["rateLabel"], "Stage 2 보강 DOE 로컬 최종 수집")
         self.assertEqual(result["stage2"]["validated"], "0")
         self.assertEqual(result["stage2"]["validatedTotal"], "/ 300")
-        self.assertIn("Slurm 완료 100", result["stage2"]["rateSub"])
-        self.assertIn("수집/검증 0", result["stage2"]["rateSub"])
-        self.assertIn("미수집 100", result["stage2"]["rateSub"])
+        self.assertIn("runner 검증 198/300", result["stage2"]["rateSub"])
+        self.assertIn("결과 감사 대기 16", result["stage2"]["rateSub"])
+        self.assertIn("제출 93", result["stage2"]["rateSub"])
+        self.assertIn("실행 50", result["stage2"]["rateSub"])
+        self.assertIn("잔여 36", result["stage2"]["rateSub"])
+        self.assertIn("Slurm 원시 완료 100", result["stage2"]["rateSub"])
+        self.assertNotIn("수집/검증 0", result["stage2"]["rateSub"])
+        self.assertNotIn("검증 결과", result["stage2"]["rateLabel"])
         self.assertIn("단위 재검증 0/4", result["stage2"]["rateSub"])
         self.assertIn("실행 4, 실패 0", result["stage2"]["rateSub"])
         self.assertIn("재시도 이력 1", result["stage2"]["rateSub"])
         self.assertEqual(result["stage2"]["etaLabel"], "Stage 2 보강 DOE 실행 중")
         self.assertEqual(result["stage2"]["running"], "99")
-        self.assertIn("실패 0", result["stage2"]["etaSub"])
+        self.assertIn("실패 이력 0", result["stage2"]["etaSub"])
         self.assertEqual(result["qualityRunning"]["state"], "running")
         self.assertEqual(result["qualityRunning"]["status"], "실행 중")
         self.assertEqual(result["qualityRunning"]["progress"], 5)

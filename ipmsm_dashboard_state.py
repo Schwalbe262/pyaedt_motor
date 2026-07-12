@@ -96,6 +96,7 @@ STAGE1_COLLECTION_AUDIT_CACHE_SECONDS = 300.0
 RESULT_PROGRESS_WARNING_SECONDS = 30 * 60.0
 RESULT_PROGRESS_STALLED_SECONDS = 2 * 60 * 60.0
 RESULT_PROGRESS_HARD_STALLED_SECONDS = 6 * 60 * 60.0
+STAGE_RUNNER_PROGRESS_MAX_AGE_SECONDS = 5 * 60.0
 MAX_TAIL_BYTES = 128 * 1024
 MAX_JSON_BYTES = 16 * 1024 * 1024
 MAX_STAGE1_CASE_RESULT_BYTES = 4 * 1024 * 1024
@@ -1374,7 +1375,13 @@ def _read_complete_tail_lines(path: Path, limit: int = MAX_TAIL_BYTES) -> list[s
         raise DashboardDataError(f"cannot decode runner status log: {path.name}") from exc
 
 
-def parse_campaign_log(path: Path, *, total_cases: int, cap: int) -> dict[str, Any]:
+def parse_campaign_log(
+    path: Path,
+    *,
+    total_cases: int,
+    cap: int,
+    latest_segment_only: bool = False,
+) -> dict[str, Any]:
     lines = _read_complete_tail_lines(path)
     samples: list[dict[str, Any]] = []
     settling = 0
@@ -1423,7 +1430,8 @@ def parse_campaign_log(path: Path, *, total_cases: int, cap: int) -> dict[str, A
             break
     progress_anchor = latest_segment[transition_index or 0]
     result_progress_log_age = max(0.0, latest_elapsed - progress_anchor["elapsed_s"])
-    if any(row["result_ok"] > current["result_ok"] for row in samples[:-1]):
+    regression_history = latest_segment[:-1] if latest_segment_only else samples[:-1]
+    if any(row["result_ok"] > current["result_ok"] for row in regression_history):
         warnings.append("Stage 1 검증 완료 수가 runner 로그에서 감소했습니다.")
     window = [
         row for row in latest_segment if latest_elapsed - row["elapsed_s"] <= 6 * 3600
@@ -1461,6 +1469,166 @@ def parse_campaign_log(path: Path, *, total_cases: int, cap: int) -> dict[str, A
         }
     )
     return current
+
+
+def read_stage_runner_progress(
+    path: Path,
+    *,
+    decision_path: Path,
+    workdir: Path,
+    total_cases: int,
+    cap: int,
+) -> dict[str, Any]:
+    """Return bounded live-runner evidence without treating it as final collection."""
+
+    unavailable = {
+        "available": False,
+        "result_ok": None,
+        "audit_pending": None,
+        "submitted": None,
+        "active": None,
+        "missing": None,
+        "retry": None,
+        "scheduler_ok": None,
+        "total": total_cases if total_cases > 0 else None,
+        "age_seconds": None,
+    }
+    if total_cases <= 0:
+        return unavailable
+    try:
+        _quality_profile_require_regular_file(
+            decision_path,
+            label="active stage decision",
+        )
+        claim_path = decision_path.with_name(decision_path.name + ".claim")
+        recovery_path = claim_path.with_name(claim_path.name + ".recover")
+        _quality_profile_require_regular_file(
+            claim_path,
+            label="active stage decision claim",
+        )
+        if os.path.lexists(recovery_path):
+            raise DashboardDataError("active stage decision recovery is in progress")
+        decision_before = _quality_profile_stat_identity(os.lstat(decision_path))
+        claim_before = _quality_profile_stat_identity(os.lstat(claim_path))
+        decision = pipeline_supervisor.audit_decision(
+            decision_path,
+            schema_version=pipeline_supervisor.STAGE2_DECISION_SCHEMA_VERSION,
+            allowed_statuses={"stage2_started"},
+            workdir=workdir,
+        )
+        decision_sha256 = _quality_profile_stable_file_sha256(
+            decision_path,
+            label="active stage decision",
+        )
+        _, claim = _read_sidecar_json(claim_path)
+        owner_fields = {"hostname", "invocation_id", "mode", "pid", "started_at"}
+
+        def owner_identity(value: Any) -> dict[str, Any]:
+            if not isinstance(value, dict) or set(value) != owner_fields:
+                raise DashboardDataError("active stage owner identity fields differ")
+            hostname = str(value.get("hostname") or "").strip()
+            invocation_id = str(value.get("invocation_id") or "").strip()
+            mode = str(value.get("mode") or "").strip()
+            owner_pid = _safe_int(value.get("pid"), -1)
+            started_at = _parse_scheduler_time(value.get("started_at"))
+            if (
+                not hostname
+                or re.fullmatch(r"[0-9a-f]{32}", invocation_id) is None
+                or mode not in {"execute", "resume"}
+                or owner_pid <= 0
+                or started_at is None
+            ):
+                raise DashboardDataError("active stage owner identity is invalid")
+            return dict(value)
+
+        decision_owner = owner_identity(decision.get("owner"))
+        if set(claim) != {
+            "decision_output",
+            "decision_sha256",
+            "contract_sha256",
+            "original_owner",
+            "owner",
+            "schema_version",
+        }:
+            raise DashboardDataError("active stage claim fields differ")
+        claim_owner = owner_identity(claim.get("owner"))
+        original_owner = owner_identity(claim.get("original_owner"))
+        if (
+            claim.get("schema_version") != pipeline_supervisor.STAGE2_DECISION_SCHEMA_VERSION
+            or claim.get("decision_output") != str(decision_path.resolve(strict=False))
+            or claim.get("decision_sha256") != decision_sha256
+            or claim.get("contract_sha256") != decision.get("contract_sha256")
+            or original_owner != decision_owner
+            or _pid_running_without_signal(_safe_int(claim_owner.get("pid"), -1)) != "alive"
+        ):
+            raise DashboardDataError("active stage decision claim identity differs")
+        created_at = _parse_scheduler_time(decision.get("created_at"))
+        owner_started_at = _parse_scheduler_time(claim_owner.get("started_at"))
+        if created_at is None or owner_started_at is None:
+            raise DashboardDataError("active stage decision time is invalid")
+        _quality_profile_require_regular_file(path, label="active stage runner log")
+        log_before = _quality_profile_stat_identity(os.lstat(path))
+        log_mtime = datetime.fromtimestamp(os.lstat(path).st_mtime, timezone.utc)
+        log_age = time.time() - log_mtime.timestamp()
+        if (
+            log_age < -30.0
+            or log_age > STAGE_RUNNER_PROGRESS_MAX_AGE_SECONDS
+            or log_mtime < created_at
+            or log_mtime < owner_started_at
+        ):
+            raise DashboardDataError("active stage runner log is stale or predates its owner")
+        progress = parse_campaign_log(
+            path,
+            total_cases=total_cases,
+            cap=cap,
+            latest_segment_only=True,
+        )
+        if (
+            _quality_profile_stat_identity(os.lstat(decision_path)) != decision_before
+            or _quality_profile_stat_identity(os.lstat(claim_path)) != claim_before
+            or _quality_profile_stat_identity(os.lstat(path)) != log_before
+        ):
+            raise DashboardDataError("active stage runner evidence changed during audit")
+    except (DashboardDataError, OSError, ValueError, RuntimeError):
+        return unavailable
+    if progress.get("source_status") != "ok":
+        return unavailable
+    scheduler_ok = max(0, _safe_int(progress.get("scheduler_ok")))
+    result_ok = max(0, _safe_int(progress.get("result_ok")))
+    if result_ok > scheduler_ok or scheduler_ok > total_cases:
+        return unavailable
+    return {
+        "available": True,
+        "result_ok": result_ok,
+        "audit_pending": max(
+            max(0, _safe_int(progress.get("settling_results"))),
+            scheduler_ok - result_ok,
+        ),
+        "submitted": max(0, _safe_int(progress.get("submitted"))),
+        "active": max(0, _safe_int(progress.get("active"))),
+        "missing": max(0, _safe_int(progress.get("missing"))),
+        "retry": max(0, _safe_int(progress.get("retry"))),
+        "scheduler_ok": scheduler_ok,
+        "total": total_cases,
+        "age_seconds": _safe_float(progress.get("log_age_seconds")),
+    }
+
+
+def active_stage_runner_binding(
+    stage2_decision: Mapping[str, Any] | None,
+    stage2_path: Path,
+    stage3_decision: Mapping[str, Any] | None,
+    stage3_path: Path,
+) -> tuple[str, Path | None]:
+    active = [
+        (stage_id, path)
+        for stage_id, decision, path in (
+            ("stage2", stage2_decision, stage2_path),
+            ("stage3", stage3_decision, stage3_path),
+        )
+        if isinstance(decision, Mapping) and decision.get("status") == "stage2_started"
+    ]
+    return active[0] if len(active) == 1 else ("", None)
 
 
 def find_runner_log(artifact_dir: Path) -> Path:
@@ -4658,6 +4826,26 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
             ),
         ),
     }
+    active_runner_stage, active_runner_decision = active_stage_runner_binding(
+        stage2_decision,
+        stage2_decision_path,
+        stage3_decision,
+        stage3_decision_path,
+    )
+    if active_runner_stage and active_runner_decision is not None:
+        runner_root = (
+            config.v4_contract_path.parent
+            if config.v4_contract_path is not None
+            else config.contract_path.parent
+        )
+        active_runtime = local_runtime[active_runner_stage]
+        active_runtime["runner_progress"] = read_stage_runner_progress(
+            runner_root / "pipeline_executor.stderr.log",
+            decision_path=active_runner_decision,
+            workdir=config.workdir,
+            total_cases=_safe_int(active_runtime.get("total"), -1),
+            cap=config.cap,
+        )
     for stage in stages:
         runtime = local_runtime.get(str(stage.get("id") or ""))
         if runtime is not None:
@@ -5126,13 +5314,17 @@ def _attach_stage_runtimes(
         stage_id = str(stage.get("id") or "")
         if stage_id in {"stage2", "stage3"}:
             existing = stage.get("runtime") if isinstance(stage.get("runtime"), Mapping) else {}
-            runtimes[stage_id] = _runtime_counter(
+            stage_runtime = _runtime_counter(
                 completed=existing.get("completed"),
                 total=existing.get("total"),
                 unit="result_rows",
                 planned=existing.get("planned"),
                 scheduler_counts=scheduler_counts(stage_id),
             )
+            runner_progress = existing.get("runner_progress")
+            if isinstance(runner_progress, Mapping):
+                stage_runtime["runner_progress"] = dict(runner_progress)
+            runtimes[stage_id] = stage_runtime
         runtime = runtimes.get(stage_id)
         if runtime is not None:
             stage["runtime"] = runtime
@@ -6084,14 +6276,29 @@ class DashboardStateStore:
             stage_failed = _safe_int(current_scheduler_counts.get("failed"))
             validated_rows = _safe_int(current_runtime.get("completed"))
             expected_rows = _safe_int(current_runtime.get("total"))
+            runner_progress = (
+                current_runtime.get("runner_progress")
+                if isinstance(current_runtime.get("runner_progress"), Mapping)
+                else {}
+            )
+            runner_detail = (
+                f"runner 검증 {_safe_int(runner_progress.get('result_ok'))}/{expected_rows} · "
+                f"결과 감사 대기 {_safe_int(runner_progress.get('audit_pending'))} · "
+                f"제출 {_safe_int(runner_progress.get('submitted'))} · "
+                f"실행 {_safe_int(runner_progress.get('active'))} · "
+                f"잔여 {_safe_int(runner_progress.get('missing'))}"
+                if runner_progress.get("available") is True
+                else "runner 진행 미확인"
+            )
             local.setdefault("alerts", []).insert(
                 0,
                 {
                     "level": "warning" if stage_failed else "success",
                     "message": (
-                        f"{current_stage.get('label', current_stage_id)} · 검증 결과 "
-                        f"{validated_rows}/{expected_rows} · Slurm 완료 {stage_completed} · "
-                        f"실행 {stage_running} · 실패 {stage_failed}"
+                        f"{current_stage.get('label', current_stage_id)} · 로컬 최종 수집 "
+                        f"{validated_rows}/{expected_rows} · {runner_detail} · "
+                        f"Slurm 원시 완료 {stage_completed} · Slurm 실행 {stage_running} · "
+                        f"실패 이력 {stage_failed}"
                     ),
                 },
             )

@@ -5,6 +5,7 @@ import copy
 import hashlib
 import http.client
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -27,6 +28,47 @@ STATUS = (
     "run_ipmsm_v2 scheduler_ok=156 result_ok=152 active=100 pending=0 "
     "missing=444 retry=0 project_active=100 submitted=112 elapsed_s=8653.9\n"
 )
+
+
+def write_active_runner_authority(
+    root: Path,
+    *,
+    created_at: datetime | None = None,
+    owner_started_at: datetime | None = None,
+) -> tuple[Path, Path]:
+    decision_path = root / "decision.json"
+    now = datetime.now(timezone.utc)
+    owner = {
+        "hostname": "test-host",
+        "invocation_id": "a" * 32,
+        "mode": "execute",
+        "pid": os.getpid(),
+        "started_at": (owner_started_at or now - timedelta(seconds=2)).isoformat(),
+    }
+    execution_contract: dict[str, object] = {}
+    decision = {
+        "schema_version": dashboard.pipeline_supervisor.STAGE2_DECISION_SCHEMA_VERSION,
+        "mode": "execute",
+        "status": "stage2_started",
+        "decision": "run_stage2",
+        "decision_output": str(decision_path.resolve(strict=False)),
+        "execution_contract": execution_contract,
+        "contract_sha256": dashboard.pipeline_supervisor._canonical_sha256(execution_contract),
+        "created_at": (created_at or now - timedelta(seconds=3)).isoformat(),
+        "owner": owner,
+    }
+    decision_path.write_text(json.dumps(decision), encoding="utf-8")
+    claim_path = decision_path.with_name(decision_path.name + ".claim")
+    claim = {
+        "decision_output": str(decision_path.resolve(strict=False)),
+        "decision_sha256": dashboard._file_sha256(decision_path),
+        "contract_sha256": decision["contract_sha256"],
+        "original_owner": owner,
+        "owner": owner,
+        "schema_version": dashboard.pipeline_supervisor.STAGE2_DECISION_SCHEMA_VERSION,
+    }
+    claim_path.write_text(json.dumps(claim), encoding="utf-8")
+    return decision_path, claim_path
 
 
 class CampaignLogTests(unittest.TestCase):
@@ -69,6 +111,140 @@ class CampaignLogTests(unittest.TestCase):
             )
             result = dashboard.parse_campaign_log(path, total_cases=700, cap=100)
         self.assertEqual(result["settling_results"], 0)
+
+    def test_stage_runner_progress_separates_qualified_settling_and_submission(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision, _ = write_active_runner_authority(root)
+            path = root / "pipeline_executor.stderr.log"
+            path.write_text(
+                "wait_ipmsm_v2_result_audit pending=16 a:settling:10s\n"
+                "run_ipmsm_v2 scheduler_ok=214 result_ok=198 active=50 pending=0 "
+                "missing=36 retry=0 project_active=50 submitted=93 elapsed_s=3310.2\n",
+                encoding="utf-8",
+            )
+            result = dashboard.read_stage_runner_progress(
+                path,
+                decision_path=decision,
+                workdir=root,
+                total_cases=300,
+                cap=50,
+            )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["result_ok"], 198)
+        self.assertEqual(result["audit_pending"], 16)
+        self.assertEqual(result["submitted"], 93)
+        self.assertEqual(result["active"], 50)
+        self.assertEqual(result["missing"], 36)
+        self.assertEqual(result["scheduler_ok"], 214)
+
+    def test_stage_runner_progress_fails_closed_on_degraded_heartbeat(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision, _ = write_active_runner_authority(root)
+            path = root / "pipeline_executor.stderr.log"
+            path.write_text(
+                "run_ipmsm_v2 scheduler_ok=214 result_ok=215 active=50 pending=0 "
+                "missing=36 retry=0 project_active=50 submitted=93 elapsed_s=3310.2\n",
+                encoding="utf-8",
+            )
+            result = dashboard.read_stage_runner_progress(
+                path,
+                decision_path=decision,
+                workdir=root,
+                total_cases=300,
+                cap=50,
+            )
+
+        self.assertFalse(result["available"])
+        self.assertIsNone(result["result_ok"])
+
+    def test_stage_runner_progress_rejects_stale_dead_mismatched_or_prior_evidence(self) -> None:
+        cases = ("stale", "dead", "mismatch", "prior")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                now = datetime.now(timezone.utc)
+                decision, claim_path = write_active_runner_authority(
+                    root,
+                    created_at=now - timedelta(minutes=10) if case == "stale" else now - timedelta(seconds=3),
+                    owner_started_at=now - timedelta(minutes=10) if case == "stale" else now - timedelta(seconds=2),
+                )
+                path = root / "pipeline_executor.stderr.log"
+                path.write_text(
+                    "run_ipmsm_v2 scheduler_ok=214 result_ok=198 active=50 pending=0 "
+                    "missing=36 retry=0 project_active=50 submitted=93 elapsed_s=3310.2\n",
+                    encoding="utf-8",
+                )
+                if case == "stale":
+                    old = (now - timedelta(seconds=301)).timestamp()
+                    os.utime(path, (old, old))
+                elif case == "prior":
+                    old = (now - timedelta(seconds=10)).timestamp()
+                    os.utime(path, (old, old))
+                elif case == "mismatch":
+                    claim = json.loads(claim_path.read_text(encoding="utf-8"))
+                    claim["decision_sha256"] = "0" * 64
+                    claim_path.write_text(json.dumps(claim), encoding="utf-8")
+
+                running = "stopped" if case == "dead" else "alive"
+                with mock.patch.object(
+                    dashboard,
+                    "_pid_running_without_signal",
+                    return_value=running,
+                ):
+                    result = dashboard.read_stage_runner_progress(
+                        path,
+                        decision_path=decision,
+                        workdir=root,
+                        total_cases=300,
+                        cap=50,
+                    )
+
+                self.assertFalse(result["available"])
+                self.assertIsNone(result["result_ok"])
+
+    def test_stage3_binding_uses_current_owner_and_latest_elapsed_segment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stage3_decision, _ = write_active_runner_authority(root)
+            stage2_path = root / "stage2.json"
+            stage, selected = dashboard.active_stage_runner_binding(
+                {"status": "combined_r2_failed"},
+                stage2_path,
+                {"status": "stage2_started"},
+                stage3_decision,
+            )
+            ambiguous_stage, ambiguous_selected = dashboard.active_stage_runner_binding(
+                {"status": "stage2_started"},
+                stage2_path,
+                {"status": "stage2_started"},
+                stage3_decision,
+            )
+            path = root / "pipeline_executor.stderr.log"
+            path.write_text(
+                "run_ipmsm_v2 scheduler_ok=300 result_ok=300 active=0 pending=0 "
+                "missing=0 retry=0 project_active=0 submitted=129 elapsed_s=5000.0\n"
+                "run_ipmsm_v2 scheduler_ok=5 result_ok=4 active=50 pending=0 "
+                "missing=245 retry=0 project_active=50 submitted=50 elapsed_s=10.0\n",
+                encoding="utf-8",
+            )
+            result = dashboard.read_stage_runner_progress(
+                path,
+                decision_path=stage3_decision,
+                workdir=root,
+                total_cases=300,
+                cap=50,
+            )
+
+        self.assertEqual(stage, "stage3")
+        self.assertEqual(selected, stage3_decision)
+        self.assertEqual(ambiguous_stage, "")
+        self.assertIsNone(ambiguous_selected)
+        self.assertTrue(result["available"])
+        self.assertEqual(result["result_ok"], 4)
+        self.assertEqual(result["audit_pending"], 1)
 
     def test_rate_and_eta_use_only_latest_monotonic_elapsed_segment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3638,6 +3814,17 @@ class SchedulerTests(unittest.TestCase):
                                 "total": 300,
                                 "planned": 300,
                                 "unit": "result_rows",
+                                "runner_progress": {
+                                    "available": True,
+                                    "result_ok": 198,
+                                    "audit_pending": 16,
+                                    "submitted": 93,
+                                    "active": 50,
+                                    "missing": 36,
+                                    "retry": 0,
+                                    "scheduler_ok": 214,
+                                    "total": 300,
+                                },
                             },
                         },
                     ],
@@ -3653,20 +3840,20 @@ class SchedulerTests(unittest.TestCase):
         scheduler = {
             "reachable": True,
             "stale": False,
-            "active_count": 100,
-            "cap": 100,
+            "active_count": 50,
+            "cap": 50,
             "campaign_status": {
                 "stage2": {
-                    "completed": 0,
-                    "running": 100,
+                    "completed": 215,
+                    "running": 50,
                     "queued": 0,
                     "attaching": 0,
-                    "failed": 0,
+                    "failed": 27,
                 }
             },
         }
         store = dashboard.DashboardStateStore(
-            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json"), cap=50),
             local_collector=local,
             scheduler_collector=lambda _: scheduler,
         )
@@ -3675,11 +3862,14 @@ class SchedulerTests(unittest.TestCase):
 
         self.assertTrue(
             any(
-                "Stage 2 보강 DOE · 검증 결과 0/300 · Slurm 완료 0 · 실행 100 · 실패 0"
+                "Stage 2 보강 DOE · 로컬 최종 수집 0/300 · "
+                "runner 검증 198/300 · 결과 감사 대기 16 · 제출 93 · 실행 50 · 잔여 36 · "
+                "Slurm 원시 완료 215 · Slurm 실행 50 · 실패 이력 27"
                 in message
                 for message in messages
             )
         )
+        self.assertFalse(any("검증 결과 0/300" in message for message in messages))
         self.assertFalse(any("마지막 검증 결과 증가" in message for message in messages))
 
     def test_result_count_regression_degrades_even_with_full_scheduler_cap(self) -> None:

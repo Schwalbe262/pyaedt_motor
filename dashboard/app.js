@@ -55,6 +55,18 @@ function stageRuntime(stage) {
   const total = count(runtime.total);
   const suppliedProgress = finite(runtime.progress_pct) ? runtime.progress_pct : null;
   const rawUnit = typeof runtime.unit === "string" ? runtime.unit.trim() : "";
+  const rawRunner = record(runtime.runner_progress);
+  const runnerProgress = {
+    available: rawRunner.available === true,
+    resultOk: count(rawRunner.result_ok),
+    auditPending: count(rawRunner.audit_pending),
+    submitted: count(rawRunner.submitted),
+    active: count(rawRunner.active),
+    missing: count(rawRunner.missing),
+    retry: count(rawRunner.retry),
+    schedulerOk: count(rawRunner.scheduler_ok),
+    total: count(rawRunner.total),
+  };
   const progressPct = suppliedProgress !== null
     ? Math.max(0, Math.min(100, suppliedProgress))
     : completed !== null && total !== null && total > 0
@@ -70,6 +82,7 @@ function stageRuntime(stage) {
     schedulerCounts: runtime.scheduler_counts && typeof runtime.scheduler_counts === "object"
       ? runtime.scheduler_counts
       : {},
+    runnerProgress,
   };
 }
 
@@ -166,6 +179,7 @@ function overallState(data) {
       progress_pct: overall.progress_pct,
       planned: currentStage.runtime?.planned,
       scheduler_counts: currentStage.runtime?.scheduler_counts,
+      runner_progress: currentStage.runtime?.runner_progress,
     },
   };
   const hasExactRuntime = !effectivePipeline.forcedCurrentId && (
@@ -763,11 +777,13 @@ function renderCampaign(data) {
   if (["stage2", "stage3"].includes(current.currentId)) {
     const counts = current.runtime.schedulerCounts || {};
     const completedTasks = integer(counts.completed);
-    const validatedTasks = current.runtime.completed === null ? 0 : current.runtime.completed;
-    const uncollectedTasks = Math.max(0, completedTasks - validatedTasks);
     const runningTasks = integer(counts.running);
     const queuedTasks = integer(counts.queued) + integer(counts.attaching);
     const failedTasks = integer(counts.failed);
+    const runner = current.runtime.runnerProgress || {};
+    const runnerCount = (value) => value === null || value === undefined
+      ? "—"
+      : value.toLocaleString("ko-KR");
     // Remediation proof is separate from both Slurm completion and collected rows.
     const torqueReplay = data.torque_unit_replay || {};
     const torqueReplayPlanned = integer(torqueReplay.planned);
@@ -780,7 +796,7 @@ function renderCampaign(data) {
       ? ` · 단위 재검증 ${integer(torqueReplay.completed)}/${torqueReplayPlanned}`
         + ` (실행 ${integer(torqueReplay.active)}, 실패 ${torqueReplayFailed}${torqueReplayRetryDetail})`
       : "";
-    setText("rateLabel", `${current.currentLabel} 검증 결과`);
+    setText("rateLabel", `${current.currentLabel} 로컬 최종 수집`);
     setText(
       "completionRate",
       current.runtime.completed === null
@@ -795,7 +811,13 @@ function renderCampaign(data) {
     );
     setText(
       "rateSub",
-      `Slurm 완료 ${completedTasks} · 수집/검증 ${validatedTasks} · 미수집 ${uncollectedTasks}${torqueReplayDetail}`,
+      runner.available
+        ? `runner 검증 ${runnerCount(runner.resultOk)}/${runnerCount(runner.total)} · `
+          + `결과 감사 대기 ${runnerCount(runner.auditPending)} · 제출 ${runnerCount(runner.submitted)} · `
+          + `실행 ${runnerCount(runner.active)} · 잔여 ${runnerCount(runner.missing)} · `
+          + `Slurm 원시 완료 ${completedTasks} · 실패 이력 ${failedTasks}${torqueReplayDetail}`
+        : `runner 진행 미확인 · Slurm 원시 완료 ${completedTasks} · `
+          + `실패 이력 ${failedTasks}${torqueReplayDetail}`,
     );
     setText("etaLabel", `${current.currentLabel} 실행 중`);
     setText("etaValue", schedulerFresh ? runningTasks.toLocaleString("ko-KR") : "—");
@@ -803,7 +825,7 @@ function renderCampaign(data) {
     setText(
       "etaSub",
       schedulerFresh
-        ? `배정/대기 ${queuedTasks} · 실패 ${failedTasks}`
+        ? `Slurm 원시 배정/대기 ${queuedTasks} · 실패 이력 ${failedTasks}`
         : `마지막 관측 실행 ${runningTasks} · 상태 갱신 필요`,
     );
   } else {
