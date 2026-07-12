@@ -732,7 +732,10 @@ class GovernanceTests(unittest.TestCase):
             }
         }
 
-        model = dashboard._official_model_metrics(governance)
+        model = dashboard._model_with_official_fallback(
+            {"available": False, "stage": ""},
+            governance,
+        )
 
         self.assertIsNotNone(model)
         assert model is not None
@@ -742,6 +745,12 @@ class GovernanceTests(unittest.TestCase):
         self.assertFalse(model["diagnostic_only"])
         self.assertEqual(len(model["metrics"]), 9)
         self.assertEqual(model["validation_rows"], 700)
+
+        stage2 = {"available": True, "stage": "Stage 2", "metrics": [{"r2": 0.99}]}
+        self.assertEqual(
+            dashboard._model_with_official_fallback(stage2, governance),
+            stage2,
+        )
 
     def test_verified_v4_authorities_are_allow_listed_and_authorize_only_exact_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

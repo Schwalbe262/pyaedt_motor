@@ -3524,6 +3524,16 @@ def _official_model_metrics(governance: Mapping[str, Any]) -> dict[str, Any] | N
     }
 
 
+def _model_with_official_fallback(
+    current: Mapping[str, Any],
+    governance: Mapping[str, Any],
+) -> dict[str, Any]:
+    if current.get("available") is True:
+        return dict(current)
+    official = _official_model_metrics(governance)
+    return official if official is not None else dict(current)
+
+
 def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
     """Audit optional v4 authorities without exposing paths or exception text."""
 
@@ -4435,9 +4445,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         ),
         _safe_float(stage1.get("r2_threshold")) or 0.95,
     )
-    official_model = _official_model_metrics(governance)
-    if official_model is not None:
-        model = official_model
+    model = _model_with_official_fallback(model, governance)
 
     stage2_decision_path = _resolve(config.workdir, stage2.get("decision"))
     stage3_decision_path = _resolve(config.workdir, stage3.get("decision"))
