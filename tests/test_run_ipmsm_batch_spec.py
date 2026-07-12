@@ -39,6 +39,36 @@ def fixed_geometry_result_row(**overrides: str) -> dict[str, str]:
 
 
 class RunIpmsmBatchSpecTests(unittest.TestCase):
+    def test_millinewton_meter_is_converted_and_unknown_units_fail_closed(self) -> None:
+        raw_millinewton_meter = 710.35
+        self.assertAlmostEqual(
+            run_ipmsm_batch.parse_report_value(raw_millinewton_meter, "mNewtonMeter", "nm"),
+            0.71035,
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported AEDT report unit"):
+            run_ipmsm_batch.parse_report_value(1.0, "mysteryTorque", "nm")
+
+    def test_apparent_power_gate_catches_torque_unit_inflation(self) -> None:
+        coherent = {
+            "output_phasea_voltage_last_rms_v": 12.0,
+            "output_phaseb_voltage_last_rms_v": 12.0,
+            "output_phasec_voltage_last_rms_v": 12.0,
+            "output_phasea_current_last_rms_a": 24.0,
+            "output_phaseb_current_last_rms_a": 24.0,
+            "output_phasec_current_last_rms_a": 24.0,
+            "output_mech_power_last_w": 89.0,
+            "output_total_loss_last_avg_w": 37.0,
+        }
+        self.assertEqual(
+            run_ipmsm_batch.output_physics_issues(coherent, operation="sin_current"),
+            [],
+        )
+        coherent["output_mech_power_last_w"] = 89_000.0
+        self.assertEqual(
+            run_ipmsm_batch.output_physics_issues(coherent, operation="sin_current"),
+            ["apparent_power_bound"],
+        )
+
     def test_safe_path_exists_treats_permission_errors_as_missing(self) -> None:
         class PermissionDeniedPath:
             def exists(self) -> bool:

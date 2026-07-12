@@ -56,12 +56,18 @@ REQUIRED_COLUMNS = (
     "output_lq_last_avg_h",
     "output_phase_current_source",
     "output_phase_voltage_source",
+    "output_phasea_current_last_rms_a",
+    "output_phaseb_current_last_rms_a",
+    "output_phasec_current_last_rms_a",
     "output_phase_current_last_rms_a",
     "output_id_current_last_avg_a",
     "output_iq_current_last_avg_a",
     "output_phasea_voltage_last_peak_abs_v",
     "output_phaseb_voltage_last_peak_abs_v",
     "output_phasec_voltage_last_peak_abs_v",
+    "output_phasea_voltage_last_rms_v",
+    "output_phaseb_voltage_last_rms_v",
+    "output_phasec_voltage_last_rms_v",
     "output_phase_voltage_last_peak_abs_v",
     "output_total_loss_last_avg_w",
     "output_efficiency_last_pct",
@@ -88,11 +94,17 @@ FINITE_OUTPUT_COLUMNS = (
     "output_ld_last_avg_h",
     "output_lq_last_avg_h",
     "output_phase_current_last_rms_a",
+    "output_phasea_current_last_rms_a",
+    "output_phaseb_current_last_rms_a",
+    "output_phasec_current_last_rms_a",
     "output_id_current_last_avg_a",
     "output_iq_current_last_avg_a",
     "output_phasea_voltage_last_peak_abs_v",
     "output_phaseb_voltage_last_peak_abs_v",
     "output_phasec_voltage_last_peak_abs_v",
+    "output_phasea_voltage_last_rms_v",
+    "output_phaseb_voltage_last_rms_v",
+    "output_phasec_voltage_last_rms_v",
     "output_phase_voltage_last_peak_abs_v",
     "output_total_loss_last_avg_w",
 )
@@ -212,6 +224,7 @@ def validate_rows(
     max_identity_relative_error: float = 1e-6,
     max_current_relative_error: float = 0.02,
     max_current_absolute_error_a: float = 0.1,
+    max_mech_loss_to_apparent_ratio: float = 1.05,
     allow_mixed_fingerprints: bool = False,
 ) -> ValidationSummary:
     row_list = list(rows)
@@ -380,6 +393,20 @@ def validate_rows(
             summary.add_issue("total_loss_identity")
         if current_driven and relative_error(efficiency, expected["efficiency_pct"]) > max_identity_relative_error:
             summary.add_issue("efficiency_identity")
+        if current_driven:
+            apparent_power = sum(
+                abs(finite_float(row.get(f"output_phase{phase}_voltage_last_rms_v")))
+                * abs(finite_float(row.get(f"output_phase{phase}_current_last_rms_a")))
+                for phase in ("a", "b", "c")
+            )
+            mech_loss_power = abs(expected["mechanical_power_w"]) + expected["total_loss_w"]
+            if (
+                not math.isfinite(apparent_power)
+                or apparent_power <= 0.0
+                or not math.isfinite(mech_loss_power)
+                or mech_loss_power > max_mech_loss_to_apparent_ratio * apparent_power
+            ):
+                summary.add_issue("apparent_power_bound")
 
         for column, values in summary.fingerprint_values.items():
             value = str(row.get(column) or "").strip()

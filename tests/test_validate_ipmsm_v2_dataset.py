@@ -57,12 +57,18 @@ def valid_row(case_id: str = "case-1", group_id: str = "geometry-1") -> dict[str
         "output_lq_last_avg_h": "0.004",
         "output_phase_current_source": "measured_three_phase",
         "output_phase_voltage_source": "measured_three_phase",
+        "output_phasea_current_last_rms_a": str(current / math.sqrt(2.0)),
+        "output_phaseb_current_last_rms_a": str(current / math.sqrt(2.0)),
+        "output_phasec_current_last_rms_a": str(current / math.sqrt(2.0)),
         "output_phase_current_last_rms_a": str(current / math.sqrt(2.0)),
         "output_id_current_last_avg_a": str(-current * math.sin(beta_rad)),
         "output_iq_current_last_avg_a": str(current * math.cos(beta_rad)),
         "output_phasea_voltage_last_peak_abs_v": "120",
         "output_phaseb_voltage_last_peak_abs_v": "119",
         "output_phasec_voltage_last_peak_abs_v": "121",
+        "output_phasea_voltage_last_rms_v": "80",
+        "output_phaseb_voltage_last_rms_v": "80",
+        "output_phasec_voltage_last_rms_v": "80",
         "output_phase_voltage_last_peak_abs_v": "121",
         "output_total_loss_last_avg_w": str(total),
         "output_efficiency_last_pct": str(efficiency),
@@ -70,6 +76,18 @@ def valid_row(case_id: str = "case-1", group_id: str = "geometry-1") -> dict[str
 
 
 class ValidateIpmsmV2DatasetTests(unittest.TestCase):
+    def test_apparent_power_bound_rejects_self_consistent_torque_unit_error(self) -> None:
+        row = valid_row()
+        torque = 3_000.0
+        total_loss = float(row["output_total_loss_last_avg_w"])
+        mech = torque * 2.0 * math.pi * float(row["input_base_rpm"]) / 60.0
+        row["output_torque_last_avg_nm"] = str(torque)
+        row["output_efficiency_last_pct"] = str(mech / (mech + total_loss) * 100.0)
+
+        summary = validator.validate_rows([row], fieldnames=row)
+
+        self.assertIn("apparent_power_bound", summary.issue_counts)
+
     def test_valid_row_passes_without_removing_extreme_outputs(self) -> None:
         row = valid_row()
         row["output_torque_last_max_nm"] = "1000000"

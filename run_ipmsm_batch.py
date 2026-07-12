@@ -1034,6 +1034,26 @@ TORQUE_UNITS_TO_NM = {
     "N*m": 1.0,
     "N m": 1.0,
     "Nm": 1.0,
+    "mNewtonMeter": 1e-3,
+    "mNewton Meter": 1e-3,
+    "mN*m": 1e-3,
+    "mN m": 1e-3,
+    "mNm": 1e-3,
+    "uNewtonMeter": 1e-6,
+    "µNewtonMeter": 1e-6,
+    "μNewtonMeter": 1e-6,
+    "uN*m": 1e-6,
+    "µN*m": 1e-6,
+    "μN*m": 1e-6,
+    "uNm": 1e-6,
+    "µNm": 1e-6,
+    "μNm": 1e-6,
+    "nNewtonMeter": 1e-9,
+    "nN*m": 1e-9,
+    "nNm": 1e-9,
+    "kNewtonMeter": 1e3,
+    "kN*m": 1e3,
+    "kNm": 1e3,
     "": 1.0,
 }
 
@@ -1065,17 +1085,25 @@ def parse_time_seconds(value: Any, default_unit: str = "") -> float:
 
 def unit_scale_to_base(unit: str, unit_suffix: str) -> float:
     """Scale AEDT report values to the output unit implied by ``unit_suffix``."""
+    units: dict[str, float] | None = None
     if unit_suffix == "w":
-        return POWER_UNITS_TO_WATTS.get(unit, 1.0)
-    if unit_suffix == "nm":
-        return TORQUE_UNITS_TO_NM.get(unit, 1.0)
-    if unit_suffix == "a":
-        return CURRENT_UNITS_TO_AMPERES.get(unit, 1.0)
-    if unit_suffix == "v":
-        return VOLTAGE_UNITS_TO_VOLTS.get(unit, 1.0)
-    if unit_suffix == "h":
-        return INDUCTANCE_UNITS_TO_HENRY.get(unit, 1.0)
-    return 1.0
+        units = POWER_UNITS_TO_WATTS
+    elif unit_suffix == "nm":
+        units = TORQUE_UNITS_TO_NM
+    elif unit_suffix == "a":
+        units = CURRENT_UNITS_TO_AMPERES
+    elif unit_suffix == "v":
+        units = VOLTAGE_UNITS_TO_VOLTS
+    elif unit_suffix == "h":
+        units = INDUCTANCE_UNITS_TO_HENRY
+    if units is None:
+        return 1.0
+    try:
+        return units[unit]
+    except KeyError as exc:
+        raise ValueError(
+            f"unsupported AEDT report unit {unit!r} for output suffix {unit_suffix!r}"
+        ) from exc
 
 
 def parse_report_value(value: Any, default_unit: str, unit_suffix: str) -> float:
@@ -1513,6 +1541,45 @@ def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None
         ]
 
 
+def output_physics_issues(
+    output_summary: Mapping[str, Any],
+    *,
+    operation: str,
+    max_mech_loss_to_apparent_ratio: float = 1.05,
+) -> list[str]:
+    """Return fail-closed steady-state power-envelope violations.
+
+    The sum of per-phase apparent powers is an intentionally loose upper
+    bound.  It catches report-unit mistakes without assuming a power factor or
+    relying on the efficiency value derived from the same torque report.
+    """
+
+    if not is_current_driven_operation(operation):
+        return []
+    if (
+        not math.isfinite(max_mech_loss_to_apparent_ratio)
+        or max_mech_loss_to_apparent_ratio < 1.0
+    ):
+        raise ValueError("max_mech_loss_to_apparent_ratio must be finite and >= 1")
+    apparent_terms = []
+    for phase in ("a", "b", "c"):
+        voltage = finite_float(output_summary.get(f"output_phase{phase}_voltage_last_rms_v"))
+        current = finite_float(output_summary.get(f"output_phase{phase}_current_last_rms_a"))
+        if not math.isfinite(voltage) or not math.isfinite(current):
+            return ["apparent_power_inputs_nonfinite"]
+        apparent_terms.append(abs(voltage) * abs(current))
+    apparent_power = sum(apparent_terms)
+    mech_power = finite_float(output_summary.get("output_mech_power_last_w"))
+    total_loss = finite_float(output_summary.get("output_total_loss_last_avg_w"))
+    if not all(math.isfinite(value) for value in (apparent_power, mech_power, total_loss)):
+        return ["apparent_power_inputs_nonfinite"]
+    if apparent_power <= 0.0 or total_loss < 0.0:
+        return ["apparent_power_inputs_invalid"]
+    if (abs(mech_power) + total_loss) > max_mech_loss_to_apparent_ratio * apparent_power:
+        return ["apparent_power_bound"]
+    return []
+
+
 def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, operation: str = "sin_current") -> dict[str, Any]:
     """Summarize first-cycle, last-cycle, and all-cycle transient outputs."""
     frq_hz = float(spec.base_rpm) * float(spec.pole_number) / 120.0
@@ -1529,6 +1596,13 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
         df = read_report_csv(torque_path)
         column = find_column(list(df.columns), ("torque",))
         if column:
+            torque_unit = extract_column_unit(column)
+            torque_scale = unit_scale_to_base(torque_unit, "nm")
+            logging.info(
+                "Torque report source unit=%r scale_to_nm=%g",
+                torque_unit,
+                torque_scale,
+            )
             result.update(summarize_metric(df, column, "output_torque", period_s, stop_s, "nm"))
 
     cogging_path = exported_reports.get("artifact_report_PPT_Cogging_Torque")
@@ -2043,6 +2117,9 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         row["missing_required_outputs"] = ";".join(missing_outputs)
         if missing_outputs:
             raise RuntimeError(f"Missing required transient output metrics: {missing_outputs}")
+        physics_issues = output_physics_issues(output_summary, operation=operation)
+        if physics_issues:
+            raise RuntimeError(f"Transient output physics validation failed: {physics_issues}")
         elapsed = time.time() - start
         success = True
 
