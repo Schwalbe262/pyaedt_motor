@@ -3805,6 +3805,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         beta=beta,
         campaign=campaign,
         model=model,
+        governance=governance,
         stage2_decision=stage2_decision,
         stage3_decision=stage3_decision,
         optimization=optimization_state,
@@ -3884,6 +3885,21 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
                 "message": "v4 governance 계약 또는 권한 산출물 감사에 실패했습니다.",
             },
         )
+    elif (
+        governance.get("status") == "not_activated"
+        and campaign["result_ok"] >= campaign["total"]
+        and model.get("gate_status") == "waiting"
+    ):
+        alerts.insert(
+            0,
+            {
+                "level": "warning",
+                "message": (
+                    "공식 파이프라인은 감사된 v4 supervisor 활성화와 production input "
+                    "confirmation/authorization을 기다리고 있습니다."
+                ),
+            },
+        )
     if speed_state.get("marker_status") == "invalid":
         alerts.append({"level": "warning", "message": "속도 검증 완료 marker 또는 artifact hash가 유효하지 않습니다."})
     if quality_profile_experiment.get("plan_integrity_status") != "verified":
@@ -3941,6 +3957,7 @@ def build_stage_timeline(
     beta: Mapping[str, Any],
     campaign: Mapping[str, Any],
     model: Mapping[str, Any],
+    governance: Mapping[str, Any] | None = None,
     stage2_decision: Mapping[str, Any] | None,
     stage3_decision: Mapping[str, Any] | None,
     optimization: Mapping[str, Any],
@@ -3950,14 +3967,29 @@ def build_stage_timeline(
     beta_status = "complete" if beta.get("passed") else "failed" if beta.get("available") else "unavailable"
     campaign_complete = _safe_int(campaign.get("result_ok")) >= _safe_int(campaign.get("total"), 1)
     campaign_status = "complete" if campaign_complete else "running"
+    model_gate_status = str(model.get("gate_status") or "").strip().lower()
     if not campaign_complete:
         model_status = "waiting"
-    elif model.get("gate_status") == "passed":
+    elif model_gate_status == "passed":
         model_status = "complete"
-    elif model.get("gate_status") == "failed":
+    elif model_gate_status == "failed":
         model_status = "failed"
+    elif model_gate_status in {"", "waiting", "not_activated"}:
+        model_status = "waiting"
     else:
-        model_status = "running"
+        model_status = "unavailable"
+    governance_status = str((governance or {}).get("status") or "").strip().lower()
+    if campaign_complete and model_status == "waiting" and governance_status == "not_activated":
+        model_detail = (
+            "감사된 v4 supervisor 활성화 대기 · "
+            "production input confirmation/authorization 미확정"
+        )
+    elif model_status == "waiting":
+        model_detail = "공식 R² gate 산출물 대기"
+    elif model_status == "unavailable":
+        model_detail = "R² gate 산출물 무결성 확인 필요"
+    else:
+        model_detail = "9개 지표 모두 R² ≥ 0.95"
 
     s2_status = str((stage2_decision or {}).get("status") or "")
     s2_choice = str((stage2_decision or {}).get("decision") or "")
@@ -4072,7 +4104,7 @@ def build_stage_timeline(
             "detail": f"{_safe_int(campaign.get('result_ok'))} / {_safe_int(campaign.get('total'))} 결과 검증",
             "progress_pct": campaign.get("progress_pct"),
         },
-        {"id": "surrogate", "label": "Surrogate R² gate", "status": model_status, "detail": "9개 지표 모두 R² ≥ 0.95"},
+        {"id": "surrogate", "label": "Surrogate R² gate", "status": model_status, "detail": model_detail},
         {"id": "stage2", "label": "Stage 2 보강 DOE", "status": stage2_status, "detail": stage2_detail},
         {"id": "stage3", "label": "Stage 3 적응 DOE", "status": stage3_status, "detail": stage3_detail},
         {"id": "optimization", "label": "NSGA-II + Pareto FEA", "status": optimization_status, "detail": optimization_detail},
@@ -4582,7 +4614,7 @@ def summarize_scheduler(
         recent.append(
             {
                 "id": _safe_int(item.get("id") or item.get("task_id"), -1),
-                "name": _clip_text(item.get("name"), 100),
+                "name": _clip_text(item.get("name"), 200),
                 "status": _clip_text(item.get("status"), 24).lower(),
                 "node": _allocation_node(item),
                 "started_at": _normalized_scheduler_time(item.get("started_at")),
@@ -5048,6 +5080,11 @@ class DashboardStateStore:
             "artifact_invalid",
         }
         governance_invalid = local.get("governance", {}).get("status") == "invalid"
+        governance_activation_waiting = bool(
+            local.get("governance", {}).get("status") == "not_activated"
+            and campaign_result >= campaign_total
+            and local.get("model", {}).get("gate_status") == "waiting"
+        )
         quality_profile_integrity_invalid = (
             local.get("quality_profile_experiment", {}).get("integrity_status") == "invalid"
         )
@@ -5179,6 +5216,12 @@ class DashboardStateStore:
         if stale:
             health = "degraded"
             headline = "일부 상태가 오래되었거나 확인이 필요합니다"
+        elif governance_activation_waiting:
+            health = "running" if scheduler_active > 0 else "idle"
+            headline = (
+                "공식 파이프라인 차단 · 감사된 v4 supervisor 활성화 및 "
+                "production input confirmation 대기"
+            )
         elif scheduler_active == scheduler_cap:
             health = "running"
             headline = f"FEA 슬롯 {scheduler_cap} / {scheduler_cap} 점유"

@@ -839,3 +839,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: runner counts remain visible as provenance, but a bounded cached audit promotes verified publication to 700/700 and invalid/partial/stale evidence stays fail-closed or explicitly last-verified.
 - Evidence: forged raw and raw/merged mismatch tests return invalid; live raw700/tree hash is verified with health=running/stale=false; full 1030 and final dashboard 97 tests pass.
 - Remaining risk: the collection has no producer-signed manifest, so the dashboard must continue replaying content on each identity change and rely on filesystem immutability between audits.
+
+## 2026-07-12 19:00:00 +09:00 - Insight 93
+- Source loop: clean runtime replay after discovering that two nominally one-worker FEA tasks shared one allocation and node.
+- Improvement: treat `max_workers_per_node` as an advisory placement hint for `fea_bursty`; hard runtime isolation requires a one-row submission phase plus an `exclusive_node` payload, with the comparison case submitted only after the first result is validated.
+- Before: tasks 28618/28619 started three seconds apart on n012/allocation 8326, and retry 28623 shared n111 with unrelated work, so none could support runtime comparison.
+- After: fresh identities and paths prevent cancelled-history aliasing; task 28644 is the only active task on exclusive allocation 8329/n040, while candidate submission is code-gated on an explicit baseline node.
+- Evidence: scheduler detail preserves `exclusive_node=true`; allocation 8329 reports exclusive=1 and exactly one active task; Slurm 732099.0 has 4 CPUs and the Maxwell solve started normally.
+- Remaining risk: one isolated pair proves local before/after behavior only; production profile selection still requires the sealed full paired design and quality gates.

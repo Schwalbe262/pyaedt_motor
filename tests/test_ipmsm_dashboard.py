@@ -809,6 +809,23 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(by_id["stage3"]["status"], "ready")
         self.assertEqual(by_id["optimization"]["status"], "waiting")
 
+    def test_inactive_v4_waits_for_audited_activation_instead_of_claiming_training(self) -> None:
+        args = self.base_args()
+        args["model"] = {"available": False, "gate_status": "waiting"}
+        timeline = dashboard.build_stage_timeline(
+            **args,
+            governance={"status": "not_activated"},
+            stage2_decision=None,
+            stage3_decision=None,
+        )
+
+        surrogate = next(stage for stage in timeline if stage["id"] == "surrogate")
+        self.assertEqual(surrogate["status"], "waiting")
+        self.assertIn("감사된 v4 supervisor 활성화", surrogate["detail"])
+        self.assertIn("production input confirmation", surrogate["detail"])
+        self.assertEqual(dashboard.select_current_stage(timeline)["id"], "surrogate")
+        self.assertEqual(dashboard.build_overall_progress(timeline)["current_status"], "waiting")
+
     def test_current_stage_prefers_downstream_running_or_ready_over_prior_failure(self) -> None:
         stages = [
             {"id": "surrogate", "label": "Surrogate", "status": "failed"},
@@ -2581,9 +2598,14 @@ class SchedulerTests(unittest.TestCase):
             dashboard._validate_scheduler_health({**healthy, "scheduler_stalled": True})
 
     def test_scheduler_summary_is_allow_listed_and_does_not_expose_commands(self) -> None:
+        task_name = (
+            "ipmsm-v2-affinityfix-exclusive-seq-v2-"
+            "v2s1_affinityfix_exclusive_seq_v2_0001_"
+            "v2s1_0002_rated_torque_02_time_138_p12_baseline"
+        )
         payload = {
             "id": 1,
-            "name": "ipmsm-v2-foundation-s1-case-1",
+            "name": task_name,
             "status": "running",
             "cpus": 4,
             "actual_node_name": "n107",
@@ -2615,6 +2637,7 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(result["cap_matches"])
         self.assertEqual(result["deployed_count"], 1)
         self.assertEqual(result["campaign_completed_last_hour"]["stage1"], 0)
+        self.assertEqual(result["recent_tasks"][0]["name"], task_name)
 
     def test_scheduler_summary_scopes_recent_completions_by_campaign_prefix(self) -> None:
         finished_at = datetime.now(timezone.utc).isoformat()
@@ -3274,6 +3297,62 @@ class SchedulerTests(unittest.TestCase):
         result = store.refresh_once(force_scheduler=True)
         self.assertEqual(result["health"], "running")
         self.assertIn("Surrogate", result["headline"])
+
+    def test_inactive_v4_snapshot_reports_pipeline_blocker_while_ancillary_fea_runs(self) -> None:
+        def local(_: dashboard.DashboardConfig) -> dict[str, object]:
+            stages = dashboard.build_stage_timeline(
+                beta={"available": True, "passed": True},
+                campaign={"result_ok": 700, "total": 700, "progress_pct": 100.0},
+                model={"available": False, "gate_status": "waiting"},
+                governance={"status": "not_activated"},
+                stage2_decision=None,
+                stage3_decision=None,
+                optimization={"decision": None},
+                speed={"complete": False, "plan_rows": None, "result_rows": None},
+            )
+            return {
+                "campaign": {
+                    "elapsed_s": 10.0,
+                    "active": 0,
+                    "total": 700,
+                    "result_ok": 700,
+                    "source_mtime_reliable": False,
+                },
+                "pipeline": {"current_stage": "surrogate", "current_label": "Surrogate R² gate", "stages": stages},
+                "model": {
+                    "available": False,
+                    "gate_status": "waiting",
+                    "passed_count": 0,
+                    "target_count": 9,
+                },
+                "governance": dashboard._empty_governance_state(),
+                "beta": {"available": True},
+                "optimization": {"decision": None},
+                "speed": {"complete": False},
+                "processes": [],
+                "alerts": [],
+            }
+
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 1,
+            "cap": 100,
+            "campaign_status": {},
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=local,
+            scheduler_collector=lambda _: scheduler,
+        )
+
+        result = store.refresh_once(force_scheduler=True)
+
+        self.assertEqual(result["overall"]["current_stage"], "surrogate")
+        self.assertEqual(result["overall"]["current_status"], "waiting")
+        self.assertIn("감사된 v4 supervisor 활성화", result["headline"])
+        self.assertIn("production input confirmation", result["headline"])
+        self.assertNotIn("실행 중", result["headline"])
 
     def test_invalid_campaign_invariants_override_full_scheduler_utilization(self) -> None:
         def local(_: dashboard.DashboardConfig) -> dict[str, object]:

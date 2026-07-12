@@ -30,6 +30,20 @@ def rows() -> list[dict[str, str]]:
     ]
 
 
+def campaign_task(payload: dict[str, object]) -> object:
+    return scoped.campaign.submit_campaign.CampaignTask(
+        row_number=1,
+        case_id="case-1",
+        safe_case_id="case-1",
+        remote_cases="/remote/case-1.csv",
+        result_csv="/results/case-1.csv",
+        simulation_dir="/simulations/case-1",
+        task_name="task-case-1",
+        dedupe_key="dedupe-case-1",
+        payload=payload,
+    )
+
+
 class ProfileScopedCampaignTests(unittest.TestCase):
     def test_explicit_counts_and_scoped_fingerprints_accept_exact_pair(self) -> None:
         parsed = scoped.parse_expected_profile_counts(
@@ -105,6 +119,132 @@ class ProfileScopedCampaignTests(unittest.TestCase):
                 ]
             )
         self.assertIs(collector.validate_homogeneous_fingerprints, original)
+
+    def test_main_exclusive_node_replaces_payload_and_restores_builder(self) -> None:
+        original_payload = {"exclusive_node": False, "keep": "value"}
+        original_task = campaign_task(original_payload)
+        task_builder = mock.Mock(return_value=[original_task])
+
+        def campaign_main(argv: list[str]) -> int:
+            self.assertEqual(argv, ["--cases", "pilot.csv"])
+            self.assertIsNot(
+                scoped.campaign.submit_campaign.build_campaign_tasks,
+                task_builder,
+            )
+            built = scoped.campaign.submit_campaign.build_campaign_tasks(
+                mock.sentinel.args,
+                [mock.sentinel.row],
+                first_row_number=1,
+            )
+            self.assertEqual(len(built), 1)
+            self.assertIsNot(built[0], original_task)
+            self.assertEqual(
+                built[0].payload,
+                {"exclusive_node": True, "keep": "value"},
+            )
+            self.assertIs(original_task.payload, original_payload)
+            self.assertEqual(
+                original_task.payload,
+                {"exclusive_node": False, "keep": "value"},
+            )
+            return 9
+
+        with mock.patch.object(
+            scoped.campaign.submit_campaign,
+            "build_campaign_tasks",
+            task_builder,
+        ), mock.patch.object(
+            scoped.campaign,
+            "main",
+            side_effect=campaign_main,
+        ):
+            self.assertEqual(
+                scoped.main(
+                    [
+                        "--expected-profile-count",
+                        "time_138_p12_baseline=1",
+                        "--expected-profile-count",
+                        "time_135_p12_iron525=1",
+                        "--exclusive-node",
+                        "--cases",
+                        "pilot.csv",
+                    ]
+                ),
+                9,
+            )
+            self.assertIs(
+                scoped.campaign.submit_campaign.build_campaign_tasks,
+                task_builder,
+            )
+
+    def test_main_exclusive_node_restores_builder_after_failure(self) -> None:
+        task_builder = mock.Mock(return_value=[])
+        original_validator = collector.validate_homogeneous_fingerprints
+        with mock.patch.object(
+            scoped.campaign.submit_campaign,
+            "build_campaign_tasks",
+            task_builder,
+        ), mock.patch.object(
+            scoped.campaign,
+            "main",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                scoped.main(
+                    [
+                        "--expected-profile-count",
+                        "time_138_p12_baseline=1",
+                        "--expected-profile-count",
+                        "time_135_p12_iron525=1",
+                        "--exclusive-node",
+                    ]
+                )
+            self.assertIs(
+                scoped.campaign.submit_campaign.build_campaign_tasks,
+                task_builder,
+            )
+            self.assertIs(
+                collector.validate_homogeneous_fingerprints,
+                original_validator,
+            )
+
+    def test_main_without_exclusive_node_leaves_builder_unchanged(self) -> None:
+        task_builder = mock.Mock(return_value=[])
+
+        def campaign_main(argv: list[str]) -> int:
+            self.assertEqual(argv, ["--cases", "pilot.csv"])
+            self.assertIs(
+                scoped.campaign.submit_campaign.build_campaign_tasks,
+                task_builder,
+            )
+            return 3
+
+        with mock.patch.object(
+            scoped.campaign.submit_campaign,
+            "build_campaign_tasks",
+            task_builder,
+        ), mock.patch.object(
+            scoped.campaign,
+            "main",
+            side_effect=campaign_main,
+        ):
+            self.assertEqual(
+                scoped.main(
+                    [
+                        "--expected-profile-count",
+                        "time_138_p12_baseline=1",
+                        "--expected-profile-count",
+                        "time_135_p12_iron525=1",
+                        "--cases",
+                        "pilot.csv",
+                    ]
+                ),
+                3,
+            )
+            self.assertIs(
+                scoped.campaign.submit_campaign.build_campaign_tasks,
+                task_builder,
+            )
 
 
 if __name__ == "__main__":

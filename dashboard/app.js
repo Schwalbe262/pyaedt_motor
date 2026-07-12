@@ -721,7 +721,7 @@ function renderCampaign(data) {
     "resultSub",
     collectionVerified
       ? collectionFresh
-        ? `atomic collection 검증 완료 · runner 마지막 관측 ${integer(campaign.runner_result_ok)} / ${total}`
+        ? `authoritative atomic collection ${result} / ${total} 검증 완료 · runner 로그는 과거 기록(비권위)`
         : `마지막 검증값 ${result} / ${total} · snapshot 갱신 필요`
       : `scheduler 완료 ${integer(campaign.scheduler_ok)}건 · 안정화 ${integer(campaign.settling_results)}건`,
   );
@@ -1532,12 +1532,20 @@ function renderTasks(data) {
   empty(body);
   tasks.forEach((task) => {
     const row = document.createElement("tr");
-    const cleanName = (task.name || "—")
-      .replace("ipmsm-v2-profile-thirdpass-speed-v1-", "Quality A/B · ")
-      .replace("ipmsm-v2-foundation-s1-", "S1 · ")
-      .replace("ipmsm-v2-foundation-s2-", "S2 · ")
-      .replace("ipmsm-v2-foundation-s3-", "S3 · ")
-      .replace("ipmsm-v2-pareto-fea-", "Pareto · ");
+    const rawName = task.name || "—";
+    const affinityPrefix = "ipmsm-v2-affinityfix-exclusive-seq-v2-";
+    const cleanName = rawName.startsWith(affinityPrefix)
+      ? rawName.includes("time_138_p12_baseline")
+        ? "CPU affinity 단독 baseline"
+        : rawName.includes("time_135_p12_iron525")
+          ? "CPU affinity 단독 candidate"
+          : "CPU affinity 단독 replay"
+      : rawName
+        .replace("ipmsm-v2-profile-thirdpass-speed-v1-", "Quality A/B · ")
+        .replace("ipmsm-v2-foundation-s1-", "S1 · ")
+        .replace("ipmsm-v2-foundation-s2-", "S2 · ")
+        .replace("ipmsm-v2-foundation-s3-", "S3 · ")
+        .replace("ipmsm-v2-pareto-fea-", "Pareto · ");
     row.appendChild(element("td", "", cleanName));
     row.appendChild(element("td", "", task.node || "—"));
     const statusCell = document.createElement("td");

@@ -3805,3 +3805,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: live API=700/700, runner original=696, raw files=700/25,723,638 bytes, merged=10,279,234 bytes, health=running, stale=false, current=Surrogate R2 gate; full suite=1030/1030 and final dashboard=97/97.
 - Failure/next: the in-app browser surface was unavailable, so live HTTP/API and frontend semantics replaced screenshot QA; commit/push the audited tools, then start the exact two-case post-affinity pilot.
 - Token usage: unavailable; the closeout sampler found no local Codex SQLite database.
+
+## 2026-07-12 19:00:00 +09:00 - Truthful dashboard and clean exclusive affinity baseline
+- Part/goal: remove the misleading WEB UI 696/700 signal and obtain uncontaminated post-affinity simulation runtime evidence.
+- Hypothesis/actions: made atomic 700/700 the only primary UI count, exposed inactive-v4 governance as waiting, created a fresh zero-overlap two-case plan, added sequential phase/exclusive-node controls, cancelled contaminated attempts 28618/28619/28623, and submitted baseline only.
+- Candidates/options: baseline must finish on an exclusive node before the iron525 candidate is pinned to the same node; paired submission and candidate-without-node are rejected.
+- Metrics/result: plan SHA `352b1ebf...27c5`, dry-runs each selected/planned 1 with no history, task 28644 is sole active task on exclusive allocation 8329/n040/Slurm 732099, 4 CPUs/32 GiB, and reached `Solving design setup` at 18:45:53 KST; live dashboard is Stage1 700/700, surrogate waiting, errors0.
+- Failure/next: `max_workers_per_node=1` was advisory and contaminated the first retries; wait for baseline collection, then submit candidate on n040 and compare against old contaminated 9356s/10095s only as historical context, not selection authority.
+- Token usage: unavailable; the sampler was already attempted once in this execution loop and no local Codex SQLite database was available.

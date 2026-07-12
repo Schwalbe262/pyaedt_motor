@@ -1,4 +1,4 @@
-"""Generate the fixed two-case post-affinity replay pilot plan.
+"""Generate a fixed two-case post-affinity replay pilot plan.
 
 The source is the already-audited paired-24 plan.  The pilot deliberately
 replays one source geometry under each of its two quality profiles and changes
@@ -31,6 +31,20 @@ EXPECTED_PROFILES = (
 SOURCE_CASE_ID_PREFIX = "v2s1_thirdpass_speed_v1_"
 NEW_CASE_ID_PREFIX = "v2s1_affinityfix_replay_v1_"
 DEFAULT_OUTPUT = ROOT / "simul_log_smoke/profile_affinityfix_replay2_cases_v1.csv"
+DEFAULT_VARIANT = "replay-v1"
+EXCLUSIVE_SEQ_V2_VARIANT = "exclusive-seq-v2"
+EXCLUSIVE_SEQ_V2_CASE_ID_PREFIX = "v2s1_affinityfix_exclusive_seq_v2_"
+EXCLUSIVE_SEQ_V2_DEFAULT_OUTPUT = (
+    ROOT / "simul_log_smoke/profile_affinityfix_exclusive_seq_v2_cases.csv"
+)
+VARIANT_CASE_ID_PREFIXES = {
+    DEFAULT_VARIANT: NEW_CASE_ID_PREFIX,
+    EXCLUSIVE_SEQ_V2_VARIANT: EXCLUSIVE_SEQ_V2_CASE_ID_PREFIX,
+}
+VARIANT_DEFAULT_OUTPUTS = {
+    DEFAULT_VARIANT: DEFAULT_OUTPUT,
+    EXCLUSIVE_SEQ_V2_VARIANT: EXCLUSIVE_SEQ_V2_DEFAULT_OUTPUT,
+}
 SAFE_CASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
@@ -74,6 +88,8 @@ def _assert_only_case_id_changed(
 def build_replay_rows(
     fieldnames: Sequence[str],
     source_rows: Sequence[Mapping[str, str]],
+    *,
+    new_case_id_prefix: str = NEW_CASE_ID_PREFIX,
 ) -> list[dict[str, str]]:
     required = {"case_id", "quality_profile", "source_case_id"}
     missing = sorted(required - set(fieldnames))
@@ -107,7 +123,7 @@ def build_replay_rows(
             raise RuntimeError(
                 f"source row {index} has an unexpected case_id prefix: {old_case_id!r}"
             )
-        new_case_id = NEW_CASE_ID_PREFIX + old_case_id[len(SOURCE_CASE_ID_PREFIX) :]
+        new_case_id = new_case_id_prefix + old_case_id[len(SOURCE_CASE_ID_PREFIX) :]
         if not SAFE_CASE_ID.fullmatch(new_case_id):
             raise RuntimeError(
                 f"source row {index} produced an unsafe replay case_id: {new_case_id!r}"
@@ -143,7 +159,11 @@ def render_csv(fieldnames: Sequence[str], rows: Iterable[Mapping[str, str]]) -> 
     return stream.getvalue().encode("utf-8-sig")
 
 
-def build_pilot_plan(source_plan: Path) -> tuple[list[str], list[dict[str, str]], bytes]:
+def build_pilot_plan(
+    source_plan: Path,
+    *,
+    new_case_id_prefix: str = NEW_CASE_ID_PREFIX,
+) -> tuple[list[str], list[dict[str, str]], bytes]:
     if not source_plan.is_file():
         raise RuntimeError(f"fixed source plan is unavailable: {source_plan}")
     actual_hash = sha256_file(source_plan)
@@ -153,7 +173,11 @@ def build_pilot_plan(source_plan: Path) -> tuple[list[str], list[dict[str, str]]
             f"expected={SOURCE_PLAN_SHA256} actual={actual_hash}"
         )
     fieldnames, source_rows = read_csv(source_plan)
-    replay_rows = build_replay_rows(fieldnames, source_rows)
+    replay_rows = build_replay_rows(
+        fieldnames,
+        source_rows,
+        new_case_id_prefix=new_case_id_prefix,
+    )
     return fieldnames, replay_rows, render_csv(fieldnames, replay_rows)
 
 
@@ -205,7 +229,12 @@ def verify_exact_output(path: Path, expected: bytes) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-plan", type=Path, default=SOURCE_PLAN)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--variant",
+        choices=tuple(VARIANT_CASE_ID_PREFIXES),
+        default=DEFAULT_VARIANT,
+    )
+    parser.add_argument("--output", type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--execute", action="store_true")
     mode.add_argument("--verify-output", action="store_true")
@@ -215,10 +244,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     source_plan = args.source_plan.resolve()
-    output = args.output.resolve()
+    output = (args.output or VARIANT_DEFAULT_OUTPUTS[args.variant]).resolve()
     if source_plan == output:
         raise RuntimeError("source and output plan paths must be different")
-    _, rows, payload = build_pilot_plan(source_plan)
+    _, rows, payload = build_pilot_plan(
+        source_plan,
+        new_case_id_prefix=VARIANT_CASE_ID_PREFIXES[args.variant],
+    )
 
     if args.execute:
         write_no_replace(output, payload)
@@ -245,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
                 "source_plan": str(source_plan),
                 "source_plan_sha256": SOURCE_PLAN_SHA256,
                 "source_row_indices": list(SOURCE_ROW_INDICES),
+                "variant": args.variant,
             },
             ensure_ascii=False,
             separators=(",", ":"),

@@ -8,12 +8,12 @@
 - Mesh and transient setup are controlled in `module/ipmsm_ppt_setup.py`.
 - Root project-memory files are now canonical; `md/` is template/archive context.
 - Live read-only dashboard: `http://127.0.0.1:8765/`; it separates the 8-stage official pipeline from the ancillary paired-24 experiment and fail-closed collection/ranking conclusion.
-- 2026-07-12 18:08 KST: dashboard fail-closed audit serves atomic Stage1 700/700 (raw700/tree-bound, stale=false); validation passed 700 rows/112 groups/28 repeats.
+- 2026-07-12 18:58 KST: live dashboard serves authoritative atomic Stage1 700/700 without the misleading runner 696/700 subtitle; official pipeline is truthfully `surrogate/waiting` on inactive audited-v4 production-input confirmation, while ancillary FEA remains separate.
 - The v3 guard still blocks every post-campaign action; a separate exact-trainer diagnostic failed 9/9 R2 targets (min 0.624627, avg 0.771923), so Stage2 coverage is required.
-- Inactive v4/cutover plus affinity-pilot tooling and dashboard passed 1030 full tests (5 skipped), then final dashboard 97/97; no v4 contract/authority/receipt/task exists before input confirmation.
+- Inactive v4/cutover plus affinity-pilot tooling and dashboard are validated; no v4 contract/authority/receipt/task exists before production-input confirmation.
 - The legacy frozen-family watcher is stopped/Ready and is not authoritative for v4; no confirmation output root exists, so use the audited v4 path only after Stage1 and input approval.
 - All legacy paired-24 tasks ran on the pre-fix shared 0-3 CPU mask, so its runtime ranking is withheld and the local task is Disabled; physics rows remain collectible only.
-- Live affinity smoke 28528 saw CPUs 16-51, and a two-case post-fix replay plan (same source/profile inputs, only case IDs changed) is prepared but not yet submitted.
+- Live affinity smoke 28528 saw CPUs 16-51; fresh plan `352b1ebf...27c5` has zero old/source ID overlap, and baseline task 28644 is the sole task on exclusive allocation 8329 / n040 / Slurm 732099 with solve started at 18:45:53 KST; candidate remains unsubmitted.
 
 ## Current objective
 

@@ -12,6 +12,15 @@ NODE = shutil.which("node")
 
 @unittest.skipUnless(NODE, "Node.js is required for dashboard JavaScript semantics")
 class DashboardFrontendSemanticTests(unittest.TestCase):
+    def test_affinity_replay_tasks_have_compact_operator_labels(self) -> None:
+        app = (
+            Path(__file__).resolve().parents[1] / "dashboard" / "app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('"CPU affinity 단독 baseline"', app)
+        self.assertIn('"CPU affinity 단독 candidate"', app)
+        self.assertIn('"ipmsm-v2-affinityfix-exclusive-seq-v2-"', app)
+
     def test_governance_and_stale_states_are_fail_closed(self) -> None:
         app = Path(__file__).resolve().parents[1] / "dashboard" / "app.js"
         harness = r"""
@@ -179,6 +188,21 @@ const staleAtomicView = {
   detail: byId("stage1ReadinessDetail").textContent,
   resultSub: byId("resultSub").textContent,
 };
+const freshAtomic = JSON.parse(JSON.stringify(staleAtomic));
+freshAtomic.generated_at = new Date().toISOString();
+freshAtomic.health = "running";
+freshAtomic.stale = false;
+freshAtomic.scheduler = { reachable: true, stale: false, active_count: 0, cap: 100 };
+context.__freshAtomic = freshAtomic;
+vm.runInContext("renderHeroOperations(__freshAtomic, overallState(__freshAtomic))", context);
+vm.runInContext("renderCampaign(__freshAtomic)", context);
+const freshAtomicView = {
+  readiness: byId("stage1Readiness").dataset.state,
+  detail: byId("stage1ReadinessDetail").textContent,
+  resultOk: byId("resultOk").textContent,
+  resultTotal: byId("resultTotal").textContent,
+  resultSub: byId("resultSub").textContent,
+};
 
 const qualityExperiment = {
   integrity_status: "verified",
@@ -275,6 +299,7 @@ process.stdout.write(JSON.stringify({
   },
   stale: staleView,
   staleAtomic: staleAtomicView,
+  freshAtomic: freshAtomicView,
   qualityRunning,
   qualityStale,
   qualityInvalid,
@@ -321,6 +346,13 @@ process.stdout.write(JSON.stringify({
         self.assertIn("마지막 검증", result["staleAtomic"]["detail"])
         self.assertIn("snapshot 갱신 필요", result["staleAtomic"]["resultSub"])
         self.assertNotIn("무결성 검증 완료", result["staleAtomic"]["detail"])
+        self.assertEqual(result["freshAtomic"]["readiness"], "complete")
+        self.assertIn("700건 무결성 검증 완료", result["freshAtomic"]["detail"])
+        self.assertEqual(result["freshAtomic"]["resultOk"], "700")
+        self.assertEqual(result["freshAtomic"]["resultTotal"], "/ 700")
+        self.assertIn("atomic collection 700 / 700 검증 완료", result["freshAtomic"]["resultSub"])
+        self.assertIn("과거 기록(비권위)", result["freshAtomic"]["resultSub"])
+        self.assertNotIn("696", result["freshAtomic"]["resultSub"])
         self.assertEqual(result["qualityRunning"]["state"], "running")
         self.assertEqual(result["qualityRunning"]["status"], "실행 중")
         self.assertEqual(result["qualityRunning"]["progress"], 5)

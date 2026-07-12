@@ -146,6 +146,81 @@ class AffinityReplayPilotGeneratorTests(unittest.TestCase):
                 )
             self.assertEqual(output.read_bytes(), before)
 
+    def test_exclusive_seq_v2_changes_only_case_id_without_id_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.csv"
+            _, source_rows, source_hash = source_fixture(source)
+            with mock.patch.object(generator, "SOURCE_PLAN_SHA256", source_hash):
+                _, replay_v1_rows, _ = generator.build_pilot_plan(source)
+                _, exclusive_v2_rows, _ = generator.build_pilot_plan(
+                    source,
+                    new_case_id_prefix=generator.EXCLUSIVE_SEQ_V2_CASE_ID_PREFIX,
+                )
+
+            source_ids = {row["case_id"] for row in source_rows}
+            replay_v1_ids = {row["case_id"] for row in replay_v1_rows}
+            exclusive_v2_ids = {row["case_id"] for row in exclusive_v2_rows}
+            self.assertFalse(exclusive_v2_ids & source_ids)
+            self.assertFalse(exclusive_v2_ids & replay_v1_ids)
+            self.assertEqual(len(exclusive_v2_ids), len(exclusive_v2_rows))
+            for source_index, replay in zip(
+                generator.SOURCE_ROW_INDICES, exclusive_v2_rows, strict=True
+            ):
+                selected_source = source_rows[source_index - 1]
+                self.assertTrue(
+                    replay["case_id"].startswith(
+                        generator.EXCLUSIVE_SEQ_V2_CASE_ID_PREFIX
+                    )
+                )
+                self.assertEqual(
+                    {key: value for key, value in replay.items() if key != "case_id"},
+                    {
+                        key: value
+                        for key, value in selected_source.items()
+                        if key != "case_id"
+                    },
+                )
+
+    def test_exclusive_seq_v2_uses_derived_output_and_exact_file_guards(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.csv"
+            _, _, source_hash = source_fixture(source)
+            derived_output = root / "exclusive-v2.csv"
+            variant_outputs = {
+                **generator.VARIANT_DEFAULT_OUTPUTS,
+                generator.EXCLUSIVE_SEQ_V2_VARIANT: derived_output,
+            }
+            common_args = [
+                "--source-plan",
+                str(source),
+                "--variant",
+                generator.EXCLUSIVE_SEQ_V2_VARIANT,
+            ]
+            with mock.patch.object(
+                generator, "SOURCE_PLAN_SHA256", source_hash
+            ), mock.patch.object(
+                generator, "VARIANT_DEFAULT_OUTPUTS", variant_outputs
+            ), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(generator.main([*common_args, "--execute"]), 0)
+                before = derived_output.read_bytes()
+                self.assertEqual(generator.main([*common_args, "--verify-output"]), 0)
+                with self.assertRaisesRegex(RuntimeError, "refusing to overwrite"):
+                    generator.main([*common_args, "--execute"])
+                self.assertEqual(derived_output.read_bytes(), before)
+
+                derived_output.write_bytes(before + b"mutation")
+                with self.assertRaisesRegex(RuntimeError, "does not exactly match"):
+                    generator.main([*common_args, "--verify-output"])
+
+            self.assertEqual(
+                generator.VARIANT_DEFAULT_OUTPUTS[
+                    generator.EXCLUSIVE_SEQ_V2_VARIANT
+                ],
+                generator.EXCLUSIVE_SEQ_V2_DEFAULT_OUTPUT,
+            )
+
     def test_source_hash_and_output_mutation_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

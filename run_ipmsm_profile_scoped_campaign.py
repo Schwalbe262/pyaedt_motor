@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from dataclasses import replace
 import re
 import sys
 from typing import Iterable, Mapping
@@ -103,6 +104,7 @@ def build_shim_parser() -> argparse.ArgumentParser:
         action="append",
         dest="expected_profile_counts",
     )
+    parser.add_argument("--exclusive-node", action="store_true")
     return parser
 
 
@@ -113,12 +115,27 @@ def main(argv: list[str] | None = None) -> int:
     def scoped_validator(rows: Iterable[Mapping[str, object]]) -> None:
         validate_profile_scoped_fingerprints(rows, expected)
 
-    original = collector.validate_homogeneous_fingerprints
+    original_validator = collector.validate_homogeneous_fingerprints
+    original_task_builder = campaign.submit_campaign.build_campaign_tasks
+
+    def exclusive_task_builder(*args: object, **kwargs: object) -> list[object]:
+        tasks = original_task_builder(*args, **kwargs)
+        return [
+            replace(
+                task,
+                payload={**task.payload, "exclusive_node": True},
+            )
+            for task in tasks
+        ]
+
     collector.validate_homogeneous_fingerprints = scoped_validator
+    if shim_args.exclusive_node:
+        campaign.submit_campaign.build_campaign_tasks = exclusive_task_builder
     try:
         return campaign.main(campaign_argv)
     finally:
-        collector.validate_homogeneous_fingerprints = original
+        collector.validate_homogeneous_fingerprints = original_validator
+        campaign.submit_campaign.build_campaign_tasks = original_task_builder
 
 
 if __name__ == "__main__":
