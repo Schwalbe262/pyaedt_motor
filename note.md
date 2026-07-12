@@ -3913,3 +3913,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: build the v4r4 base on local NTFS without changing the contract's sealed Y workdir or writing through RaiDrive.
 - Actions/result: added exact logical-to-physical mapping, official source-pair pins, pre-open/path-scope checks, complete Stage1 replay plus 1,404-file snapshots, forensic payload binding, Stage2 decision/checkpoint TOCTOU binding, and publish-time scope/context/live-cap rechecks.
 - Metrics/next: focused22/22, related55/55, independent P0/P1=0, Python3.11/3.14 contract SHA `093bdd63...e6943`; dry-run left local/Y base, stage, and proof absent, so commit the source then publish and re-audit the local base only.
+
+## 2026-07-13 03:27:00 +09:00 - Local v4r4 base published and reverified
+- Part/goal: seal the cap50 recovery base on NTFS while leaving RaiDrive and the inactive production wrapper untouched.
+- Actions/result: committed/pushed mirror support as `5d4300b`, proved LF325 sources equal the Git blobs, published `base_v4r4.json` no-replace, then repeated publish as `existing_verified` and independently audited all 34 physical immutable inputs.
+- Metrics/next: raw SHA `e22c397e...cc1f`, contract SHA `093bdd63...e6943`, five cap values50, physical mirror strings0, stage/proof0, local wrapper absent and Y base absent; transfer/activation remains deferred until Y can be reconciled without provider ambiguity.

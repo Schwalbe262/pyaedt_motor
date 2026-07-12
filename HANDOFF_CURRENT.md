@@ -271,3 +271,5 @@
 - `--authority-mirror-root` now maps sealed logical Y references to exact C mirror paths without serializing C into the base; official v4r3 base/wrapper 4-pin, cwd/scope, and no-replace output are enforced.
 - The revision replays the complete Stage1 rebuild, snapshots original/rebuilt 1,404 files, binds forensic payloads, and pre/post-verifies the Stage2 decision plus 172 final checkpoints; independent final review found P0/P1=0.
 - Actual LF mirror dry-runs under Python3.11/3.14 produce identical contract SHA `093bdd63...e6943`; focused22/22 and related55/55 pass, and no local/Y base is published yet.
+- Local LF325 `base_v4r4.json` is now no-replace published: raw SHA `e22c397e...cc1f`, contract SHA `093bdd63...e6943`, immutable34, all five caps50; repeat publish is `existing_verified` with hash/mtime unchanged.
+- No v4r4 wrapper or Y base exists; keep the pipeline inactive until the committed sources and sanitized authorities can be transferred without RaiDrive ambiguity.
