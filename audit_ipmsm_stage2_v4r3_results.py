@@ -44,7 +44,7 @@ SCHEMA_VERSION = "ipmsm-stage2-v4r3-physics-audit-v1"
 DEFAULT_ROOT = Path("simul_log_smoke/beta_zero_recovery_26092_26093")
 DEFAULT_PLAN = DEFAULT_ROOT / "ipmsm_v2_foundation_stage2_300_cases.csv"
 DEFAULT_DECISION = DEFAULT_ROOT / "foundation_stage2_decision.json"
-DEFAULT_OUTPUT_DIR = Path("simul_log_smoke/v4r4/stage2_v4r3_physics_audit_v2")
+DEFAULT_OUTPUT_DIR = Path("simul_log_smoke/v4r4/stage2_v4r3_physics_audit_v3")
 RECEIPT_NAME = "receipt.canonical.json"
 REPORT_NAME = "report.canonical.json"
 CHECKPOINT_DIR_NAME = "result_checkpoints"
@@ -154,6 +154,10 @@ OPTIONAL_EXECUTION_IDENTITY_FIELDS = (
 CHECKPOINT_NAME_RE = re.compile(
     r"^(?P<safe_case>[A-Za-z0-9_.-]+)\.task-(?P<task_id>[1-9][0-9]*)\."
     r"(?P<sha256>[0-9a-f]{64})\.canonical\.json$"
+)
+CHECKPOINT_STAGE_NAME_RE = re.compile(
+    r"^\.(?P<checkpoint>[A-Za-z0-9_.-]+\.task-[1-9][0-9]*\."
+    r"[0-9a-f]{64}\.canonical\.json)\.(?P<nonce>[a-z0-9_]{8})\.staged$"
 )
 
 
@@ -950,34 +954,44 @@ def _checkpoint_path(
 
 
 def _publish_immutable(path: Path, payload: bytes) -> str:
-    """Publish canonical bytes once; an exact existing file is idempotent."""
+    """Publish canonical bytes once; never delete a retained stage."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        if _stable_read(path, "immutable result checkpoint") != payload:
+    destination = _snapshot_file(path)
+    if destination.state == "present":
+        if destination.payload != payload:
             raise RuntimeError(f"immutable result checkpoint collision/tamper: {path}")
         return "already_present"
+    if destination.state != "missing":
+        raise RuntimeError(f"immutable result checkpoint is {destination.state}: {path}")
     descriptor, staged_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".staged", dir=path.parent
     )
     staged = Path(staged_name)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    _wait_for_exact_staged_payload(staged, payload)
+    publication = "published"
     try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        try:
-            atomic_publish.publish_no_replace(staged, path)
-        except FileExistsError:
-            if _stable_read(path, "raced immutable result checkpoint") != payload:
-                raise RuntimeError(f"immutable result checkpoint collision/tamper: {path}")
-            return "already_present"
-        return "published"
-    finally:
-        try:
-            staged.unlink()
-        except FileNotFoundError:
-            pass
+        atomic_publish.publish_no_replace(staged, path)
+    except FileExistsError:
+        destination = _snapshot_file(path)
+        if destination.state != "present" or destination.payload != payload:
+            raise RuntimeError(f"immutable result checkpoint collision/tamper: {path}")
+        publication = "already_present"
+    except OSError:
+        # Mapped drives can report denial after applying the rename.  Only
+        # exact final bytes authorize late success; otherwise the stage remains
+        # non-authoritative and a later run re-fetches the remote result.
+        destination = _snapshot_file(path)
+        if destination.state != "present" or destination.payload != payload:
+            raise
+    destination = _snapshot_file(path)
+    if destination.state != "present" or destination.payload != payload:
+        raise RuntimeError(f"immutable result checkpoint collision/tamper: {path}")
+    return publication
 
 
 def _checkpoint_reference(
@@ -1053,15 +1067,60 @@ def _validate_checkpoint_record(
         raise RuntimeError("immutable result checkpoint has malformed physics_issues")
 
 
+def _validated_checkpoint_payload(
+    path: Path,
+    payload: bytes,
+    *,
+    output_dir: Path,
+    expected_by_case: Mapping[str, submitter.CampaignTask],
+    audit_identity_sha256: str,
+) -> tuple[str, int, dict[str, Any]]:
+    """Validate bytes only against their computed final checkpoint path."""
+
+    match = CHECKPOINT_NAME_RE.fullmatch(path.name)
+    if not match:
+        raise RuntimeError(f"orphan result checkpoint filename: {path}")
+    actual_sha256 = sha256_bytes(payload)
+    if actual_sha256 != match.group("sha256"):
+        raise RuntimeError(f"immutable result checkpoint hash/tamper mismatch: {path}")
+    document = _decode_json(payload, "immutable result checkpoint")
+    if canonical_json_bytes(document) != payload:
+        raise RuntimeError(f"immutable result checkpoint is not canonical: {path}")
+    if document.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        raise RuntimeError(f"immutable result checkpoint schema mismatch: {path}")
+    if document.get("audit_identity_sha256") != audit_identity_sha256:
+        raise RuntimeError(f"orphan result checkpoint audit identity: {path}")
+    record = document.get("record")
+    if not isinstance(record, dict):
+        raise RuntimeError(f"immutable result checkpoint record is malformed: {path}")
+    case_id = str(record.get("case_id") or "")
+    expected = expected_by_case.get(case_id)
+    if expected is None:
+        raise RuntimeError(f"orphan result checkpoint case_id: {path}")
+    task_id = int(match.group("task_id"))
+    expected_path, _, expected_sha256 = _checkpoint_path(output_dir, expected, record)
+    if expected_path != path or expected_sha256 != actual_sha256:
+        raise RuntimeError(f"immutable result checkpoint path collision: {path}")
+    _validate_checkpoint_record(
+        record,
+        expected=expected,
+        task_id=task_id,
+        audit_identity_sha256=audit_identity_sha256,
+    )
+    return case_id, task_id, record
+
+
 def _load_prior_evidence(
     output_dir: Path,
     evidence: CampaignEvidence,
+    *,
+    staged_constraints: dict[tuple[str, str], tuple[Path, bytes]] | None = None,
 ) -> dict[str, dict[str, dict[str, Any]]]:
     """Rebuild reusable evidence from immutable hash-named checkpoints.
 
     The replaceable aggregate may reference checkpoints, but can neither create
-    nor alter reusable evidence.  A valid self-bound checkpoint left just before
-    an interrupted aggregate update is recovered independently.
+    nor alter reusable evidence.  Exact staged files are validated and ignored;
+    only their final no-replace targets can authorize reuse.
     """
 
     audit_identity_sha256 = canonical_sha256(evidence.identity)
@@ -1069,49 +1128,80 @@ def _load_prior_evidence(
     checkpoints_dir = output_dir / CHECKPOINT_DIR_NAME
     audited: dict[str, dict[str, dict[str, Any]]] = {}
     checkpoint_index: dict[tuple[str, str], dict[str, str]] = {}
+    checkpoint_path_by_key: dict[tuple[str, str], Path] = {}
     if checkpoints_dir.exists():
         if not checkpoints_dir.is_dir():
             raise RuntimeError("result checkpoint path is not a directory")
         for path in sorted(checkpoints_dir.iterdir(), key=lambda item: item.name):
-            if not path.is_file():
+            if path.is_symlink() or not path.is_file():
                 raise RuntimeError(f"orphan result checkpoint entry: {path}")
-            match = CHECKPOINT_NAME_RE.fullmatch(path.name)
-            if not match:
+            stage_match = CHECKPOINT_STAGE_NAME_RE.fullmatch(path.name)
+            if stage_match is not None:
+                target = checkpoints_dir / stage_match.group("checkpoint")
+                try:
+                    identity_before = atomic_publish.FileIdentity.from_path(path)
+                except OSError as exc:
+                    raise RuntimeError(
+                        f"cannot prove immutable result checkpoint stage identity: {path}"
+                    ) from exc
+                payload = _stable_read(path, "staged immutable result checkpoint")
+                try:
+                    identity_after = atomic_publish.FileIdentity.from_path(path)
+                except OSError as exc:
+                    raise RuntimeError(
+                        f"cannot prove immutable result checkpoint stage identity: {path}"
+                    ) from exc
+                if identity_after != identity_before:
+                    raise RuntimeError(
+                        f"immutable result checkpoint stage identity changed: {path}"
+                    )
+                case_id, task_id, _ = _validated_checkpoint_payload(
+                    target,
+                    payload,
+                    output_dir=output_dir,
+                    expected_by_case=expected_by_case,
+                    audit_identity_sha256=audit_identity_sha256,
+                )
+                key = (case_id, str(task_id))
+                existing_path = checkpoint_path_by_key.get(key)
+                if existing_path is not None and existing_path != target:
+                    raise RuntimeError(
+                        f"multiple immutable checkpoints for case_id={case_id!r} "
+                        f"task_id={task_id}"
+                    )
+                checkpoint_path_by_key[key] = target
+                if staged_constraints is not None:
+                    existing_stage = staged_constraints.get(key)
+                    constraint = (target, payload)
+                    if existing_stage is not None and existing_stage != constraint:
+                        raise RuntimeError(
+                            f"conflicting immutable checkpoint stages for "
+                            f"case_id={case_id!r} task_id={task_id}"
+                        )
+                    staged_constraints[key] = constraint
+                continue
+            if not CHECKPOINT_NAME_RE.fullmatch(path.name):
                 raise RuntimeError(f"orphan result checkpoint filename: {path}")
             payload = _stable_read(path, "immutable result checkpoint")
-            actual_sha256 = sha256_bytes(payload)
-            if actual_sha256 != match.group("sha256"):
-                raise RuntimeError(f"immutable result checkpoint hash/tamper mismatch: {path}")
-            document = _decode_json(payload, "immutable result checkpoint")
-            if canonical_json_bytes(document) != payload:
-                raise RuntimeError(f"immutable result checkpoint is not canonical: {path}")
-            if document.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
-                raise RuntimeError(f"immutable result checkpoint schema mismatch: {path}")
-            if document.get("audit_identity_sha256") != audit_identity_sha256:
-                raise RuntimeError(f"orphan result checkpoint audit identity: {path}")
-            record = document.get("record")
-            if not isinstance(record, dict):
-                raise RuntimeError(f"immutable result checkpoint record is malformed: {path}")
-            case_id = str(record.get("case_id") or "")
-            expected = expected_by_case.get(case_id)
-            if expected is None:
-                raise RuntimeError(f"orphan result checkpoint case_id: {path}")
-            task_id = int(match.group("task_id"))
-            expected_path, _, expected_sha256 = _checkpoint_path(output_dir, expected, record)
-            if expected_path != path or expected_sha256 != actual_sha256:
-                raise RuntimeError(f"immutable result checkpoint path collision: {path}")
-            _validate_checkpoint_record(
-                record,
-                expected=expected,
-                task_id=task_id,
+            case_id, task_id, record = _validated_checkpoint_payload(
+                path,
+                payload,
+                output_dir=output_dir,
+                expected_by_case=expected_by_case,
                 audit_identity_sha256=audit_identity_sha256,
             )
             key = (case_id, str(task_id))
+            existing_path = checkpoint_path_by_key.get(key)
+            if existing_path is not None and existing_path != path:
+                raise RuntimeError(
+                    f"multiple immutable checkpoints for case_id={case_id!r} task_id={task_id}"
+                )
+            checkpoint_path_by_key[key] = path
             if key in checkpoint_index:
                 raise RuntimeError(
                     f"multiple immutable checkpoints for case_id={case_id!r} task_id={task_id}"
                 )
-            reference = _checkpoint_reference(output_dir, expected, record)
+            reference = _checkpoint_reference(output_dir, expected_by_case[case_id], record)
             checkpoint_index[key] = reference
             audited.setdefault(case_id, {})[str(task_id)] = record
 
@@ -1267,7 +1357,12 @@ def audit_stage2(
         raise RuntimeError("scheduler URL must use HTTP or HTTPS")
     receipt_path = output_dir / RECEIPT_NAME
     report_path = output_dir / REPORT_NAME
-    audited_results = _load_prior_evidence(output_dir, evidence)
+    staged_constraints: dict[tuple[str, str], tuple[Path, bytes]] = {}
+    audited_results = _load_prior_evidence(
+        output_dir,
+        evidence,
+        staged_constraints=staged_constraints,
+    )
     audit_identity_sha256 = canonical_sha256(evidence.identity)
     observations: list[dict[str, Any]] = []
     seen_task_ids: dict[int, str] = {}
@@ -1386,6 +1481,17 @@ def audit_stage2(
                 checkpoint_path, checkpoint_payload, _ = _checkpoint_path(
                     output_dir, expected, record
                 )
+                staged_constraint = staged_constraints.get(
+                    (expected.case_id, str(task_id))
+                )
+                if staged_constraint is not None and staged_constraint != (
+                    checkpoint_path,
+                    checkpoint_payload,
+                ):
+                    raise RuntimeError(
+                        f"staged immutable checkpoint differs from the freshly "
+                        f"audited result: {expected.case_id}:{task_id}"
+                    )
                 _publish_immutable(checkpoint_path, checkpoint_payload)
             case_versions = audited_results.setdefault(expected.case_id, {})
             case_versions[str(task_id)] = record

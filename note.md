@@ -3883,3 +3883,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: resume the 300-case GET-only audit without treating a delayed network-drive rename as loss or deleting ambiguous evidence.
 - Actions/result: added hash-named stages, exact double-read snapshots, transient WinError 5/32/33 retry, and exact-payload late-success acceptance; focused tests pass 17/17.
 - Evidence/next: the failed 6,443-byte stage independently materialized as canonical receipt with 5 audited checkpoints and 4 observations; the older provider sidecar remains untouched, and the full scan can now resume from immutable checkpoints.
+
+## 2026-07-13 01:47:00 +09:00 - Stage2 checkpoint recovery developed off RaiDrive
+- Part/goal: stop repeated RaiDrive source-upload failures and make immutable checkpoint publication resumable without trusting staged files as evidence.
+- Actions/result: paused all Y-drive source edits, cloned commit `eb3e596` to local NTFS, and made stages non-authoritative/non-mutating: they are validated and constrain a fresh remote-result re-fetch before new no-replace publication; focused 23/23 and related 54/54 (1 skip) pass.
+- Failure/next: v1/v2 audit outputs remain preserved failed-attempt evidence; review and push the local commit, then update Y once and start v3 only after the mount is stable.

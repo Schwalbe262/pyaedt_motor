@@ -208,6 +208,31 @@ class Stage2V4R3AuditTests(unittest.TestCase):
         plan, decision = write_fixture(root, count=count)
         return audit.load_campaign_evidence(plan, decision, expected_rows=count)
 
+    def published_checkpoint(
+        self, root: Path
+    ) -> tuple[audit.CampaignEvidence, Path, Path, bytes]:
+        evidence = self.evidence(root, 1)
+        task = scheduler_task(evidence.tasks[0], 91, "completed", exit_code=0)
+        output = root / "published-checkpoint"
+        audit.audit_stage2(
+            plan_path=evidence.plan_path,
+            decision_path=evidence.decision_path,
+            output_dir=output,
+            scheduler_url=None,
+            publish=True,
+            client=FakeClient(
+                {evidence.tasks[0].task_name: [task]},
+                {91: result_payload(evidence.rows[0])},
+            ),
+            attempt_limit=20,
+            max_result_bytes=1_000_000,
+            expected_rows=1,
+        )
+        checkpoint = next(
+            (output / audit.CHECKPOINT_DIR_NAME).glob("*.canonical.json")
+        )
+        return evidence, output, checkpoint, checkpoint.read_bytes()
+
     def test_atomic_write_retries_transient_winerror_with_owned_stage(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             destination = Path(temp) / audit.RECEIPT_NAME
@@ -387,6 +412,166 @@ class Stage2V4R3AuditTests(unittest.TestCase):
                 retained = list(root.glob(f".{destination.name}.{sha256}.*.tmp"))
                 self.assertEqual(len(retained), 1)
                 self.assertEqual(retained[0].read_bytes(), payload)
+
+    def test_staged_checkpoint_is_validated_but_never_authorizes_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            evidence, output, checkpoint, _ = self.published_checkpoint(Path(temp))
+            checkpoint.unlink()
+            (output / audit.RECEIPT_NAME).unlink()
+            stages = list(checkpoint.parent.glob(f".{checkpoint.name}.*.staged"))
+            self.assertGreaterEqual(len(stages), 1)
+
+            with mock.patch.object(
+                audit.atomic_publish, "publish_no_replace"
+            ) as publication:
+                audited = audit._load_prior_evidence(output, evidence)
+            publication.assert_not_called()
+            self.assertEqual(audited, {})
+            self.assertTrue(all(stage.is_file() for stage in stages))
+            self.assertFalse(checkpoint.exists())
+
+    def test_ambiguous_immutable_publish_retains_stage_for_next_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            evidence, output, checkpoint, payload = self.published_checkpoint(Path(temp))
+            checkpoint.unlink()
+            denied = PermissionError("mapped-drive checkpoint rename denied")
+            denied.winerror = 5
+            with mock.patch.object(
+                audit.atomic_publish, "publish_no_replace", side_effect=denied
+            ):
+                with self.assertRaisesRegex(PermissionError, "checkpoint rename denied"):
+                    audit._publish_immutable(checkpoint, payload)
+
+            stages = list(checkpoint.parent.glob(f".{checkpoint.name}.*.staged"))
+            self.assertGreaterEqual(len(stages), 2)
+            self.assertTrue(all(stage.read_bytes() == payload for stage in stages))
+            self.assertFalse(checkpoint.exists())
+            (output / audit.RECEIPT_NAME).unlink()
+            resumed = FakeClient(
+                {
+                    evidence.tasks[0].task_name: [
+                        scheduler_task(evidence.tasks[0], 91, "completed", exit_code=0)
+                    ]
+                },
+                {91: result_payload(evidence.rows[0])},
+            )
+            result = audit.audit_stage2(
+                plan_path=evidence.plan_path,
+                decision_path=evidence.decision_path,
+                output_dir=output,
+                scheduler_url=None,
+                publish=True,
+                client=resumed,
+                attempt_limit=20,
+                max_result_bytes=1_000_000,
+                expected_rows=1,
+            )
+            self.assertEqual(result["summary"]["reused_results_this_run"], 0)
+            self.assertEqual(result["summary"]["remote_result_fetches_this_run"], 1)
+            self.assertEqual(len(resumed.result_urls), 1)
+            self.assertEqual(checkpoint.read_bytes(), payload)
+            self.assertTrue(stages[0].exists())
+
+    def test_immutable_publish_accepts_only_exact_late_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            _, _, checkpoint, payload = self.published_checkpoint(Path(temp))
+            checkpoint.unlink()
+            real_publish = audit.atomic_publish.publish_no_replace
+
+            def publish_then_deny(source: Path, destination: Path):
+                real_publish(source, destination)
+                denied = PermissionError("mapped drive reported late denial")
+                denied.winerror = 5
+                raise denied
+
+            with mock.patch.object(
+                audit.atomic_publish,
+                "publish_no_replace",
+                side_effect=publish_then_deny,
+            ):
+                self.assertEqual(
+                    audit._publish_immutable(checkpoint, payload),
+                    "published",
+                )
+            self.assertEqual(checkpoint.read_bytes(), payload)
+            retained = list(checkpoint.parent.glob(f".{checkpoint.name}.*.staged"))
+            self.assertGreaterEqual(len(retained), 1)
+            self.assertTrue(all(stage.read_bytes() == payload for stage in retained))
+
+    def test_stage_preflight_rejects_foreign_identity_before_any_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            evidence, output, checkpoint, payload = self.published_checkpoint(Path(temp))
+            valid_stage = checkpoint.with_name(f".{checkpoint.name}.abcdefgh.staged")
+            checkpoint.rename(valid_stage)
+            document = json.loads(payload.decode("utf-8"))
+            document["audit_identity_sha256"] = "0" * 64
+            document["record"]["audit_identity_sha256"] = "0" * 64
+            foreign_payload = audit.canonical_json_bytes(document)
+            foreign_name = (
+                f"{evidence.tasks[0].safe_case_id}.task-91."
+                f"{audit.sha256_bytes(foreign_payload)}.canonical.json"
+            )
+            foreign_stage = checkpoint.parent / f".{foreign_name}.ijklmnop.staged"
+            foreign_stage.write_bytes(foreign_payload)
+
+            with mock.patch.object(
+                audit.atomic_publish, "publish_no_replace"
+            ) as publication:
+                with self.assertRaisesRegex(RuntimeError, "audit identity"):
+                    audit._load_prior_evidence(
+                        output,
+                        evidence,
+                    )
+            publication.assert_not_called()
+            self.assertTrue(valid_stage.is_file())
+            self.assertTrue(foreign_stage.is_file())
+            self.assertFalse(checkpoint.exists())
+
+    def test_conflicting_staged_checkpoints_fail_preflight_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            evidence, output, checkpoint, payload = self.published_checkpoint(Path(temp))
+            first_stage = checkpoint.with_name(f".{checkpoint.name}.abcdefgh.staged")
+            checkpoint.rename(first_stage)
+            document = json.loads(payload.decode("utf-8"))
+            document["record"]["classification"] = "physics_failed"
+            document["record"]["physics_issues"] = ["synthetic_conflict"]
+            conflict_payload = audit.canonical_json_bytes(document)
+            conflict_name = (
+                f"{evidence.tasks[0].safe_case_id}.task-91."
+                f"{audit.sha256_bytes(conflict_payload)}.canonical.json"
+            )
+            conflict_stage = checkpoint.parent / f".{conflict_name}.ijklmnop.staged"
+            conflict_stage.write_bytes(conflict_payload)
+
+            with mock.patch.object(
+                audit.atomic_publish, "publish_no_replace"
+            ) as publication:
+                with self.assertRaisesRegex(RuntimeError, "multiple immutable checkpoints"):
+                    audit._load_prior_evidence(
+                        output,
+                        evidence,
+                    )
+            publication.assert_not_called()
+            self.assertTrue(first_stage.is_file())
+            self.assertTrue(conflict_stage.is_file())
+            self.assertFalse(checkpoint.exists())
+
+    def test_exact_final_plus_stage_preserves_stage_without_republication(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            evidence, output, checkpoint, payload = self.published_checkpoint(Path(temp))
+            stage = checkpoint.with_name(f".{checkpoint.name}.abcdefgh.staged")
+            stage.write_bytes(payload)
+            with mock.patch.object(
+                audit.atomic_publish, "publish_no_replace"
+            ) as publication:
+                recovered = audit._load_prior_evidence(
+                    output,
+                    evidence,
+                )
+            publication.assert_not_called()
+            self.assertEqual(list(recovered), [evidence.tasks[0].case_id])
+            self.assertEqual(checkpoint.read_bytes(), payload)
+            self.assertTrue(stage.exists())
 
     def test_dry_run_queries_every_exact_identity_and_fetches_only_scheduler_success(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

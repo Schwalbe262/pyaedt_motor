@@ -40,7 +40,7 @@
 - `summarize_ipmsm_partial_replay.py`: computes partial replay counts and exact downstream gate thresholds from result CSVs.
 - `plan_ipmsm_quality_workflow.py`: writes a manual command plan for setup dry-run, quality analysis, filtering, gates, and retraining.
 - `train_ipmsm_lightgbm.py`: deterministic LightGBM training CLI with derived geometry input repair and recovered width-ratio feature.
-- `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the current 200-concurrent/batch cap.
+- `select_ipmsm_replay_cases.py`: selects fixed-geometry replay cases from existing result CSVs under the current 50-active-task cap; larger plans use bounded refill.
 - `submit_ipmsm_scheduler_job.py` / `submit_ipmsm_scheduler_task.py`: dry-run-first Slurm Scheduler helpers for `/api/tasks`, legacy `/tasks`, `/tasks/git`, and `dynamic_packed_srun`.
 - `sync_ipmsm_scheduler_replay.py`: read-only scheduler sampler plus missing-result fetch, partial CSV generation, and exact-slot `/api/tasks` refill helper.
 - `inspect_ipmsm_scheduler_job.py`: filtered scheduler job/task/status/log/result inspector.
@@ -129,7 +129,7 @@
 
 - AEDT setup-only cannot run in this local runtime because required PyAEDT wrapper/packages are unavailable.
 - Scheduler reaches AEDT; current blocker is quality triage: failed row indexes 12, 19, 35, 40, 59, 63, 67, 92, 106, 107, 108, 109, 115, 120, 123, 146, 153, 155, 193, and 198 failed again in retry1 with AEDT `analysis=False`.
-- The 200 figure is an active queued/running concurrency cap, not a total simulation cap; keep submitting 200-case waves as capacity opens, with non-overlapping plans and filtered evidence.
+- The current 50 figure is an active queued/running concurrency cap, not a total simulation cap; larger non-overlapping plans may continue through bounded refill with filtered evidence.
 - Batch3 all cases001-200 completed. Batch4 has completed=98/failed=15/cancelled=94/running=102, including 15 old no-bootstrap plumbing failures and corrected submissions through case200. Batch5 has cases001-100 submitted after a non-overlapping 200-case plan; total active FEA is 200, with first completed batch5 cases040/059/070 failed missing transient outputs.
 - Fallback allocations n108/n109/n110/n115 also run unrelated `crypto-sweep` tasks, but explicit-module setup-only smokes passed and production FEA now uses their remaining scheduler capacity.
 - Tasks 8448-8463 finished with 15 `ok`, 1 AEDT `analysis=False`, and long ok elapsed times of 4385.824-5517.626s under a 16-way wave.
@@ -138,7 +138,7 @@
 
 ## Next steps
 
-1. Poll batch3/batch4/batch5 tasks with filtered fields; fetch completed result CSV row/status summaries only, then recompute explicit partial gates without broad globs while keeping active FEA queued/running count <=200.
+1. Poll batch3/batch4/batch5 tasks with filtered fields; fetch completed result CSV row/status summaries only, then recompute explicit partial gates without broad globs while keeping active FEA queued/running count <=50.
 2. Do not use `quality_cases_smoke.csv` for mesh/time conclusions; it does not fix geometry across profiles.
 3. Keep `mesh_time_fine` as the selected profile unless new fixed-geometry evidence beats it on quality/runtime.
 4. With batch5 cases001-100 submitted, future refill can advance to batch5 case101+ when slots open; automated refills must use `/api/tasks`, deterministic `dedupe_key`, explicit Ansys module env setup, and per-case bootstrapped remote CSV paths.
@@ -260,3 +260,4 @@
 - Stage1 v4r4 rebuild tooling now fail-closes on fixed replay authorities, exact forensic scheduler provenance, any 700-row collection drift, or non-atomic publication; focused tests pass 19/19, while real output remains gated on published forensic/recovery receipts.
 - Torque-unit replay forensics are published 4/4 at receipt `28600d7f...2c23d0a`: selected tasks 29328/29297/29298/29299, excluded infra task 29288, with full-window raw exports and exact torque/power gates verified.
 - Stage2 audit aggregate publication now uses hash-named staging, bounded WinError retries, and exact-byte late-success checks; the earlier 5-checkpoint receipt materialized after its reported error, while the provider sidecar remains preserved.
+- RaiDrive source upload errors are avoided by developing v3 on local NTFS; retained stages are validated but never promoted/deleted/used as evidence, and a retry re-fetches before fresh no-replace publication; focused 23/23 and related 54/54 (1 skip) pass.
