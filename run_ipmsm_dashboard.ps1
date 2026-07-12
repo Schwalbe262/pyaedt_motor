@@ -7,8 +7,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $artifactDir = Join-Path $repoRoot 'simul_log_smoke\beta_zero_recovery_26092_26093'
-$v4StateDir = Join-Path $repoRoot 'simul_log_smoke\v4r3'
-$contract = Join-Path $v4StateDir 'base_v3.json'
+$v4StateDir = Join-Path $repoRoot 'simul_log_smoke\v4r5_native'
+$contract = Join-Path $v4StateDir 'base_v4r5.json'
 $v4Contract = Join-Path $v4StateDir 'contract.json'
 $runnerLog = Join-Path $artifactDir 'foundation_stage1_runner_supervised.stderr.log'
 $targetLoadProgress = Join-Path $artifactDir 'ipmsm_target_load_v4\progress.json'
@@ -26,6 +26,7 @@ $arguments = @(
     '--v4-contract', $v4Contract,
     '--runner-log', $runnerLog,
     '--target-load-progress', $targetLoadProgress
+    '--project-active-cap', '50'
 )
 $process = Start-Process `
     -FilePath $python `

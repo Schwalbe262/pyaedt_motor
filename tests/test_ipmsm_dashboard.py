@@ -2538,11 +2538,12 @@ class FamilyConfirmationTests(unittest.TestCase):
         script = (
             Path(server.__file__).resolve().parent / "run_ipmsm_dashboard.ps1"
         ).read_text(encoding="utf-8")
-        self.assertIn("'simul_log_smoke\\v4r3'", script)
-        self.assertIn("$contract = Join-Path $v4StateDir 'base_v3.json'", script)
+        self.assertIn("'simul_log_smoke\\v4r5_native'", script)
+        self.assertIn("$contract = Join-Path $v4StateDir 'base_v4r5.json'", script)
         self.assertIn("$v4Contract = Join-Path $v4StateDir 'contract.json'", script)
         self.assertIn("'--runner-log', $runnerLog", script)
         self.assertIn("'--v4-contract', $v4Contract", script)
+        self.assertIn("'--project-active-cap', '50'", script)
         self.assertNotIn("Test-Path -LiteralPath $v4Contract", script)
 
     def test_frontend_family_card_ids_and_render_entrypoint_are_stable(self) -> None:
