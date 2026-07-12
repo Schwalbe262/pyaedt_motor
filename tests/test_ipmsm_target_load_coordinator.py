@@ -1,16 +1,32 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
+import math
+import os
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 import ipmsm_dashboard_state as dashboard
+import ipmsm_optimization as optimization
 import ipmsm_target_load_coordinator as coordinator
 import ipmsm_target_load_workflow as workflow
+import optimize_ipmsm_nsga2 as optimizer
+import validate_ipmsm_pareto_fea as pareto_validator
+from tests.test_validate_ipmsm_pareto_fea import (
+    ValidationFixture,
+    predictor as validation_predictor,
+    read_csv as read_fixture_csv,
+    write_csv as write_fixture_csv,
+)
 from tests.test_ipmsm_target_load_workflow import (
+    build_kwargs,
     fixed_mtpa_evidence,
     issue_observation,
     result_csv,
@@ -20,6 +36,266 @@ from tests.test_ipmsm_target_load_workflow import (
 
 
 NOW = datetime(2026, 7, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _write_upstream_audit_fixture(
+    root: Path,
+    *,
+    two_candidates: bool = False,
+    fea_filter_to_low: bool = False,
+    relative_validator_argv: bool = False,
+) -> tuple[SimpleNamespace, ValidationFixture]:
+    fixture = ValidationFixture(root)
+    if two_candidates:
+        low_design = {
+            bound.name: (bound.lower + bound.upper) / 2.0
+            for bound in fixture.spec.design_space
+        }
+        high_design = dict(low_design)
+        low_design["stack_length_mm"] = fixture.spec.stack_length_bounds_mm[0]
+        high_design["stack_length_mm"] = fixture.spec.stack_length_bounds_mm[1]
+
+        def length_tradeoff_predictor(features: dict[str, Any]) -> dict[str, float]:
+            prediction = dict(validation_predictor(features))
+            lower, upper = fixture.spec.stack_length_bounds_mm
+            fraction = (float(features["stack_length_mm"]) - lower) / (upper - lower)
+            prediction.update(
+                {
+                    "core_loss_w": 100.0 - 99.9 * fraction,
+                    "core_loss_ucb_w": 101.0 - 99.9 * fraction,
+                    "solid_loss_w": 50.0 - 49.9 * fraction,
+                    "solid_loss_ucb_w": 51.0 - 49.9 * fraction,
+                }
+            )
+            return prediction
+
+        low = optimization.evaluate_design_candidate(
+            low_design,
+            fixture.spec,
+            length_tradeoff_predictor,
+            candidate_id="pareto_low",
+            seed=42,
+        )
+        high = optimization.evaluate_design_candidate(
+            high_design,
+            fixture.spec,
+            length_tradeoff_predictor,
+            candidate_id="pareto_high",
+            seed=42,
+        )
+        if not low.feasible or not high.feasible:
+            raise AssertionError("two-candidate audit fixture must be surrogate feasible")
+        decoded_metadata = json.loads(fixture.metadata_path.read_text(encoding="utf-8"))
+        artifact_hashes: dict[str, str] = {}
+        for target in sorted(decoded_metadata["model_paths"]):
+            recorded = decoded_metadata["model_paths"][target]
+            values = [recorded] if isinstance(recorded, str) else list(recorded)
+            for index, value in enumerate(values):
+                path = root / Path(value).name
+                artifact_hashes[f"{target}[{index}]::{path.name}"] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+        fixture.pareto_path.unlink()
+        fixture.plan_path.unlink()
+        optimizer.write_optimization_csv_pair(
+            fixture.pareto_path,
+            fixture.plan_path,
+            [low, high],
+            [high, low],
+            fixture.spec,
+            provenance_context={
+                optimizer.OPTIMIZATION_SPEC_SHA256_FIELD: hashlib.sha256(
+                    fixture.spec_path.read_bytes()
+                ).hexdigest(),
+                optimizer.SURROGATE_METADATA_SHA256_FIELD: hashlib.sha256(
+                    fixture.metadata_path.read_bytes()
+                ).hexdigest(),
+                optimizer.SURROGATE_MODEL_ARTIFACTS_SHA256_FIELD: (
+                    workflow._optimizer_canonical_json_sha256(artifact_hashes)
+                ),
+                optimizer.SURROGATE_VERIFICATION_FIELD: optimizer.STRICT_BUNDLE_VERIFICATION,
+            },
+        )
+        fixture.pareto_fields, fixture.pareto_rows = read_fixture_csv(fixture.pareto_path)
+        fixture.plan_fields, fixture.plan_rows = read_fixture_csv(fixture.plan_path)
+        fixture.result_rows = [fixture.result_row(row) for row in fixture.plan_rows]
+        for row in fixture.result_rows:
+            if fea_filter_to_low:
+                core_loss = 1.0 if row["candidate_id"] == "pareto_high" else 0.01
+            else:
+                core_loss = 0.05 if row["candidate_id"] == "pareto_high" else 99.0
+            solid_loss = float(row["output_solidloss_last_avg_w"])
+            copper_loss = float(row["output_copperloss_last_avg_w"])
+            total_loss = core_loss + solid_loss + copper_loss
+            point = next(
+                item
+                for item in fixture.spec.operating_points
+                if item.name == row["operating_point_id"]
+            )
+            power = float(row["output_torque_last_avg_nm"]) * point.mechanical_angular_speed_rad_s
+            row["output_coreloss_last_avg_w"] = core_loss
+            row["output_total_loss_last_avg_w"] = total_loss
+            row["output_efficiency_last_pct"] = power / (power + total_loss) * 100.0
+        fixture.result_fields = list(fixture.result_rows[0])
+        write_fixture_csv(fixture.results_path, fixture.result_fields, fixture.result_rows)
+    summary, rows = fixture.validate()
+    summary_path = root / "pareto_fea_validation.json"
+    rows_path = root / "pareto_fea_validation_rows.csv"
+    front_path = root / pareto_validator.DEFAULT_FINAL_FRONT_NAME
+    summary_path.write_bytes(pareto_validator._json_text(summary).encode("utf-8"))
+    rows_path.write_bytes(pareto_validator._row_csv_text(rows).encode("utf-8"))
+    front_path.write_bytes(
+        pareto_validator._final_front_csv_text(
+            fixture.spec,
+            summary["fea_filtered_final_front"],
+        ).encode("utf-8")
+    )
+    beta_path = root / "beta_calibration_manifest.json"
+    beta_path.write_text("{}", encoding="utf-8")
+
+    _, fingerprints, _ = pareto_validator.read_model_metadata(
+        fixture.metadata_path,
+        fixture.spec,
+    )
+    metadata = json.loads(fixture.metadata_path.read_text(encoding="utf-8"))
+    model_artifacts: dict[str, dict[str, str]] = {}
+    for target in sorted(metadata["model_paths"]):
+        recorded = metadata["model_paths"][target]
+        values = [recorded] if isinstance(recorded, str) else list(recorded)
+        for index, value in enumerate(values):
+            path = root / Path(value).name
+            model_artifacts[f"{target}[{index}]::{path.name}"] = {
+                "path": str(path.resolve(strict=False)),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+    provenance = {
+        field: fixture.plan_rows[0][field]
+        for field in pareto_validator.PROVENANCE_FIELDS
+    }
+    candidate_order: list[str] = []
+    for row in fixture.plan_rows:
+        if row["candidate_id"] not in candidate_order:
+            candidate_order.append(row["candidate_id"])
+
+    def artifact(path: Path) -> dict[str, str]:
+        return {
+            "path": str(path.resolve(strict=False)),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+
+    def validator_path(path: Path) -> str:
+        return path.name if relative_validator_argv else str(path)
+
+    contract = {
+        "inputs": {
+            "optimization_spec": artifact(fixture.spec_path),
+            "beta": {"calibration_manifest": artifact(beta_path)},
+            "model_bundle": {
+                "model_dir": str(root.resolve(strict=False)),
+                "metadata": artifact(fixture.metadata_path),
+                "artifacts": model_artifacts,
+                "fingerprints": fingerprints,
+            },
+        },
+        "optimization": {
+            "pareto_output": str(fixture.pareto_path.resolve(strict=False)),
+            "fea_cases_output": str(fixture.plan_path.resolve(strict=False)),
+            "max_fea_candidates": 12,
+        },
+        "pareto_fea": {
+            "results": str(fixture.results_path.resolve(strict=False)),
+        },
+        "validation": {
+            "argv": [
+                "--spec",
+                validator_path(fixture.spec_path),
+                "--model-dir",
+                "." if relative_validator_argv else str(root.resolve(strict=False)),
+                "--pareto",
+                validator_path(fixture.pareto_path),
+                "--case-plan",
+                validator_path(fixture.plan_path),
+                "--results",
+                validator_path(fixture.results_path),
+                "--summary-output",
+                validator_path(summary_path),
+                "--rows-output",
+                validator_path(rows_path),
+                "--final-front-output",
+                validator_path(front_path),
+                "--minimum-coverage",
+                str(pareto_validator.DEFAULT_MINIMUM_COVERAGE),
+                "--identity-relative-tolerance",
+                str(pareto_validator.DEFAULT_IDENTITY_RELATIVE_TOLERANCE),
+            ],
+            "minimum_coverage": pareto_validator.DEFAULT_MINIMUM_COVERAGE,
+            "identity_relative_tolerance": (
+                pareto_validator.DEFAULT_IDENTITY_RELATIVE_TOLERANCE
+            ),
+            "summary_output": str(summary_path.resolve(strict=False)),
+            "rows_output": str(rows_path.resolve(strict=False)),
+            "final_front_output": str(front_path.resolve(strict=False)),
+        },
+        "source_sha256": {
+            name: hashlib.sha256(
+                (Path(coordinator.__file__).resolve().parent / name).read_bytes()
+            ).hexdigest()
+            for name in coordinator.OPTIMIZATION_SOURCE_FILES
+        },
+    }
+    decision_path = root / "ipmsm_v2_optimization_decision.json"
+    final_ids = summary["fea_filtered_final_front_candidate_ids"]
+    decision = {
+        "schema_version": coordinator.OPTIMIZATION_DECISION_SCHEMA_VERSION,
+        "decision_output": str(decision_path.resolve(strict=False)),
+        "contract_sha256": coordinator.canonical_json_sha256(contract),
+        "execution_contract": contract,
+        "mode": "execute",
+        "status": "complete",
+        "selected_model": {
+            "model_dir": str(root.resolve(strict=False)),
+            "metadata_sha256": hashlib.sha256(fixture.metadata_path.read_bytes()).hexdigest(),
+            "fingerprints": fingerprints,
+        },
+        "optimization_artifacts": {
+            "pareto": artifact(fixture.pareto_path),
+            "fea_cases": artifact(fixture.plan_path),
+            "fea_candidate_ids": candidate_order,
+            "fea_case_rows": len(fixture.plan_rows),
+            "provenance": provenance,
+        },
+        "pareto_fea": {
+            "results": str(fixture.results_path.resolve(strict=False)),
+            "results_sha256": hashlib.sha256(fixture.results_path.read_bytes()).hexdigest(),
+            "case_rows": len(fixture.plan_rows),
+        },
+        "validation": {
+            "summary": artifact(summary_path),
+            "rows": artifact(rows_path),
+            "final_front": {
+                **artifact(front_path),
+                "candidate_count": len(final_ids),
+                "candidate_ids": final_ids,
+            },
+            "validation_id": summary["validation_id"],
+            "feasible_candidate_count": summary["feasible_candidate_count"],
+            "gate_failures": [],
+            "pass": True,
+        },
+    }
+    decision_path.write_bytes(coordinator._indented_json_bytes(decision))
+    args = SimpleNamespace(
+        optimization_decision=decision_path,
+        optimization_spec=fixture.spec_path,
+        pareto_csv=fixture.pareto_path,
+        seed_fea_plan=fixture.plan_path,
+        pareto_validation_summary=summary_path,
+        pareto_final_front=front_path,
+        model_metadata=fixture.metadata_path,
+        model_artifact_dir=root,
+        beta_calibration_manifest=beta_path,
+    )
+    return args, fixture
 
 
 class FakeSchedulerClient:
@@ -111,6 +387,330 @@ class FakeSchedulerClient:
         return self.results[(task_id, result_path)]
 
 
+class UpstreamFinalFrontAuditTests(unittest.TestCase):
+    def audit(self, args: SimpleNamespace) -> tuple[bytes, dict[str, Any]]:
+        metadata_json = args.model_metadata.read_bytes()
+        return coordinator._audit_upstream_final_front(
+            args,
+            spec_json=args.optimization_spec.read_bytes(),
+            pareto_csv=args.pareto_csv.read_bytes(),
+            seed_plan_csv=args.seed_fea_plan.read_bytes(),
+            metadata_json=metadata_json,
+            beta_json=args.beta_calibration_manifest.read_bytes(),
+            model_artifacts=coordinator._model_artifacts_from_directory(
+                metadata_json,
+                args.model_artifact_dir,
+            ),
+        )
+
+    def test_completed_decision_strict_summary_and_final_front_are_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args, fixture = _write_upstream_audit_fixture(Path(tmp))
+            filtered, binding = self.audit(args)
+            fields, rows = workflow._strict_csv(filtered, "filtered fixture plan")
+            self.assertEqual(fields, fixture.plan_fields)
+            self.assertEqual(
+                [row["case_id"] for row in rows],
+                [row["case_id"] for row in fixture.plan_rows],
+            )
+            self.assertEqual(binding["selected_candidate_ids"], ["pareto_001"])
+            self.assertEqual(
+                binding["source_artifacts"]["seed_fea_plan"]["sha256"],
+                hashlib.sha256(fixture.plan_path.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                binding["optimization_decision"]["sha256"],
+                hashlib.sha256(args.optimization_decision.read_bytes()).hexdigest(),
+            )
+
+    def test_relative_validator_argv_binds_inferred_execution_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args, _ = _write_upstream_audit_fixture(
+                root,
+                relative_validator_argv=True,
+            )
+            _, binding = self.audit(args)
+        self.assertEqual(binding["execution_cwd"], str(root.resolve(strict=False)))
+
+    def test_final_front_is_filtered_in_original_seed_order_not_front_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args, _ = _write_upstream_audit_fixture(Path(tmp), two_candidates=True)
+            filtered, binding = self.audit(args)
+            _, rows = workflow._strict_csv(filtered, "two-candidate filtered fixture plan")
+            filtered_order: list[str] = []
+            for row in rows:
+                if row["candidate_id"] not in filtered_order:
+                    filtered_order.append(row["candidate_id"])
+
+        self.assertEqual(binding["original_seed_candidate_ids"], ["pareto_high", "pareto_low"])
+        self.assertEqual(
+            binding["fea_filtered_final_front_candidate_ids"],
+            ["pareto_low", "pareto_high"],
+        )
+        self.assertEqual(binding["selected_candidate_ids"], ["pareto_high", "pareto_low"])
+        self.assertEqual(filtered_order, ["pareto_high", "pareto_low"])
+
+    def test_fea_dominated_seed_candidate_is_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args, _ = _write_upstream_audit_fixture(
+                Path(tmp),
+                two_candidates=True,
+                fea_filter_to_low=True,
+            )
+            filtered, binding = self.audit(args)
+            _, rows = workflow._strict_csv(filtered, "subset filtered fixture plan")
+            filtered_ids = {row["candidate_id"] for row in rows}
+
+        self.assertEqual(binding["original_seed_candidate_ids"], ["pareto_high", "pareto_low"])
+        self.assertEqual(binding["fea_filtered_final_front_candidate_ids"], ["pareto_low"])
+        self.assertEqual(binding["selected_candidate_ids"], ["pareto_low"])
+        self.assertEqual(filtered_ids, {"pareto_low"})
+
+    def test_decision_summary_and_final_front_tamper_fail_closed(self) -> None:
+        mutations = ("decision_status", "summary_bytes", "front_bytes", "front_ids")
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
+                args, _ = _write_upstream_audit_fixture(Path(tmp))
+                if mutation == "decision_status":
+                    decision = json.loads(args.optimization_decision.read_text(encoding="utf-8"))
+                    decision["status"] = "pareto_fea_started"
+                    args.optimization_decision.write_bytes(coordinator._indented_json_bytes(decision))
+                elif mutation == "summary_bytes":
+                    args.pareto_validation_summary.write_bytes(
+                        args.pareto_validation_summary.read_bytes() + b" "
+                    )
+                elif mutation == "front_bytes":
+                    args.pareto_final_front.write_bytes(args.pareto_final_front.read_bytes() + b"\n")
+                else:
+                    decision = json.loads(args.optimization_decision.read_text(encoding="utf-8"))
+                    decision["validation"]["final_front"]["candidate_ids"] = ["unknown"]
+                    args.optimization_decision.write_bytes(coordinator._indented_json_bytes(decision))
+                with self.assertRaises(coordinator.TargetLoadCoordinatorError):
+                    self.audit(args)
+
+    def test_coordinated_rehash_cannot_select_fea_dominated_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args, fixture = _write_upstream_audit_fixture(
+                root,
+                two_candidates=True,
+                fea_filter_to_low=True,
+            )
+            forged = json.loads(args.pareto_validation_summary.read_text(encoding="utf-8"))
+            high = next(
+                candidate
+                for candidate in forged["candidates"]
+                if candidate["candidate_id"] == "pareto_high"
+            )
+            forged_front = pareto_validator._final_front_row(fixture.spec, high)
+            forged["fea_filtered_final_front"] = [forged_front]
+            forged["fea_filtered_final_front_candidate_ids"] = ["pareto_high"]
+            forged["fea_filtered_final_front_count"] = 1
+            unsigned = dict(forged)
+            unsigned.pop("validation_id")
+            forged_id = pareto_validator.canonical_hash(
+                "ipmsm-pareto-fea-validation",
+                unsigned,
+            )
+            forged["validation_id"] = forged_id
+            args.pareto_validation_summary.write_bytes(
+                pareto_validator._json_text(forged).encode("utf-8")
+            )
+            args.pareto_final_front.write_bytes(
+                pareto_validator._final_front_csv_text(
+                    fixture.spec,
+                    [forged_front],
+                ).encode("utf-8")
+            )
+            rows_path = root / "pareto_fea_validation_rows.csv"
+            _, forged_rows = read_fixture_csv(rows_path)
+            for row in forged_rows:
+                row["validation_id"] = forged_id
+            rows_path.write_bytes(pareto_validator._row_csv_text(forged_rows).encode("utf-8"))
+
+            decision = json.loads(args.optimization_decision.read_text(encoding="utf-8"))
+            decision["validation"]["summary"]["sha256"] = hashlib.sha256(
+                args.pareto_validation_summary.read_bytes()
+            ).hexdigest()
+            decision["validation"]["rows"]["sha256"] = hashlib.sha256(
+                rows_path.read_bytes()
+            ).hexdigest()
+            decision["validation"]["final_front"].update(
+                {
+                    "sha256": hashlib.sha256(args.pareto_final_front.read_bytes()).hexdigest(),
+                    "candidate_ids": ["pareto_high"],
+                    "candidate_count": 1,
+                }
+            )
+            decision["validation"]["validation_id"] = forged_id
+            args.optimization_decision.write_bytes(coordinator._indented_json_bytes(decision))
+
+            with self.assertRaisesRegex(
+                coordinator.TargetLoadCoordinatorError,
+                "independent strict validation",
+            ):
+                self.audit(args)
+
+    def test_validator_argv_thresholds_and_candidate_bound_are_immutable(self) -> None:
+        mutations = (
+            "argv_order",
+            "threshold_mismatch",
+            "coordinated_threshold",
+            "candidate_bound",
+            "source_coverage",
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
+                args, _ = _write_upstream_audit_fixture(
+                    Path(tmp),
+                    two_candidates=mutation == "candidate_bound",
+                )
+                decision = json.loads(args.optimization_decision.read_text(encoding="utf-8"))
+                contract = decision["execution_contract"]
+                validation = contract["validation"]
+                if mutation == "argv_order":
+                    validation["argv"][0] = "--pareto"
+                elif mutation == "threshold_mismatch":
+                    validation["minimum_coverage"] = 0.9
+                elif mutation == "coordinated_threshold":
+                    validation["minimum_coverage"] = 0.9
+                    index = validation["argv"].index("--minimum-coverage") + 1
+                    validation["argv"][index] = "0.9"
+                else:
+                    if mutation == "candidate_bound":
+                        contract["optimization"]["max_fea_candidates"] = 1
+                    else:
+                        contract["source_sha256"].pop(next(iter(contract["source_sha256"])))
+                decision["contract_sha256"] = coordinator.canonical_json_sha256(contract)
+                args.optimization_decision.write_bytes(
+                    coordinator._indented_json_bytes(decision)
+                )
+                with self.assertRaises(coordinator.TargetLoadCoordinatorError):
+                    self.audit(args)
+
+    def test_final_recheck_closes_toctou_for_every_bound_artifact_class(self) -> None:
+        targets = (
+            "optimization_decision",
+            "pareto_validation_summary",
+            "validation_rows",
+            "pareto_final_front",
+            "pareto_results",
+            "optimization_spec",
+            "pareto_csv",
+            "seed_fea_plan",
+            "model_metadata",
+            "beta_calibration_manifest",
+            "model_artifact",
+        )
+        original_recheck = coordinator._final_recheck_upstream_artifacts
+        for target in targets:
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                args, fixture = _write_upstream_audit_fixture(root)
+                paths = {
+                    "optimization_decision": args.optimization_decision,
+                    "pareto_validation_summary": args.pareto_validation_summary,
+                    "validation_rows": root / "pareto_fea_validation_rows.csv",
+                    "pareto_final_front": args.pareto_final_front,
+                    "pareto_results": fixture.results_path,
+                    "optimization_spec": args.optimization_spec,
+                    "pareto_csv": args.pareto_csv,
+                    "seed_fea_plan": args.seed_fea_plan,
+                    "model_metadata": args.model_metadata,
+                    "beta_calibration_manifest": args.beta_calibration_manifest,
+                    "model_artifact": fixture.artifact_paths[0],
+                }
+                target_path = paths[target]
+
+                def mutate_then_recheck(artifacts):
+                    target_path.write_bytes(target_path.read_bytes() + b"TOCTOU")
+                    return original_recheck(artifacts)
+
+                with mock.patch.object(
+                    coordinator,
+                    "_final_recheck_upstream_artifacts",
+                    side_effect=mutate_then_recheck,
+                ), self.assertRaisesRegex(
+                    coordinator.TargetLoadCoordinatorError,
+                    "changed during final audit",
+                ):
+                    self.audit(args)
+
+    def test_root_and_progress_bind_decision_and_reject_rehashed_claim(self) -> None:
+        first_kwargs = build_kwargs()
+        second_kwargs = copy.deepcopy(first_kwargs)
+        second_kwargs["upstream_pareto_binding"]["optimization_decision"]["sha256"] = "c" * 64
+        first = workflow.build_root_manifest(**first_kwargs)  # type: ignore[arg-type]
+        second = workflow.build_root_manifest(**second_kwargs)  # type: ignore[arg-type]
+        with tempfile.TemporaryDirectory() as first_tmp, tempfile.TemporaryDirectory() as second_tmp:
+            first_progress = coordinator.initialize_workspace(Path(first_tmp), first)
+            with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "decision hash"):
+                coordinator.initialize_workspace(Path(second_tmp), second)
+        self.assertNotEqual(first["identity_sha256"], second["identity_sha256"])
+        self.assertEqual(first_progress["identity_sha256"], first["identity_sha256"])
+
+    def test_init_root_builder_consumes_only_final_front_without_workspace_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths, _ = _write_upstream_audit_fixture(
+                root,
+                two_candidates=True,
+                fea_filter_to_low=True,
+            )
+            workspace = root / "must-not-be-created-by-root-builder"
+            args = SimpleNamespace(
+                **vars(paths),
+                workspace=workspace,
+                relative_tolerance=0.01,
+                max_attempts=6,
+                monotonic_relative_tolerance=0.005,
+                minimum_step_relative=0.01,
+                maximum_scale_per_attempt=1.5,
+                project="PYAEDT_MOTOR_IPMSM_V2",
+                project_id=2,
+                project_active_cap=100,
+                remote_root="$HOME/slurm_scheduler/projects/PYAEDT_MOTOR_IPMSM_V2/pyaedt_motor",
+                env_setup="module load ansys-electronics/v252",
+                max_workers_per_node=4,
+                cpus=4,
+                cores_per_process=4,
+                memory_mb=32_768,
+                task_timeout_seconds=43_200,
+                scheduler_url="http://127.0.0.1:8000",
+                scheduler_timeout=1.0,
+                history_limit=10_000,
+                task_retry_limit=2,
+                result_settle_seconds=60,
+                result_identity_relative_tolerance=1.0e-6,
+            )
+            sentinel = {"sentinel": True}
+            snapshot = coordinator.SchedulerSnapshot((), 0, 0, 100)
+            with mock.patch.object(
+                coordinator.SchedulerClient,
+                "snapshot",
+                return_value=snapshot,
+            ), mock.patch.object(
+                workflow,
+                "build_root_manifest",
+                return_value=sentinel,
+            ) as build:
+                result = coordinator.build_root_from_files(args)
+            call = build.call_args.kwargs
+            _, filtered_rows = workflow._strict_csv(
+                call["seed_fea_plan_csv"],
+                "init filtered plan",
+            )
+
+        self.assertIs(result, sentinel)
+        self.assertEqual({row["candidate_id"] for row in filtered_rows}, {"pareto_low"})
+        self.assertEqual(
+            call["upstream_pareto_binding"]["selected_candidate_ids"],
+            ["pareto_low"],
+        )
+        self.assertFalse(workspace.exists())
+
+
 class TargetLoadCoordinatorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -192,6 +792,25 @@ class TargetLoadCoordinatorTests(unittest.TestCase):
         self.assertEqual(parsed["root_manifest_sha256"], workflow.canonical_json_sha256(root))
         self.assertEqual(parsed["identity_sha256"], root["identity_sha256"])
 
+    def test_one_cycle_strict_loads_unchanged_root_only_once(self) -> None:
+        root = self.fresh_root()
+        workflow._ROOT_VALIDATION_CACHE.clear()
+        original_loader = workflow._validated_surrogate_bundle_documents
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            workflow,
+            "_validated_surrogate_bundle_documents",
+            wraps=original_loader,
+        ) as loader:
+            workspace = Path(temporary) / "target-load-v4"
+            coordinator.initialize_workspace(workspace, root)
+            coordinator.advance_workspace_once(
+                workspace,
+                FakeSchedulerClient(),
+                submit=False,
+                now=NOW,
+            )
+        self.assertEqual(loader.call_count, 1)
+
     def test_immutable_publication_is_idempotent_and_replay_rejects_root_tamper(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "target-load-v4"
@@ -209,6 +828,94 @@ class TargetLoadCoordinatorTests(unittest.TestCase):
             )
             with self.assertRaises(workflow.TargetLoadWorkflowError):
                 coordinator.replay_workspace(workspace)
+
+    def test_managed_paths_reject_escape_and_reparse_components(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary) / "target-load-v4"
+            self.initialize(workspace)
+            outside = Path(temporary) / "outside.json"
+            outside.write_text("untouched", encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.TargetLoadCoordinatorError, "escapes"):
+                coordinator._guard_workspace_path(workspace, outside)
+
+            simulated = workspace / "simulated-reparse"
+            simulated.mkdir()
+            original_detector = coordinator._path_is_link_or_reparse
+
+            def detector(path: Path) -> bool:
+                return path == simulated or original_detector(path)
+
+            with mock.patch.object(
+                coordinator,
+                "_path_is_link_or_reparse",
+                side_effect=detector,
+            ), self.assertRaisesRegex(
+                coordinator.TargetLoadCoordinatorError,
+                "symlink/reparse",
+            ):
+                coordinator.publish_immutable_json(simulated / "escape.json", {"bad": True})
+            self.assertEqual(outside.read_text(encoding="utf-8"), "untouched")
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlink semantics")
+    def test_posix_symlink_escape_is_rejected_before_read_or_replace(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "target-load-v4"
+            self.initialize(workspace)
+            outside = root / "outside.json"
+            outside.write_text("untouched", encoding="utf-8")
+            progress = workspace / "progress.json"
+            progress.unlink()
+            progress.symlink_to(outside)
+            with self.assertRaisesRegex(
+                coordinator.TargetLoadCoordinatorError,
+                "symlink/reparse",
+            ):
+                coordinator.replace_progress(progress, {"bad": True})
+            self.assertEqual(outside.read_text(encoding="utf-8"), "untouched")
+
+            linked_parent = root / "linked-parent"
+            linked_parent.symlink_to(root, target_is_directory=True)
+            with self.assertRaisesRegex(
+                coordinator.TargetLoadCoordinatorError,
+                "symlink/reparse",
+            ):
+                coordinator.initialize_workspace(linked_parent / "escaped-workspace", self.fresh_root())
+
+    def test_hardlinked_lock_and_authority_files_cannot_alias_outside_inode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "lock-workspace"
+            workspace.mkdir()
+            outside_lock = root / "outside-lock.bin"
+            outside_lock.write_bytes(b"")
+            try:
+                os.link(outside_lock, workspace / ".coordinator.lock")
+            except OSError as exc:
+                self.skipTest(f"hardlinks unavailable: {exc}")
+            with self.assertRaisesRegex(
+                coordinator.TargetLoadCoordinatorError,
+                "single-link",
+            ):
+                with coordinator.workspace_lock(workspace):
+                    pass
+            self.assertEqual(outside_lock.read_bytes(), b"")
+
+            managed = root / "authority-workspace"
+            manifest = self.fresh_root()
+            coordinator.initialize_workspace(managed, manifest)
+            root_path = managed / "root.manifest.json"
+            payload = root_path.read_bytes()
+            root_path.unlink()
+            outside_root = root / "outside-root.json"
+            outside_root.write_bytes(payload)
+            os.link(outside_root, root_path)
+            with self.assertRaisesRegex(
+                coordinator.TargetLoadCoordinatorError,
+                "single-link",
+            ):
+                coordinator.publish_immutable_bytes(root_path, payload)
+            self.assertEqual(outside_root.read_bytes(), payload)
 
     def test_fixed_mtpa_envelope_is_revalidated_on_replay_and_updates_progress(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -3748,3 +3748,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Candidates/options: kept filesystem-ACL self-attestation explicit and inactive; rejected silently accepting assumption-marked PPT values or treating the artifact as a digital signature.
 - Metrics/result: focused `.venv` 17/17; two independent P0/P1 audits found none within the documented trust model; Stage1 remained 575/700 with 100 active and no declaration/confirmation artifact was created.
 - Failure/next: current v3 does not pin or invoke the helper; a future resealed supervisor must pin it and audit the exact declaration/confirmation immediately before optimization after the operator confirms the production values.
+
+## 2026-07-12 10:41:38 +09:00 - Strict final-front target-load root v2
+- Part/goal: ensure post-NSGA target-load FEA can consume only the independently validated FEA-filtered Pareto front without touching live v3.
+- Hypothesis/actions: independently reran the Pareto validator, embedded exact decision/plan/results/validation/model/producer bytes, preserved original seed order, pinned atomic publication, and rejected workspace escapes, reparse/symlink, and hardlink aliases.
+- Candidates/options: retained full immutable model replay but keyed the expensive validation cache by canonical root plus live runtime-source digest; rejected trusting coordinated rehashes or reloading the 14.94 MiB bundle roughly five times per cycle.
+- Metrics/result: real strict load measured 43.8 s/126.6 MiB peak; one-load-per-process-root replay is regression-tested; target-load related 94/94 and shared `.venv` 828/828 pass, with one expected Windows POSIX-only skip and no remaining independent-audit P0/P1.
+- Failure/next: no root, task, or execution artifact was created; after official R²/Pareto gates and production-input approval, initialize the v2 root and run the coordinator through the existing cap-serialized path.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

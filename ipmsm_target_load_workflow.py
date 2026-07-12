@@ -47,7 +47,19 @@ from optimize_ipmsm_nsga2 import (
 import validate_ipmsm_pareto_fea as pareto_validator
 
 
-ROOT_SCHEMA_VERSION = "ipmsm-target-load-match-root-v1"
+ROOT_SCHEMA_VERSION = "ipmsm-target-load-match-root-v2"
+UPSTREAM_PARETO_BINDING_SCHEMA_VERSION = "ipmsm-target-load-upstream-pareto-v1"
+OPTIMIZATION_PRODUCER_SOURCE_FILES = (
+    "continue_ipmsm_v2_optimization.py",
+    "continue_ipmsm_v2_stage2.py",
+    "calibrate_ipmsm_beta.py",
+    "ipmsm_optimization.py",
+    "ipmsm_surrogate_bundle.py",
+    "optimize_ipmsm_nsga2.py",
+    "run_ipmsm_v2_campaign.py",
+    "submit_ipmsm_v2_campaign.py",
+    "validate_ipmsm_pareto_fea.py",
+)
 ATTEMPT_SCHEMA_VERSION = "ipmsm-target-load-match-attempt-v1"
 OBSERVATION_SCHEMA_VERSION = "ipmsm-target-load-observation-v1"
 FIXED_MTPA_EVIDENCE_SCHEMA_VERSION = "ipmsm-fixed-current-mtpa-evidence-v1"
@@ -81,6 +93,7 @@ RUNTIME_SOURCE_PATHS = MappingProxyType({
     "matcher_source": Path(target_load_matching.__file__).resolve(),
     "workflow_source": Path(__file__).resolve(),
     "coordinator_source": COORDINATOR_SOURCE_PATH,
+    "atomic_publish_source": Path(__file__).resolve().with_name("atomic_publish.py"),
     "validator_source": Path(pareto_validator.__file__).resolve(),
     "submit_ipmsm_v2_campaign_source": Path(__file__).resolve().with_name(
         "submit_ipmsm_v2_campaign.py"
@@ -113,6 +126,7 @@ REQUIRED_SOURCE_HASHES = frozenset(
         "matcher_source_sha256",
         "workflow_source_sha256",
         "coordinator_source_sha256",
+        "atomic_publish_source_sha256",
         "validator_source_sha256",
         "submit_ipmsm_v2_campaign_source_sha256",
         "submit_ipmsm_scheduler_task_source_sha256",
@@ -161,6 +175,7 @@ ROOT_SOURCE_DOCUMENT_FIELDS = (
     "matcher_source",
     "workflow_source",
     "coordinator_source",
+    "atomic_publish_source",
     "validator_source",
     "submit_ipmsm_v2_campaign_source",
     "submit_ipmsm_scheduler_task_source",
@@ -241,6 +256,23 @@ def _strict_json_object(payload: bytes, label: str) -> dict[str, Any]:
     return decoded
 
 
+def _producer_json_object(payload: bytes, label: str) -> dict[str, Any]:
+    decoded = _strict_json_object(payload, label)
+    expected = (
+        json.dumps(
+            decoded,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n"
+    ).encode("utf-8")
+    if payload != expected:
+        raise TargetLoadWorkflowError(f"{label} is not canonical producer JSON")
+    return decoded
+
+
 def _strict_csv(payload: bytes, label: str) -> tuple[list[str], list[dict[str, str]]]:
     try:
         stream = io.StringIO(_exact_bytes(payload, label).decode("utf-8-sig"), newline="")
@@ -306,6 +338,229 @@ def _text(value: object, label: str) -> str:
     if not text or text.lower() in {"nan", "none", "null"}:
         raise TargetLoadWorkflowError(f"{label} must be nonblank")
     return text
+
+
+def _artifact_binding(value: object, label: str) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"path", "sha256"}:
+        raise TargetLoadWorkflowError(f"{label} artifact binding is invalid")
+    path = _text(value.get("path"), f"{label}.path")
+    if not Path(path).is_absolute():
+        raise TargetLoadWorkflowError(f"{label}.path must be absolute")
+    return {
+        "path": str(Path(path).resolve(strict=False)),
+        "sha256": _validate_sha256(value.get("sha256"), f"{label}.sha256"),
+    }
+
+
+def _fingerprinted_id(value: object, namespace: str, label: str) -> str:
+    text = _text(value, label)
+    prefix = f"{namespace}:sha256:"
+    if not text.startswith(prefix):
+        raise TargetLoadWorkflowError(f"{label} namespace is invalid")
+    _validate_sha256(text[len(prefix) :], label)
+    return text
+
+
+def validate_upstream_pareto_binding(value: object) -> dict[str, Any]:
+    """Normalize the completed optimization/strict-FEA authority frozen by v4."""
+
+    required = {
+        "schema_version",
+        "optimization_decision",
+        "source_artifacts",
+        "optimization_run_id",
+        "execution_cwd",
+        "validation",
+        "authority_documents_base64",
+        "model_artifacts_base64",
+        "producer_sources_base64",
+        "original_seed_candidate_ids",
+        "fea_filtered_final_front_candidate_ids",
+        "selected_candidate_ids",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise TargetLoadWorkflowError("upstream Pareto binding fields are invalid")
+    if value.get("schema_version") != UPSTREAM_PARETO_BINDING_SCHEMA_VERSION:
+        raise TargetLoadWorkflowError("upstream Pareto binding schema is invalid")
+
+    decision = value.get("optimization_decision")
+    if not isinstance(decision, Mapping) or set(decision) != {
+        "path",
+        "sha256",
+        "schema_version",
+        "contract_sha256",
+        "mode",
+        "status",
+    }:
+        raise TargetLoadWorkflowError("upstream optimization decision binding is invalid")
+    normalized_decision: dict[str, Any] = {
+        **_artifact_binding(
+            {"path": decision.get("path"), "sha256": decision.get("sha256")},
+            "upstream optimization decision",
+        ),
+        "schema_version": _text(
+            decision.get("schema_version"), "upstream optimization decision schema"
+        ),
+        "contract_sha256": _validate_sha256(
+            decision.get("contract_sha256"), "upstream optimization contract SHA256"
+        ),
+        "mode": decision.get("mode"),
+        "status": decision.get("status"),
+    }
+    if normalized_decision["schema_version"] != "ipmsm_v2_optimization_continuation_v1":
+        raise TargetLoadWorkflowError("upstream optimization decision schema is unsupported")
+    if normalized_decision["mode"] != "execute" or normalized_decision["status"] != "complete":
+        raise TargetLoadWorkflowError("upstream optimization decision is not complete")
+
+    source_names = {
+        "optimization_spec",
+        "pareto",
+        "seed_fea_plan",
+        "pareto_fea_results",
+        "model_metadata",
+        "beta_calibration_manifest",
+    }
+    sources = value.get("source_artifacts")
+    if not isinstance(sources, Mapping) or set(sources) != source_names | {
+        "model_artifacts_manifest_sha256"
+    }:
+        raise TargetLoadWorkflowError("upstream source artifact coverage is invalid")
+    normalized_sources: dict[str, Any] = {
+        name: _artifact_binding(sources.get(name), f"upstream source {name}")
+        for name in sorted(source_names)
+    }
+    normalized_sources["model_artifacts_manifest_sha256"] = _validate_sha256(
+        sources.get("model_artifacts_manifest_sha256"),
+        "upstream model artifact manifest SHA256",
+    )
+
+    validation = value.get("validation")
+    if not isinstance(validation, Mapping) or set(validation) != {
+        "validation_id",
+        "summary_schema_version",
+        "final_front_schema_version",
+        "summary",
+        "rows",
+        "final_front",
+        "status",
+        "pass",
+    }:
+        raise TargetLoadWorkflowError("upstream validation binding is invalid")
+    normalized_validation: dict[str, Any] = {
+        "validation_id": _fingerprinted_id(
+            validation.get("validation_id"),
+            "ipmsm-pareto-fea-validation",
+            "upstream validation_id",
+        ),
+        "summary_schema_version": _text(
+            validation.get("summary_schema_version"), "upstream summary schema"
+        ),
+        "final_front_schema_version": _text(
+            validation.get("final_front_schema_version"), "upstream final-front schema"
+        ),
+        "summary": _artifact_binding(validation.get("summary"), "upstream validation summary"),
+        "rows": _artifact_binding(validation.get("rows"), "upstream validation rows"),
+        "final_front": _artifact_binding(
+            validation.get("final_front"), "upstream validation final front"
+        ),
+        "status": validation.get("status"),
+        "pass": validation.get("pass"),
+    }
+    if normalized_validation["summary_schema_version"] != pareto_validator.SUMMARY_SCHEMA_VERSION:
+        raise TargetLoadWorkflowError("upstream validation summary schema is unsupported")
+    if normalized_validation["final_front_schema_version"] != (
+        pareto_validator.FINAL_FRONT_SCHEMA_VERSION
+    ):
+        raise TargetLoadWorkflowError("upstream final-front schema is unsupported")
+    if normalized_validation["status"] != "passed" or normalized_validation["pass"] is not True:
+        raise TargetLoadWorkflowError("upstream strict Pareto FEA gate did not pass")
+
+    authority_names = {
+        "optimization_decision_json",
+        "original_seed_fea_plan_csv",
+        "pareto_fea_results_csv",
+        "validation_summary_json",
+        "validation_rows_csv",
+        "final_front_csv",
+    }
+    authority = value.get("authority_documents_base64")
+    if not isinstance(authority, Mapping) or set(authority) != authority_names:
+        raise TargetLoadWorkflowError("upstream authority document coverage is invalid")
+    normalized_authority = {
+        name: _encode_exact_bytes(
+            _decode_exact_bytes(authority[name], f"upstream authority {name}")
+        )
+        for name in sorted(authority_names)
+    }
+    encoded_models = value.get("model_artifacts_base64")
+    if not isinstance(encoded_models, Mapping) or not encoded_models:
+        raise TargetLoadWorkflowError("upstream embedded model artifacts are missing")
+    normalized_models: dict[str, str] = {}
+    for raw_name, encoded in sorted(encoded_models.items()):
+        name = _text(raw_name, "upstream model artifact basename")
+        if Path(name).name != name or name in normalized_models:
+            raise TargetLoadWorkflowError("upstream model artifact basename is unsafe or duplicate")
+        normalized_models[name] = _encode_exact_bytes(
+            _decode_exact_bytes(encoded, f"upstream model artifact {name}")
+        )
+    encoded_sources = value.get("producer_sources_base64")
+    if not isinstance(encoded_sources, Mapping) or not encoded_sources:
+        raise TargetLoadWorkflowError("upstream producer sources are missing")
+    normalized_producer_sources: dict[str, str] = {}
+    for raw_name, encoded in sorted(encoded_sources.items()):
+        name = _text(raw_name, "upstream producer source name")
+        if Path(name).name != name or name in normalized_producer_sources:
+            raise TargetLoadWorkflowError("upstream producer source name is unsafe or duplicate")
+        normalized_producer_sources[name] = _encode_exact_bytes(
+            _decode_exact_bytes(encoded, f"upstream producer source {name}")
+        )
+
+    def candidate_ids(raw: object, label: str) -> list[str]:
+        if not isinstance(raw, list) or not raw:
+            raise TargetLoadWorkflowError(f"{label} must be a nonempty array")
+        result = [_text(item, f"{label} item") for item in raw]
+        if len(result) != len(set(result)):
+            raise TargetLoadWorkflowError(f"{label} contains duplicate IDs")
+        return result
+
+    original = candidate_ids(
+        value.get("original_seed_candidate_ids"), "upstream original seed candidate IDs"
+    )
+    final_front = candidate_ids(
+        value.get("fea_filtered_final_front_candidate_ids"),
+        "upstream FEA-filtered final-front candidate IDs",
+    )
+    selected = candidate_ids(
+        value.get("selected_candidate_ids"), "upstream selected candidate IDs"
+    )
+    if not set(final_front) <= set(original):
+        raise TargetLoadWorkflowError("upstream final front contains an unknown seed candidate")
+    expected_selected = [candidate_id for candidate_id in original if candidate_id in set(final_front)]
+    if selected != expected_selected or set(selected) != set(final_front):
+        raise TargetLoadWorkflowError("upstream selected candidates do not preserve seed-plan order")
+    execution_cwd = Path(_text(value.get("execution_cwd"), "upstream execution cwd"))
+    if not execution_cwd.is_absolute():
+        raise TargetLoadWorkflowError("upstream execution cwd must be absolute")
+    execution_cwd = execution_cwd.resolve(strict=False)
+
+    return {
+        "schema_version": UPSTREAM_PARETO_BINDING_SCHEMA_VERSION,
+        "optimization_decision": normalized_decision,
+        "source_artifacts": normalized_sources,
+        "optimization_run_id": _fingerprinted_id(
+            value.get("optimization_run_id"),
+            "ipmsm-optimization-run",
+            "upstream optimization_run_id",
+        ),
+        "execution_cwd": str(execution_cwd),
+        "validation": normalized_validation,
+        "authority_documents_base64": normalized_authority,
+        "model_artifacts_base64": normalized_models,
+        "producer_sources_base64": normalized_producer_sources,
+        "original_seed_candidate_ids": original,
+        "fea_filtered_final_front_candidate_ids": final_front,
+        "selected_candidate_ids": selected,
+    }
 
 
 def _finite(value: object, label: str) -> float:
@@ -628,6 +883,7 @@ def _validated_root_documents(
     matcher_source: bytes,
     workflow_source: bytes,
     coordinator_source: bytes,
+    atomic_publish_source: bytes,
     validator_source: bytes,
     submit_ipmsm_v2_campaign_source: bytes,
     submit_ipmsm_scheduler_task_source: bytes,
@@ -661,6 +917,9 @@ def _validated_root_documents(
         "matcher_source": _exact_bytes(matcher_source, "matcher source"),
         "workflow_source": _exact_bytes(workflow_source, "workflow source"),
         "coordinator_source": _exact_bytes(coordinator_source, "coordinator source"),
+        "atomic_publish_source": _exact_bytes(
+            atomic_publish_source, "atomic_publish source"
+        ),
         "validator_source": _exact_bytes(validator_source, "validator source"),
         "submit_ipmsm_v2_campaign_source": _exact_bytes(
             submit_ipmsm_v2_campaign_source,
@@ -737,6 +996,9 @@ def _validated_root_documents(
         "matcher_source_sha256": _sha256_bytes(exact_documents["matcher_source"]),
         "workflow_source_sha256": _sha256_bytes(exact_documents["workflow_source"]),
         "coordinator_source_sha256": _sha256_bytes(exact_documents["coordinator_source"]),
+        "atomic_publish_source_sha256": _sha256_bytes(
+            exact_documents["atomic_publish_source"]
+        ),
         "validator_source_sha256": _sha256_bytes(exact_documents["validator_source"]),
         "submit_ipmsm_v2_campaign_source_sha256": _sha256_bytes(
             exact_documents["submit_ipmsm_v2_campaign_source"]
@@ -921,6 +1183,7 @@ def build_root_manifest(
     matcher_source: bytes,
     workflow_source: bytes,
     coordinator_source: bytes,
+    atomic_publish_source: bytes,
     validator_source: bytes,
     submit_ipmsm_v2_campaign_source: bytes,
     submit_ipmsm_scheduler_task_source: bytes,
@@ -931,6 +1194,7 @@ def build_root_manifest(
     ipmsm_geometry_source: bytes,
     variable_source: bytes,
     pyaedt_core_source: bytes,
+    upstream_pareto_binding: Mapping[str, Any],
     scheduler_contract: Mapping[str, object],
     policy_template: MatchPolicyTemplate,
     task_retry_limit: int,
@@ -958,6 +1222,7 @@ def build_root_manifest(
         matcher_source=matcher_source,
         workflow_source=workflow_source,
         coordinator_source=coordinator_source,
+        atomic_publish_source=atomic_publish_source,
         validator_source=validator_source,
         submit_ipmsm_v2_campaign_source=submit_ipmsm_v2_campaign_source,
         submit_ipmsm_scheduler_task_source=submit_ipmsm_scheduler_task_source,
@@ -982,6 +1247,7 @@ def build_root_manifest(
     if not 0.0 < identity_tolerance <= 1.0e-6:
         raise TargetLoadWorkflowError("result_identity_relative_tolerance must be in (0, 1e-6]")
     normalized_hashes = _validate_source_hashes(source_hashes)
+    normalized_upstream = validate_upstream_pareto_binding(upstream_pareto_binding)
     normalized_scheduler = _validate_scheduler_contract(scheduler_contract)
     if not math.isclose(
         policy_template.maximum_current_peak_a,
@@ -995,6 +1261,10 @@ def build_root_manifest(
     candidate_order, probe_seeds = _ordered_probe_seeds(base_plan_rows, spec, policy_template)
     if candidate_order != strict_candidate_order:
         raise TargetLoadWorkflowError("strict candidate order differs from probe seed order")
+    if candidate_order != normalized_upstream["selected_candidate_ids"]:
+        raise TargetLoadWorkflowError(
+            "filtered seed-plan candidates differ from the upstream final-front selection"
+        )
     identity = {
         "revision": revision,
         "source_hashes": normalized_hashes,
@@ -1010,6 +1280,7 @@ def build_root_manifest(
         "model_fingerprints": model_fingerprints,
         "model_artifact_hashes": model_artifact_hashes,
         "optimization_provenance": optimization_provenance,
+        "upstream_pareto_binding": normalized_upstream,
         "source_documents_base64": source_documents_base64,
         "strict_input_validation": {
             "seed_plan": "validate_case_plan",
@@ -1018,6 +1289,7 @@ def build_root_manifest(
             "surrogate_bundle": "load_surrogate_bundle",
             "exact_document_hashes_computed_internally": True,
             "embedded_source_documents_revalidated": True,
+            "upstream_final_front": "completed_decision_and_strict_validation_v1",
         },
         "beta_validation_semantics": {
             "probe_family": TARGET_LOAD_CONTROL_SOURCE,
@@ -1064,6 +1336,337 @@ def build_root_manifest(
     }
 
 
+def _validate_embedded_upstream_authority(
+    identity: Mapping[str, Any],
+    upstream: Mapping[str, Any],
+    documents: Mapping[str, bytes],
+    spec: OptimizationSpec,
+    expected_provenance: Mapping[str, str],
+    filtered_candidate_order: Sequence[str],
+) -> None:
+    authority = {
+        name: _decode_exact_bytes(encoded, f"root upstream authority {name}")
+        for name, encoded in upstream["authority_documents_base64"].items()
+    }
+    model_artifacts = {
+        name: _decode_exact_bytes(encoded, f"root upstream model artifact {name}")
+        for name, encoded in upstream["model_artifacts_base64"].items()
+    }
+    source_records = upstream["source_artifacts"]
+    validation_record = upstream["validation"]
+
+    def require_hash(record: Mapping[str, Any], payload: bytes, label: str) -> None:
+        if record.get("sha256") != _sha256_bytes(payload):
+            raise TargetLoadWorkflowError(f"root upstream {label} hash is invalid")
+
+    require_hash(
+        upstream["optimization_decision"],
+        authority["optimization_decision_json"],
+        "optimization decision",
+    )
+    for name, payload in (
+        ("optimization_spec", documents["optimization_spec_json"]),
+        ("pareto", documents["pareto_csv"]),
+        ("seed_fea_plan", authority["original_seed_fea_plan_csv"]),
+        ("pareto_fea_results", authority["pareto_fea_results_csv"]),
+        ("model_metadata", documents["model_metadata_json"]),
+        ("beta_calibration_manifest", documents["beta_calibration_manifest_json"]),
+    ):
+        require_hash(source_records[name], payload, name)
+    for name, payload in (
+        ("summary", authority["validation_summary_json"]),
+        ("rows", authority["validation_rows_csv"]),
+        ("final_front", authority["final_front_csv"]),
+    ):
+        require_hash(validation_record[name], payload, f"validation {name}")
+
+    metadata = _strict_json_object(documents["model_metadata_json"], "root surrogate metadata")
+    indexed_models = _model_artifact_index(metadata)
+    expected_basenames = {basename for _, _, basename in indexed_models}
+    if set(model_artifacts) != expected_basenames:
+        raise TargetLoadWorkflowError("root upstream embedded model artifact coverage is invalid")
+    replayed_model_hashes = {
+        f"{target}[{index}]::{basename}": _sha256_bytes(model_artifacts[basename])
+        for target, index, basename in indexed_models
+    }
+    if identity.get("model_artifact_hashes") != replayed_model_hashes:
+        raise TargetLoadWorkflowError("root embedded model artifact hashes are invalid")
+    replayed_fingerprints = identity.get("model_fingerprints")
+    replayed_manifest_sha = _optimizer_canonical_json_sha256(replayed_model_hashes)
+    if source_records["model_artifacts_manifest_sha256"] != replayed_manifest_sha:
+        raise TargetLoadWorkflowError("root upstream model artifact manifest hash is invalid")
+
+    original_fields, original_rows = _strict_csv(
+        authority["original_seed_fea_plan_csv"],
+        "root original seed FEA plan",
+    )
+    pareto_fields, pareto_rows = _strict_csv(documents["pareto_csv"], "root Pareto front")
+    try:
+        original_candidate_order = pareto_validator.validate_case_plan(
+            spec,
+            original_fields,
+            original_rows,
+            expected_provenance,
+        )
+        pareto_validator.validate_pareto_front(
+            spec,
+            pareto_fields,
+            pareto_rows,
+            original_rows,
+            original_candidate_order,
+        )
+    except pareto_validator.ParetoFEAValidationError as exc:
+        raise TargetLoadWorkflowError(
+            f"root original upstream optimization authority is invalid: {exc}"
+        ) from exc
+    if upstream["original_seed_candidate_ids"] != original_candidate_order:
+        raise TargetLoadWorkflowError("root upstream original candidate order is invalid")
+
+    decision = _producer_json_object(
+        authority["optimization_decision_json"],
+        "root optimization decision",
+    )
+    if (
+        decision.get("schema_version") != "ipmsm_v2_optimization_continuation_v1"
+        or decision.get("mode") != "execute"
+        or decision.get("status") != "complete"
+    ):
+        raise TargetLoadWorkflowError("root embedded optimization decision is not complete")
+    decision_binding = upstream["optimization_decision"]
+    if decision.get("decision_output") != decision_binding["path"]:
+        raise TargetLoadWorkflowError("root optimization decision path binding is invalid")
+    contract = decision.get("execution_contract")
+    if not isinstance(contract, Mapping):
+        raise TargetLoadWorkflowError("root optimization execution contract is missing")
+    contract_sha = _optimizer_canonical_json_sha256(contract)
+    if (
+        decision.get("contract_sha256") != contract_sha
+        or decision_binding["contract_sha256"] != contract_sha
+    ):
+        raise TargetLoadWorkflowError("root optimization execution contract hash is invalid")
+    producer_sources = {
+        name: _decode_exact_bytes(encoded, f"root producer source {name}")
+        for name, encoded in upstream["producer_sources_base64"].items()
+    }
+    source_contract = contract.get("source_sha256")
+    if (
+        set(producer_sources) != set(OPTIMIZATION_PRODUCER_SOURCE_FILES)
+        or not isinstance(source_contract, Mapping)
+        or set(source_contract) != set(OPTIMIZATION_PRODUCER_SOURCE_FILES)
+    ):
+        raise TargetLoadWorkflowError("root optimization producer source coverage is invalid")
+    if any(
+        source_contract[name] != _sha256_bytes(producer_sources[name])
+        for name in OPTIMIZATION_PRODUCER_SOURCE_FILES
+    ):
+        raise TargetLoadWorkflowError("root optimization producer source hash is invalid")
+    for name, payload in producer_sources.items():
+        path = PROJECT_SOURCE_ROOT / name
+        try:
+            current = path.read_bytes()
+        except OSError as exc:
+            raise TargetLoadWorkflowError(f"cannot replay producer source: {path}") from exc
+        if payload != current:
+            raise TargetLoadWorkflowError(f"root producer source differs from runtime: {name}")
+
+    def bound_path(value: Any, record: Mapping[str, Any], label: str) -> None:
+        if str(value or "") != record["path"]:
+            raise TargetLoadWorkflowError(f"root {label} path binding is invalid")
+
+    inputs = contract.get("inputs")
+    optimization_contract = contract.get("optimization")
+    fea_contract = contract.get("pareto_fea")
+    validator_contract = contract.get("validation")
+    if not all(
+        isinstance(item, Mapping)
+        for item in (inputs, optimization_contract, fea_contract, validator_contract)
+    ):
+        raise TargetLoadWorkflowError("root optimization decision contract sections are missing")
+    beta_inputs = inputs.get("beta")
+    model_contract = inputs.get("model_bundle")
+    if not isinstance(beta_inputs, Mapping) or not isinstance(model_contract, Mapping):
+        raise TargetLoadWorkflowError("root optimization input contract is incomplete")
+    spec_input = inputs.get("optimization_spec")
+    beta_manifest_input = beta_inputs.get("calibration_manifest")
+    metadata_input = model_contract.get("metadata")
+    if not all(
+        isinstance(item, Mapping)
+        for item in (spec_input, beta_manifest_input, metadata_input)
+    ):
+        raise TargetLoadWorkflowError("root optimization artifact input records are invalid")
+    bound_path(spec_input.get("path"), source_records["optimization_spec"], "spec")
+    if spec_input.get("sha256") != source_records["optimization_spec"]["sha256"]:
+        raise TargetLoadWorkflowError("root optimization spec contract hash is invalid")
+    bound_path(
+        beta_manifest_input.get("path"),
+        source_records["beta_calibration_manifest"],
+        "beta manifest",
+    )
+    if beta_manifest_input.get("sha256") != source_records[
+        "beta_calibration_manifest"
+    ]["sha256"]:
+        raise TargetLoadWorkflowError("root beta manifest contract hash is invalid")
+    bound_path(metadata_input.get("path"), source_records["model_metadata"], "metadata")
+    if metadata_input.get("sha256") != source_records["model_metadata"]["sha256"]:
+        raise TargetLoadWorkflowError("root model metadata contract hash is invalid")
+    recorded_models = model_contract.get("artifacts")
+    if not isinstance(recorded_models, Mapping) or set(recorded_models) != set(replayed_model_hashes):
+        raise TargetLoadWorkflowError("root decision model artifact coverage is invalid")
+    for key, digest in replayed_model_hashes.items():
+        record = recorded_models[key]
+        if not isinstance(record, Mapping) or record.get("sha256") != digest:
+            raise TargetLoadWorkflowError("root decision model artifact hash is invalid")
+    if model_contract.get("fingerprints") != replayed_fingerprints:
+        raise TargetLoadWorkflowError("root decision model fingerprints are invalid")
+    selected_model = decision.get("selected_model")
+    if not isinstance(selected_model, Mapping) or (
+        selected_model.get("model_dir") != model_contract.get("model_dir")
+        or selected_model.get("metadata_sha256") != source_records["model_metadata"]["sha256"]
+        or selected_model.get("fingerprints") != replayed_fingerprints
+    ):
+        raise TargetLoadWorkflowError("root decision selected-model identity is invalid")
+
+    artifacts = decision.get("optimization_artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise TargetLoadWorkflowError("root decision optimization artifacts are missing")
+    pareto_artifact = artifacts.get("pareto")
+    plan_artifact = artifacts.get("fea_cases")
+    if not isinstance(pareto_artifact, Mapping) or not isinstance(plan_artifact, Mapping):
+        raise TargetLoadWorkflowError("root decision optimization artifact records are invalid")
+    bound_path(pareto_artifact.get("path"), source_records["pareto"], "Pareto")
+    bound_path(plan_artifact.get("path"), source_records["seed_fea_plan"], "seed plan")
+    if (
+        pareto_artifact.get("sha256") != source_records["pareto"]["sha256"]
+        or plan_artifact.get("sha256") != source_records["seed_fea_plan"]["sha256"]
+        or artifacts.get("provenance") != expected_provenance
+        or artifacts.get("fea_candidate_ids") != original_candidate_order
+        or artifacts.get("fea_case_rows") != len(original_rows)
+    ):
+        raise TargetLoadWorkflowError("root decision optimization artifact identity is invalid")
+    if optimization_contract.get("pareto_output") != source_records["pareto"]["path"] or (
+        optimization_contract.get("fea_cases_output") != source_records["seed_fea_plan"]["path"]
+    ):
+        raise TargetLoadWorkflowError("root optimization output contract path is invalid")
+    maximum_candidates = optimization_contract.get("max_fea_candidates")
+    if isinstance(maximum_candidates, bool) or not isinstance(maximum_candidates, int) or not (
+        1 <= len(original_candidate_order) <= maximum_candidates
+    ):
+        raise TargetLoadWorkflowError("root optimization candidate bound is invalid")
+
+    fea = decision.get("pareto_fea")
+    if not isinstance(fea, Mapping):
+        raise TargetLoadWorkflowError("root decision Pareto FEA evidence is missing")
+    if (
+        fea.get("results") != source_records["pareto_fea_results"]["path"]
+        or fea.get("results_sha256") != source_records["pareto_fea_results"]["sha256"]
+        or fea.get("case_rows") != len(original_rows)
+        or fea_contract.get("results") != source_records["pareto_fea_results"]["path"]
+    ):
+        raise TargetLoadWorkflowError("root decision Pareto FEA result binding is invalid")
+
+    expected_flags = [
+        "--spec", "--model-dir", "--pareto", "--case-plan", "--results",
+        "--summary-output", "--rows-output", "--final-front-output",
+        "--minimum-coverage", "--identity-relative-tolerance",
+    ]
+    argv = validator_contract.get("argv")
+    if not isinstance(argv, list) or len(argv) != 20 or argv[::2] != expected_flags:
+        raise TargetLoadWorkflowError("root validator argv is invalid")
+    expected_argv_paths = {
+        "--spec": source_records["optimization_spec"]["path"],
+        "--model-dir": model_contract.get("model_dir"),
+        "--pareto": source_records["pareto"]["path"],
+        "--case-plan": source_records["seed_fea_plan"]["path"],
+        "--results": source_records["pareto_fea_results"]["path"],
+        "--summary-output": validation_record["summary"]["path"],
+        "--rows-output": validation_record["rows"]["path"],
+        "--final-front-output": validation_record["final_front"]["path"],
+    }
+    argv_map = dict(zip(argv[::2], argv[1::2]))
+    execution_cwd = Path(upstream["execution_cwd"])
+    for flag, expected_path in expected_argv_paths.items():
+        raw = argv_map.get(flag)
+        if not isinstance(raw, str):
+            raise TargetLoadWorkflowError("root validator argv path binding is invalid")
+        recorded_path = Path(raw)
+        resolved = (
+            recorded_path.resolve(strict=False)
+            if recorded_path.is_absolute()
+            else (execution_cwd / recorded_path).resolve(strict=False)
+        )
+        if resolved != Path(str(expected_path)).resolve(strict=False):
+            raise TargetLoadWorkflowError("root validator argv path binding is invalid")
+    minimum_coverage = _finite(validator_contract.get("minimum_coverage"), "root minimum coverage")
+    identity_tolerance = _finite(
+        validator_contract.get("identity_relative_tolerance"),
+        "root identity tolerance",
+    )
+    if (
+        _finite(argv_map["--minimum-coverage"], "root argv minimum coverage") != minimum_coverage
+        or _finite(argv_map["--identity-relative-tolerance"], "root argv identity tolerance")
+        != identity_tolerance
+    ):
+        raise TargetLoadWorkflowError("root validator argv thresholds differ from contract")
+    if (
+        validator_contract.get("summary_output") != validation_record["summary"]["path"]
+        or validator_contract.get("rows_output") != validation_record["rows"]["path"]
+        or validator_contract.get("final_front_output") != validation_record["final_front"]["path"]
+    ):
+        raise TargetLoadWorkflowError("root validator output path contract is invalid")
+
+    try:
+        import ipmsm_target_load_coordinator as coordinator
+
+        expected_summary, expected_summary_bytes, expected_rows_bytes, expected_front_bytes = (
+            coordinator._recompute_strict_validation_from_bytes(
+                spec_json=documents["optimization_spec_json"],
+                metadata_json=documents["model_metadata_json"],
+                model_artifacts=model_artifacts,
+                pareto_csv=documents["pareto_csv"],
+                seed_plan_csv=authority["original_seed_fea_plan_csv"],
+                results_csv=authority["pareto_fea_results_csv"],
+                minimum_coverage=minimum_coverage,
+                identity_relative_tolerance=identity_tolerance,
+            )
+        )
+    except (ValueError, OSError, pareto_validator.ParetoFEAValidationError) as exc:
+        raise TargetLoadWorkflowError(f"root strict upstream validation replay failed: {exc}") from exc
+    if (
+        authority["validation_summary_json"] != expected_summary_bytes
+        or authority["validation_rows_csv"] != expected_rows_bytes
+        or authority["final_front_csv"] != expected_front_bytes
+    ):
+        raise TargetLoadWorkflowError("root upstream validation outputs differ from strict replay")
+    if expected_summary.get("status") != "passed" or expected_summary.get("pass") is not True:
+        raise TargetLoadWorkflowError("root replayed upstream validation did not pass")
+    final_ids = expected_summary["fea_filtered_final_front_candidate_ids"]
+    selected_ids = [candidate_id for candidate_id in original_candidate_order if candidate_id in set(final_ids)]
+    if (
+        upstream["fea_filtered_final_front_candidate_ids"] != final_ids
+        or upstream["selected_candidate_ids"] != selected_ids
+        or list(filtered_candidate_order) != selected_ids
+        or upstream["optimization_run_id"] != expected_provenance[nsga2.OPTIMIZATION_RUN_ID_FIELD]
+    ):
+        raise TargetLoadWorkflowError("root upstream final-front selection identity is invalid")
+    validation = decision.get("validation")
+    if not isinstance(validation, Mapping):
+        raise TargetLoadWorkflowError("root decision validation evidence is missing")
+    recorded_front = validation.get("final_front")
+    if not isinstance(recorded_front, Mapping) or (
+        validation.get("summary") != validation_record["summary"]
+        or validation.get("rows") != validation_record["rows"]
+        or recorded_front.get("path") != validation_record["final_front"]["path"]
+        or recorded_front.get("sha256") != validation_record["final_front"]["sha256"]
+        or recorded_front.get("candidate_ids") != final_ids
+        or recorded_front.get("candidate_count") != len(final_ids)
+        or validation.get("validation_id") != expected_summary["validation_id"]
+        or validation.get("feasible_candidate_count") != expected_summary["feasible_candidate_count"]
+        or validation.get("gate_failures") != []
+        or validation.get("pass") is not True
+    ):
+        raise TargetLoadWorkflowError("root decision validation binding is invalid")
+
+
 def _validate_embedded_root_documents(
     identity: Mapping[str, Any],
     spec: OptimizationSpec,
@@ -1100,6 +1703,7 @@ def _validate_embedded_root_documents(
         "matcher_source_sha256": _sha256_bytes(documents["matcher_source"]),
         "workflow_source_sha256": _sha256_bytes(documents["workflow_source"]),
         "coordinator_source_sha256": _sha256_bytes(documents["coordinator_source"]),
+        "atomic_publish_source_sha256": _sha256_bytes(documents["atomic_publish_source"]),
         "validator_source_sha256": _sha256_bytes(documents["validator_source"]),
         "submit_ipmsm_v2_campaign_source_sha256": _sha256_bytes(
             documents["submit_ipmsm_v2_campaign_source"]
@@ -1133,6 +1737,19 @@ def _validate_embedded_root_documents(
     }
     if set(artifact_hashes) != expected_artifact_keys:
         raise TargetLoadWorkflowError("root model artifact identity differs from exact metadata")
+    upstream = validate_upstream_pareto_binding(identity.get("upstream_pareto_binding"))
+    if identity.get("upstream_pareto_binding") != upstream:
+        raise TargetLoadWorkflowError("root upstream Pareto binding is not normalized")
+    early_model_artifacts = {
+        name: _decode_exact_bytes(encoded, f"root upstream model artifact {name}")
+        for name, encoded in upstream["model_artifacts_base64"].items()
+    }
+    early_fingerprints = _validated_surrogate_bundle_documents(
+        documents["model_metadata_json"],
+        early_model_artifacts,
+    )
+    if early_fingerprints != expected_fingerprints:
+        raise TargetLoadWorkflowError("root embedded surrogate bundle fingerprints are invalid")
 
     calibration = _strict_json_object(
         documents["beta_calibration_manifest_json"],
@@ -1197,10 +1814,43 @@ def _validate_embedded_root_documents(
         raise TargetLoadWorkflowError("root candidate order differs from exact seed documents")
     if identity.get("probe_seeds") != probe_seeds:
         raise TargetLoadWorkflowError("root probe seeds differ from exact seed documents")
+    upstream_sources = upstream["source_artifacts"]
+    for upstream_name, root_name in {
+        "optimization_spec": "optimization_spec_sha256",
+        "pareto": "pareto_sha256",
+        "model_metadata": "model_metadata_sha256",
+        "beta_calibration_manifest": "beta_calibration_artifact_sha256",
+    }.items():
+        if upstream_sources[upstream_name]["sha256"] != expected_source_hashes[root_name]:
+            raise TargetLoadWorkflowError(
+                f"root upstream {upstream_name} hash differs from its exact source document"
+            )
+    if upstream_sources["model_artifacts_manifest_sha256"] != expected_source_hashes[
+        "model_artifact_manifest_sha256"
+    ]:
+        raise TargetLoadWorkflowError(
+            "root upstream model artifact hash differs from exact model artifacts"
+        )
+    if upstream["optimization_run_id"] != expected_provenance[nsga2.OPTIMIZATION_RUN_ID_FIELD]:
+        raise TargetLoadWorkflowError(
+            "root upstream optimization_run_id differs from exact optimization provenance"
+        )
+    if candidate_order != upstream["selected_candidate_ids"]:
+        raise TargetLoadWorkflowError(
+            "root candidates differ from the upstream final-front selection"
+        )
+    _validate_embedded_upstream_authority(
+        identity,
+        upstream,
+        documents,
+        spec,
+        expected_provenance,
+        candidate_order,
+    )
     return candidate_order, probe_seeds
 
 
-def validate_root_manifest(manifest: Mapping[str, Any]) -> None:
+def _validate_root_manifest_uncached(manifest: Mapping[str, Any]) -> None:
     if manifest.get("schema_version") != ROOT_SCHEMA_VERSION:
         raise TargetLoadWorkflowError("root manifest schema is invalid")
     if manifest.get("status") != "frozen_before_attempts":
@@ -1235,6 +1885,9 @@ def validate_root_manifest(manifest: Mapping[str, Any]) -> None:
     ):
         raise TargetLoadWorkflowError("root model fingerprints are incomplete")
     _validate_source_hashes(source_hashes)
+    upstream = validate_upstream_pareto_binding(identity.get("upstream_pareto_binding"))
+    if identity.get("upstream_pareto_binding") != upstream:
+        raise TargetLoadWorkflowError("root upstream Pareto binding is not normalized")
     _validate_scheduler_contract(scheduler_contract)
     try:
         policy_template = MatchPolicyTemplate(**dict(policy_mapping))
@@ -1304,6 +1957,7 @@ def validate_root_manifest(manifest: Mapping[str, Any]) -> None:
         "surrogate_bundle": "load_surrogate_bundle",
         "exact_document_hashes_computed_internally": True,
         "embedded_source_documents_revalidated": True,
+        "upstream_final_front": "completed_decision_and_strict_validation_v1",
     }:
         raise TargetLoadWorkflowError("root strict input validation receipt is invalid")
     probes = manifest.get("probes")
@@ -1340,6 +1994,37 @@ def validate_root_manifest(manifest: Mapping[str, Any]) -> None:
             raise TargetLoadWorkflowError("root manifest probe_id is invalid or duplicate")
         _policy_from_probe(probe)
         seen.add(expected_probe_id)
+
+
+_ROOT_VALIDATION_CACHE: dict[tuple[str, str], None] = {}
+_ROOT_VALIDATION_CACHE_LIMIT = 8
+
+
+def _root_validation_runtime_sha256() -> str:
+    digest = hashlib.sha256()
+    paths = {
+        *(path.resolve() for path in RUNTIME_SOURCE_PATHS.values()),
+        *(PROJECT_SOURCE_ROOT / name for name in OPTIMIZATION_PRODUCER_SOURCE_FILES),
+    }
+    for path in sorted(paths, key=lambda item: str(item)):
+        try:
+            payload = path.read_bytes()
+        except OSError as exc:
+            raise TargetLoadWorkflowError(f"cannot hash root-validation runtime source: {path}") from exc
+        digest.update(str(path).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(payload).digest())
+    return digest.hexdigest()
+
+
+def validate_root_manifest(manifest: Mapping[str, Any]) -> None:
+    key = (canonical_json_sha256(manifest), _root_validation_runtime_sha256())
+    if key in _ROOT_VALIDATION_CACHE:
+        return
+    _validate_root_manifest_uncached(manifest)
+    if len(_ROOT_VALIDATION_CACHE) >= _ROOT_VALIDATION_CACHE_LIMIT:
+        _ROOT_VALIDATION_CACHE.pop(next(iter(_ROOT_VALIDATION_CACHE)))
+    _ROOT_VALIDATION_CACHE[key] = None
 
 
 def _find_probe(manifest: Mapping[str, Any], probe_id: str) -> Mapping[str, Any]:

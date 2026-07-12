@@ -9,7 +9,9 @@ import json
 import math
 from pathlib import Path
 import pickle
+import tempfile
 import unittest
+from unittest import mock
 
 import calibrate_ipmsm_beta as beta_calibration
 import ipmsm_optimization as optimization
@@ -307,10 +309,244 @@ def policy_template(**overrides: object) -> workflow.MatchPolicyTemplate:
     return workflow.MatchPolicyTemplate(**values)  # type: ignore[arg-type]
 
 
+def upstream_pareto_binding(documents: dict[str, object]) -> dict[str, object]:
+    spec_json = documents["optimization_spec_json"]
+    pareto_csv = documents["pareto_csv"]
+    plan_csv = documents["seed_fea_plan_csv"]
+    metadata_json = documents["model_metadata_json"]
+    beta_json = documents["beta_calibration_manifest_json"]
+    assert isinstance(spec_json, bytes)
+    assert isinstance(pareto_csv, bytes)
+    assert isinstance(plan_csv, bytes)
+    assert isinstance(metadata_json, bytes)
+    assert isinstance(beta_json, bytes)
+    model_artifacts = documents["model_artifacts_by_basename"]
+    assert isinstance(model_artifacts, dict)
+    _, plan_rows = workflow._strict_csv(plan_csv, "fixture seed plan")
+    candidate_ids: list[str] = []
+    for row in plan_rows:
+        if row["candidate_id"] not in candidate_ids:
+            candidate_ids.append(row["candidate_id"])
+    run_id = plan_rows[0][nsga2.OPTIMIZATION_RUN_ID_FIELD]
+    spec = optimization.optimization_spec_from_mapping(json.loads(spec_json))
+    from tests.test_validate_ipmsm_pareto_fea import ValidationFixture
+
+    fixture = object.__new__(ValidationFixture)
+    fixture.spec = spec
+    result_rows = [fixture.result_row(row) for row in plan_rows]
+    metadata_mapping = json.loads(metadata_json)
+    for result_row in result_rows:
+        result_row.update(metadata_mapping["fingerprints"])
+    result_fields = list(result_rows[0])
+    result_stream = io.StringIO(newline="")
+    result_writer = csv.DictWriter(result_stream, fieldnames=result_fields, extrasaction="raise")
+    result_writer.writeheader()
+    result_writer.writerows(result_rows)
+    results_csv = result_stream.getvalue().encode("utf-8")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        temporary_root = Path(temporary)
+        spec_path = temporary_root / "spec.json"
+        metadata_path = temporary_root / "metadata.json"
+        pareto_path = temporary_root / "pareto.csv"
+        plan_path = temporary_root / "fea_cases.csv"
+        results_path = temporary_root / "merged_results.csv"
+        spec_path.write_bytes(spec_json)
+        metadata_path.write_bytes(metadata_json)
+        pareto_path.write_bytes(pareto_csv)
+        plan_path.write_bytes(plan_csv)
+        results_path.write_bytes(results_csv)
+        for basename, payload in model_artifacts.items():
+            (temporary_root / basename).write_bytes(payload)
+        summary, validation_rows = pareto_validator.validate_pareto_fea(
+            spec_path,
+            metadata_path,
+            pareto_path,
+            plan_path,
+            results_path,
+        )
+    summary_bytes = pareto_validator._json_text(summary).encode("utf-8")
+    validation_rows_bytes = pareto_validator._row_csv_text(validation_rows).encode("utf-8")
+    front_bytes = pareto_validator._final_front_csv_text(
+        spec,
+        summary["fea_filtered_final_front"],
+    ).encode("utf-8")
+    root = Path(__file__).resolve().parent / "fixture-upstream"
+
+    def artifact(name: str, payload: bytes) -> dict[str, str]:
+        return {
+            "path": str((root / name).resolve(strict=False)),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+
+    artifact_hashes_value = artifact_hashes()
+    model_records = {
+        key: artifact(key.split("::", 1)[1], model_artifacts[key.split("::", 1)[1]])
+        for key in artifact_hashes_value
+    }
+    spec_record = artifact("optimization_spec.json", spec_json)
+    pareto_record = artifact("pareto.csv", pareto_csv)
+    plan_record = artifact("fea_cases.csv", plan_csv)
+    results_record = artifact("merged_results.csv", results_csv)
+    metadata_record = artifact("metadata.json", metadata_json)
+    beta_record = artifact("beta.json", beta_json)
+    summary_record = artifact("pareto_fea_validation.json", summary_bytes)
+    rows_record = artifact("pareto_fea_validation_rows.csv", validation_rows_bytes)
+    front_record = artifact("fea_filtered_final_front.csv", front_bytes)
+    model_dir = str(root.resolve(strict=False))
+    provenance = {
+        field: plan_rows[0][field]
+        for field in pareto_validator.PROVENANCE_FIELDS
+    }
+    validator_argv = [
+        "--spec", spec_record["path"], "--model-dir", model_dir,
+        "--pareto", pareto_record["path"], "--case-plan", plan_record["path"],
+        "--results", results_record["path"], "--summary-output", summary_record["path"],
+        "--rows-output", rows_record["path"], "--final-front-output", front_record["path"],
+        "--minimum-coverage", str(pareto_validator.DEFAULT_MINIMUM_COVERAGE),
+        "--identity-relative-tolerance", str(pareto_validator.DEFAULT_IDENTITY_RELATIVE_TOLERANCE),
+    ]
+    project_root = Path(workflow.__file__).resolve().parent
+    producer_sources = {
+        name: (project_root / name).read_bytes()
+        for name in workflow.OPTIMIZATION_PRODUCER_SOURCE_FILES
+    }
+    contract = {
+        "inputs": {
+            "optimization_spec": spec_record,
+            "beta": {"calibration_manifest": beta_record},
+            "model_bundle": {
+                "model_dir": model_dir,
+                "metadata": metadata_record,
+                "artifacts": model_records,
+                "fingerprints": metadata(str(beta_manifest()["calibration_id"]))["fingerprints"],
+            },
+        },
+        "optimization": {
+            "pareto_output": pareto_record["path"],
+            "fea_cases_output": plan_record["path"],
+            "max_fea_candidates": 12,
+        },
+        "pareto_fea": {"results": results_record["path"]},
+        "validation": {
+            "argv": validator_argv,
+            "minimum_coverage": pareto_validator.DEFAULT_MINIMUM_COVERAGE,
+            "identity_relative_tolerance": pareto_validator.DEFAULT_IDENTITY_RELATIVE_TOLERANCE,
+            "summary_output": summary_record["path"],
+            "rows_output": rows_record["path"],
+            "final_front_output": front_record["path"],
+        },
+        "source_sha256": {
+            name: hashlib.sha256(payload).hexdigest()
+            for name, payload in sorted(producer_sources.items())
+        },
+    }
+    decision_path = str((root / "ipmsm_v2_optimization_decision.json").resolve(strict=False))
+    decision = {
+        "schema_version": "ipmsm_v2_optimization_continuation_v1",
+        "decision_output": decision_path,
+        "contract_sha256": workflow._optimizer_canonical_json_sha256(contract),
+        "execution_contract": contract,
+        "mode": "execute",
+        "status": "complete",
+        "selected_model": {
+            "model_dir": model_dir,
+            "metadata_sha256": metadata_record["sha256"],
+            "fingerprints": metadata(str(beta_manifest()["calibration_id"]))["fingerprints"],
+        },
+        "optimization_artifacts": {
+            "pareto": pareto_record,
+            "fea_cases": plan_record,
+            "fea_candidate_ids": candidate_ids,
+            "fea_case_rows": len(plan_rows),
+            "provenance": provenance,
+        },
+        "pareto_fea": {
+            "results": results_record["path"],
+            "results_sha256": results_record["sha256"],
+            "case_rows": len(plan_rows),
+        },
+        "validation": {
+            "summary": summary_record,
+            "rows": rows_record,
+            "final_front": {
+                **front_record,
+                "candidate_count": summary["fea_filtered_final_front_count"],
+                "candidate_ids": summary["fea_filtered_final_front_candidate_ids"],
+            },
+            "validation_id": summary["validation_id"],
+            "feasible_candidate_count": summary["feasible_candidate_count"],
+            "gate_failures": [],
+            "pass": True,
+        },
+    }
+    decision_bytes = (
+        json.dumps(decision, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2) + "\n"
+    ).encode("utf-8")
+    return {
+        "schema_version": workflow.UPSTREAM_PARETO_BINDING_SCHEMA_VERSION,
+        "optimization_decision": {
+            "path": decision_path,
+            "sha256": hashlib.sha256(decision_bytes).hexdigest(),
+            "schema_version": "ipmsm_v2_optimization_continuation_v1",
+            "contract_sha256": decision["contract_sha256"],
+            "mode": "execute",
+            "status": "complete",
+        },
+        "source_artifacts": {
+            "optimization_spec": spec_record,
+            "pareto": pareto_record,
+            "seed_fea_plan": plan_record,
+            "pareto_fea_results": results_record,
+            "model_metadata": metadata_record,
+            "model_artifacts_manifest_sha256": optimizer_artifact_manifest_sha256(),
+            "beta_calibration_manifest": beta_record,
+        },
+        "optimization_run_id": run_id,
+        "execution_cwd": model_dir,
+        "validation": {
+            "validation_id": summary["validation_id"],
+            "summary_schema_version": pareto_validator.SUMMARY_SCHEMA_VERSION,
+            "final_front_schema_version": pareto_validator.FINAL_FRONT_SCHEMA_VERSION,
+            "summary": summary_record,
+            "rows": rows_record,
+            "final_front": front_record,
+            "status": "passed",
+            "pass": True,
+        },
+        "authority_documents_base64": {
+            "optimization_decision_json": base64.b64encode(decision_bytes).decode("ascii"),
+            "original_seed_fea_plan_csv": base64.b64encode(plan_csv).decode("ascii"),
+            "pareto_fea_results_csv": base64.b64encode(results_csv).decode("ascii"),
+            "validation_summary_json": base64.b64encode(summary_bytes).decode("ascii"),
+            "validation_rows_csv": base64.b64encode(validation_rows_bytes).decode("ascii"),
+            "final_front_csv": base64.b64encode(front_bytes).decode("ascii"),
+        },
+        "model_artifacts_base64": {
+            basename: base64.b64encode(payload).decode("ascii")
+            for basename, payload in sorted(model_artifacts.items())
+        },
+        "producer_sources_base64": {
+            name: base64.b64encode(payload).decode("ascii")
+            for name, payload in sorted(producer_sources.items())
+        },
+        "original_seed_candidate_ids": candidate_ids,
+        "fea_filtered_final_front_candidate_ids": summary[
+            "fea_filtered_final_front_candidate_ids"
+        ],
+        "selected_candidate_ids": [
+            candidate_id
+            for candidate_id in candidate_ids
+            if candidate_id in set(summary["fea_filtered_final_front_candidate_ids"])
+        ],
+    }
+
+
 def build_kwargs() -> dict[str, object]:
     documents, _, _ = fixture_documents()
     return {
         **documents,
+        "upstream_pareto_binding": upstream_pareto_binding(documents),
         "scheduler_contract": scheduler_contract(),
         "policy_template": policy_template(),
         "task_retry_limit": 2,
@@ -366,12 +602,21 @@ class RootManifestTests(unittest.TestCase):
     def test_exact_documents_freeze_strict_independent_probes(self) -> None:
         manifest = root_manifest()
         workflow.validate_root_manifest(manifest)
+        self.assertEqual(manifest["schema_version"], "ipmsm-target-load-match-root-v2")
         probes = manifest["probes"]
         self.assertEqual(len(probes), 6)
         self.assertEqual(len({probe["probe_id"] for probe in probes}), 6)
         self.assertEqual(
             manifest["identity"]["strict_input_validation"]["pareto_binding"],
             "validate_pareto_front",
+        )
+        self.assertEqual(
+            manifest["identity"]["strict_input_validation"]["upstream_final_front"],
+            "completed_decision_and_strict_validation_v1",
+        )
+        self.assertEqual(
+            manifest["identity"]["upstream_pareto_binding"]["selected_candidate_ids"],
+            manifest["identity"]["candidate_order"],
         )
         self.assertEqual(
             manifest["identity"]["source_hashes"]["seed_fea_plan_sha256"],
@@ -381,6 +626,7 @@ class RootManifestTests(unittest.TestCase):
             "matcher_source": "ipmsm_target_load_matching.py",
             "workflow_source": "ipmsm_target_load_workflow.py",
             "coordinator_source": "ipmsm_target_load_coordinator.py",
+            "atomic_publish_source": "atomic_publish.py",
             "validator_source": "validate_ipmsm_pareto_fea.py",
             "submit_ipmsm_v2_campaign_source": "submit_ipmsm_v2_campaign.py",
             "submit_ipmsm_scheduler_task_source": "submit_ipmsm_scheduler_task.py",
@@ -411,6 +657,157 @@ class RootManifestTests(unittest.TestCase):
             source_hashes["workflow_source_sha256"],
             source_hashes["coordinator_source_sha256"],
         )
+
+    def test_upstream_final_front_binding_is_required_and_tamper_evident(self) -> None:
+        kwargs = build_kwargs()
+        missing = dict(kwargs)
+        missing.pop("upstream_pareto_binding")
+        with self.assertRaises(TypeError):
+            workflow.build_root_manifest(**missing)  # type: ignore[arg-type]
+
+        changed = copy.deepcopy(root_manifest())
+        binding = changed["identity"]["upstream_pareto_binding"]
+        binding["source_artifacts"]["optimization_spec"]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "upstream"):
+            workflow.validate_root_manifest(rehash_root(changed))
+
+        changed = copy.deepcopy(root_manifest())
+        binding = changed["identity"]["upstream_pareto_binding"]
+        binding["selected_candidate_ids"] = ["unknown_candidate"]
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "selected candidates"):
+            workflow.validate_root_manifest(rehash_root(changed))
+
+    def test_upstream_final_front_rejects_duplicate_extra_and_misordered_ids(self) -> None:
+        base = build_kwargs()["upstream_pareto_binding"]
+        duplicate = copy.deepcopy(base)
+        duplicate["fea_filtered_final_front_candidate_ids"] = ["pareto_001", "pareto_001"]
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "duplicate IDs"):
+            workflow.validate_upstream_pareto_binding(duplicate)
+
+        extra = copy.deepcopy(base)
+        extra["fea_filtered_final_front_candidate_ids"] = ["unknown"]
+        extra["selected_candidate_ids"] = ["unknown"]
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "unknown seed candidate"):
+            workflow.validate_upstream_pareto_binding(extra)
+
+        mismatch = copy.deepcopy(base)
+        mismatch["selected_candidate_ids"] = ["unknown"]
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "preserve seed-plan order"):
+            workflow.validate_upstream_pareto_binding(mismatch)
+
+    def test_rehashed_root_cannot_rewrite_embedded_validation_authority(self) -> None:
+        changed = copy.deepcopy(root_manifest())
+        binding = changed["identity"]["upstream_pareto_binding"]
+        decision = json.loads(
+            base64.b64decode(binding["authority_documents_base64"]["optimization_decision_json"])
+        )
+        validation = decision["execution_contract"]["validation"]
+        validation["minimum_coverage"] = 0.9
+        index = validation["argv"].index("--minimum-coverage") + 1
+        validation["argv"][index] = "0.9"
+        decision["contract_sha256"] = workflow._optimizer_canonical_json_sha256(
+            decision["execution_contract"]
+        )
+        decision_bytes = (
+            json.dumps(decision, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2)
+            + "\n"
+        ).encode("utf-8")
+        binding["authority_documents_base64"]["optimization_decision_json"] = (
+            base64.b64encode(decision_bytes).decode("ascii")
+        )
+        binding["optimization_decision"]["sha256"] = hashlib.sha256(decision_bytes).hexdigest()
+        binding["optimization_decision"]["contract_sha256"] = decision["contract_sha256"]
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "strict replay"):
+            workflow.validate_root_manifest(rehash_root(changed))
+
+    def test_rehashed_root_cannot_replace_embedded_models_with_arbitrary_bytes(self) -> None:
+        changed = copy.deepcopy(root_manifest())
+        identity = changed["identity"]
+        binding = identity["upstream_pareto_binding"]
+        basename = sorted(binding["model_artifacts_base64"])[0]
+        binding["model_artifacts_base64"][basename] = base64.b64encode(
+            b"arbitrary-not-a-model"
+        ).decode("ascii")
+        key = next(key for key in identity["model_artifact_hashes"] if key.endswith(f"::{basename}"))
+        identity["model_artifact_hashes"][key] = hashlib.sha256(
+            b"arbitrary-not-a-model"
+        ).hexdigest()
+        manifest_sha = workflow._optimizer_canonical_json_sha256(
+            identity["model_artifact_hashes"]
+        )
+        identity["source_hashes"]["model_artifact_manifest_sha256"] = manifest_sha
+        binding["source_artifacts"]["model_artifacts_manifest_sha256"] = manifest_sha
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "surrogate bundle"):
+            workflow.validate_root_manifest(rehash_root(changed))
+
+    def test_root_replay_resolves_relative_producer_argv_from_bound_cwd(self) -> None:
+        changed = copy.deepcopy(root_manifest())
+        binding = changed["identity"]["upstream_pareto_binding"]
+        cwd = Path(binding["execution_cwd"])
+        decision = json.loads(
+            base64.b64decode(binding["authority_documents_base64"]["optimization_decision_json"])
+        )
+        argv = decision["execution_contract"]["validation"]["argv"]
+        for index in range(1, 16, 2):
+            path = Path(argv[index])
+            argv[index] = "." if argv[index - 1] == "--model-dir" else str(path.relative_to(cwd))
+        decision["contract_sha256"] = workflow._optimizer_canonical_json_sha256(
+            decision["execution_contract"]
+        )
+        decision_bytes = (
+            json.dumps(decision, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2)
+            + "\n"
+        ).encode("utf-8")
+        binding["authority_documents_base64"]["optimization_decision_json"] = base64.b64encode(
+            decision_bytes
+        ).decode("ascii")
+        binding["optimization_decision"]["sha256"] = hashlib.sha256(decision_bytes).hexdigest()
+        binding["optimization_decision"]["contract_sha256"] = decision["contract_sha256"]
+        workflow.validate_root_manifest(rehash_root(changed))
+
+    def test_rehashed_root_cannot_replace_bound_producer_source(self) -> None:
+        changed = copy.deepcopy(root_manifest())
+        binding = changed["identity"]["upstream_pareto_binding"]
+        name = sorted(binding["producer_sources_base64"])[0]
+        replacement = b"forged producer source\n"
+        binding["producer_sources_base64"][name] = base64.b64encode(replacement).decode("ascii")
+        decision = json.loads(
+            base64.b64decode(binding["authority_documents_base64"]["optimization_decision_json"])
+        )
+        decision["execution_contract"]["source_sha256"][name] = hashlib.sha256(
+            replacement
+        ).hexdigest()
+        decision["contract_sha256"] = workflow._optimizer_canonical_json_sha256(
+            decision["execution_contract"]
+        )
+        decision_bytes = (
+            json.dumps(decision, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2)
+            + "\n"
+        ).encode("utf-8")
+        binding["authority_documents_base64"]["optimization_decision_json"] = base64.b64encode(
+            decision_bytes
+        ).decode("ascii")
+        binding["optimization_decision"]["sha256"] = hashlib.sha256(decision_bytes).hexdigest()
+        binding["optimization_decision"]["contract_sha256"] = decision["contract_sha256"]
+        with self.assertRaisesRegex(workflow.TargetLoadWorkflowError, "differs from runtime"):
+            workflow.validate_root_manifest(rehash_root(changed))
+
+    def test_root_validation_cache_invalidates_on_runtime_source_digest_change(self) -> None:
+        manifest = root_manifest()
+        workflow._ROOT_VALIDATION_CACHE.clear()
+        original = workflow._validate_root_manifest_uncached
+        with mock.patch.object(
+            workflow,
+            "_root_validation_runtime_sha256",
+            side_effect=["1" * 64, "2" * 64],
+        ), mock.patch.object(
+            workflow,
+            "_validate_root_manifest_uncached",
+            wraps=original,
+        ) as validate:
+            workflow.validate_root_manifest(manifest)
+            workflow.validate_root_manifest(manifest)
+        self.assertEqual(validate.call_count, 2)
 
     def test_spec_plan_and_beta_manifest_tamper_fail_closed(self) -> None:
         kwargs = build_kwargs()

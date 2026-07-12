@@ -15,16 +15,21 @@ from __future__ import annotations
 
 import argparse
 import base64
+import csv
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
+import math
 import os
 from pathlib import Path
 import re
 import shlex
+import stat
 from types import SimpleNamespace
+import tempfile
 import time
 from typing import Any, Iterable, Mapping, Sequence
 from urllib import parse, request
@@ -33,10 +38,24 @@ import uuid
 from atomic_publish import cleanup_publish_receipt, publish_no_replace
 from ipmsm_optimization import optimization_spec_from_mapping
 import ipmsm_target_load_workflow as workflow
+import optimize_ipmsm_nsga2 as optimizer
 import submit_ipmsm_v2_campaign as submit_campaign
+import validate_ipmsm_pareto_fea as pareto_validator
 
 
 PROGRESS_SCHEMA_VERSION = "ipmsm-target-load-progress-v1"
+OPTIMIZATION_DECISION_SCHEMA_VERSION = "ipmsm_v2_optimization_continuation_v1"
+OPTIMIZATION_SOURCE_FILES = (
+    "continue_ipmsm_v2_optimization.py",
+    "continue_ipmsm_v2_stage2.py",
+    "calibrate_ipmsm_beta.py",
+    "ipmsm_optimization.py",
+    "ipmsm_surrogate_bundle.py",
+    "optimize_ipmsm_nsga2.py",
+    "run_ipmsm_v2_campaign.py",
+    "submit_ipmsm_v2_campaign.py",
+    "validate_ipmsm_pareto_fea.py",
+)
 FIXED_ENVELOPE_SCHEMA_VERSION = "ipmsm-fixed-current-mtpa-envelope-v1"
 DISPATCH_INTENT_SCHEMA_VERSION = "ipmsm-target-load-dispatch-intent-v1"
 DISPATCH_RECEIPT_SCHEMA_VERSION = "ipmsm-target-load-dispatch-receipt-v1"
@@ -166,10 +185,135 @@ def _strict_json_bytes(payload: bytes, label: str) -> dict[str, Any]:
 
 def _read_json(path: Path, label: str) -> dict[str, Any]:
     try:
-        payload = path.read_bytes()
+        workspace = _managed_workspace_for(path)
+        payload = _read_managed_bytes(workspace, path, label)
     except OSError as exc:
         raise TargetLoadCoordinatorError(f"cannot read {label}: {path}") from exc
     return _strict_json_bytes(payload, label)
+
+
+def _path_is_link_or_reparse(path: Path) -> bool:
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise TargetLoadCoordinatorError(f"cannot inspect managed path: {path}") from exc
+    attributes = int(getattr(info, "st_file_attributes", 0))
+    reparse_flag = int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+    return stat.S_ISLNK(info.st_mode) or bool(attributes & reparse_flag)
+
+
+def _require_regular_single_link(info: os.stat_result, path: Path, label: str) -> None:
+    if not stat.S_ISREG(info.st_mode) or int(getattr(info, "st_nlink", 1)) != 1:
+        raise TargetLoadCoordinatorError(
+            f"{label} must be a regular single-link managed file: {path}"
+        )
+
+
+def _lexical_absolute(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _require_contained(root: Path, target: Path, label: str) -> None:
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise TargetLoadCoordinatorError(f"{label} escapes the workspace: {target}") from exc
+
+
+def _reject_link_components(root: Path, target: Path) -> None:
+    _require_contained(root, target, "managed path")
+    relative = target.relative_to(root)
+    current = root
+    if _path_is_link_or_reparse(current):
+        raise TargetLoadCoordinatorError(f"workspace is a symlink/reparse point: {current}")
+    for part in relative.parts:
+        current = current / part
+        if _path_is_link_or_reparse(current):
+            raise TargetLoadCoordinatorError(
+                f"managed path contains a symlink/reparse point: {current}"
+            )
+        if not current.exists():
+            break
+
+
+def _scan_workspace_links(root: Path) -> None:
+    if not root.is_dir():
+        raise TargetLoadCoordinatorError(f"workspace is not a directory: {root}")
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        for name in (*directories, *files):
+            path = current_path / name
+            if _path_is_link_or_reparse(path):
+                raise TargetLoadCoordinatorError(
+                    f"managed workspace entry is a symlink/reparse point: {path}"
+                )
+            if name in files:
+                _require_regular_single_link(os.lstat(path), path, "managed workspace entry")
+
+
+def _secure_workspace_root(workspace: Path, *, create: bool) -> Path:
+    lexical = _lexical_absolute(workspace)
+    anchor = Path(lexical.anchor)
+    current = anchor
+    for part in lexical.parts[1:]:
+        current = current / part
+        if _path_is_link_or_reparse(current):
+            raise TargetLoadCoordinatorError(
+                f"workspace path contains a symlink/reparse point: {current}"
+            )
+        if not current.exists():
+            break
+    if create:
+        lexical.mkdir(parents=True, exist_ok=True)
+    if not lexical.is_dir():
+        raise TargetLoadCoordinatorError(f"workspace is missing or not a directory: {lexical}")
+    if _path_is_link_or_reparse(lexical):
+        raise TargetLoadCoordinatorError(f"workspace is a symlink/reparse point: {lexical}")
+    resolved = lexical.resolve(strict=True)
+    _scan_workspace_links(resolved)
+    return resolved
+
+
+def _guard_workspace_path(workspace: Path, target: Path) -> Path:
+    root = _secure_workspace_root(workspace, create=False)
+    lexical_target = _lexical_absolute(target)
+    _require_contained(root, lexical_target, "managed path")
+    _reject_link_components(root, lexical_target)
+    resolved_target = lexical_target.resolve(strict=False)
+    _require_contained(root, resolved_target, "resolved managed path")
+    return lexical_target
+
+
+def _managed_workspace_for(destination: Path) -> Path:
+    lexical = _lexical_absolute(destination)
+    for ancestor in (lexical.parent, *lexical.parents):
+        lock = ancestor / ".coordinator.lock"
+        try:
+            info = os.lstat(lock)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise TargetLoadCoordinatorError(f"cannot inspect workspace lock: {lock}") from exc
+        if stat.S_ISREG(info.st_mode) and int(getattr(info, "st_nlink", 1)) == 1 and not _path_is_link_or_reparse(lock):
+            return ancestor
+        raise TargetLoadCoordinatorError(f"workspace lock is not a regular no-follow file: {lock}")
+    raise TargetLoadCoordinatorError(
+        f"managed publication has no containing workspace lock: {destination}"
+    )
+
+
+def _read_managed_bytes(workspace: Path, path: Path, label: str) -> bytes:
+    guarded = _guard_workspace_path(workspace, path)
+    flags = os.O_RDONLY | int(getattr(os, "O_NOFOLLOW", 0))
+    try:
+        descriptor = os.open(guarded, flags)
+        _require_regular_single_link(os.fstat(descriptor), guarded, f"managed {label}")
+        with os.fdopen(descriptor, "rb") as stream:
+            return stream.read()
+    except OSError as exc:
+        raise TargetLoadCoordinatorError(f"cannot read managed {label}: {guarded}") from exc
 
 
 def _fsync_directory(path: Path) -> None:
@@ -188,10 +332,18 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _stage_bytes(destination: Path, payload: bytes) -> Path:
+    workspace = _managed_workspace_for(destination)
+    destination = _guard_workspace_path(workspace, destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    _guard_workspace_path(workspace, destination.parent)
     staged = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+    _guard_workspace_path(workspace, staged)
     try:
-        with staged.open("xb") as stream:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= int(getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(staged, flags, 0o600)
+        _require_regular_single_link(os.fstat(descriptor), staged, "staged artifact")
+        with os.fdopen(descriptor, "wb") as stream:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
@@ -204,9 +356,10 @@ def _stage_bytes(destination: Path, payload: bytes) -> Path:
 def publish_immutable_bytes(destination: Path, payload: bytes) -> bool:
     """Publish bytes once; an existing byte-identical artifact is idempotent."""
 
-    destination = destination.resolve(strict=False)
+    workspace = _managed_workspace_for(destination)
+    destination = _guard_workspace_path(workspace, destination)
     if destination.is_file():
-        if destination.read_bytes() != payload:
+        if _read_managed_bytes(workspace, destination, "immutable artifact") != payload:
             raise TargetLoadCoordinatorError(f"immutable artifact differs: {destination}")
         return False
     staged = _stage_bytes(destination, payload)
@@ -214,7 +367,9 @@ def publish_immutable_bytes(destination: Path, payload: bytes) -> bool:
     try:
         receipt = publish_no_replace(staged, destination)
     except FileExistsError:
-        if not destination.is_file() or destination.read_bytes() != payload:
+        if not destination.is_file() or _read_managed_bytes(
+            workspace, destination, "raced immutable artifact"
+        ) != payload:
             raise TargetLoadCoordinatorError(
                 f"immutable publication raced with different bytes: {destination}"
             )
@@ -233,7 +388,8 @@ def publish_immutable_json(destination: Path, document: Mapping[str, Any]) -> bo
 
 
 def replace_progress(destination: Path, document: Mapping[str, Any]) -> None:
-    destination = destination.resolve(strict=False)
+    workspace = _managed_workspace_for(destination)
+    destination = _guard_workspace_path(workspace, destination)
     payload = canonical_json_bytes(dict(document))
     staged = _stage_bytes(destination, payload)
     try:
@@ -247,11 +403,16 @@ def replace_progress(destination: Path, document: Mapping[str, Any]) -> None:
 def workspace_lock(workspace: Path):
     """Acquire one non-blocking byte lock for a coordinator cycle."""
 
-    workspace.mkdir(parents=True, exist_ok=True)
+    workspace = _secure_workspace_root(workspace, create=True)
     path = workspace / ".coordinator.lock"
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    _guard_workspace_path(workspace, path)
+    flags = os.O_RDWR | os.O_CREAT
+    flags |= int(getattr(os, "O_NOFOLLOW", 0))
+    descriptor = os.open(path, flags, 0o600)
     try:
-        if os.path.getsize(path) == 0:
+        lock_info = os.fstat(descriptor)
+        _require_regular_single_link(lock_info, path, "workspace lock")
+        if lock_info.st_size == 0:
             os.write(descriptor, b"0")
             os.fsync(descriptor)
         os.lseek(descriptor, 0, os.SEEK_SET)
@@ -267,6 +428,7 @@ def workspace_lock(workspace: Path):
         except OSError as exc:
             raise TargetLoadCoordinatorError("another target-load coordinator holds the lock") from exc
         try:
+            _scan_workspace_links(workspace)
             yield
         finally:
             os.lseek(descriptor, 0, os.SEEK_SET)
@@ -344,7 +506,7 @@ def initialize_workspace(workspace: Path, manifest: Mapping[str, Any]) -> dict[s
 
     root = dict(manifest)
     workflow.validate_root_manifest(root)
-    workspace = workspace.resolve(strict=False)
+    workspace = _secure_workspace_root(workspace, create=True)
     with workspace_lock(workspace):
         unexpected = [
             path
@@ -362,7 +524,8 @@ def initialize_workspace(workspace: Path, manifest: Mapping[str, Any]) -> dict[s
 
 
 def _load_root(workspace: Path) -> tuple[dict[str, Any], str]:
-    path = _root_path(workspace)
+    workspace = _secure_workspace_root(workspace, create=False)
+    path = _guard_workspace_path(workspace, _root_path(workspace))
     if not path.is_file():
         raise TargetLoadCoordinatorError(f"frozen root is missing: {path}")
     root = _read_json(path, "root manifest")
@@ -500,7 +663,7 @@ def publish_fixed_mtpa_evidence(
     candidate_id: str,
     evidence: Mapping[str, Any],
 ) -> dict[str, Any]:
-    workspace = workspace.resolve(strict=False)
+    workspace = _secure_workspace_root(workspace, create=False)
     with workspace_lock(workspace):
         root, _ = _load_root(workspace)
         candidate_order = root["identity"]["candidate_order"]
@@ -641,10 +804,7 @@ def _replay_probe(
                 raise TargetLoadCoordinatorError(f"unexpected dispatch directory: {child}")
     stored_results: list[bytes] = []
     for path in result_paths:
-        try:
-            payload = path.read_bytes()
-        except OSError as exc:
-            raise TargetLoadCoordinatorError(f"cannot read result artifact: {path}") from exc
+        payload = _read_managed_bytes(workspace, path, "result artifact")
         if not payload:
             raise TargetLoadCoordinatorError("durable result artifact is empty")
         stored_results.append(payload)
@@ -902,7 +1062,7 @@ def replay_workspace(
 ) -> ReplayState:
     """Reconstruct all authority from immutable artifacts and exact FEA bytes."""
 
-    workspace = workspace.resolve(strict=False)
+    workspace = _secure_workspace_root(workspace, create=False)
     if repair and not _lock_held:
         with workspace_lock(workspace):
             return replay_workspace(workspace, repair=True, _lock_held=True)
@@ -954,7 +1114,7 @@ def finalize_ready_candidates(
     _lock_held: bool = False,
 ) -> int:
     if not _lock_held:
-        with workspace_lock(workspace.resolve(strict=False)):
+        with workspace_lock(_secure_workspace_root(workspace, create=False)):
             current = replay_workspace(workspace, repair=False)
             return finalize_ready_candidates(
                 workspace,
@@ -2434,7 +2594,9 @@ def build_progress(
         raise TargetLoadCoordinatorError("derived target-load counts are impossible")
 
     scheduler_counts = {"queued": 0, "running": 0, "completed": 0, "failed": 0}
-    ledger_workspace = workspace.resolve(strict=False) if workspace is not None else None
+    ledger_workspace = (
+        _secure_workspace_root(workspace, create=False) if workspace is not None else None
+    )
     for journal in state.probes:
         for offset, attempt in enumerate(journal.attempts):
             if offset < len(journal.observations):
@@ -2549,7 +2711,7 @@ def advance_workspace_once(
 ) -> dict[str, Any]:
     """Reconcile, collect, finalize, and optionally refill one scheduler cycle."""
 
-    workspace = workspace.resolve(strict=False)
+    workspace = _secure_workspace_root(workspace, create=False)
     current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if max_submissions is not None and max_submissions < 0:
         raise TargetLoadCoordinatorError("max_submissions must be >= 0")
@@ -2731,6 +2893,742 @@ def _model_artifacts_from_directory(
     return artifacts
 
 
+def _sha256_file(path: Path, label: str) -> str:
+    if not path.is_file():
+        raise TargetLoadCoordinatorError(f"{label} must be an existing regular file: {path}")
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError as exc:
+        raise TargetLoadCoordinatorError(f"cannot hash {label}: {path}") from exc
+
+
+def _indented_json_bytes(value: Mapping[str, Any]) -> bytes:
+    try:
+        return (
+            json.dumps(
+                dict(value),
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise TargetLoadCoordinatorError("upstream JSON is not canonical") from exc
+
+
+def _read_indented_json(path: Path, label: str) -> tuple[dict[str, Any], bytes]:
+    if not path.is_file():
+        raise TargetLoadCoordinatorError(f"{label} must be an existing regular file: {path}")
+    try:
+        payload = path.read_bytes()
+        decoded = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise TargetLoadCoordinatorError(f"cannot decode strict {label}: {path}") from exc
+    if not isinstance(decoded, dict):
+        raise TargetLoadCoordinatorError(f"{label} must contain one JSON object")
+    if payload != _indented_json_bytes(decoded):
+        raise TargetLoadCoordinatorError(f"{label} bytes are not canonical producer JSON")
+    return decoded, payload
+
+
+def _required_mapping(value: object, label: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TargetLoadCoordinatorError(f"{label} must be an object")
+    return value
+
+
+def _required_integer(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TargetLoadCoordinatorError(f"{label} must be an integer")
+    return value
+
+
+def _required_finite(value: object, label: str) -> float:
+    if isinstance(value, bool):
+        raise TargetLoadCoordinatorError(f"{label} must be finite")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TargetLoadCoordinatorError(f"{label} must be finite") from exc
+    if not math.isfinite(number):
+        raise TargetLoadCoordinatorError(f"{label} must be finite")
+    return number
+
+
+def _same_local_path(recorded: object, actual: Path) -> bool:
+    try:
+        left = os.path.normcase(str(Path(str(recorded or "")).resolve(strict=False)))
+        right = os.path.normcase(str(actual.resolve(strict=False)))
+    except (OSError, ValueError):
+        return False
+    return bool(str(recorded or "").strip()) and left == right
+
+
+def _artifact_binding_from_bytes(path: Path, payload: bytes) -> dict[str, str]:
+    return {
+        "path": str(path.resolve(strict=False)),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def _verify_artifact_record(
+    value: object,
+    path: Path,
+    label: str,
+) -> dict[str, str]:
+    record = _required_mapping(value, label)
+    digest = _sha256_file(path, label)
+    if not _same_local_path(record.get("path"), path) or record.get("sha256") != digest:
+        raise TargetLoadCoordinatorError(f"{label} path/hash differs from the exact artifact")
+    return {"path": str(path.resolve(strict=False)), "sha256": digest}
+
+
+def _recorded_artifact(value: object, label: str) -> tuple[Path, dict[str, str]]:
+    record = _required_mapping(value, label)
+    raw_path = str(record.get("path") or "").strip()
+    if not raw_path:
+        raise TargetLoadCoordinatorError(f"{label}.path is empty")
+    path = Path(raw_path)
+    normalized = _verify_artifact_record(record, path, label)
+    return path, normalized
+
+
+def _render_filtered_plan(
+    fieldnames: Sequence[str],
+    rows: Sequence[Mapping[str, str]],
+) -> bytes:
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=list(fieldnames), extrasaction="raise")
+    writer.writeheader()
+    writer.writerows(rows)
+    return stream.getvalue().encode("utf-8")
+
+
+def _final_recheck_upstream_artifacts(
+    artifacts: Sequence[tuple[str, Path, bytes]],
+) -> None:
+    """Replay exact source bytes after all semantic checks and before root construction."""
+
+    for label, path, expected in artifacts:
+        if not path.is_file():
+            raise TargetLoadCoordinatorError(f"{label} disappeared during final audit: {path}")
+        try:
+            actual = path.read_bytes()
+        except OSError as exc:
+            raise TargetLoadCoordinatorError(
+                f"cannot replay {label} during final audit: {path}"
+            ) from exc
+        if actual != expected:
+            raise TargetLoadCoordinatorError(f"{label} changed during final audit: {path}")
+
+
+def _validated_pareto_validator_thresholds(
+    validation_contract: Mapping[str, Any],
+    *,
+    args: argparse.Namespace,
+    rows_path: Path,
+    results_path: Path,
+) -> tuple[float, float, Path]:
+    argv = validation_contract.get("argv")
+    if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
+        raise TargetLoadCoordinatorError("contract validator argv must be a string array")
+    expected_flags = [
+        "--spec",
+        "--model-dir",
+        "--pareto",
+        "--case-plan",
+        "--results",
+        "--summary-output",
+        "--rows-output",
+        "--final-front-output",
+        "--minimum-coverage",
+        "--identity-relative-tolerance",
+    ]
+    if len(argv) != len(expected_flags) * 2 or argv[::2] != expected_flags:
+        raise TargetLoadCoordinatorError("contract validator argv shape/order is invalid")
+    try:
+        parsed = pareto_validator.build_parser().parse_args(argv)
+    except SystemExit as exc:
+        raise TargetLoadCoordinatorError("contract validator argv cannot be parsed") from exc
+    expected_paths = (
+        (parsed.spec, args.optimization_spec, "spec"),
+        (parsed.model_dir, args.model_artifact_dir, "model directory"),
+        (parsed.pareto, args.pareto_csv, "Pareto"),
+        (parsed.case_plan, args.seed_fea_plan, "case plan"),
+        (parsed.results, results_path, "results"),
+        (parsed.summary_output, args.pareto_validation_summary, "summary output"),
+        (parsed.rows_output, rows_path, "rows output"),
+        (parsed.final_front_output, args.pareto_final_front, "final-front output"),
+    )
+    relative_constraints: list[tuple[Path, Path, str]] = []
+    for recorded, actual, label in expected_paths:
+        if recorded is None:
+            raise TargetLoadCoordinatorError(f"contract validator argv {label} path is missing")
+        recorded_path = Path(recorded)
+        if recorded_path.is_absolute():
+            if not _same_local_path(recorded_path, actual):
+                raise TargetLoadCoordinatorError(f"contract validator argv {label} path changed")
+        else:
+            relative_constraints.append((recorded_path, actual.resolve(strict=False), label))
+    if relative_constraints:
+        candidates: set[Path] | None = None
+        for relative, actual, _ in relative_constraints:
+            matches = {
+                parent
+                for parent in (actual, *actual.parents)
+                if (parent / relative).resolve(strict=False) == actual
+            }
+            candidates = matches if candidates is None else candidates & matches
+        if not candidates:
+            raise TargetLoadCoordinatorError("contract validator argv has no common execution cwd")
+        execution_cwd = max(candidates, key=lambda path: len(path.parts))
+        for relative, actual, label in relative_constraints:
+            if (execution_cwd / relative).resolve(strict=False) != actual:
+                raise TargetLoadCoordinatorError(f"contract validator argv {label} path changed")
+    else:
+        execution_cwd = Path.cwd().resolve(strict=False)
+    minimum_coverage = _required_finite(
+        validation_contract.get("minimum_coverage"),
+        "contract validation minimum_coverage",
+    )
+    identity_tolerance = _required_finite(
+        validation_contract.get("identity_relative_tolerance"),
+        "contract validation identity_relative_tolerance",
+    )
+    if parsed.minimum_coverage != minimum_coverage:
+        raise TargetLoadCoordinatorError("validator argv minimum coverage differs from contract")
+    if parsed.identity_relative_tolerance != identity_tolerance:
+        raise TargetLoadCoordinatorError("validator argv identity tolerance differs from contract")
+    if not 0.0 < minimum_coverage <= 1.0 or identity_tolerance < 0.0:
+        raise TargetLoadCoordinatorError("contract validator thresholds are out of range")
+    return minimum_coverage, identity_tolerance, execution_cwd
+
+
+def _recompute_strict_validation_from_bytes(
+    *,
+    spec_json: bytes,
+    metadata_json: bytes,
+    model_artifacts: Mapping[str, bytes],
+    pareto_csv: bytes,
+    seed_plan_csv: bytes,
+    results_csv: bytes,
+    minimum_coverage: float,
+    identity_relative_tolerance: float,
+) -> tuple[dict[str, Any], bytes, bytes, bytes]:
+    """Run the production comparator from exact in-memory authority documents."""
+
+    with tempfile.TemporaryDirectory(prefix="ipmsm-target-load-validation-") as temporary:
+        root = Path(temporary)
+        spec_path = root / "optimization_spec.json"
+        metadata_path = root / "metadata.json"
+        pareto_path = root / "pareto.csv"
+        plan_path = root / "fea_cases.csv"
+        results_path = root / "merged_results.csv"
+        spec_path.write_bytes(spec_json)
+        metadata_path.write_bytes(metadata_json)
+        pareto_path.write_bytes(pareto_csv)
+        plan_path.write_bytes(seed_plan_csv)
+        results_path.write_bytes(results_csv)
+        for basename, payload in model_artifacts.items():
+            if Path(basename).name != basename:
+                raise TargetLoadCoordinatorError("embedded model artifact name is unsafe")
+            (root / basename).write_bytes(payload)
+        expected_summary, expected_rows = pareto_validator.validate_pareto_fea(
+            spec_path,
+            metadata_path,
+            pareto_path,
+            plan_path,
+            results_path,
+            minimum_coverage=minimum_coverage,
+            identity_relative_tolerance=identity_relative_tolerance,
+        )
+        spec = optimization_spec_from_mapping(
+            workflow._strict_json_object(spec_json, "embedded optimization spec")
+        )
+        summary_bytes = pareto_validator._json_text(expected_summary).encode("utf-8")
+        rows_bytes = pareto_validator._row_csv_text(expected_rows).encode("utf-8")
+        front_bytes = pareto_validator._final_front_csv_text(
+            spec,
+            expected_summary["fea_filtered_final_front"],
+        ).encode("utf-8")
+        return expected_summary, summary_bytes, rows_bytes, front_bytes
+
+
+def _audit_upstream_final_front(
+    args: argparse.Namespace,
+    *,
+    spec_json: bytes,
+    pareto_csv: bytes,
+    seed_plan_csv: bytes,
+    metadata_json: bytes,
+    beta_json: bytes,
+    model_artifacts: Mapping[str, bytes],
+) -> tuple[bytes, dict[str, Any]]:
+    """Return an original-order final-front seed plan plus its immutable authority."""
+
+    decision, decision_payload = _read_indented_json(
+        args.optimization_decision,
+        "completed optimization decision",
+    )
+    summary, summary_payload = _read_indented_json(
+        args.pareto_validation_summary,
+        "strict Pareto FEA validation summary",
+    )
+    if decision.get("schema_version") != OPTIMIZATION_DECISION_SCHEMA_VERSION:
+        raise TargetLoadCoordinatorError("optimization decision schema is unsupported")
+    if decision.get("mode") != "execute" or decision.get("status") != "complete":
+        raise TargetLoadCoordinatorError("optimization decision must be executed and complete")
+    if not _same_local_path(decision.get("decision_output"), args.optimization_decision):
+        raise TargetLoadCoordinatorError("optimization decision moved from decision_output")
+    contract = _required_mapping(decision.get("execution_contract"), "execution_contract")
+    contract_sha = canonical_json_sha256(contract)
+    if decision.get("contract_sha256") != contract_sha:
+        raise TargetLoadCoordinatorError("optimization decision contract SHA256 is invalid")
+    source_contract = _required_mapping(
+        contract.get("source_sha256"), "execution_contract.source_sha256"
+    )
+    if set(source_contract) != set(OPTIMIZATION_SOURCE_FILES):
+        raise TargetLoadCoordinatorError("optimization producer source coverage is invalid")
+    producer_sources: dict[str, bytes] = {}
+    source_root = Path(__file__).resolve().parent
+    for name in OPTIMIZATION_SOURCE_FILES:
+        path = source_root / name
+        payload = path.read_bytes()
+        if source_contract.get(name) != hashlib.sha256(payload).hexdigest():
+            raise TargetLoadCoordinatorError(f"optimization producer source hash changed: {name}")
+        producer_sources[name] = payload
+
+    spec, spec_mapping, spec_hash = pareto_validator.read_spec(args.optimization_spec)
+    metadata, model_fingerprints, metadata_hash = pareto_validator.read_model_metadata(
+        args.model_metadata,
+        spec,
+    )
+    pareto_fields, pareto_rows, pareto_hash = pareto_validator.read_csv(
+        args.pareto_csv,
+        "Pareto front",
+    )
+    plan_fields, plan_rows, plan_hash = pareto_validator.read_csv(
+        args.seed_fea_plan,
+        "FEA case plan",
+    )
+    if args.optimization_spec.read_bytes() != spec_json or args.pareto_csv.read_bytes() != pareto_csv:
+        raise TargetLoadCoordinatorError("upstream source bytes changed during audit")
+    if args.seed_fea_plan.read_bytes() != seed_plan_csv:
+        raise TargetLoadCoordinatorError("upstream seed-plan bytes changed during audit")
+    if args.model_metadata.read_bytes() != metadata_json:
+        raise TargetLoadCoordinatorError("upstream model metadata bytes changed during audit")
+    if args.beta_calibration_manifest.read_bytes() != beta_json:
+        raise TargetLoadCoordinatorError("upstream beta manifest bytes changed during audit")
+
+    artifact_hashes = workflow._model_artifact_hashes(metadata, model_artifacts)
+    artifact_manifest_sha = workflow._optimizer_canonical_json_sha256(artifact_hashes)
+    provenance = optimizer.build_optimization_run_provenance(
+        pareto_csv,
+        {
+            optimizer.OPTIMIZATION_SPEC_SHA256_FIELD: hashlib.sha256(spec_json).hexdigest(),
+            optimizer.SURROGATE_METADATA_SHA256_FIELD: hashlib.sha256(metadata_json).hexdigest(),
+            optimizer.SURROGATE_MODEL_ARTIFACTS_SHA256_FIELD: artifact_manifest_sha,
+            optimizer.SURROGATE_VERIFICATION_FIELD: optimizer.STRICT_BUNDLE_VERIFICATION,
+        },
+    )
+    original_candidate_ids = pareto_validator.validate_case_plan(
+        spec,
+        plan_fields,
+        plan_rows,
+        provenance,
+    )
+    pareto_validator.validate_pareto_front(
+        spec,
+        pareto_fields,
+        pareto_rows,
+        plan_rows,
+        original_candidate_ids,
+    )
+
+    inputs = _required_mapping(contract.get("inputs"), "execution_contract.inputs")
+    _verify_artifact_record(
+        inputs.get("optimization_spec"), args.optimization_spec, "contract optimization spec"
+    )
+    beta_inputs = _required_mapping(inputs.get("beta"), "execution_contract.inputs.beta")
+    _verify_artifact_record(
+        beta_inputs.get("calibration_manifest"),
+        args.beta_calibration_manifest,
+        "contract beta calibration manifest",
+    )
+    model_contract = _required_mapping(inputs.get("model_bundle"), "contract model bundle")
+    if not _same_local_path(model_contract.get("model_dir"), args.model_artifact_dir):
+        raise TargetLoadCoordinatorError("contract model directory differs from --model-artifact-dir")
+    _verify_artifact_record(
+        model_contract.get("metadata"), args.model_metadata, "contract model metadata"
+    )
+    recorded_model_artifacts = _required_mapping(
+        model_contract.get("artifacts"), "contract model artifacts"
+    )
+    if set(recorded_model_artifacts) != set(artifact_hashes):
+        raise TargetLoadCoordinatorError("contract model artifact identities are incomplete")
+    for key, digest in artifact_hashes.items():
+        basename = key.split("::", 1)[1]
+        path = args.model_artifact_dir / basename
+        record = _verify_artifact_record(
+            recorded_model_artifacts.get(key), path, f"contract model artifact {key}"
+        )
+        if record["sha256"] != digest:
+            raise TargetLoadCoordinatorError(f"contract model artifact digest changed: {key}")
+    if model_contract.get("fingerprints") != model_fingerprints:
+        raise TargetLoadCoordinatorError("contract model fingerprints changed")
+    selected_model = _required_mapping(decision.get("selected_model"), "decision selected model")
+    if (
+        not _same_local_path(selected_model.get("model_dir"), args.model_artifact_dir)
+        or selected_model.get("metadata_sha256") != hashlib.sha256(metadata_json).hexdigest()
+        or selected_model.get("fingerprints") != model_fingerprints
+    ):
+        raise TargetLoadCoordinatorError("decision selected-model identity changed")
+
+    optimization_contract = _required_mapping(contract.get("optimization"), "contract optimization")
+    if not _same_local_path(optimization_contract.get("pareto_output"), args.pareto_csv):
+        raise TargetLoadCoordinatorError("contract Pareto output path changed")
+    if not _same_local_path(optimization_contract.get("fea_cases_output"), args.seed_fea_plan):
+        raise TargetLoadCoordinatorError("contract seed FEA plan path changed")
+    artifacts = _required_mapping(
+        decision.get("optimization_artifacts"), "decision optimization_artifacts"
+    )
+    _verify_artifact_record(artifacts.get("pareto"), args.pareto_csv, "decision Pareto artifact")
+    _verify_artifact_record(
+        artifacts.get("fea_cases"), args.seed_fea_plan, "decision seed FEA plan artifact"
+    )
+    if artifacts.get("provenance") != provenance:
+        raise TargetLoadCoordinatorError("decision optimizer provenance changed")
+    if artifacts.get("fea_candidate_ids") != original_candidate_ids:
+        raise TargetLoadCoordinatorError("decision FEA candidate IDs differ from the seed plan")
+    if _required_integer(artifacts.get("fea_case_rows"), "decision FEA case rows") != len(plan_rows):
+        raise TargetLoadCoordinatorError("decision FEA case-row count changed")
+
+    validation_contract = _required_mapping(contract.get("validation"), "contract validation")
+    if not _same_local_path(
+        validation_contract.get("summary_output"), args.pareto_validation_summary
+    ):
+        raise TargetLoadCoordinatorError("contract validation summary path changed")
+    if not _same_local_path(
+        validation_contract.get("final_front_output"), args.pareto_final_front
+    ):
+        raise TargetLoadCoordinatorError("contract final-front path changed")
+    validation = _required_mapping(decision.get("validation"), "decision validation")
+    _verify_artifact_record(
+        validation.get("summary"),
+        args.pareto_validation_summary,
+        "decision validation summary",
+    )
+    rows_path, rows_binding = _recorded_artifact(
+        validation.get("rows"), "decision validation rows"
+    )
+    rows_payload = rows_path.read_bytes()
+    if not _same_local_path(validation_contract.get("rows_output"), rows_path):
+        raise TargetLoadCoordinatorError("contract validation rows path changed")
+    _verify_artifact_record(
+        validation.get("final_front"),
+        args.pareto_final_front,
+        "decision final front",
+    )
+    fea = _required_mapping(decision.get("pareto_fea"), "decision pareto_fea")
+    results_path = Path(str(fea.get("results") or ""))
+    if not results_path.is_file() or fea.get("results_sha256") != _sha256_file(
+        results_path, "Pareto FEA results"
+    ):
+        raise TargetLoadCoordinatorError("decision Pareto FEA results path/hash is invalid")
+    results_payload = results_path.read_bytes()
+    pareto_fea_contract = _required_mapping(contract.get("pareto_fea"), "contract pareto_fea")
+    if not _same_local_path(pareto_fea_contract.get("results"), results_path):
+        raise TargetLoadCoordinatorError("contract Pareto FEA result path changed")
+    if _required_integer(fea.get("case_rows"), "decision Pareto FEA case rows") != len(plan_rows):
+        raise TargetLoadCoordinatorError("decision Pareto FEA case-row count changed")
+    _, _, results_hash = pareto_validator.read_csv(results_path, "collected FEA results")
+    minimum_coverage, identity_tolerance, execution_cwd = _validated_pareto_validator_thresholds(
+        validation_contract,
+        args=args,
+        rows_path=rows_path,
+        results_path=results_path,
+    )
+    (
+        expected_summary,
+        expected_summary_payload,
+        expected_rows_payload,
+        recomputed_front_payload,
+    ) = _recompute_strict_validation_from_bytes(
+        spec_json=spec_json,
+        metadata_json=metadata_json,
+        model_artifacts=model_artifacts,
+        pareto_csv=pareto_csv,
+        seed_plan_csv=seed_plan_csv,
+        results_csv=results_payload,
+        minimum_coverage=minimum_coverage,
+        identity_relative_tolerance=identity_tolerance,
+    )
+    if summary_payload != expected_summary_payload:
+        raise TargetLoadCoordinatorError(
+            "published Pareto FEA summary differs from independent strict validation"
+        )
+    if rows_payload != expected_rows_payload:
+        raise TargetLoadCoordinatorError(
+            "published Pareto FEA rows differ from independent strict validation"
+        )
+    summary = expected_summary
+    required_feasible = pareto_validator.minimum_required_fea_candidates(
+        len(original_candidate_ids)
+    )
+    if summary.get("required_feasible_candidate_count") != required_feasible:
+        raise TargetLoadCoordinatorError("recomputed required feasible candidate count is invalid")
+    maximum_fea_candidates = _required_integer(
+        optimization_contract.get("max_fea_candidates"),
+        "contract maximum FEA candidates",
+    )
+    if not 1 <= len(original_candidate_ids) <= maximum_fea_candidates:
+        raise TargetLoadCoordinatorError("original FEA candidate count exceeds its contract bound")
+
+    expected_summary_fields = {
+        "summary_schema_version",
+        "status",
+        "pass",
+        "gate_failures",
+        "thresholds",
+        "input_hashes",
+        "contract",
+        "coverage",
+        "candidates",
+        "feasible_candidate_count",
+        "feasible_candidate_ids",
+        "required_feasible_candidate_count",
+        "fea_filtered_final_front_count",
+        "fea_filtered_final_front_candidate_ids",
+        "fea_filtered_final_front",
+        "row_binding_hashes",
+        "validation_id",
+    }
+    if set(summary) != expected_summary_fields:
+        raise TargetLoadCoordinatorError("strict Pareto FEA summary fields are unsupported")
+    if summary.get("summary_schema_version") != pareto_validator.SUMMARY_SCHEMA_VERSION:
+        raise TargetLoadCoordinatorError("strict Pareto FEA summary schema is unsupported")
+    if summary.get("status") != "passed" or summary.get("pass") is not True:
+        raise TargetLoadCoordinatorError("strict Pareto FEA validation did not pass")
+    if summary.get("gate_failures") != []:
+        raise TargetLoadCoordinatorError("passed Pareto FEA summary contains gate failures")
+    unsigned_summary = dict(summary)
+    validation_id = str(unsigned_summary.pop("validation_id", ""))
+    if validation_id != pareto_validator.canonical_hash(
+        "ipmsm-pareto-fea-validation", unsigned_summary
+    ):
+        raise TargetLoadCoordinatorError("strict Pareto FEA validation_id is invalid")
+
+    expected_input_hashes = {
+        "optimization_spec": spec_hash,
+        "surrogate_model_metadata": metadata_hash,
+        "pareto_front": pareto_hash,
+        "fea_case_plan": plan_hash,
+        "collected_fea_results": results_hash,
+        optimizer.OPTIMIZATION_SPEC_SHA256_FIELD: hashlib.sha256(spec_json).hexdigest(),
+        optimizer.SURROGATE_METADATA_SHA256_FIELD: hashlib.sha256(metadata_json).hexdigest(),
+        optimizer.PARETO_SHA256_FIELD: hashlib.sha256(pareto_csv).hexdigest(),
+        optimizer.SURROGATE_MODEL_ARTIFACTS_SHA256_FIELD: artifact_manifest_sha,
+    }
+    if summary.get("input_hashes") != expected_input_hashes:
+        raise TargetLoadCoordinatorError("strict Pareto FEA summary input hashes changed")
+    summary_contract = _required_mapping(summary.get("contract"), "validation summary contract")
+    if summary_contract.get("optimization_provenance") != provenance:
+        raise TargetLoadCoordinatorError("validation summary optimizer provenance changed")
+    if _required_integer(summary_contract.get("case_rows"), "summary case_rows") != len(plan_rows):
+        raise TargetLoadCoordinatorError("validation summary case-row count changed")
+    if _required_integer(summary_contract.get("candidate_count"), "summary candidate_count") != len(
+        original_candidate_ids
+    ):
+        raise TargetLoadCoordinatorError("validation summary candidate count changed")
+    if _required_integer(
+        summary_contract.get("pareto_candidate_count"), "summary Pareto candidate count"
+    ) != len(pareto_rows):
+        raise TargetLoadCoordinatorError("validation summary Pareto candidate count changed")
+
+    candidates = summary.get("candidates")
+    if not isinstance(candidates, list) or [
+        str(item.get("candidate_id") or "") if isinstance(item, Mapping) else ""
+        for item in candidates
+    ] != original_candidate_ids:
+        raise TargetLoadCoordinatorError("validation summary candidate IDs/order changed")
+    feasible_ids = summary.get("feasible_candidate_ids")
+    if not isinstance(feasible_ids, list) or len(feasible_ids) != len(set(feasible_ids)):
+        raise TargetLoadCoordinatorError("validation summary feasible candidate IDs are invalid")
+    if not set(feasible_ids) <= set(original_candidate_ids):
+        raise TargetLoadCoordinatorError("validation summary has an unknown feasible candidate")
+    if _required_integer(
+        summary.get("feasible_candidate_count"), "summary feasible_candidate_count"
+    ) != len(feasible_ids):
+        raise TargetLoadCoordinatorError("validation summary feasible candidate count changed")
+
+    final_ids = summary.get("fea_filtered_final_front_candidate_ids")
+    front_rows = summary.get("fea_filtered_final_front")
+    if not isinstance(final_ids, list) or not final_ids or len(final_ids) != len(set(final_ids)):
+        raise TargetLoadCoordinatorError("validation summary final-front candidate IDs are invalid")
+    if not isinstance(front_rows, list) or any(not isinstance(row, Mapping) for row in front_rows):
+        raise TargetLoadCoordinatorError("validation summary final-front rows are invalid")
+    front_row_ids = [str(row.get("candidate_id") or "") for row in front_rows]
+    if final_ids != front_row_ids or not set(final_ids) <= set(feasible_ids):
+        raise TargetLoadCoordinatorError("validation summary final-front IDs/rows mismatch")
+    if _required_integer(
+        summary.get("fea_filtered_final_front_count"), "summary final-front count"
+    ) != len(final_ids):
+        raise TargetLoadCoordinatorError("validation summary final-front count changed")
+    expected_front = pareto_validator._final_front_csv_text(spec, front_rows).encode("utf-8")
+    if expected_front != recomputed_front_payload:
+        raise TargetLoadCoordinatorError("recomputed final-front serialization is inconsistent")
+    if args.pareto_final_front.read_bytes() != expected_front:
+        raise TargetLoadCoordinatorError("FEA-filtered final-front CSV differs from its summary")
+    if any(
+        row.get("final_front_schema_version") != pareto_validator.FINAL_FRONT_SCHEMA_VERSION
+        for row in front_rows
+    ):
+        raise TargetLoadCoordinatorError("FEA-filtered final-front row schema is invalid")
+
+    recorded_front = _required_mapping(validation.get("final_front"), "decision final front")
+    if (
+        validation.get("validation_id") != validation_id
+        or validation.get("pass") is not True
+        or validation.get("gate_failures") != []
+        or _required_integer(
+            validation.get("feasible_candidate_count"),
+            "decision feasible candidate count",
+        )
+        != len(feasible_ids)
+        or _required_integer(recorded_front.get("candidate_count"), "decision final-front count")
+        != len(final_ids)
+        or recorded_front.get("candidate_ids") != final_ids
+    ):
+        raise TargetLoadCoordinatorError("optimization decision validation identity changed")
+
+    final_id_set = set(final_ids)
+    selected_ids = [candidate_id for candidate_id in original_candidate_ids if candidate_id in final_id_set]
+    if len(selected_ids) != len(final_ids):
+        raise TargetLoadCoordinatorError("final front contains a missing/extra seed candidate ID")
+    filtered_rows = [
+        row for row in plan_rows if str(row.get("candidate_id") or "").strip() in final_id_set
+    ]
+    filtered_candidate_ids = pareto_validator.validate_case_plan(
+        spec,
+        plan_fields,
+        filtered_rows,
+        provenance,
+    )
+    if filtered_candidate_ids != selected_ids:
+        raise TargetLoadCoordinatorError("filtered seed plan does not preserve original candidate order")
+    pareto_validator.validate_pareto_front(
+        spec,
+        pareto_fields,
+        pareto_rows,
+        filtered_rows,
+        filtered_candidate_ids,
+    )
+    filtered_plan = _render_filtered_plan(plan_fields, filtered_rows)
+
+    binding = {
+        "schema_version": workflow.UPSTREAM_PARETO_BINDING_SCHEMA_VERSION,
+        "optimization_decision": {
+            "path": str(args.optimization_decision.resolve(strict=False)),
+            "sha256": hashlib.sha256(decision_payload).hexdigest(),
+            "schema_version": decision["schema_version"],
+            "contract_sha256": contract_sha,
+            "mode": decision["mode"],
+            "status": decision["status"],
+        },
+        "source_artifacts": {
+            "optimization_spec": _artifact_binding_from_bytes(
+                args.optimization_spec, spec_json
+            ),
+            "pareto": _artifact_binding_from_bytes(args.pareto_csv, pareto_csv),
+            "seed_fea_plan": _artifact_binding_from_bytes(
+                args.seed_fea_plan, seed_plan_csv
+            ),
+            "pareto_fea_results": _artifact_binding_from_bytes(
+                results_path, results_payload
+            ),
+            "model_metadata": _artifact_binding_from_bytes(
+                args.model_metadata, metadata_json
+            ),
+            "model_artifacts_manifest_sha256": artifact_manifest_sha,
+            "beta_calibration_manifest": _artifact_binding_from_bytes(
+                args.beta_calibration_manifest, beta_json
+            ),
+        },
+        "optimization_run_id": provenance[optimizer.OPTIMIZATION_RUN_ID_FIELD],
+        "execution_cwd": str(execution_cwd),
+        "validation": {
+            "validation_id": validation_id,
+            "summary_schema_version": summary["summary_schema_version"],
+            "final_front_schema_version": pareto_validator.FINAL_FRONT_SCHEMA_VERSION,
+            "summary": {
+                "path": str(args.pareto_validation_summary.resolve(strict=False)),
+                "sha256": hashlib.sha256(summary_payload).hexdigest(),
+            },
+            "rows": rows_binding,
+            "final_front": _artifact_binding_from_bytes(
+                args.pareto_final_front, expected_front
+            ),
+            "status": summary["status"],
+            "pass": summary["pass"],
+        },
+        "authority_documents_base64": {
+            "optimization_decision_json": base64.b64encode(decision_payload).decode("ascii"),
+            "original_seed_fea_plan_csv": base64.b64encode(seed_plan_csv).decode("ascii"),
+            "pareto_fea_results_csv": base64.b64encode(results_payload).decode("ascii"),
+            "validation_summary_json": base64.b64encode(summary_payload).decode("ascii"),
+            "validation_rows_csv": base64.b64encode(rows_payload).decode("ascii"),
+            "final_front_csv": base64.b64encode(expected_front).decode("ascii"),
+        },
+        "model_artifacts_base64": {
+            basename: base64.b64encode(payload).decode("ascii")
+            for basename, payload in sorted(model_artifacts.items())
+        },
+        "producer_sources_base64": {
+            name: base64.b64encode(payload).decode("ascii")
+            for name, payload in sorted(producer_sources.items())
+        },
+        "original_seed_candidate_ids": original_candidate_ids,
+        "fea_filtered_final_front_candidate_ids": final_ids,
+        "selected_candidate_ids": selected_ids,
+    }
+    exact_rechecks: list[tuple[str, Path, bytes]] = [
+        ("optimization decision", args.optimization_decision, decision_payload),
+        ("Pareto FEA validation summary", args.pareto_validation_summary, summary_payload),
+        ("Pareto FEA validation rows", rows_path, rows_payload),
+        ("FEA-filtered final front", args.pareto_final_front, expected_front),
+        ("Pareto FEA results", results_path, results_payload),
+        ("optimization spec", args.optimization_spec, spec_json),
+        ("Pareto CSV", args.pareto_csv, pareto_csv),
+        ("original seed FEA plan", args.seed_fea_plan, seed_plan_csv),
+        ("surrogate metadata", args.model_metadata, metadata_json),
+        ("beta calibration manifest", args.beta_calibration_manifest, beta_json),
+    ]
+    exact_rechecks.extend(
+        (
+            f"surrogate model artifact {basename}",
+            args.model_artifact_dir / basename,
+            payload,
+        )
+        for basename, payload in sorted(model_artifacts.items())
+    )
+    exact_rechecks.extend(
+        (f"optimization producer source {name}", source_root / name, payload)
+        for name, payload in sorted(producer_sources.items())
+    )
+    _final_recheck_upstream_artifacts(exact_rechecks)
+    return filtered_plan, workflow.validate_upstream_pareto_binding(binding)
+
+
 def build_root_from_files(args: argparse.Namespace) -> dict[str, Any]:
     """Build the frozen root from explicit, exact upstream artifacts."""
 
@@ -2744,6 +3642,24 @@ def build_root_from_files(args: argparse.Namespace) -> dict[str, Any]:
         raise TargetLoadCoordinatorError(f"cannot read frozen root input: {exc}") from exc
     spec_mapping = workflow._strict_json_object(spec_json, "optimization spec")
     spec = optimization_spec_from_mapping(spec_mapping)
+    model_artifacts = _model_artifacts_from_directory(
+        metadata_json,
+        args.model_artifact_dir,
+    )
+    try:
+        filtered_plan_csv, upstream_binding = _audit_upstream_final_front(
+            args,
+            spec_json=spec_json,
+            pareto_csv=pareto_csv,
+            seed_plan_csv=seed_plan_csv,
+            metadata_json=metadata_json,
+            beta_json=beta_json,
+            model_artifacts=model_artifacts,
+        )
+    except (pareto_validator.ParetoFEAValidationError, OSError, ValueError) as exc:
+        raise TargetLoadCoordinatorError(
+            f"strict upstream final-front audit failed: {exc}"
+        ) from exc
     policy = workflow.MatchPolicyTemplate(
         relative_tolerance=args.relative_tolerance,
         minimum_current_peak_a=0.0,
@@ -2784,14 +3700,12 @@ def build_root_from_files(args: argparse.Namespace) -> dict[str, Any]:
     return workflow.build_root_manifest(
         optimization_spec_json=spec_json,
         pareto_csv=pareto_csv,
-        seed_fea_plan_csv=seed_plan_csv,
+        seed_fea_plan_csv=filtered_plan_csv,
         model_metadata_json=metadata_json,
-        model_artifacts_by_basename=_model_artifacts_from_directory(
-            metadata_json,
-            args.model_artifact_dir,
-        ),
+        model_artifacts_by_basename=model_artifacts,
         beta_calibration_manifest_json=beta_json,
         **runtime_sources,
+        upstream_pareto_binding=upstream_binding,
         scheduler_contract=scheduler_contract,
         policy_template=policy,
         task_retry_limit=args.task_retry_limit,
@@ -2812,9 +3726,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     initialize = subparsers.add_parser("init", help="Freeze an exact v4 root and root_frozen sidecar.")
     initialize.add_argument("--workspace", type=Path, required=True)
+    initialize.add_argument("--optimization-decision", type=Path, required=True)
     initialize.add_argument("--optimization-spec", type=Path, required=True)
     initialize.add_argument("--pareto-csv", type=Path, required=True)
     initialize.add_argument("--seed-fea-plan", type=Path, required=True)
+    initialize.add_argument("--pareto-validation-summary", type=Path, required=True)
+    initialize.add_argument("--pareto-final-front", type=Path, required=True)
     initialize.add_argument("--model-metadata", type=Path, required=True)
     initialize.add_argument("--model-artifact-dir", type=Path, required=True)
     initialize.add_argument("--beta-calibration-manifest", type=Path, required=True)
@@ -2916,7 +3833,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.command == "import-fixed-mtpa":
-            root, _ = _load_root(args.workspace.resolve(strict=False))
+            root, _ = _load_root(args.workspace)
             candidates = args.candidate_id or list(root["identity"]["candidate_order"])
             imported: list[str] = []
             for candidate_id in candidates:

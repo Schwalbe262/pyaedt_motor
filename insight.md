@@ -791,3 +791,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: canonical base64 result replay, exact spec/Pareto/plan/model/beta/source reconstruction, production bundle loading, runtime-source equality, terminal count invariants, and stale/invalid health propagation close those gaps.
 - Evidence: tamper/fuzz/independent-review regressions pass; focused 69/69 and shared `.venv` 728/728 are green, and live health/API/static readback is clean.
 - Remaining risk: the v4 coordinator/sidecar does not run until the sealed Stage1 gate and production Pareto artifacts exist; browser-level screenshot regression remains unavailable in this session.
+
+## 2026-07-12 10:41:38 +09:00 - Insight 87
+- Source loop: strict final-front target-load root v2 audit.
+- Improvement: cache expensive immutable-authority validation by both canonical content and the exact live runtime-source digest, while still rereading the small root bytes and identity at every action boundary.
+- Before: a 14.94 MiB model bundle took 43.8 s and 126.6 MiB peak to validate; five internal replays would cost about 220 s per watch cycle, while incomplete source pinning or hardlinked authority files could bypass the cache trust boundary.
+- After: bounded content/source-keyed validation performs one strict load, exact producer and atomic-publish bytes invalidate on drift, and uniform single-link/no-follow containment rejects reproduced external-inode aliases.
+- Evidence: loader-count, source-mutation, NTFS hardlink, reparse/symlink, coordinated-rehash, and final TOCTOU tests pass; related 94/94 and full 828/828 are green with an independent no-P0/P1 audit.
+- Remaining risk: the optimization-input approval remains filesystem-ACL self-attestation, and the target-load root must remain uninitialized until official upstream gates are complete.
