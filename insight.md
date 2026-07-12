@@ -943,3 +943,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: the exact saved models reproduce the gate, repeat noise is negligible, and all train/calibration/test groups are similarly sparse in the 16D geometry space; distance becomes a supporting signal instead of the sole selector.
 - Evidence: preview passed0/9 with min/avg R2 0.624627/0.771923; combined residual versus nearest-train distance Pearson0.1418 and Spearman0.0573, while farthest-six error is 1.269x nearest-six.
 - Remaining risk: only 23 independent test groups are available, so target-specific active subspaces and a formally revised Stage3 geometry count may still be needed to reach R2>=0.95.
+
+## 2026-07-13 05:27:00 +09:00 - Insight 106
+- Source loop: Scheduler deployment rows claimed one old commit while five live project clones had silently diverged under branch auto-pull.
+- Improvement: treat deployment metadata as a hint, freeze branch movement before fan-out, require per-account actual HEAD and clean-tree checks, and store a full commit SHA with auto-pull disabled before submitting identity-bound FEA.
+- Before: tasks could share one project name and dedupe scheme while executing different source commits, and literal-SHA deploys failed in detached HEAD handling.
+- After: all five capable accounts resolve one verified SHA, the project is immutable at cap50, and the scheduler has a tested exact-SHA sync fix ready on `dbd23ae`.
+- Evidence: deployment refs and SSH HEADs are 5/5 `c9c7003...97633`, tracked/untracked-Python checks are clean, project active0, and scheduler sync/API tests pass18/18.
+- Remaining risk: the running scheduler still has old SHA sync code and global active200, so no update/deploy or service restart is safe until a controlled maintenance window.

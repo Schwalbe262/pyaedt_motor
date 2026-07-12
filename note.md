@@ -3928,3 +3928,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 ## 2026-07-13 05:23:00 +09:00 - Local diagnostic dashboard deployed
 - Actions/result: committed/pushed `93c3564`, synced exact Git LF blobs to LF325, restarted only the local dashboard task, and verified status/static HTTP plus dual authority flags; Y/Slurm writes0.
 - Metrics/next: PID53540, root/app200, model available diagnostic, validation700, hashes7, passed0/9, min/avg0.624627/0.771923, authority/official eligibility false; intentional invalid-contract health remains degraded, and Stage2 stays stopped pending scheduler SHA-fix maintenance.
+
+## 2026-07-13 05:27:00 +09:00 - Scheduler project source frozen without service restart
+- Part/goal: eliminate heterogeneous remote source HEADs before any cap50 Stage2 refill while preserving other projects' 200 active tasks.
+- Actions/result: snapshotted project/deployments, set branch auto-pull false, updated five capable accounts, verified actual HEAD/tracked/untracked-Python state, then froze project metadata to full SHA `c9c7003...97633`; no task was submitted or cancelled.
+- Metrics/next: project body exact, deployments5/5 exact, cap50, nonterminal0, dashboard project/cap match true; live SHA redeploy remains forbidden until `dbd23ae` is merged/restarted, and official Stage1 activation still precedes Stage2 refill.
