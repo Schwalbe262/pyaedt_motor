@@ -3893,3 +3893,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: complete all 300 historical Stage2 identity/result checks without further RaiDrive source writes.
 - Actions/result: ran the committed v3 auditor from local NTFS against Y inputs and Scheduler GET-only; receipt `50405c72...82018` is ready with coverage300, audited172, physics_ok171, sole torque suspect task28880, infra27, unsubmitted101, active/pending0, and 429 retries0.
 - Evidence/next: report binds the receipt exactly and a fresh read-only inventory validates 172 final checkpoints plus 172 non-authoritative retained local hardlink stages; publish the sanitized authority to Y only after mount stability, then seal recovery plans.
+
+## 2026-07-13 02:02:00 +09:00 - v4r4 torque-recovery base revision tool completed
+- Part/goal: make the eventual cap50 pipeline contract depend on the complete forensic, recovery-plan, Stage1 rebuild, and Stage2 audit authorities without mutating v4r3.
+- Actions/result: added a dry-run-first/no-replace base-only revision with exact recursive allowlist, 299 Stage2 dedupe preservation, task28880-only contamination gate, live project id2/cap50 authority, crash recovery, and fresh v4r4 namespaces; focused tests pass 12/12.
+- Failure/next: recovery manifest and Stage1 rebuild receipt are not yet published, so the real default dry-run remains intentionally fail-closed and no v4r4 base or wrapper exists.
