@@ -927,3 +927,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: C performs all reads/writes, Y remains the contract workdir, complete Stage1/Stage2 authorities replay, and publish callbacks recheck file identities, future namespaces, and live cap50.
 - Evidence: actual Python3.11/3.14 dry-runs share contract SHA `093bdd63...e6943`, 22 focused plus 55 related tests pass, and two independent reviews report P0/P1=0.
 - Remaining risk: the Stage1 receipt intentionally preserves its LF325 validator absolute path, so this authority must remain at that exact mirror location until a separately sealed portable receipt revision exists.
+
+## 2026-07-13 04:42:00 +09:00 - Insight 104
+- Source loop: a signed wrapper had to be rebuilt while RaiDrive metadata-finalization and rename operations were failing globally.
+- Improvement: derive the wrapper with the stock builder on a fixed-local shadow, rewrite only an exact path-leaf allowlist back to sealed logical paths, pin intended source deltas against the old signed wrapper, and rebind mutable training data to an immutable recovery receipt at execution time.
+- Before: direct Y publication could fail ambiguously, self-pinning could bless an unintended source, and a 700-row result could be replaced after wrapper creation but before training.
+- After: local publication is byte-identical to the stock serializer, repeat-no-replace stable, Y writes stay zero, and the official publisher rejects any receipt/result path, row-count, size, or SHA drift.
+- Evidence: commit `d087c77`; independent P0/P1=0; related 119/119 (3 skip); Python3.11 focused 72/72; wrapper raw `e58c2b1c...dc13a`, contract `b73cd808...c1d8e8`, sidecars0.
+- Remaining risk: Stage1 execution still needs a separately audited C-mirror runtime adapter; the logical contract itself is not executable from C with the stock loaders.

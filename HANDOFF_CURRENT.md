@@ -273,3 +273,9 @@
 - Actual LF mirror dry-runs under Python3.11/3.14 produce identical contract SHA `093bdd63...e6943`; focused22/22 and related55/55 pass, and no local/Y base is published yet.
 - Local LF325 `base_v4r4.json` is now no-replace published: raw SHA `e22c397e...cc1f`, contract SHA `093bdd63...e6943`, immutable34, all five caps50; repeat publish is `existing_verified` with hash/mtime unchanged.
 - No v4r4 wrapper or Y base exists; keep the pipeline inactive until the committed sources and sanitized authorities can be transferred without RaiDrive ambiguity.
+- 2026-07-13 04:42 KST: RaiDrive 2025.9.0 has a global index/metadata-finalization failure; the target audit file is not retrying, but all project writes to Y remain prohibited.
+- Dashboard task/PID now runs from local LF325 at `http://127.0.0.1:8765`; IPMSM RaiDrive errors stayed at zero in a 2-minute probe and read throughput fell about 52%.
+- Commit `d087c77` adds the mirror-safe v4r4 wrapper builder plus execution-time Stage1 rebuild-receipt/result binding; independent P0/P1 review is clean.
+- Wrapper/publisher/base related tests pass 119/119 (3 skip), Python3.11 focused passes 72/72; full 1012-test run reached 33 missing-scipy/pandas environment errors unrelated to this change.
+- Local LF325 `contract.json` is no-replace published: raw `e58c2b1c...dc13a`, contract `b73cd808...c1d8e8`, pins31/immutable32, C/temp leaks0; repeat publish preserved bytes/mtime and left no sidecars.
+- Stage1 workspace/declaration/confirmation/authorization remain absent and NSGA-II stays gated; next is a C-mirror-only Stage1 official publisher adapter, with Y and Slurm writes still disabled.
