@@ -3933,3 +3933,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: eliminate heterogeneous remote source HEADs before any cap50 Stage2 refill while preserving other projects' 200 active tasks.
 - Actions/result: snapshotted project/deployments, set branch auto-pull false, updated five capable accounts, verified actual HEAD/tracked/untracked-Python state, then froze project metadata to full SHA `c9c7003...97633`; no task was submitted or cancelled.
 - Metrics/next: project body exact, deployments5/5 exact, cap50, nonterminal0, dashboard project/cap match true; live SHA redeploy remains forbidden until `dbd23ae` is merged/restarted, and official Stage1 activation still precedes Stage2 refill.
+
+## 2026-07-13 05:49:00 +09:00 - C-native v4r5 base builder implemented
+- Part/goal: remove the RaiDrive activation dependency without weakening the recovered v4r4 authority.
+- Actions/result: added an exact 12-leaf native revision, append-only source/base-builder provenance, fixed LF325/Python/module authority, in-memory v3 audit, bytecode suppression, TOCTOU checks, and crash-safe no-replace publication; no real base or LF/Y file was created.
+- Metrics/next: original34/native36 immutables, independent P0=0/P1 bytecode fix closed, related127/127 pass (3 skip); commit and sync the exact builder blob before the real zero-write dry-run.
