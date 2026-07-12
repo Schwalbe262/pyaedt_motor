@@ -43,6 +43,16 @@ ATTEMPTS_NAME = "attempts"
 PUBLISH_PROOF_SUFFIX = ".publish-proof.json"
 PUBLISH_ATTEMPT_MARKER = ".publish-attempt."
 PUBLISH_STAGE_READY_NAME = "stage-ready"
+STAGE1_REBUILD_RECEIPT_NAME = (
+    "stage1_torqueunit_fix_rebuild.receipt.canonical.json"
+)
+STAGE1_REBUILD_RECEIPT_REFERENCE = (
+    "simul_log_smoke/v4r4/"
+    "stage1_torqueunit_fix_rebuild.receipt.canonical.json"
+)
+STAGE1_REBUILD_RECEIPT_SCHEMA_VERSION = (
+    "ipmsm-v2-stage1-torque-unit-rebuild-receipt-v1"
+)
 
 
 class OfficialStage1Error(RuntimeError):
@@ -1458,6 +1468,123 @@ def _source_path(module: Any, label: str) -> Path:
     return lexical.resolve(strict=False)
 
 
+def _rebuild_receipt_path(value: Any, workdir: Path, label: str) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise OfficialStage1Error(f"{label} must be a nonblank path")
+    raw = Path(value)
+    if raw.is_absolute():
+        candidate = raw
+    else:
+        posix = PurePosixPath(value)
+        if posix.is_absolute() or ".." in posix.parts or "\\" in value:
+            raise OfficialStage1Error(f"{label} must be workdir-relative without traversal")
+        candidate = workdir.joinpath(*posix.parts)
+    lexical = _lexical_absolute(candidate)
+    _reject_link_components(lexical, label)
+    return lexical.resolve(strict=False)
+
+
+def _audit_rebuild_receipt_result_authority(
+    contract: v3_supervisor.PipelineContract,
+    immutable_by_path: Mapping[Path, str],
+    result_binding: Mapping[str, Any],
+) -> None:
+    candidates = [
+        path
+        for path in immutable_by_path
+        if path.name.lower() == STAGE1_REBUILD_RECEIPT_NAME.lower()
+    ]
+    if not candidates:
+        return
+    if len(candidates) != 1:
+        raise OfficialStage1Error(
+            "base immutable inputs must contain exactly one Stage1 rebuild receipt"
+        )
+    receipt_path = candidates[0]
+    expected_receipt = _resolved_absolute(
+        contract.workdir.joinpath(*PurePosixPath(STAGE1_REBUILD_RECEIPT_REFERENCE).parts)
+    )
+    if receipt_path != expected_receipt:
+        raise OfficialStage1Error(
+            "Stage1 rebuild receipt is outside its exact v4r4 authority path"
+        )
+    payload = _read_regular_bytes(receipt_path, "Stage1 rebuild receipt")
+    if _sha256_bytes(payload) != immutable_by_path[receipt_path]:
+        raise OfficialStage1Error("Stage1 rebuild receipt changed after immutable audit")
+    receipt = _decode_json(payload, "Stage1 rebuild receipt", canonical=True)
+    if set(receipt) != {
+        "forensics",
+        "original_collection",
+        "publication",
+        "rebuilt_collection",
+        "recovery",
+        "remap",
+        "schema_version",
+        "validator",
+        "verified",
+    }:
+        raise OfficialStage1Error("Stage1 rebuild receipt fields are not exact")
+    if (
+        receipt.get("schema_version") != STAGE1_REBUILD_RECEIPT_SCHEMA_VERSION
+        or receipt.get("verified") is not True
+    ):
+        raise OfficialStage1Error("Stage1 rebuild receipt is not verified v1 authority")
+
+    publication = receipt.get("publication")
+    rebuilt = receipt.get("rebuilt_collection")
+    if not isinstance(publication, dict) or set(publication) != {
+        "mode",
+        "output_collection",
+        "receipt_path",
+    }:
+        raise OfficialStage1Error("Stage1 rebuild publication binding is not exact")
+    if publication.get("mode") != "fresh_directory_then_atomic_receipt_no_replace":
+        raise OfficialStage1Error("Stage1 rebuild publication mode changed")
+    if not isinstance(rebuilt, dict) or set(rebuilt) != {
+        "columns",
+        "materialization",
+        "merged_results",
+        "result_files",
+        "result_inventory_canonical_sha256",
+        "rows",
+        "selected_cases",
+        "unchanged_original_results",
+        "validation_summary",
+    }:
+        raise OfficialStage1Error("Stage1 rebuilt collection binding is not exact")
+    merged = rebuilt.get("merged_results")
+    if not isinstance(merged, dict) or set(merged) != {"bytes", "path", "sha256"}:
+        raise OfficialStage1Error("Stage1 rebuilt merged-result binding is not exact")
+
+    bound_receipt = _rebuild_receipt_path(
+        publication.get("receipt_path"), contract.workdir, "rebuild receipt path"
+    )
+    output_collection = _rebuild_receipt_path(
+        publication.get("output_collection"),
+        contract.workdir,
+        "rebuilt output collection",
+    )
+    merged_path = _rebuild_receipt_path(
+        merged.get("path"), contract.workdir, "rebuilt merged result"
+    )
+    expected_output = _resolved_absolute(contract.stage1.output_dir)
+    expected_result = _resolved_absolute(contract.stage1.result)
+    if bound_receipt != receipt_path:
+        raise OfficialStage1Error("Stage1 rebuild receipt does not bind its own path")
+    if output_collection != expected_output or merged_path.parent != expected_output:
+        raise OfficialStage1Error("Stage1 rebuild receipt output collection changed")
+    if merged_path != expected_result:
+        raise OfficialStage1Error("Stage1 result path differs from rebuild receipt authority")
+    if rebuilt.get("rows") != contract.stage1.expected_rows:
+        raise OfficialStage1Error("Stage1 result rows differ from rebuild receipt authority")
+    if rebuilt.get("result_files") != contract.stage1.expected_rows:
+        raise OfficialStage1Error("Stage1 rebuild receipt result-file count changed")
+    if merged.get("sha256") != result_binding.get("sha256"):
+        raise OfficialStage1Error("Stage1 result SHA-256 differs from rebuild receipt authority")
+    if merged.get("bytes") != result_binding.get("size"):
+        raise OfficialStage1Error("Stage1 result size differs from rebuild receipt authority")
+
+
 def _audit_stage1_result_coverage(
     case_plan: Path,
     result: Path,
@@ -1599,6 +1726,7 @@ def _build_context(
     case_plan_sha256 = immutable_by_path.get(case_plan_path)
     if case_plan_sha256 is None:
         raise OfficialStage1Error("Stage1 case plan is not an immutable base input")
+    _audit_rebuild_receipt_result_authority(contract, immutable_by_path, result)
     _audit_stage1_result_coverage(
         contract.stage1.case_plan,
         contract.stage1.result,

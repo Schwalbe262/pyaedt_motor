@@ -37,6 +37,7 @@ class Stage1OfficialV4Tests(unittest.TestCase):
         training_source.write_text("# trainer\n", encoding="utf-8")
         stage1_contract = SimpleNamespace(
             result=self.result,
+            output_dir=self.workdir,
             case_plan=self.workdir / "cases.csv",
             expected_rows=700,
             expected_groups=112,
@@ -170,6 +171,67 @@ class Stage1OfficialV4Tests(unittest.TestCase):
         if members is not None:
             record["ensemble_members"] = members
         return record
+
+    def _write_rebuild_receipt(
+        self,
+        *,
+        receipt_path: Path | None = None,
+        merged_path: Path | None = None,
+        merged_sha256: str | None = None,
+        merged_bytes: int | None = None,
+        rows: int = 700,
+        schema_version: str = official.STAGE1_REBUILD_RECEIPT_SCHEMA_VERSION,
+        canonical: bool = True,
+    ) -> tuple[Path, dict[Path, str]]:
+        path = receipt_path or self.workdir.joinpath(
+            *official.PurePosixPath(
+                official.STAGE1_REBUILD_RECEIPT_REFERENCE
+            ).parts
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        merged = merged_path or self.result
+        result_sha = official._sha256_bytes(self.result.read_bytes())
+        document = {
+            "schema_version": schema_version,
+            "verified": True,
+            "publication": {
+                "mode": "fresh_directory_then_atomic_receipt_no_replace",
+                "output_collection": str(self.workdir),
+                "receipt_path": str(path),
+            },
+            "recovery": {},
+            "forensics": {},
+            "original_collection": {},
+            "remap": {},
+            "rebuilt_collection": {
+                "rows": rows,
+                "columns": 704,
+                "selected_cases": {},
+                "merged_results": {
+                    "path": str(merged),
+                    "sha256": merged_sha256 or result_sha,
+                    "bytes": (
+                        self.result.stat().st_size
+                        if merged_bytes is None
+                        else merged_bytes
+                    ),
+                },
+                "validation_summary": {},
+                "result_files": rows,
+                "unchanged_original_results": rows - 1,
+                "materialization": {"copy": rows - 1},
+                "result_inventory_canonical_sha256": "f" * 64,
+            },
+            "validator": {},
+        }
+        payload = (
+            official._canonical_json_bytes(document)
+            if canonical
+            else (json.dumps(document, indent=2) + "\n").encode("utf-8")
+        )
+        path.write_bytes(payload)
+        resolved = official._resolved_absolute(path)
+        return path, {resolved: official._sha256_bytes(payload)}
 
     def _make_ready(
         self,
@@ -1052,6 +1114,129 @@ class Stage1OfficialV4Tests(unittest.TestCase):
                         expected_case_plan_sha256=plan_sha,
                         expected_result_sha256=official._sha256_bytes(result.read_bytes()),
                     )
+
+    def test_rebuild_receipt_authority_is_optional_for_legacy_base(self) -> None:
+        changed = dict(self.context.result_binding)
+        changed["sha256"] = "0" * 64
+        official._audit_rebuild_receipt_result_authority(
+            self.context.contract,
+            {},
+            changed,
+        )
+
+    def test_rebuild_receipt_authority_binds_result_path_sha_size_and_rows(self) -> None:
+        _, immutable = self._write_rebuild_receipt()
+        official._audit_rebuild_receipt_result_authority(
+            self.context.contract,
+            immutable,
+            self.context.result_binding,
+        )
+
+        mutations = (
+            ({"merged_sha256": "0" * 64}, "SHA-256"),
+            ({"merged_path": self.workdir / "other.csv"}, "result path"),
+            ({"merged_bytes": self.result.stat().st_size + 1}, "result size"),
+            ({"rows": 699}, "result rows"),
+        )
+        for arguments, message in mutations:
+            with self.subTest(arguments=arguments):
+                _, immutable = self._write_rebuild_receipt(**arguments)
+                with self.assertRaisesRegex(official.OfficialStage1Error, message):
+                    official._audit_rebuild_receipt_result_authority(
+                        self.context.contract,
+                        immutable,
+                        self.context.result_binding,
+                    )
+
+    def test_rebuild_receipt_authority_requires_exact_path_schema_and_bytes(self) -> None:
+        wrong = self.workdir / "other" / official.STAGE1_REBUILD_RECEIPT_NAME
+        _, immutable = self._write_rebuild_receipt(receipt_path=wrong)
+        with self.assertRaisesRegex(official.OfficialStage1Error, "authority path"):
+            official._audit_rebuild_receipt_result_authority(
+                self.context.contract,
+                immutable,
+                self.context.result_binding,
+            )
+
+        _, immutable = self._write_rebuild_receipt(schema_version="changed")
+        with self.assertRaisesRegex(official.OfficialStage1Error, "verified v1"):
+            official._audit_rebuild_receipt_result_authority(
+                self.context.contract,
+                immutable,
+                self.context.result_binding,
+            )
+
+        _, immutable = self._write_rebuild_receipt(canonical=False)
+        with self.assertRaisesRegex(official.OfficialStage1Error, "canonical JSON"):
+            official._audit_rebuild_receipt_result_authority(
+                self.context.contract,
+                immutable,
+                self.context.result_binding,
+            )
+
+    def test_rebuild_receipt_authority_rejects_ambiguous_candidates(self) -> None:
+        _, immutable = self._write_rebuild_receipt()
+        second = self.workdir / "other" / official.STAGE1_REBUILD_RECEIPT_NAME
+        second.parent.mkdir()
+        second.write_bytes(b"foreign\n")
+        immutable[official._resolved_absolute(second)] = official._sha256_bytes(
+            second.read_bytes()
+        )
+        with self.assertRaisesRegex(official.OfficialStage1Error, "exactly one"):
+            official._audit_rebuild_receipt_result_authority(
+                self.context.contract,
+                immutable,
+                self.context.result_binding,
+            )
+
+    def test_build_context_invokes_rebuild_receipt_authority(self) -> None:
+        case_plan = self.context.contract.stage1.case_plan
+        case_plan.write_text("case_id\na\n", encoding="utf-8")
+        case_plan_sha = official._sha256_bytes(case_plan.read_bytes())
+        contract_values = dict(vars(self.context.contract))
+        contract_values.update(
+            contract_sha256="2" * 64,
+            immutable_inputs=(
+                SimpleNamespace(path=case_plan, sha256=case_plan_sha),
+            ),
+        )
+        contract = SimpleNamespace(**contract_values)
+        base_binding = official._binding(
+            self.contract_source, "fixture base contract"
+        )
+        authority = SimpleNamespace(
+            base_contract_binding=SimpleNamespace(
+                path=self.contract_source,
+                sha256=base_binding["sha256"],
+                canonical_sha256="0" * 64,
+                contract_sha256=contract.contract_sha256,
+            ),
+            base_contract=contract,
+        )
+        with (
+            mock.patch.object(
+                official,
+                "_load_v4_contract",
+                return_value=(object(), authority, {}),
+            ),
+            mock.patch.object(
+                official.v3_supervisor, "load_contract", return_value=contract
+            ),
+            mock.patch.object(
+                official,
+                "_audit_rebuild_receipt_result_authority",
+                side_effect=official.OfficialStage1Error("receipt authority invoked"),
+            ) as audit,
+        ):
+            with self.assertRaisesRegex(
+                official.OfficialStage1Error, "receipt authority invoked"
+            ):
+                official._build_context(
+                    self.pipeline_contract_source,
+                    self.contract_source,
+                )
+        audit.assert_called_once()
+        self.assertEqual(audit.call_args.args[2]["sha256"], self.context.result_binding["sha256"])
 
     def test_v4_stage1_authority_exactly_binds_cli_workspace_and_completion(self) -> None:
         root = self.base / "workspace"
