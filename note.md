@@ -3847,3 +3847,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: Stage1 violations=1/700, observed Stage2 violations=1/99; replay plan=4x45 SHA `16d5730b...fc7a`; tasks 29288/29297/29298/29299 running; dashboard Stage1=700/700, project active=95/100, and Stage2 Slurm complete=108/running=91 versus validated=0/300, with 109/109 dashboard tests passing.
 - Failure/next: replay raw reports/results are pending; fetch and hash retained torque headers, publish replacement receipts/plans, resume revised Stage2 without task28880, then retrain the clean 1000-row gate.
 - Token usage: unavailable; no local Codex SQLite sample was exposed.
+
+## 2026-07-12 23:46:00 +09:00 - Deterministic torque replay forensics
+- Part/goal: make the four retained-project replays produce byte-preserved, remap-ready evidence without mutating scheduler state or accepting a failed attempt.
+- Hypothesis/actions: added a dry-run-first auditor that resolves exact case/dedupe history, excludes failed predecessors, fetches only each selected result and discovered in-scope `PPT_Torque.csv`, uses the sealed parser for unit/last-cycle checks, applies the apparent-power gate, and publishes canonical no-replace evidence only with `--publish`.
+- Metrics/result: focused and related tests pass 59/59; live dry-run selects retry 29328 plus 29297-29299, excludes infra-failed 29288 (exit143), reports 0/4 complete, and performs zero remote-file fetches while pending.
+- Failure/next: raw proof remains pending on four running solves; rerun dry-run after completion, then `--publish` and use receipt-bound original case/geometry IDs plus the 704-column header hash for the separate replacement workflow.
+- Token usage: unavailable; no local Codex SQLite sample was exposed.
