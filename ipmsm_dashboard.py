@@ -176,6 +176,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--workdir", type=Path, default=Path.cwd())
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
+    parser.add_argument(
+        "--v4-contract",
+        type=Path,
+        help="Optional inactive v4 governance envelope; a missing file is not activated.",
+    )
     parser.add_argument("--runner-log", type=Path)
     parser.add_argument("--target-load-progress", type=Path, default=DEFAULT_TARGET_LOAD_PROGRESS)
     parser.add_argument("--family-confirmation-root", type=Path, default=DEFAULT_FAMILY_CONFIRMATION_ROOT)
@@ -221,6 +226,9 @@ def _resolved_config(args: argparse.Namespace) -> DashboardConfig:
     family_confirmation_pid = args.family_confirmation_pid
     if family_confirmation_pid is not None and not family_confirmation_pid.is_absolute():
         family_confirmation_pid = workdir / family_confirmation_pid
+    v4_contract = args.v4_contract
+    if v4_contract is not None and not v4_contract.is_absolute():
+        v4_contract = workdir / v4_contract
     return DashboardConfig(
         workdir=workdir,
         contract_path=contract.resolve(strict=True),
@@ -236,6 +244,7 @@ def _resolved_config(args: argparse.Namespace) -> DashboardConfig:
             if family_confirmation_pid is not None
             else None
         ),
+        v4_contract_path=v4_contract.absolute() if v4_contract is not None else None,
     )
 
 

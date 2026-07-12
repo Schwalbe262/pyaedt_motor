@@ -7,8 +7,9 @@
 - Main run path: `controller.py` -> `simulation1.sh` -> `subprocess_run.py` -> `run_ipmsm_batch.py`.
 - Mesh and transient setup are controlled in `module/ipmsm_ppt_setup.py`.
 - Root project-memory files are now canonical; `md/` is template/archive context.
-- Live read-only dashboard: `http://127.0.0.1:8765/`; its 8-stage view now nests the diagnostic-only frozen-family watcher, integrity state, and baseline/selected R² under the official Surrogate gate.
-- 2026-07-12 09:08 KST: dashboard is healthy after restart; Stage1=551/700, project cap active=100/100, family watcher=alive/waiting, and full `.venv` regression is 790/790.
+- Live read-only dashboard: `http://127.0.0.1:8765/`; its operations view shows weighted 8-stage progress, Stage1/Slurm, official R², input authorization, NSGA/Pareto, speed, and target-load gates with fail-closed v4 governance.
+- 2026-07-12 12:38 KST: dashboard health=running, Stage1=606/700, project id=2/cap match, active=93/100, v4 governance=not_activated, and dashboard+semantic regression=81/81.
+- Inactive v4 cutover remains held: legacy optimization source pins and the Stage1 hard-link kill-window recovery need correction before any v4 contract/receipt/task is created.
 - Crash-safe frozen-family sidecar commit `3c44b25` is pushed; scheduled task `PYAEDT_MOTOR_IPMSM_V2_FAMILY_CONFIRM` is Running with PID marker 43616, exact watcher SHA `f5fc5c69...c5ffe`, and is safely waiting for audited Stage1 results without creating the confirmation output root.
 
 ## Current objective

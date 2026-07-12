@@ -405,6 +405,167 @@ class TargetLoadProgressTests(unittest.TestCase):
         self.assertEqual(result["integrity_status"], "absent")
 
 
+class GovernanceTests(unittest.TestCase):
+    TOP_FIELDS = {
+        "schema_version",
+        "status",
+        "contract",
+        "official_stage1",
+        "confirmation",
+        "authorization",
+    }
+
+    def test_optional_v4_cli_path_is_resolved_without_requiring_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base.json"
+            base.write_text("{}", encoding="utf-8")
+            args = server.build_parser().parse_args(
+                [
+                    "--workdir",
+                    str(root),
+                    "--contract",
+                    str(base),
+                    "--v4-contract",
+                    "missing-v4.json",
+                ]
+            )
+            config = server._resolved_config(args)
+        self.assertEqual(config.v4_contract_path, (root / "missing-v4.json").absolute())
+
+    def test_absent_optional_v4_contract_is_not_activated_with_fixed_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base.json"
+            base.write_text("{}", encoding="utf-8")
+            config = dashboard.DashboardConfig(
+                root,
+                base,
+                v4_contract_path=root / "missing-v4.json",
+            )
+            with mock.patch.object(dashboard.importlib, "import_module") as imported:
+                result = dashboard.collect_governance_state(config)
+        imported.assert_not_called()
+        self.assertEqual(set(result), self.TOP_FIELDS)
+        self.assertEqual(result["status"], "not_activated")
+        self.assertFalse(result["contract"]["activated"])
+        self.assertFalse(result["authorization"]["authorized"])
+
+    def test_verified_v4_authorities_are_allow_listed_and_authorize_only_exact_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base.json"
+            v4 = root / "v4.json"
+            completion = root / "completion.json"
+            declaration = root / "declaration.json"
+            confirmation = root / "confirmation.json"
+            receipt = root / "receipt.json"
+            for path in (base, v4, completion, declaration, confirmation, receipt):
+                path.write_text("{}", encoding="utf-8")
+            contract = SimpleNamespace(
+                source=v4,
+                base_contract_binding=SimpleNamespace(path=base),
+                base_contract=SimpleNamespace(stage1=SimpleNamespace(r2_threshold=0.95)),
+                stage1_official=SimpleNamespace(completion=completion),
+                optimization_confirmation=SimpleNamespace(
+                    declaration=declaration,
+                    confirmation=confirmation,
+                    receipt=receipt,
+                ),
+            )
+            gate = SimpleNamespace(
+                primary_test_r2={"torque": 0.97, "efficiency": 0.96},
+                voltage_test_r2=0.98,
+                passed=True,
+            )
+            supervisor = SimpleNamespace(
+                load_contract=mock.Mock(return_value=contract),
+                audit_contract=mock.Mock(),
+                audit_official_stage1=mock.Mock(return_value=SimpleNamespace(gate=gate)),
+                audit_authorization=mock.Mock(
+                    return_value=SimpleNamespace(
+                        mapping={
+                            "status": "authorized",
+                            "authorized": True,
+                            "authorization_effective_at_utc": "2026-07-12T00:00:00+00:00",
+                            "private_path": "must-not-leak",
+                        }
+                    )
+                ),
+            )
+            helper = SimpleNamespace(
+                audit_confirmation=mock.Mock(
+                    return_value=SimpleNamespace(
+                        confirmed_at_utc="2026-07-11T23:00:00+00:00",
+                        duty_basis="equal_weight_two_point",
+                    )
+                )
+            )
+
+            def imported(name: str) -> object:
+                return helper if name == "confirm_ipmsm_v2_optimization_inputs" else supervisor
+
+            config = dashboard.DashboardConfig(root, base, v4_contract_path=v4)
+            with mock.patch.object(dashboard.importlib, "import_module", side_effect=imported):
+                result = dashboard.collect_governance_state(config)
+
+        self.assertEqual(result["status"], "authorized")
+        self.assertEqual(result["official_stage1"]["r2_authority"], "verified")
+        self.assertEqual(result["official_stage1"]["gate_status"], "passed")
+        self.assertEqual(result["official_stage1"]["passed_count"], 3)
+        self.assertEqual(result["confirmation"]["status"], "verified")
+        self.assertTrue(result["authorization"]["authorized"])
+        self.assertTrue(dashboard.governance_authorized(result))
+        encoded = json.dumps(result)
+        self.assertNotIn(str(root), encoded)
+        self.assertNotIn("private_path", encoded)
+
+    def test_invalid_receipt_is_fail_closed_without_exception_or_path_leak(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base.json"
+            v4 = root / "v4.json"
+            declaration = root / "declaration.json"
+            confirmation = root / "confirmation.json"
+            receipt = root / "secret-receipt.json"
+            for path in (base, v4, declaration, confirmation, receipt):
+                path.write_text("{}", encoding="utf-8")
+            contract = SimpleNamespace(
+                source=v4,
+                base_contract_binding=SimpleNamespace(path=base),
+                base_contract=SimpleNamespace(stage1=SimpleNamespace(r2_threshold=0.95)),
+                stage1_official=SimpleNamespace(completion=root / "missing-completion.json"),
+                optimization_confirmation=SimpleNamespace(
+                    declaration=declaration,
+                    confirmation=confirmation,
+                    receipt=receipt,
+                ),
+            )
+            supervisor = SimpleNamespace(
+                load_contract=mock.Mock(return_value=contract),
+                audit_contract=mock.Mock(),
+                audit_authorization=mock.Mock(side_effect=RuntimeError(str(receipt))),
+            )
+            helper = SimpleNamespace(
+                audit_confirmation=mock.Mock(
+                    return_value=SimpleNamespace(confirmed_at_utc="now", duty_basis="two-point")
+                )
+            )
+
+            def imported(name: str) -> object:
+                return helper if name == "confirm_ipmsm_v2_optimization_inputs" else supervisor
+
+            config = dashboard.DashboardConfig(root, base, v4_contract_path=v4)
+            with mock.patch.object(dashboard.importlib, "import_module", side_effect=imported):
+                result = dashboard.collect_governance_state(config)
+
+        self.assertEqual(result["status"], "invalid")
+        self.assertEqual(result["authorization"]["status"], "invalid")
+        self.assertFalse(result["authorization"]["authorized"])
+        self.assertFalse(dashboard.governance_authorized(result))
+        self.assertNotIn("secret-receipt", json.dumps(result))
+
+
 class TimelineTests(unittest.TestCase):
     RUNTIME_FIELDS = {
         "completed",
@@ -1606,6 +1767,64 @@ class FamilyConfirmationTests(unittest.TestCase):
                 ]
                 self.assertEqual(len(processes), 1)
                 self.assertNotIn(str(Path.cwd()), json.dumps(family, sort_keys=True))
+
+    def test_local_collection_failure_revokes_last_good_v4_authorization(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            v4_contract = root / "foundation_pipeline_contract_v4.json"
+            v4_contract.write_text("{}", encoding="utf-8")
+            local = self._healthy_local("waiting_stage1")
+            local["governance"] = dashboard._empty_governance_state()
+            local["governance"]["status"] = "authorized"
+            local["governance"]["contract"] = {
+                "activated": True,
+                "status": "verified",
+            }
+            local["governance"]["authorization"] = {
+                "status": "authorized",
+                "receipt_present": True,
+                "authorized": True,
+                "effective_at_utc": "2026-07-12T00:00:00+00:00",
+            }
+            local["optimization"] = {
+                "decision": None,
+                "seeds": [],
+                "requires_user_confirmation": False,
+                "authorization_status": "authorized",
+            }
+            calls = 0
+
+            def collector(_: dashboard.DashboardConfig) -> dict[str, object]:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    return copy.deepcopy(local)
+                raise dashboard.DashboardDataError("local unavailable")
+
+            store = dashboard.DashboardStateStore(
+                dashboard.DashboardConfig(
+                    root,
+                    root / "unused-v3.json",
+                    v4_contract_path=v4_contract,
+                ),
+                local_collector=collector,
+                scheduler_collector=lambda _: self._healthy_scheduler(),
+            )
+            first = store.refresh_once(force_scheduler=True)
+            stale = store.refresh_once(force_scheduler=True)
+
+        self.assertTrue(first["governance"]["authorization"]["authorized"])
+        self.assertEqual(stale["governance"]["status"], "invalid")
+        self.assertFalse(stale["governance"]["authorization"]["authorized"])
+        self.assertTrue(stale["optimization"]["requires_user_confirmation"])
+        self.assertEqual(stale["optimization"]["authorization_status"], "invalid")
+
+    def test_dashboard_launcher_always_passes_expected_v4_contract_path(self) -> None:
+        script = (
+            Path(server.__file__).resolve().parent / "run_ipmsm_dashboard.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("'--v4-contract', $v4Contract", script)
+        self.assertNotIn("Test-Path -LiteralPath $v4Contract", script)
 
     def test_frontend_family_card_ids_and_render_entrypoint_are_stable(self) -> None:
         root = Path(server.__file__).resolve().parent / "dashboard"

@@ -41,11 +41,44 @@
             <strong id="heroProgressLabel">단계 수치 대기</strong>
           </div>
         </div>
-        <div class="hero-orbit" aria-hidden="true">
-          <div class="orbit orbit-outer"><span></span><span></span><span></span><span></span></div>
-          <div class="orbit orbit-inner"><span></span><span></span><span></span><span></span><span></span><span></span></div>
-          <div class="rotor-core"><b id="heroPercent">—</b><small id="heroPercentLabel">현재 단계</small></div>
-        </div>
+        <aside class="hero-operations" aria-labelledby="operationsTitle">
+          <div class="operations-heading">
+            <div>
+              <span>ROADMAP CONTROL</span>
+              <h2 id="operationsTitle">전체 로드맵</h2>
+            </div>
+            <strong id="overallPercent">—</strong>
+          </div>
+          <progress id="overallProgress" max="100" value="0" aria-label="8단계 전체 로드맵 진행률"></progress>
+          <p id="overallProgressNote">8단계 균등 가중 진행률을 계산하고 있습니다.</p>
+          <ol class="gate-readiness" aria-label="핵심 관문 준비 상태">
+            <li id="stage1Readiness" data-state="waiting">
+              <span><i>01</i> STAGE 1 DATA</span>
+              <strong id="stage1ReadinessValue">— / 700</strong>
+              <small id="stage1ReadinessDetail">FEA 상태 확인 중</small>
+            </li>
+            <li id="r2Readiness" data-state="waiting">
+              <span><i>02</i> R² QUALITY</span>
+              <strong id="r2ReadinessValue">공식 결과 대기</strong>
+              <small id="r2ReadinessDetail">목표 ≥ 0.95</small>
+            </li>
+            <li id="inputReadiness" data-state="waiting">
+              <span><i>03</i> INPUT APPROVAL</span>
+              <strong id="inputReadinessValue">승인 상태 확인 중</strong>
+              <small id="inputReadinessDetail">운전점·duty·권선 가정</small>
+            </li>
+            <li id="optimizationReadiness" data-state="waiting">
+              <span><i>04</i> NSGA-II / PARETO</span>
+              <strong id="optimizationReadinessValue">상위 gate 대기</strong>
+              <small id="optimizationReadinessDetail">R²와 입력 승인 후 시작</small>
+            </li>
+          </ol>
+          <div class="wait-reason" role="status">
+            <span>WHY WAITING</span>
+            <strong id="heroWaitTitle">현재 대기 사유 계산 중</strong>
+            <small id="heroWaitDetail">다음 산출물과 승인 조건을 확인합니다.</small>
+          </div>
+        </aside>
       </section>
 
       <section class="alerts" id="alerts" aria-label="현재 알림" aria-live="polite"></section>
@@ -164,7 +197,7 @@
           </section>
           <div class="model-summary">
             <div class="score-ring">
-              <strong id="r2Passed">0</strong><span>/ 9</span><small>통과 지표</small>
+              <strong id="r2Passed">0</strong><span id="r2Total">/ 9</span><small>통과 지표</small>
             </div>
             <div>
               <p class="model-state" id="modelState">Stage 1 완료 후 학습됩니다</p>

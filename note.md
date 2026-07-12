@@ -3756,3 +3756,12 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: real strict load measured 43.8 s/126.6 MiB peak; one-load-per-process-root replay is regression-tested; target-load related 94/94 and shared `.venv` 828/828 pass, with one expected Windows POSIX-only skip and no remaining independent-audit P0/P1.
 - Failure/next: no root, task, or execution artifact was created; after official R²/Pareto gates and production-input approval, initialize the v2 root and run the coordinator through the existing cap-serialized path.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-12 12:38:41 +09:00 - Overall pipeline operations Web UI
+- Part/goal: expose live Stage1/Slurm, official R², input authorization, NSGA/Pareto, speed, and target-load progress in one read-only view.
+- Hypothesis/actions: weight the eight stages explicitly, show current-stage counters separately, and audit optional v4 authorities fail-closed without changing live FEA.
+- Candidates/options: preserved the local stdlib dashboard and loopback security; external hosting was excluded because the source data is local scheduler/filesystem state.
+- Metrics/result: dashboard+frontend semantic tests 81/81, pycompile/Node/PowerShell parse and live HTTP/health passed; Stage1=606/700, active=93/100, project id=2/cap match, governance=not_activated.
+- Failure reason: a full discovery run exceeded 120 s without a result; focused dashboard coverage passed, and inactive-v4 audit P1s remain isolated from the live UI/cutover.
+- Next action: keep the UI live, finish the two inactive-v4 source-pin/hard-link recovery corrections, then create no contract or authorization artifact until production inputs are confirmed.
+- Token usage: unavailable because the local Codex SQLite database was not found.

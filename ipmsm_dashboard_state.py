@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import copy
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -48,6 +49,7 @@ DEFAULT_REFRESH_SECONDS = 5.0
 DEFAULT_SCHEDULER_REFRESH_SECONDS = 15.0
 DEFAULT_TIMEOUT_SECONDS = 3.0
 TARGET_LOAD_PROGRESS_SCHEMA_VERSION = "ipmsm-target-load-progress-v1"
+GOVERNANCE_SCHEMA_VERSION = "ipmsm-v2-dashboard-governance-v1"
 TARGET_LOAD_PROGRESS_STALE_SECONDS = 5 * 60.0
 FAMILY_CONFIRMATION_COMPLETION_SCHEMA_VERSION = (
     "ipmsm-v2-model-family-confirmation-completion-v1"
@@ -1922,6 +1924,221 @@ def _read_target_load_progress(path: Path | None) -> dict[str, Any]:
     }
 
 
+def _empty_governance_state() -> dict[str, Any]:
+    """Return the fixed, path-free governance API shape."""
+
+    return {
+        "schema_version": GOVERNANCE_SCHEMA_VERSION,
+        "status": "not_activated",
+        "contract": {"activated": False, "status": "not_activated"},
+        "official_stage1": {
+            "status": "not_activated",
+            "completion_present": False,
+            "r2_authority": "not_activated",
+            "gate_status": "not_activated",
+            "threshold": None,
+            "passed_count": None,
+            "target_count": None,
+            "min_r2": None,
+            "avg_r2": None,
+        },
+        "confirmation": {
+            "status": "not_activated",
+            "declaration_status": "not_activated",
+            "confirmation_present": False,
+            "confirmed": False,
+            "confirmed_at_utc": "",
+            "duty_basis": "",
+        },
+        "authorization": {
+            "status": "not_activated",
+            "receipt_present": False,
+            "authorized": False,
+            "effective_at_utc": "",
+        },
+    }
+
+
+def _invalid_governance_state() -> dict[str, Any]:
+    state = _empty_governance_state()
+    state["status"] = "invalid"
+    state["contract"] = {"activated": True, "status": "invalid"}
+    state["official_stage1"].update(
+        status="invalid",
+        completion_present=None,
+        r2_authority="invalid",
+        gate_status="invalid",
+    )
+    state["confirmation"].update(
+        status="invalid",
+        declaration_status="unknown",
+        confirmation_present=None,
+    )
+    state["authorization"].update(
+        status="invalid",
+        receipt_present=None,
+    )
+    return state
+
+
+def _governance_fallback(config: "DashboardConfig") -> dict[str, Any]:
+    path = config.v4_contract_path
+    if path is not None and os.path.lexists(path):
+        return _invalid_governance_state()
+    return _empty_governance_state()
+
+
+def _same_existing_file(left: Path, right: Path) -> bool:
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+
+
+def _official_r2_summary(contract: Any, official: Any) -> dict[str, Any]:
+    gate = getattr(official, "gate", None)
+    primary = getattr(gate, "primary_test_r2", None)
+    voltage = _safe_float(getattr(gate, "voltage_test_r2", None))
+    threshold = _safe_float(getattr(contract.base_contract.stage1, "r2_threshold", None))
+    if not isinstance(primary, Mapping) or not primary or voltage is None or threshold is None:
+        raise DashboardDataError("official Stage1 gate summary is incomplete")
+    values = [_safe_float(value) for value in primary.values()]
+    if any(value is None for value in values):
+        raise DashboardDataError("official Stage1 R2 values are invalid")
+    finite_values = [float(value) for value in values if value is not None] + [voltage]
+    passed_count = sum(value >= threshold for value in finite_values)
+    gate_passed = getattr(gate, "passed", None)
+    if not isinstance(gate_passed, bool) or gate_passed != (passed_count == len(finite_values)):
+        raise DashboardDataError("official Stage1 gate status is inconsistent")
+    return {
+        "status": "verified",
+        "completion_present": True,
+        "r2_authority": "verified",
+        "gate_status": "passed" if gate_passed else "failed",
+        "threshold": threshold,
+        "passed_count": passed_count,
+        "target_count": len(finite_values),
+        "min_r2": round(min(finite_values), 6),
+        "avg_r2": round(sum(finite_values) / len(finite_values), 6),
+    }
+
+
+def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
+    """Audit optional v4 authorities without exposing paths or exception text."""
+
+    source = config.v4_contract_path
+    if source is None or not os.path.lexists(source):
+        return _empty_governance_state()
+    try:
+        supervisor = importlib.import_module("supervise_ipmsm_v2_pipeline_v4")
+        contract = supervisor.load_contract(source)
+        supervisor.audit_contract(contract)
+        if not _same_existing_file(
+            Path(contract.base_contract_binding.path), config.contract_path
+        ):
+            raise DashboardDataError("v4 base contract differs from dashboard contract")
+    except Exception:
+        return _invalid_governance_state()
+
+    state = _empty_governance_state()
+    state["contract"] = {"activated": True, "status": "verified"}
+    official_path = contract.stage1_official.completion
+    official_present = os.path.lexists(official_path)
+    if official_present:
+        try:
+            official = supervisor.audit_official_stage1(contract)
+            state["official_stage1"] = _official_r2_summary(contract, official)
+        except Exception:
+            state["official_stage1"].update(
+                status="invalid",
+                completion_present=True,
+                r2_authority="invalid",
+                gate_status="invalid",
+            )
+    else:
+        state["official_stage1"].update(
+            status="absent",
+            completion_present=False,
+            r2_authority="waiting_for_completion",
+            gate_status="waiting",
+        )
+
+    authority = contract.optimization_confirmation
+    declaration_present = os.path.lexists(authority.declaration)
+    confirmation_present = os.path.lexists(authority.confirmation)
+    state["confirmation"].update(
+        status="absent",
+        declaration_status="present" if declaration_present else "absent",
+        confirmation_present=confirmation_present,
+    )
+    if confirmation_present:
+        try:
+            helper = importlib.import_module("confirm_ipmsm_v2_optimization_inputs")
+            audit = helper.audit_confirmation(authority.confirmation, contract.source)
+            state["confirmation"].update(
+                status="verified",
+                declaration_status="verified",
+                confirmed=True,
+                confirmed_at_utc=_clip_text(getattr(audit, "confirmed_at_utc", ""), 40),
+                duty_basis=_clip_text(getattr(audit, "duty_basis", ""), 80),
+            )
+        except Exception:
+            state["confirmation"].update(status="invalid", confirmed=False)
+
+    receipt_present = os.path.lexists(authority.receipt)
+    state["authorization"].update(status="absent", receipt_present=receipt_present)
+    if receipt_present:
+        if state["confirmation"]["status"] != "verified":
+            state["authorization"]["status"] = "invalid"
+        else:
+            try:
+                audited = supervisor.audit_authorization(contract)
+                mapping = audited.mapping
+                if mapping.get("status") != "authorized" or mapping.get("authorized") is not True:
+                    raise DashboardDataError("authorization audit did not authorize")
+                state["authorization"].update(
+                    status="authorized",
+                    authorized=True,
+                    effective_at_utc=_clip_text(
+                        mapping.get("authorization_effective_at_utc"), 40
+                    ),
+                )
+            except Exception:
+                state["authorization"].update(status="invalid", authorized=False)
+
+    try:
+        supervisor.audit_contract(contract)
+    except Exception:
+        return _invalid_governance_state()
+    if any(
+        item["status"] == "invalid"
+        for item in (
+            state["official_stage1"],
+            state["confirmation"],
+            state["authorization"],
+        )
+    ):
+        state["status"] = "invalid"
+    elif state["official_stage1"]["status"] != "verified":
+        state["status"] = "awaiting_official_stage1"
+    elif state["authorization"]["authorized"] is True:
+        state["status"] = "authorized"
+    elif state["confirmation"]["status"] != "verified":
+        state["status"] = "awaiting_confirmation"
+    else:
+        state["status"] = "awaiting_authorization"
+    return state
+
+
+def governance_authorized(governance: Mapping[str, Any]) -> bool:
+    authorization = governance.get("authorization")
+    return bool(
+        isinstance(authorization, Mapping)
+        and authorization.get("status") == "authorized"
+        and authorization.get("authorized") is True
+    )
+
+
 @dataclass(frozen=True)
 class DashboardConfig:
     workdir: Path
@@ -1934,6 +2151,7 @@ class DashboardConfig:
     target_load_progress: Path | None = None
     family_confirmation_root: Path = DEFAULT_FAMILY_CONFIRMATION_ROOT
     family_confirmation_pid: Path | None = None
+    v4_contract_path: Path | None = None
 
 
 def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1968,6 +2186,7 @@ def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[
 
 def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
     contract_document, pipeline = _pipeline_definition(config)
+    governance = collect_governance_state(config)
     artifact_dir = config.contract_path.parent
     stage1 = pipeline.get("stage1") if isinstance(pipeline.get("stage1"), dict) else {}
     stage2 = pipeline.get("stage2") if isinstance(pipeline.get("stage2"), dict) else {}
@@ -2179,6 +2398,14 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         **optimization_targets,
         "objectives": ["모터 부피 최소화", "효율 최대화"],
     }
+    authorization = governance.get("authorization")
+    authorized = governance_authorized(governance)
+    optimization_state["requires_user_confirmation"] = not authorized
+    optimization_state["authorization_status"] = (
+        _clip_text(authorization.get("status"), 40)
+        if isinstance(authorization, Mapping)
+        else "invalid"
+    )
 
     speed_plan = _resolve(config.workdir, speed.get("plan"))
     speed_result = _resolve(config.workdir, speed.get("result"))
@@ -2287,6 +2514,14 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
                 "message": "Production NSGA-II 전에 모터 운전점 수치, duty, 권선 가정을 사용자 확인해야 합니다.",
             }
         )
+    if governance.get("status") == "invalid":
+        alerts.insert(
+            0,
+            {
+                "level": "error",
+                "message": "v4 governance 계약 또는 권한 산출물 감사에 실패했습니다.",
+            },
+        )
     if speed_state.get("marker_status") == "invalid":
         alerts.append({"level": "warning", "message": "속도 검증 완료 marker 또는 artifact hash가 유효하지 않습니다."})
     if target_load_error:
@@ -2320,6 +2555,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         "model": model,
         "beta": beta,
         "optimization": optimization_state,
+        "governance": governance,
         "checkpoint_execution": checkpoint_execution,
         "family_confirmation": family_confirmation,
         "speed": speed_state,
@@ -3155,6 +3391,7 @@ class DashboardStateStore:
                     "model": {"available": False, "gate_status": "unavailable", "metrics": []},
                     "beta": {"available": False, "passed": False},
                     "optimization": {"decision": None, "seeds": []},
+                    "governance": _governance_fallback(self.config),
                     "speed": {"complete": False},
                     "target_load": _empty_target_load_state(),
                     "family_confirmation": _empty_family_confirmation_state(
@@ -3174,8 +3411,26 @@ class DashboardStateStore:
                     "alerts": [],
                 }
             local = copy.deepcopy(self._last_local) if self._last_local is not None else fallback
+            # A stale last-good snapshot is useful for counts, but never for
+            # production authorization.  Recompute the fail-closed governance
+            # view and close the optimization gate whenever local collection
+            # itself fails.
+            local["governance"] = _governance_fallback(self.config)
+            optimization = local.get("optimization")
+            if not isinstance(optimization, dict):
+                optimization = {"decision": None, "seeds": []}
+                local["optimization"] = optimization
+            authorization = local["governance"].get("authorization")
+            optimization["requires_user_confirmation"] = True
+            optimization["authorization_status"] = (
+                _clip_text(authorization.get("status"), 40)
+                if isinstance(authorization, Mapping)
+                else "invalid"
+            )
             local["stale"] = True
             errors.append({"source": "local", "message": "로컬 진행 상태를 읽을 수 없습니다."})
+
+        local.setdefault("governance", _governance_fallback(self.config))
 
         now = time.monotonic()
         campaign = local.get("campaign")
@@ -3361,6 +3616,7 @@ class DashboardStateStore:
             "resume_required",
             "artifact_invalid",
         }
+        governance_invalid = local.get("governance", {}).get("status") == "invalid"
         local.setdefault("campaign", {})["result_progress_stalled"] = result_progress_stalled
         stale = bool(
             errors
@@ -3376,6 +3632,7 @@ class DashboardStateStore:
             or target_load_integrity_invalid
             or target_load_stale
             or family_confirmation_degraded
+            or governance_invalid
             or (scheduler_active == 0 and campaign_status_stale and not automation_alive)
         )
         if not project_identity_ok:
@@ -3559,6 +3816,7 @@ class DashboardStateStore:
             "model": {"available": False, "gate_status": "unavailable", "metrics": []},
             "beta": {"available": False, "passed": False},
             "optimization": {"decision": None, "seeds": []},
+            "governance": _governance_fallback(self.config),
             "checkpoint": {
                 "status": "unavailable",
                 "target_designs": 60,

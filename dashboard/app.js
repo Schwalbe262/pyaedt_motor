@@ -45,6 +45,7 @@ const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const integer = (value, fallback = 0) => Number.isInteger(value) ? value : fallback;
 const count = (value) => Number.isInteger(value) && value >= 0 ? value : null;
 const decimal = (value, digits = 1) => finite(value) ? value.toFixed(digits) : "—";
+const record = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
 function stageRuntime(stage) {
   const runtime = stage && typeof stage.runtime === "object" && stage.runtime !== null
@@ -96,11 +97,61 @@ function schedulerComposition(rawCounts) {
   return { active, completed, failed };
 }
 
+function effectivePipelineState(data, rawStages, requestedCurrentId) {
+  const context = governanceContext(data);
+  if (!context.active) return { stages: rawStages, blocked: false, forcedCurrentId: "" };
+
+  const campaign = data.campaign || {};
+  const stage1Incomplete = integer(campaign.result_ok) < Math.max(1, integer(campaign.total, 700));
+  const quality = qualityGateState(data);
+  const authorization = authorizationGateState(data);
+  const blocked = stage1Incomplete || !quality.passed || !authorization.approved;
+  if (!blocked) return { stages: rawStages, blocked: false, forcedCurrentId: "" };
+
+  const optimizationIndex = rawStages.findIndex((stage) => stage.id === "optimization");
+  if (optimizationIndex < 0) return { stages: rawStages, blocked: true, forcedCurrentId: "" };
+  const rawOptimization = rawStages[optimizationIndex] || {};
+  const executionContradiction = ["running", "complete"].includes(rawOptimization.status);
+  const optimizationFailed = quality.failed
+    || authorization.rejected
+    || executionContradiction
+    || ["failed", "unavailable"].includes(rawOptimization.status);
+  const stages = rawStages.map((stage, index) => {
+    if (index < optimizationIndex) return stage;
+    const runtime = record(stage.runtime);
+    if (index === optimizationIndex) {
+      return {
+        ...stage,
+        status: optimizationFailed ? "failed" : "waiting",
+        detail: "v4 공식 R² authority와 authorization gate 충족 전 실행 차단",
+        runtime: { ...runtime, completed: 0, progress_pct: 0 },
+      };
+    }
+    return {
+      ...stage,
+      status: "waiting",
+      detail: "최적화 governance gate가 유효해진 뒤 실행",
+      runtime: { ...runtime, completed: 0, progress_pct: 0 },
+    };
+  });
+  const requestedIndex = rawStages.findIndex((stage) => stage.id === requestedCurrentId);
+  return {
+    stages,
+    blocked: true,
+    forcedCurrentId: requestedIndex >= optimizationIndex || (requestedIndex < 0 && executionContradiction)
+      ? "optimization"
+      : "",
+  };
+}
+
 function overallState(data) {
   const pipeline = data.pipeline || {};
-  const stages = Array.isArray(pipeline.stages) ? pipeline.stages : [];
+  const rawStages = Array.isArray(pipeline.stages) ? pipeline.stages : [];
   const overall = data.overall && typeof data.overall === "object" ? data.overall : {};
-  const currentId = overall.current_stage || pipeline.current_stage || "";
+  const requestedCurrentId = overall.current_stage || pipeline.current_stage || "";
+  const effectivePipeline = effectivePipelineState(data, rawStages, requestedCurrentId);
+  const stages = effectivePipeline.stages;
+  const currentId = effectivePipeline.forcedCurrentId || requestedCurrentId;
   const currentStage = stages.find((stage) => stage.id === currentId)
     || stages.find((stage) => stage.status === "running")
     || stages.find((stage) => stage.status === "ready")
@@ -117,12 +168,16 @@ function overallState(data) {
       scheduler_counts: currentStage.runtime?.scheduler_counts,
     },
   };
-  const hasExactRuntime = count(overall.completed) !== null
-    || count(overall.total) !== null
-    || finite(overall.progress_pct);
+  const hasExactRuntime = !effectivePipeline.forcedCurrentId && (
+    count(overall.completed) !== null
+      || count(overall.total) !== null
+      || finite(overall.progress_pct)
+  );
   let runtime = hasExactRuntime ? stageRuntime(exactRuntime) : stageRuntime(currentStage);
-  const resolved = count(overall.resolved_stages)
-    ?? stages.filter((stage) => ["complete", "skipped"].includes(stage.status)).length;
+  const resolved = effectivePipeline.blocked
+    ? stages.filter((stage) => ["complete", "skipped"].includes(stage.status)).length
+    : count(overall.resolved_stages)
+      ?? stages.filter((stage) => ["complete", "skipped"].includes(stage.status)).length;
   const totalStages = count(overall.total_stages) ?? stages.length;
 
   // Current v1 snapshots predate stage runtime counters. Keep their Stage 1
@@ -143,22 +198,28 @@ function overallState(data) {
   }
 
   const currentIndex = stages.indexOf(currentStage);
-  const nextStage = stages.find((stage) => stage.id === overall.next_stage)
+  const nextStage = (!effectivePipeline.forcedCurrentId
+    ? stages.find((stage) => stage.id === overall.next_stage)
+    : null)
     || stages.slice(Math.max(0, currentIndex + 1)).find((stage) => !["complete", "skipped"].includes(stage.status))
     || null;
   return {
     stages,
     currentStage,
-    currentId: overall.current_stage || currentStage.id || "unknown",
-    currentLabel: overall.current_label || currentStage.label || pipeline.current_label || "현재 단계 확인 필요",
-    currentStatus: overall.current_status || currentStage.status || "waiting",
+    currentId: effectivePipeline.forcedCurrentId || overall.current_stage || currentStage.id || "unknown",
+    currentLabel: effectivePipeline.forcedCurrentId
+      ? currentStage.label || "NSGA-II + Pareto FEA"
+      : overall.current_label || currentStage.label || pipeline.current_label || "현재 단계 확인 필요",
+    currentStatus: effectivePipeline.forcedCurrentId
+      ? currentStage.status || "waiting"
+      : overall.current_status || currentStage.status || "waiting",
     currentDetail: currentStage.detail || "현재 단계 산출물을 확인합니다.",
     runtime,
     resolved,
     totalStages,
-    nextStageId: overall.next_stage || nextStage?.id || "",
-    nextLabel: overall.next_label || nextStage?.label || "계획된 다음 단계 없음",
-    nextDetail: overall.next_detail || nextStage?.detail || "현재 단계의 최종 검증을 기다립니다.",
+    nextStageId: effectivePipeline.forcedCurrentId ? nextStage?.id || "" : overall.next_stage || nextStage?.id || "",
+    nextLabel: effectivePipeline.forcedCurrentId ? nextStage?.label || "계획된 다음 단계 없음" : overall.next_label || nextStage?.label || "계획된 다음 단계 없음",
+    nextDetail: effectivePipeline.forcedCurrentId ? nextStage?.detail || "현재 단계의 최종 검증을 기다립니다." : overall.next_detail || nextStage?.detail || "현재 단계의 최종 검증을 기다립니다.",
   };
 }
 
@@ -260,13 +321,19 @@ function blockerState(data, state) {
     return { summary: `${state.currentLabel} ${statusKorean[state.currentStatus]}`, detail: state.currentDetail };
   }
   const optimizationStage = state.stages.find((stage) => stage.id === "optimization");
+  const authorization = authorizationGateState(data);
+  const authorizationPending = authorization.v4Active
+    ? !authorization.approved
+    : data.optimization?.requires_user_confirmation === true && !authorization.approved;
   if (
-    data.optimization?.requires_user_confirmation === true
-    && !["complete", "skipped"].includes(optimizationStage?.status)
+    authorizationPending
+    && (authorization.v4Active || !["complete", "skipped"].includes(optimizationStage?.status))
   ) {
     return {
-      summary: "향후 최적화 입력 확인",
-      detail: "Production NSGA-II 전 운전점 수치·duty·권선 가정을 확인해야 합니다.",
+      summary: authorization.confirmed ? "최적화 authorization 대기" : "향후 최적화 입력 확인",
+      detail: authorization.confirmed
+        ? "입력 확인은 완료됐지만 검증된 authorization receipt 전에는 Production NSGA-II를 시작하지 않습니다."
+        : "Production NSGA-II 전 운전점 수치·duty·권선 가정을 확인해야 합니다.",
     };
   }
   return {
@@ -275,6 +342,310 @@ function blockerState(data, state) {
       ? `${state.currentLabel} 검증 후 ${state.nextLabel}(으)로 진행합니다.`
       : "남은 산출물의 최종 무결성을 확인합니다.",
   };
+}
+
+function readinessState(id, state) {
+  const node = byId(id);
+  if (node) node.dataset.state = state;
+}
+
+function inputApprovalState(optimization) {
+  const confirmationStatus = String(
+    optimization.confirmation_status || optimization.input_confirmation_status || "",
+  ).trim().toLowerCase();
+  const authorizationStatus = String(optimization.authorization_status || "").trim().toLowerCase();
+  const authorizedTokens = new Set(["approved", "authorized", "complete", "valid"]);
+  const confirmedTokens = new Set(["approved", "confirmed", "complete", "valid"]);
+  const rejectedTokens = new Set(["failed", "invalid", "rejected", "revoked"]);
+  return {
+    approved: optimization.requires_user_confirmation === false || authorizedTokens.has(authorizationStatus),
+    confirmed: confirmedTokens.has(confirmationStatus),
+    rejected: rejectedTokens.has(confirmationStatus) || rejectedTokens.has(authorizationStatus),
+    confirmationStatus,
+    authorizationStatus,
+  };
+}
+
+function governanceContext(data) {
+  const governance = record(data.governance);
+  const contract = record(governance.contract);
+  return {
+    active: contract.activated === true,
+    governance,
+    contract,
+    officialStage1: record(governance.official_stage1),
+    confirmation: record(governance.confirmation),
+    authorization: record(governance.authorization),
+  };
+}
+
+function qualityGateState(data) {
+  const context = governanceContext(data);
+  if (!context.active) {
+    const model = data.model || {};
+    return {
+      v4Active: false,
+      authorityVerified: Boolean(model.available),
+      available: Boolean(model.available),
+      passed: model.gate_status === "passed",
+      failed: ["failed", "unavailable"].includes(model.gate_status),
+      gateStatus: model.gate_status || "waiting",
+      threshold: finite(model.threshold) ? model.threshold : 0.95,
+      passedCount: integer(model.passed_count),
+      targetCount: Math.max(9, Array.isArray(model.metrics) ? model.metrics.length : 0),
+      minR2: model.min_r2,
+      avgR2: model.avg_r2,
+    };
+  }
+
+  const official = context.officialStage1;
+  const gateStatus = String(official.gate_status || "waiting").trim().toLowerCase();
+  const invalidTokens = new Set(["failed", "invalid", "artifact_invalid", "rejected", "revoked"]);
+  const contractInvalid = invalidTokens.has(String(context.contract.status || "").toLowerCase());
+  const authorityVerified = !contractInvalid
+    && official.completion_present === true
+    && official.status === "verified"
+    && official.r2_authority === "verified";
+  return {
+    v4Active: true,
+    authorityVerified,
+    available: authorityVerified && ["passed", "failed"].includes(gateStatus),
+    passed: authorityVerified && gateStatus === "passed",
+    failed: contractInvalid
+      || invalidTokens.has(String(official.status || "").toLowerCase())
+      || invalidTokens.has(String(official.r2_authority || "").toLowerCase())
+      || (authorityVerified && gateStatus === "failed"),
+    gateStatus,
+    threshold: finite(official.threshold) ? official.threshold : 0.95,
+    passedCount: integer(official.passed_count),
+    targetCount: Math.max(1, integer(official.target_count, 9)),
+    minR2: official.min_r2,
+    avgR2: official.avg_r2,
+  };
+}
+
+function authorizationGateState(data) {
+  const context = governanceContext(data);
+  if (!context.active) return { ...inputApprovalState(data.optimization || {}), v4Active: false };
+
+  const confirmationStatus = String(context.confirmation.status || "").trim().toLowerCase();
+  const authorizationStatus = String(context.authorization.status || "").trim().toLowerCase();
+  const invalidTokens = new Set(["failed", "invalid", "artifact_invalid", "rejected", "revoked"]);
+  const confirmed = context.confirmation.confirmation_present === true
+    && context.confirmation.confirmed === true
+    && ["verified", "confirmed"].includes(confirmationStatus);
+  const receiptPresent = context.authorization.receipt_present === true;
+  const rejected = invalidTokens.has(confirmationStatus)
+    || invalidTokens.has(authorizationStatus)
+    || invalidTokens.has(String(context.governance.status || "").toLowerCase())
+    || invalidTokens.has(String(context.contract.status || "").toLowerCase());
+  return {
+    v4Active: true,
+    approved: !rejected
+      && confirmed
+      && receiptPresent
+      && authorizationStatus === "authorized"
+      && context.authorization.authorized === true
+      && context.governance.status === "authorized"
+      && context.contract.status === "verified",
+    confirmed,
+    rejected,
+    confirmationStatus,
+    authorizationStatus,
+    declarationStatus: String(context.confirmation.declaration_status || "").trim().toLowerCase(),
+    receiptPresent,
+  };
+}
+
+function renderHeroOperations(data, state) {
+  const totalStages = Math.max(1, state.totalStages || state.stages.length || 1);
+  const currentResolved = ["complete", "skipped"].includes(state.currentStatus);
+  const currentFraction = !currentResolved && state.runtime.progressPct !== null
+    ? Math.max(0, Math.min(1, state.runtime.progressPct / 100))
+    : 0;
+  const stageUnits = Math.min(totalStages, state.resolved + currentFraction);
+  const overallPct = 100 * stageUnits / totalStages;
+  const overallProgress = byId("overallProgress");
+  overallProgress.max = 100;
+  overallProgress.value = overallPct;
+  setText("overallPercent", `${overallPct.toFixed(1)}%`);
+  setText(
+    "overallProgressNote",
+    `${state.resolved}/${totalStages}단계 해결 · 현재 ${state.currentLabel} ${state.runtime.progressPct === null ? "수치 대기" : `${state.runtime.progressPct.toFixed(1)}%`} · 단계별 균등 가중`,
+  );
+
+  const campaign = data.campaign || {};
+  const scheduler = data.scheduler || {};
+  const total = Math.max(1, integer(campaign.total, 700));
+  const result = Math.max(0, integer(campaign.result_ok));
+  const active = scheduler.reachable ? integer(scheduler.active_count) : integer(campaign.active);
+  const cap = Math.max(1, integer(scheduler.cap, integer(campaign.cap, 100)));
+  const snapshotFresh = timestampAgeMs(data.generated_at) <= SNAPSHOT_STALE_MS;
+  const topLevelFresh = data.stale !== true
+    && ["running", "healthy", "ok"].includes(String(data.health || "").trim().toLowerCase());
+  const schedulerFresh = scheduler.reachable === true
+    && scheduler.stale !== true
+    && snapshotFresh
+    && topLevelFresh;
+  const stage1Pct = Math.max(0, Math.min(100, 100 * result / total));
+  setText("stage1ReadinessValue", `${result.toLocaleString("ko-KR")} / ${total.toLocaleString("ko-KR")}`);
+  setText(
+    "stage1ReadinessDetail",
+    schedulerFresh
+      ? `${stage1Pct.toFixed(1)}% · active ${active} / cap ${cap}`
+      : `${stage1Pct.toFixed(1)}% · ${scheduler.reachable === false ? "scheduler 상태 확인 필요" : `마지막 관측 active ${active} / cap ${cap}`}`,
+  );
+  readinessState(
+    "stage1Readiness",
+    result >= total
+      ? "complete"
+      : !schedulerFresh
+        ? scheduler.reachable === false ? "failed" : "waiting"
+        : active > 0 ? "running" : "waiting",
+  );
+
+  const quality = qualityGateState(data);
+  const threshold = quality.threshold;
+  const modelStageActive = state.currentId === "surrogate" && ["running", "ready"].includes(state.currentStatus);
+  if (quality.available) {
+    setText("r2ReadinessValue", `최소 R² ${decimal(quality.minR2, 4)}`);
+    setText("r2ReadinessDetail", `${quality.passedCount} / ${quality.targetCount} 통과 · 목표 ≥ ${threshold.toFixed(2)}${quality.v4Active ? " · v4 authority" : ""}`);
+  } else {
+    setText("r2ReadinessValue", "공식 결과 대기");
+    setText(
+      "r2ReadinessDetail",
+      quality.v4Active
+        ? `v4 official Stage 1·R² authority 검증 대기 · 목표 ≥ ${threshold.toFixed(2)}`
+        : `${quality.targetCount}개 지표 목표 ≥ ${threshold.toFixed(2)} · Stage 1 후 판정`,
+    );
+  }
+  readinessState(
+    "r2Readiness",
+    quality.passed
+      ? "complete"
+      : quality.failed
+        ? "failed"
+        : modelStageActive
+          ? "running"
+          : "waiting",
+  );
+
+  const optimization = data.optimization || {};
+  const approval = authorizationGateState(data);
+  const specAudited = ["verified", "artifact_audited"].includes(optimization.spec_status);
+  setText(
+    "inputReadinessValue",
+    approval.approved
+      ? "Authorization 완료"
+      : approval.rejected
+        ? "승인 무효"
+        : approval.confirmed
+          ? "입력 확인 완료 · authorization 대기"
+          : "사용자 승인 필요",
+  );
+  setText(
+    "inputReadinessDetail",
+    approval.approved
+      ? approval.v4Active ? "v4 authorization verified · Production 실행 허용" : "운전점·duty·권선 가정 확정"
+      : approval.confirmed
+        ? approval.receiptPresent
+          ? "authorization receipt 확인됨 · 최종 authorized 상태 대기"
+          : "입력 confirmation verified · authorization receipt 대기"
+        : approval.v4Active
+          ? `${approval.declarationStatus ? `declaration ${approval.declarationStatus}` : "declaration 대기"} · 입력 confirmation 필요`
+          : `${specAudited ? "spec 감사 완료" : "spec 확인 필요"} · 운전점·duty·권선 가정`,
+  );
+  readinessState("inputReadiness", approval.approved ? "complete" : approval.rejected ? "failed" : "waiting");
+
+  const optimizationStage = state.stages.find((stage) => stage.id === "optimization") || {};
+  const optimizationStatus = optimizationStage.status || "waiting";
+  const optimizationNeeds = [];
+  if (result < total) optimizationNeeds.push(`Stage 1 ${total - result}건`);
+  if (!quality.passed) optimizationNeeds.push(quality.v4Active ? "공식 R² authority" : "R² gate");
+  if (!approval.approved) optimizationNeeds.push(approval.confirmed ? "authorization" : "입력 승인");
+  const optimizationBlocked = optimizationNeeds.length > 0;
+  const executionContradiction = optimizationBlocked && ["running", "complete"].includes(optimizationStatus);
+  const optimizationFailed = quality.failed
+    || approval.rejected
+    || executionContradiction
+    || ["failed", "unavailable"].includes(optimizationStatus);
+  const optimizationLabel = optimizationBlocked
+    ? executionContradiction
+      ? "관문 상태 불일치"
+      : optimizationFailed
+        ? "관문 확인 필요"
+        : "상위 gate 대기"
+    : {
+        complete: "최적화 완료",
+        running: "NSGA-II 실행 중",
+        ready: "실행 준비 완료",
+      }[optimizationStatus] || "실행 준비 확인 중";
+  setText("optimizationReadinessValue", optimizationLabel);
+  setText(
+    "optimizationReadinessDetail",
+    optimizationNeeds.length ? `${optimizationNeeds.join(" + ")} 필요` : "Pareto FEA와 target-load 검증으로 연결",
+  );
+  readinessState(
+    "optimizationReadiness",
+    optimizationBlocked
+      ? optimizationFailed ? "failed" : "waiting"
+      : optimizationStatus === "complete"
+      ? "complete"
+      : ["failed", "unavailable"].includes(optimizationStatus)
+        ? "failed"
+        : ["running", "ready"].includes(optimizationStatus)
+          ? "running"
+          : "waiting",
+  );
+
+  const blocker = blockerState(data, state);
+  if (!schedulerFresh && result < total) {
+    setText(
+      "heroWaitTitle",
+      !snapshotFresh
+        ? "대시보드 snapshot 갱신 지연"
+        : !topLevelFresh
+          ? "대시보드 상태 확인 필요"
+          : scheduler.reachable === false ? "Scheduler 연결 확인 필요" : "Scheduler 상태 갱신 지연",
+    );
+    setText(
+      "heroWaitDetail",
+      !snapshotFresh
+        ? `Stage 1 잔여 ${total - result}건 · 오래된 snapshot의 active 수를 실행 상태로 해석하지 않습니다.`
+        : !topLevelFresh
+          ? `Stage 1 잔여 ${total - result}건 · health=${data.health || "unknown"} 상태가 회복될 때까지 기다립니다.`
+          : scheduler.reachable === false
+        ? `Stage 1 잔여 ${total - result}건 · 연결 복구 전 active 수를 실행 상태로 해석하지 않습니다.`
+        : `Stage 1 잔여 ${total - result}건 · 마지막 관측 active ${active} / cap ${cap} · fresh 상태를 기다립니다.`,
+    );
+  } else if (result < total) {
+    setText("heroWaitTitle", `Stage 1 검증 결과 ${total - result}건 수집 중`);
+    setText("heroWaitDetail", `현재 active ${active} / cap ${cap} · 완료 후 공식 9-target R² gate를 실행합니다.`);
+  } else if (quality.failed) {
+    setText(
+      "heroWaitTitle",
+      quality.authorityVerified ? `R² ${threshold.toFixed(2)} 품질 기준 미충족` : "v4 공식 R² authority 검증 실패",
+    );
+    setText(
+      "heroWaitDetail",
+      quality.authorityVerified
+        ? `현재 최소 R² ${decimal(quality.minR2, 4)} · 보강 단계 판정 후 다시 평가합니다.`
+        : "contract 또는 official Stage 1 authority가 유효하지 않아 R² gate를 완료로 간주하지 않습니다.",
+    );
+  } else if (!quality.available) {
+    setText("heroWaitTitle", quality.v4Active ? "v4 공식 Stage 1·R² authority" : "공식 9-target R² gate 산출물");
+    setText("heroWaitDetail", quality.v4Active
+      ? "official completion과 R² authority가 모두 verified된 gate 결과를 기다립니다."
+      : `Stage 1 감사·학습·독립 test 평가 후 최소 R² ${threshold.toFixed(2)}를 확인합니다.`);
+  } else if (!approval.approved) {
+    setText("heroWaitTitle", approval.confirmed ? "Production authorization receipt" : "Production 최적화 입력 승인");
+    setText("heroWaitDetail", approval.confirmed
+      ? "입력 confirmation은 verified됐지만 authorization.status=authorized 증거 전에는 NSGA-II를 시작하지 않습니다."
+      : "정격 운전점·DC 전압·전류·권선·duty 가정을 확정해야 NSGA-II를 시작합니다.");
+  } else {
+    setText("heroWaitTitle", blocker.summary);
+    setText("heroWaitDetail", blocker.detail);
+  }
 }
 
 function renderOverview(data) {
@@ -314,6 +685,7 @@ function renderOverview(data) {
   const blocker = blockerState(data, state);
   setText("blockerSummary", blocker.summary);
   setText("blockerDetail", blocker.detail);
+  renderHeroOperations(data, state);
 }
 
 function renderCampaign(data) {
@@ -326,12 +698,22 @@ function renderCampaign(data) {
   const schedulerCounts = scheduler.status_counts || {};
   const running = integer(schedulerCounts.running);
   const assigning = integer(schedulerCounts.queued) + integer(schedulerCounts.attaching);
+  const schedulerFresh = scheduler.reachable === true
+    && scheduler.stale !== true
+    && data.stale !== true
+    && timestampAgeMs(data.generated_at) <= SNAPSHOT_STALE_MS
+    && ["running", "healthy", "ok"].includes(String(data.health || "").trim().toLowerCase());
   setText("resultOk", result.toLocaleString("ko-KR"));
   setText("resultTotal", `/ ${total.toLocaleString("ko-KR")}`);
   setText("resultSub", `scheduler 완료 ${integer(campaign.scheduler_ok)}건 · 안정화 ${integer(campaign.settling_results)}건`);
-  setText("activeSlots", active.toLocaleString("ko-KR"));
+  setText("activeSlots", schedulerFresh ? active.toLocaleString("ko-KR") : "—");
   setText("activeCap", `/ ${cap}`);
-  setText("slotSub", `실행 ${running} · 배정/대기 ${assigning}`);
+  setText(
+    "slotSub",
+    schedulerFresh
+      ? `실행 ${running} · 배정/대기 ${assigning}`
+      : `${scheduler.reachable === false ? "Scheduler 연결 확인 필요" : "상태 갱신 지연"} · 마지막 관측 ${active} / ${cap}`,
+  );
   setText("completionRate", decimal(campaign.completion_rate_per_hour, 1));
   setText("rateSub", "최근 최대 6시간 · 검증 완료 증가량 기준");
   const eta = durationHours(campaign.eta_hours);
@@ -345,15 +727,31 @@ function renderCampaign(data) {
 function renderPipeline(data) {
   const state = overallState(data);
   const stages = state.stages;
-  setText("currentStageChip", `${state.currentLabel} · ${state.resolved}/${state.totalStages}`);
+  const governanceActive = governanceContext(data).active;
+  const quality = qualityGateState(data);
+  const authorization = authorizationGateState(data);
+  const campaign = data.campaign || {};
+  const stage1Incomplete = integer(campaign.result_ok) < Math.max(1, integer(campaign.total, 700));
+  const optimizationBlocked = governanceActive && (stage1Incomplete || !quality.passed || !authorization.approved);
+  const optimizationEvidenceFailed = quality.failed || authorization.rejected;
+  setText(
+    "currentStageChip",
+    state.currentId === "optimization" && optimizationBlocked
+      ? `최적화 governance gate ${optimizationEvidenceFailed ? "확인 필요" : "대기"} · ${state.resolved}/${state.totalStages}`
+      : `${state.currentLabel} · ${state.resolved}/${state.totalStages}`,
+  );
   const list = byId("pipelineList");
   empty(list);
   stages.forEach((stage, index) => {
-    const item = element("li", `pipeline-item ${stage.status || "waiting"}`);
-    item.appendChild(element("span", "stage-node", stage.status === "complete" ? "✓" : String(index + 1).padStart(2, "0")));
+    const effectiveStatus = stage.status || "waiting";
+    const item = element("li", `pipeline-item ${effectiveStatus}`);
+    item.appendChild(element("span", "stage-node", effectiveStatus === "complete" ? "✓" : String(index + 1).padStart(2, "0")));
     const copy = element("div", "stage-copy");
     copy.appendChild(element("strong", "", stage.label || "—"));
     copy.appendChild(element("small", "", stage.detail || ""));
+    if (stage.id === "optimization" && optimizationBlocked) {
+      copy.appendChild(element("small", "stage-runtime-tasks", "v4 공식 R² authority와 authorization gate 충족 전 실행 차단"));
+    }
     const runtime = stage.id === state.currentId ? state.runtime : stageRuntime(stage);
     const taskComposition = schedulerComposition(runtime.schedulerCounts);
     if (taskComposition.active || taskComposition.completed || taskComposition.failed) {
@@ -361,7 +759,7 @@ function renderPipeline(data) {
     }
     item.appendChild(copy);
     const meta = element("div", "stage-meta");
-    meta.appendChild(element("span", "stage-status", statusKorean[stage.status] || stage.status || "대기"));
+    meta.appendChild(element("span", "stage-status", statusKorean[effectiveStatus] || effectiveStatus));
     const counterText = runtimeCounter(runtime);
     if (counterText) meta.appendChild(element("small", "stage-counter", counterText));
     item.appendChild(meta);
@@ -744,21 +1142,24 @@ function renderFamilyConfirmation(familyValue) {
 
 function renderModel(data) {
   const model = data.model || {};
-  setText("r2Threshold", finite(model.threshold) ? model.threshold.toFixed(2) : "0.95");
-  setText("r2Passed", model.available ? integer(model.passed_count) : "—");
-  const stateText = {
-    passed: "모든 지표가 품질 목표를 통과했습니다",
-    failed: "일부 지표가 R² 목표에 미달했습니다",
-    unavailable: "모델 품질 산출물을 확인할 수 없습니다",
-    waiting: "Stage 1 완료 후 학습됩니다",
-  }[model.gate_status] || "Surrogate 학습 상태 확인 중";
+  const quality = qualityGateState(data);
+  setText("r2Threshold", quality.threshold.toFixed(2));
+  setText("r2Passed", quality.available ? quality.passedCount : "—");
+  setText("r2Total", `/ ${quality.targetCount}`);
+  const stateText = quality.passed
+    ? "모든 공식 지표가 품질 목표를 통과했습니다"
+    : quality.failed
+      ? quality.authorityVerified ? "일부 공식 지표가 R² 목표에 미달했습니다" : "공식 R² authority 무결성 확인이 필요합니다"
+      : quality.v4Active ? "v4 공식 Stage 1 completion과 R² authority를 기다립니다" : "Stage 1 완료 후 학습됩니다";
   setText("modelState", stateText);
-  setText("modelStats", model.available
-    ? `${model.stage || "현재"} · 최소 R² ${decimal(model.min_r2, 4)} · 평균 R² ${decimal(model.avg_r2, 4)}`
-    : "독립 test split에서 8개 primary + 전압 1개를 평가합니다.");
+  setText("modelStats", quality.available
+    ? `${quality.v4Active ? "v4 official Stage 1" : model.stage || "현재"} · 최소 R² ${decimal(quality.minR2, 4)} · 평균 R² ${decimal(quality.avgR2, 4)}`
+    : quality.v4Active
+      ? "legacy model 상태는 gate 판정에 사용하지 않습니다."
+      : "독립 test split에서 8개 primary + 전압 1개를 평가합니다.");
   const list = byId("metricList");
   empty(list);
-  const metrics = Array.isArray(model.metrics) ? model.metrics : [];
+  const metrics = quality.v4Active ? [] : Array.isArray(model.metrics) ? model.metrics : [];
   metrics.forEach((metric) => {
     const row = element("div", `metric-row ${metric.r2 === null ? "pending" : metric.passed ? "pass" : "fail"}`);
     row.appendChild(element("span", "", metric.label || metric.target || "—"));
@@ -770,12 +1171,26 @@ function renderModel(data) {
     row.appendChild(element("strong", "", finite(metric.r2) ? metric.r2.toFixed(4) : "대기"));
     list.appendChild(row);
   });
+  if (quality.v4Active) {
+    const row = element("div", `metric-row ${quality.passed ? "pass" : quality.failed ? "fail" : "pending"}`);
+    row.appendChild(element("span", "", "v4 공식 Stage 1"));
+    const progress = document.createElement("progress");
+    progress.max = 1;
+    progress.value = finite(quality.minR2) ? Math.max(0, Math.min(1, quality.minR2)) : 0;
+    progress.setAttribute("aria-label", "v4 공식 Stage 1 최소 R²");
+    row.appendChild(progress);
+    row.appendChild(element("strong", "", quality.available ? decimal(quality.minR2, 4) : "authority 대기"));
+    list.appendChild(row);
+  }
   renderFamilyConfirmation(data.family_confirmation);
 }
 
 function renderPhysics(data) {
   const beta = data.beta || {};
   const optimization = data.optimization || {};
+  const quality = qualityGateState(data);
+  const approval = authorizationGateState(data);
+  const governanceBlocked = approval.v4Active && (!quality.passed || !approval.approved);
   const gate = byId("betaGate");
   gate.textContent = beta.passed ? "물리 gate 통과" : beta.available ? "gate 실패" : "확인 필요";
   gate.className = `health-pill ${beta.passed ? "complete" : beta.available ? "failed" : "warning"}`;
@@ -787,15 +1202,29 @@ function renderPhysics(data) {
   setText("targetTorqueSpeed", `@ ${integer(optimization.target_torque_speed_rpm).toLocaleString("ko-KR")} rpm`);
   setText("targetPower", finite(optimization.target_power_kw) ? `${optimization.target_power_kw.toFixed(1)} kW` : "—");
   setText("targetPowerSpeed", `@ ${integer(optimization.target_power_speed_rpm).toLocaleString("ko-KR")} rpm`);
-  setText("constraintNote", ["verified", "artifact_audited"].includes(optimization.spec_status)
-    ? `산출물 감사 완료 · 사용자 확인 전 production NSGA 차단 · 65.1 N·m @ 1,200 rpm = ${decimal(optimization.torque_point_power_kw, 3)} kW · 7.5 kW @ 5,000 rpm = ${decimal(optimization.power_point_torque_nm, 3)} N·m`
-    : "최적화 spec 확인 실패 · 화면에는 기본 목표값이 표시됩니다.");
+  const targetEvidence = `${decimal(optimization.target_torque_nm, 1)} N·m @ ${integer(optimization.target_torque_speed_rpm).toLocaleString("ko-KR")} rpm = ${decimal(optimization.torque_point_power_kw, 3)} kW · ${decimal(optimization.target_power_kw, 1)} kW @ ${integer(optimization.target_power_speed_rpm).toLocaleString("ko-KR")} rpm = ${decimal(optimization.power_point_torque_nm, 3)} N·m`;
+  setText(
+    "constraintNote",
+    approval.v4Active
+      ? approval.approved && quality.passed
+        ? `v4 공식 R² authority와 authorization 검증 완료 · ${targetEvidence}`
+        : approval.rejected || quality.failed
+          ? `v4 governance 검증 실패 · Production NSGA 차단 · ${targetEvidence}`
+          : approval.confirmed
+            ? `입력 확인 완료 · authorization 대기 · Production NSGA 차단 · ${targetEvidence}`
+            : `v4 입력 confirmation 대기 · Production NSGA 차단 · ${targetEvidence}`
+      : ["verified", "artifact_audited"].includes(optimization.spec_status)
+        ? `산출물 감사 완료 · 사용자 확인 전 production NSGA 차단 · ${targetEvidence}`
+        : "최적화 spec 확인 실패 · 화면에는 기본 목표값이 표시됩니다.",
+  );
   const nsga = byId("nsgaProgress");
   empty(nsga);
-  const seedProgress = Array.isArray(optimization.seeds) ? optimization.seeds : [];
+  const seedProgress = governanceBlocked ? [] : Array.isArray(optimization.seeds) ? optimization.seeds : [];
   const configuredSeeds = Array.isArray(optimization.configured_seeds) ? optimization.configured_seeds : [42, 43, 44];
   const progressBySeed = new Map(seedProgress.map((item) => [integer(item.seed, -1), item]));
-  if (seedProgress.length) {
+  if (governanceBlocked) {
+    nsga.appendChild(element("p", "", "v4 공식 R² authority와 authorization gate 충족 전 NSGA-II 실행 차단"));
+  } else if (seedProgress.length) {
     configuredSeeds.forEach((configuredSeed) => {
       const seed = progressBySeed.get(integer(configuredSeed)) || { seed: configuredSeed };
       const row = element("div", "seed-row");
@@ -813,17 +1242,21 @@ function renderPhysics(data) {
   } else {
     nsga.appendChild(element("p", "", `NSGA-II 대기 · ${configuredSeeds.length} seeds · population ${integer(optimization.population_size, 160)} · ${integer(optimization.max_generations, 300)} generations`));
   }
-  if (integer(optimization.pareto_candidates) || integer(optimization.fea_case_rows)) {
+  if (!governanceBlocked && (integer(optimization.pareto_candidates) || integer(optimization.fea_case_rows))) {
     nsga.appendChild(element("p", "", `Pareto ${integer(optimization.pareto_candidates)}개 · FEA 검증 행 ${integer(optimization.fea_case_rows)}개`));
   }
 }
 
 function renderTargetLoad(data) {
   const targetLoad = data.target_load || {};
+  const quality = qualityGateState(data);
+  const approval = authorizationGateState(data);
+  const governanceBlocked = approval.v4Active && (!quality.passed || !approval.approved);
   const counts = targetLoad.counts || {};
   const schedulerCounts = targetLoad.scheduler_counts || {};
   const scheduler = schedulerComposition(schedulerCounts);
-  const rawStatus = targetLoad.status || "waiting_for_surrogate_gate";
+  const sourceStatus = targetLoad.status || "waiting_for_surrogate_gate";
+  const rawStatus = governanceBlocked ? "waiting_for_surrogate_gate" : sourceStatus;
   const stale = targetLoad.stale === true;
   const labels = {
     waiting_for_surrogate_gate: "R² gate 대기",
@@ -836,10 +1269,14 @@ function renderTargetLoad(data) {
   const gate = byId("targetLoadGate");
   gate.textContent = targetLoad.integrity_status === "invalid"
     ? "진행 파일 오류"
-    : stale
+    : sourceStatus === "failed"
+      ? "검증 실패"
+    : governanceBlocked
+      ? "v4 governance gate 대기"
+      : stale
       ? `갱신 지연 · ${labels[rawStatus] || "상태 확인"}`
       : labels[rawStatus] || "상태 확인";
-  gate.className = `health-pill ${rawStatus === "complete" ? "complete" : rawStatus === "failed" || targetLoad.integrity_status === "invalid" ? "failed" : "warning"}`;
+  gate.className = `health-pill ${!governanceBlocked && rawStatus === "complete" ? "complete" : sourceStatus === "failed" || targetLoad.integrity_status === "invalid" ? "failed" : "warning"}`;
 
   const candidatesTotal = integer(counts.candidates_total);
   const candidatesFinalized = integer(counts.candidates_finalized);
@@ -852,11 +1289,13 @@ function renderTargetLoad(data) {
   setText("targetLoadScheduler", `Scheduler 활성 ${scheduler.active} · 완료 ${scheduler.completed} · 실패 ${scheduler.failed}`);
   const progress = byId("targetLoadProgress");
   progress.max = Math.max(1, probesTotal || candidatesTotal);
-  progress.value = probesTotal ? Math.min(probesTotal, probesMatched) : Math.min(candidatesTotal, candidatesFinalized);
+  progress.value = governanceBlocked ? 0 : probesTotal ? Math.min(probesTotal, probesMatched) : Math.min(candidatesTotal, candidatesFinalized);
 
   const current = targetLoad.current_probe;
   const stalePrefix = stale ? "갱신 지연 · " : "";
-  if (current && current.candidate_id) {
+  if (governanceBlocked) {
+    setText("targetLoadCurrent", "v4 공식 R² authority와 authorization 이후 progress root를 권위 있게 표시합니다.");
+  } else if (current && current.candidate_id) {
     setText(
       "targetLoadCurrent",
       `${stalePrefix}${current.candidate_id} · ${current.operating_point_id || "운전점"} · ${current.beta_validation_role || "β"} · attempt ${integer(current.attempt_index)}`,
@@ -924,19 +1363,26 @@ function renderProcesses(data) {
   });
 
   const speed = data.speed || {};
+  const quality = qualityGateState(data);
+  const approval = authorizationGateState(data);
+  const governanceBlocked = approval.v4Active && (!quality.passed || !approval.approved);
   const speedCounts = speed.scheduler_counts || {};
   const expected = integer(speed.expected_rows, 24);
-  const verified = speed.complete ? expected : Math.min(expected, integer(speed.result_rows));
-  const schedulerCompleted = Math.min(expected, integer(speedCounts.completed));
+  const verified = governanceBlocked ? 0 : speed.complete ? expected : Math.min(expected, integer(speed.result_rows));
+  const schedulerCompleted = governanceBlocked ? 0 : Math.min(expected, integer(speedCounts.completed));
   const progressValue = Math.max(verified, schedulerCompleted);
   const active = integer(speedCounts.running) + integer(speedCounts.queued) + integer(speedCounts.attaching);
   const progress = byId("speedProgress");
   progress.max = expected;
   progress.value = progressValue;
-  setText("speedRows", speed.complete
+  setText("speedRows", governanceBlocked
+    ? `0 / ${expected} · governance gate 대기`
+    : speed.complete
     ? `${verified} / ${expected} 검증 완료`
     : `${verified} 검증 · ${schedulerCompleted} / ${expected} scheduler 완료`);
-  setText("speedStatus", speed.complete
+  setText("speedStatus", governanceBlocked
+    ? "v4 최적화 authorization 대기"
+    : speed.complete
     ? "완료"
     : active
       ? `${active}건 실행/배정`
@@ -985,9 +1431,11 @@ function render(data) {
   const liveBadge = byId("liveBadge");
   const snapshotStale = timestampAgeMs(data.generated_at) > SNAPSHOT_STALE_MS;
   const serverDegraded = data.health === "degraded";
-  liveBadge.classList.toggle("offline", !paused && serverDegraded && !data.scheduler?.reachable && !snapshotStale);
-  liveBadge.classList.toggle("stale", paused || snapshotStale || (serverDegraded && Boolean(data.scheduler?.reachable)));
-  setText("liveLabel", paused ? "PAUSED" : snapshotStale ? "STALE" : serverDegraded ? (data.scheduler?.reachable ? "STALE" : "OFFLINE") : "LIVE");
+  const schedulerOffline = data.scheduler?.reachable === false;
+  const offline = !paused && schedulerOffline;
+  liveBadge.classList.toggle("offline", offline);
+  liveBadge.classList.toggle("stale", paused || (!offline && (snapshotStale || (serverDegraded && Boolean(data.scheduler?.reachable)))));
+  setText("liveLabel", paused ? "PAUSED" : schedulerOffline ? snapshotStale ? "OFFLINE · STALE" : "OFFLINE" : snapshotStale ? "STALE" : serverDegraded ? "STALE" : "LIVE");
   renderCampaign(data);
   renderOverview(data);
   renderPipeline(data);
