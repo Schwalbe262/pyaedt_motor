@@ -261,3 +261,4 @@
 - Torque-unit replay forensics are published 4/4 at receipt `28600d7f...2c23d0a`: selected tasks 29328/29297/29298/29299, excluded infra task 29288, with full-window raw exports and exact torque/power gates verified.
 - Stage2 audit aggregate publication now uses hash-named staging, bounded WinError retries, and exact-byte late-success checks; the earlier 5-checkpoint receipt materialized after its reported error, while the provider sidecar remains preserved.
 - RaiDrive source upload errors are avoided by developing v3 on local NTFS; retained stages are validated but never promoted/deleted/used as evidence, and a retry re-fetches before fresh no-replace publication; focused 23/23 and related 54/54 (1 skip) pass.
+- Local v3 Stage2 audit is complete/ready at receipt `50405c72...82018`: coverage 300/300, physics_ok171, sole torque suspect task28880, retryable infrastructure27, unsubmitted101, active/pending0, and 172 final checkpoints validated.

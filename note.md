@@ -3888,3 +3888,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: stop repeated RaiDrive source-upload failures and make immutable checkpoint publication resumable without trusting staged files as evidence.
 - Actions/result: paused all Y-drive source edits, cloned commit `eb3e596` to local NTFS, and made stages non-authoritative/non-mutating: they are validated and constrain a fresh remote-result re-fetch before new no-replace publication; focused 23/23 and related 54/54 (1 skip) pass.
 - Failure/next: v1/v2 audit outputs remain preserved failed-attempt evidence; review and push the local commit, then update Y once and start v3 only after the mount is stable.
+
+## 2026-07-13 01:58:00 +09:00 - Full Stage2 v3 audit completed locally
+- Part/goal: complete all 300 historical Stage2 identity/result checks without further RaiDrive source writes.
+- Actions/result: ran the committed v3 auditor from local NTFS against Y inputs and Scheduler GET-only; receipt `50405c72...82018` is ready with coverage300, audited172, physics_ok171, sole torque suspect task28880, infra27, unsubmitted101, active/pending0, and 429 retries0.
+- Evidence/next: report binds the receipt exactly and a fresh read-only inventory validates 172 final checkpoints plus 172 non-authoritative retained local hardlink stages; publish the sanitized authority to Y only after mount stability, then seal recovery plans.

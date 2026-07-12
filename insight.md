@@ -895,3 +895,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: a 1 MiB request returned the complete 667,319-byte export with `Moving1.Torque [mNewtonMeter]`; all four replay result/raw pairs verified and published.
 - Evidence: dry-run and publish both verified 4/4 with eight remote fetches; receipt SHA is `28600d7f...2c23d0a`.
 - Remaining risk: any future retained artifact at or above 1 MiB will fail closed until a larger scheduler hard limit or chunked byte-preserving API is available.
+
+## 2026-07-13 01:58:00 +09:00 - Insight 100
+- Source loop: repeated source edits and atomic renames on the RaiDrive-backed Git worktree triggered upload failures, WinError 5, delayed files, and provider sidecars.
+- Improvement: develop/test mutable source and build resumable evidence on local NTFS, push source through Git, and treat RaiDrive as a read-mostly artifact destination with a final bounded transfer.
+- Before: the auditor source itself produced recurring `upload failed` notifications and mapped-drive rename ambiguity.
+- After: the final source passed 23 focused and 54 related tests, and the 511-second 300-case audit completed locally with zero HTTP errors while Y inputs remained read-only.
+- Evidence: commit `9c7faab`, receipt `50405c72...82018`, 172/172 final checkpoints revalidated, and no further Y-source write after the popup.
+- Remaining risk: the final sanitized audit authority still needs one controlled no-replace transfer to Y after the mount is stable.
