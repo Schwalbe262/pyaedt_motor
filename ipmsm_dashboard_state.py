@@ -1,8 +1,8 @@
 """Read-only live state collection for the IPMSM v2 dashboard.
 
 The collector deliberately exposes a small allow-listed view of scheduler and
-artifact state.  It never submits tasks, opens result CSVs in full, executes a
-pipeline action, or signals a process.
+artifact state.  It never submits tasks, parses unbounded result CSVs, executes
+a pipeline action, or signals a process.
 """
 
 from __future__ import annotations
@@ -26,9 +26,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from urllib import error, parse, request
 
+import collect_ipmsm_v2_campaign as campaign_collector
 import run_ipmsm_v2_campaign as campaign_runner
 import submit_ipmsm_v2_campaign as campaign_submitter
 import supervise_ipmsm_v2_pipeline as pipeline_supervisor
+from merge_ipmsm_v2_results import merge_complete_results
 
 
 SCHEMA_VERSION = "ipmsm-v2-dashboard-status-v1"
@@ -90,11 +92,17 @@ TARGET_LOAD_STATUSES = frozenset(
 )
 DECISION_AUDIT_CACHE_SECONDS = 300.0
 CONTRACT_AUDIT_CACHE_SECONDS = 300.0
+STAGE1_COLLECTION_AUDIT_CACHE_SECONDS = 300.0
 RESULT_PROGRESS_WARNING_SECONDS = 30 * 60.0
 RESULT_PROGRESS_STALLED_SECONDS = 2 * 60 * 60.0
 RESULT_PROGRESS_HARD_STALLED_SECONDS = 6 * 60 * 60.0
 MAX_TAIL_BYTES = 128 * 1024
 MAX_JSON_BYTES = 16 * 1024 * 1024
+MAX_STAGE1_CASE_RESULT_BYTES = 4 * 1024 * 1024
+MAX_STAGE1_COLLECTION_RAW_BYTES = 128 * 1024 * 1024
+MAX_STAGE1_COLLECTION_MERGED_BYTES = 64 * 1024 * 1024
+STAGE1_COLLECTION_PLAN_NAME = "selected_cases.csv"
+STAGE1_COLLECTION_RESULTS_DIR_NAME = "results"
 ACTIVE_STATUSES = frozenset({"queued", "attaching", "running"})
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 QUALITY_PROFILE_EXPERIMENT_SCHEMA_VERSION = (
@@ -224,6 +232,11 @@ _DECISION_CACHE_LOCK = threading.Lock()
 _DECISION_CACHE: dict[tuple[str, str], tuple[int, int, float, dict[str, Any]]] = {}
 _CONTRACT_CACHE_LOCK = threading.Lock()
 _CONTRACT_CACHE: dict[str, tuple[int, int, float, dict[str, Any], dict[str, Any]]] = {}
+_STAGE1_COLLECTION_CACHE_LOCK = threading.Lock()
+_STAGE1_COLLECTION_CACHE: dict[
+    tuple[str, str, int],
+    tuple[tuple[tuple[int, int, int, int], ...], float, dict[str, Any]],
+] = {}
 _FAMILY_CONFIRMATION_REPLAY_LOCK = threading.Lock()
 
 
@@ -3177,6 +3190,322 @@ class DashboardConfig:
     v4_contract_path: Path | None = None
 
 
+def _stage1_collection_state(
+    *,
+    status: str,
+    expected_rows: int,
+    rows: int = 0,
+    result_files: int = 0,
+    error_code: str = "",
+    selected_plan_sha256: str = "",
+    merged_results_sha256: str = "",
+    result_tree_sha256: str = "",
+    raw_result_bytes: int = 0,
+    merged_result_bytes: int = 0,
+    merged_file: str = "",
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "complete": status == "verified" and rows == expected_rows,
+        "expected_rows": expected_rows,
+        "rows": rows,
+        "result_files": result_files,
+        "error_code": error_code,
+        "selected_plan_sha256": selected_plan_sha256,
+        "merged_results_sha256": merged_results_sha256,
+        "result_tree_sha256": result_tree_sha256,
+        "raw_result_bytes": raw_result_bytes,
+        "merged_result_bytes": merged_result_bytes,
+        "merged_file": merged_file,
+    }
+
+
+def _stage1_stable_result_text(path: Path) -> tuple[str, str]:
+    """Read and hash one bounded raw result while rejecting link/replacement races."""
+
+    if _path_contains_symlink(path):
+        raise DashboardDataError("Stage 1 case result has an invalid path type")
+    try:
+        pathname_before = os.lstat(path)
+        if not stat.S_ISREG(pathname_before.st_mode):
+            raise DashboardDataError("Stage 1 case result has an invalid path type")
+        digest = hashlib.sha256()
+        payload = bytearray()
+        with path.open("rb") as stream:
+            opened_before = os.fstat(stream.fileno())
+            if _quality_profile_stat_identity(opened_before) != _quality_profile_stat_identity(
+                pathname_before
+            ):
+                raise DashboardDataError("Stage 1 case result changed while it was opened")
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                payload.extend(chunk)
+                if len(payload) > MAX_STAGE1_CASE_RESULT_BYTES:
+                    raise DashboardDataError("Stage 1 case result exceeds the dashboard limit")
+                digest.update(chunk)
+            opened_after = os.fstat(stream.fileno())
+        pathname_after = os.lstat(path)
+        text = bytes(payload).decode("utf-8-sig")
+    except DashboardDataError:
+        raise
+    except (OSError, UnicodeError) as exc:
+        raise DashboardDataError("cannot read Stage 1 case result") from exc
+    identities = {
+        _quality_profile_stat_identity(pathname_before),
+        _quality_profile_stat_identity(opened_before),
+        _quality_profile_stat_identity(opened_after),
+        _quality_profile_stat_identity(pathname_after),
+    }
+    if len(identities) != 1 or _path_contains_symlink(path):
+        raise DashboardDataError("Stage 1 case result changed during audit")
+    return text, digest.hexdigest()
+
+
+def inspect_stage1_collection(
+    config: DashboardConfig,
+    stage1: Mapping[str, Any],
+    *,
+    expected_rows: int,
+) -> dict[str, Any]:
+    """Audit the immutable Stage 1 collector envelope before using its count."""
+
+    case_plan = _resolve(config.workdir, stage1.get("case_plan"))
+    merged = _resolve(config.workdir, stage1.get("result"))
+    output_value = stage1.get("output_dir")
+    output_dir = _resolve(config.workdir, output_value) if output_value else merged.parent
+    selected_plan = output_dir / STAGE1_COLLECTION_PLAN_NAME
+    results_dir = output_dir / STAGE1_COLLECTION_RESULTS_DIR_NAME
+    absent = _stage1_collection_state(status="absent", expected_rows=expected_rows)
+    if not os.path.lexists(output_dir):
+        return absent
+
+    try:
+        if output_dir.resolve(strict=False) != merged.parent.resolve(strict=False):
+            raise DashboardDataError("Stage 1 result is outside its collection directory")
+        _quality_profile_exact_entries(
+            output_dir,
+            {
+                STAGE1_COLLECTION_PLAN_NAME,
+                STAGE1_COLLECTION_RESULTS_DIR_NAME,
+                merged.name,
+            },
+            label="Stage 1 collection",
+        )
+        _quality_profile_require_regular_file(case_plan, label="Stage 1 case plan")
+        _quality_profile_require_regular_file(
+            selected_plan,
+            label="Stage 1 collected case plan",
+        )
+        _quality_profile_require_regular_file(merged, label="Stage 1 merged results")
+        if _path_contains_symlink(results_dir) or not results_dir.is_dir():
+            raise DashboardDataError("Stage 1 result directory has an invalid path type")
+        try:
+            result_entries = sorted(results_dir.iterdir(), key=lambda item: item.name)
+        except OSError as exc:
+            raise DashboardDataError("cannot enumerate Stage 1 result files") from exc
+        if len(result_entries) != expected_rows:
+            raise DashboardDataError("Stage 1 result-file count differs from the contract")
+        for entry in result_entries:
+            if entry.suffix.lower() != ".csv":
+                raise DashboardDataError("Stage 1 result directory contains a non-CSV entry")
+            _quality_profile_require_regular_file(entry, label="Stage 1 case result")
+
+        identity_paths = (
+            output_dir,
+            case_plan,
+            selected_plan,
+            merged,
+            results_dir,
+            *result_entries,
+        )
+        signature = tuple(
+            _quality_profile_stat_identity(os.lstat(path)) for path in identity_paths
+        )
+        merged_result_bytes = signature[3][2]
+        raw_result_bytes = sum(identity[2] for identity in signature[5:])
+        if raw_result_bytes > MAX_STAGE1_COLLECTION_RAW_BYTES:
+            raise DashboardDataError("Stage 1 raw result set exceeds the dashboard limit")
+        if merged_result_bytes > MAX_STAGE1_COLLECTION_MERGED_BYTES:
+            raise DashboardDataError("Stage 1 merged results exceed the dashboard limit")
+    except (DashboardDataError, OSError):
+        return _stage1_collection_state(
+            status="invalid",
+            expected_rows=expected_rows,
+            error_code="collection_layout_invalid",
+        )
+
+    cache_key = (
+        str(case_plan.resolve(strict=False)),
+        str(merged.resolve(strict=False)),
+        expected_rows,
+    )
+    now = time.monotonic()
+    with _STAGE1_COLLECTION_CACHE_LOCK:
+        cached = _STAGE1_COLLECTION_CACHE.get(cache_key)
+    if (
+        cached is not None
+        and cached[0] == signature
+        and now - cached[1] < STAGE1_COLLECTION_AUDIT_CACHE_SECONDS
+    ):
+        return copy.deepcopy(cached[2])
+
+    try:
+        plan_sha256 = _quality_profile_stable_file_sha256(
+            case_plan,
+            label="Stage 1 case plan",
+        )
+        selected_sha256 = _quality_profile_stable_file_sha256(
+            selected_plan,
+            label="Stage 1 collected case plan",
+        )
+        if selected_sha256 != plan_sha256:
+            raise DashboardDataError("Stage 1 collected plan differs from the contract plan")
+
+        plan_rows = campaign_submitter.load_and_validate_cases(
+            case_plan,
+            expected_rows,
+            False,
+        )
+        if len(plan_rows) != expected_rows:
+            raise DashboardDataError("Stage 1 case-plan count differs from the contract")
+        entries_by_name = {entry.name: entry for entry in result_entries}
+        expected_names: set[str] = set()
+        raw_headers: list[str] = []
+        raw_row_sha256: list[str] = []
+        fingerprint_values = {
+            column: set() for column in campaign_collector.REQUIRED_FINGERPRINT_COLUMNS
+        }
+        tree_records: list[str] = []
+        for plan_row in plan_rows:
+            case_id = str(plan_row.get("case_id") or "").strip()
+            safe_case_id = campaign_submitter.sanitize_case_id(case_id)
+            name = f"{safe_case_id}.csv"
+            if name in expected_names:
+                raise DashboardDataError("Stage 1 case IDs collide after sanitization")
+            expected_names.add(name)
+            entry = entries_by_name.get(name)
+            if entry is None:
+                raise DashboardDataError("Stage 1 result filename differs from the case plan")
+            text, result_sha256 = _stage1_stable_result_text(entry)
+            headers, result_row = campaign_collector._one_remote_result(
+                text,
+                case_id,
+                str(plan_row.get("design_hash") or "").strip(),
+            )
+            if (
+                not headers
+                or any(not str(column or "").strip() for column in headers)
+                or len(headers) != len(set(headers))
+                or None in result_row
+            ):
+                raise DashboardDataError("Stage 1 raw result CSV structure is invalid")
+            campaign_collector.validate_result_matches_plan(plan_row, result_row)
+            for column in headers:
+                if column not in raw_headers:
+                    raw_headers.append(column)
+            raw_row_sha256.append(_canonical_json_sha256(result_row))
+            for column, values in fingerprint_values.items():
+                values.add(str(result_row.get(column) or "").strip())
+            tree_records.append(f"{name}\0{result_sha256}\n")
+        if set(entries_by_name) != expected_names:
+            raise DashboardDataError("Stage 1 result filenames differ from the case plan")
+        if any(len(values) != 1 or "" in values for values in fingerprint_values.values()):
+            raise DashboardDataError("Stage 1 raw results mix or omit fingerprints")
+
+        merged_sha256_before = _quality_profile_stable_file_sha256(
+            merged,
+            label="Stage 1 merged results",
+        )
+        merged_headers, merged_rows = merge_complete_results(case_plan, [merged])
+        merged_sha256 = _quality_profile_stable_file_sha256(
+            merged,
+            label="Stage 1 merged results",
+        )
+        if merged_sha256 != merged_sha256_before:
+            raise DashboardDataError("Stage 1 merged results changed during audit")
+        if (
+            merged_headers != raw_headers
+            or [_canonical_json_sha256(row) for row in merged_rows] != raw_row_sha256
+        ):
+            raise DashboardDataError("Stage 1 merged results differ from raw case results")
+        signature_after = tuple(
+            _quality_profile_stat_identity(os.lstat(path)) for path in identity_paths
+        )
+        if signature_after != signature:
+            raise DashboardDataError("Stage 1 collection changed during audit")
+        result_tree_sha256 = hashlib.sha256(
+            "".join(sorted(tree_records)).encode("utf-8")
+        ).hexdigest()
+        audited = _stage1_collection_state(
+            status="verified",
+            expected_rows=expected_rows,
+            rows=expected_rows,
+            result_files=len(result_entries),
+            selected_plan_sha256=selected_sha256,
+            merged_results_sha256=merged_sha256,
+            result_tree_sha256=result_tree_sha256,
+            raw_result_bytes=raw_result_bytes,
+            merged_result_bytes=merged_result_bytes,
+            merged_file=merged.name,
+        )
+    except (DashboardDataError, OSError, UnicodeError, ValueError, RuntimeError, csv.Error):
+        return _stage1_collection_state(
+            status="invalid",
+            expected_rows=expected_rows,
+            error_code="collection_integrity_failed",
+        )
+
+    with _STAGE1_COLLECTION_CACHE_LOCK:
+        _STAGE1_COLLECTION_CACHE[cache_key] = (signature, now, copy.deepcopy(audited))
+    return audited
+
+
+def reconcile_campaign_with_stage1_collection(
+    campaign: Mapping[str, Any],
+    collection: Mapping[str, Any],
+) -> dict[str, Any]:
+    reconciled = dict(campaign)
+    status = str(collection.get("status") or "absent")
+    reconciled["collection_integrity_status"] = status
+    reconciled["collection_rows"] = _safe_int(collection.get("rows"))
+    reconciled["collection_result_files"] = _safe_int(collection.get("result_files"))
+    if status == "verified" and collection.get("complete") is True:
+        expected_rows = _safe_int(collection.get("expected_rows"))
+        reconciled.update(
+            {
+                "runner_result_ok": _safe_int(campaign.get("result_ok")),
+                "runner_scheduler_ok": _safe_int(campaign.get("scheduler_ok")),
+                "runner_source_file": str(campaign.get("source_file") or ""),
+                "runner_warnings": list(campaign.get("warnings") or ()),
+                "scheduler_ok": expected_rows,
+                "result_ok": expected_rows,
+                "active": 0,
+                "pending": 0,
+                "missing": 0,
+                "retry": 0,
+                "settling_results": 0,
+                "progress_pct": 100.0,
+                "scheduler_progress_pct": 100.0,
+                "completion_rate_per_hour": 0.0,
+                "eta_hours": None,
+                "result_progress_log_age_seconds": 0.0,
+                "result_progress_log_transition_verified": True,
+                "result_progress_log_age_lower_bound": False,
+                "source_file": str(collection.get("merged_file") or "merged_results.csv"),
+                "source_mtime_reliable": True,
+                "source_status": "ok",
+                "completion_source": "atomic_collection",
+                "warnings": [],
+            }
+        )
+    elif status == "invalid":
+        warnings = list(campaign.get("warnings") or ())
+        warnings.append(
+            "Stage 1 atomic collection 무결성 검증에 실패해 runner 로그 수치를 유지합니다."
+        )
+        reconciled.update(source_status="degraded", warnings=warnings)
+    return reconciled
+
+
 def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         stat = config.contract_path.stat()
@@ -3219,6 +3548,12 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
     expected_stage1 = _safe_int(stage1.get("expected_rows"), 700)
     runner_log = config.runner_log or find_runner_log(artifact_dir)
     campaign = parse_campaign_log(runner_log, total_cases=expected_stage1, cap=config.cap)
+    stage1_collection = inspect_stage1_collection(
+        config,
+        stage1,
+        expected_rows=expected_stage1,
+    )
+    campaign = reconcile_campaign_with_stage1_collection(campaign, stage1_collection)
     quality_profile_experiment, expected_quality_tasks = inspect_quality_profile_experiment_plan(config)
     quality_profile_experiment.update(
         inspect_quality_profile_experiment_analysis(config, expected_quality_tasks)
@@ -3585,6 +3920,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         )
     return {
         "campaign": campaign,
+        "stage1_collection": stage1_collection,
         "pipeline": {"current_stage": current["id"], "current_label": current["label"], "stages": stages},
         "model": model,
         "beta": beta,

@@ -480,9 +480,12 @@ function renderHeroOperations(data, state) {
   const result = Math.max(0, integer(campaign.result_ok));
   const active = scheduler.reachable ? integer(scheduler.active_count) : integer(campaign.active);
   const cap = Math.max(1, integer(scheduler.cap, integer(campaign.cap, 100)));
+  const collectionVerified = campaign.completion_source === "atomic_collection"
+    && campaign.collection_integrity_status === "verified";
   const snapshotFresh = timestampAgeMs(data.generated_at) <= SNAPSHOT_STALE_MS;
   const topLevelFresh = data.stale !== true
-    && ["running", "healthy", "ok"].includes(String(data.health || "").trim().toLowerCase());
+    && ["running", "healthy", "ok", "idle"].includes(String(data.health || "").trim().toLowerCase());
+  const collectionFresh = collectionVerified && snapshotFresh && topLevelFresh;
   const schedulerFresh = scheduler.reachable === true
     && scheduler.stale !== true
     && snapshotFresh
@@ -491,7 +494,11 @@ function renderHeroOperations(data, state) {
   setText("stage1ReadinessValue", `${result.toLocaleString("ko-KR")} / ${total.toLocaleString("ko-KR")}`);
   setText(
     "stage1ReadinessDetail",
-    schedulerFresh
+    collectionVerified
+      ? collectionFresh
+        ? `Atomic collection ${integer(campaign.collection_result_files)}건 무결성 검증 완료`
+        : `마지막 검증: atomic collection ${integer(campaign.collection_result_files)}건 · snapshot 갱신 필요`
+      : schedulerFresh
       ? `${stage1Pct.toFixed(1)}% · active ${active} / cap ${cap}`
       : `${stage1Pct.toFixed(1)}% · ${scheduler.reachable === false ? "scheduler 상태 확인 필요" : `마지막 관측 active ${active} / cap ${cap}`}`,
   );
@@ -695,17 +702,29 @@ function renderCampaign(data) {
   const result = integer(campaign.result_ok);
   const active = scheduler.reachable ? integer(scheduler.active_count) : integer(campaign.active);
   const cap = integer(scheduler.cap, integer(campaign.cap, 100));
+  const collectionVerified = campaign.completion_source === "atomic_collection"
+    && campaign.collection_integrity_status === "verified";
   const schedulerCounts = scheduler.status_counts || {};
   const running = integer(schedulerCounts.running);
   const assigning = integer(schedulerCounts.queued) + integer(schedulerCounts.attaching);
+  const snapshotFresh = timestampAgeMs(data.generated_at) <= SNAPSHOT_STALE_MS;
+  const topLevelFresh = data.stale !== true
+    && ["running", "healthy", "ok", "idle"].includes(String(data.health || "").trim().toLowerCase());
+  const collectionFresh = collectionVerified && snapshotFresh && topLevelFresh;
   const schedulerFresh = scheduler.reachable === true
     && scheduler.stale !== true
-    && data.stale !== true
-    && timestampAgeMs(data.generated_at) <= SNAPSHOT_STALE_MS
-    && ["running", "healthy", "ok"].includes(String(data.health || "").trim().toLowerCase());
+    && snapshotFresh
+    && topLevelFresh;
   setText("resultOk", result.toLocaleString("ko-KR"));
   setText("resultTotal", `/ ${total.toLocaleString("ko-KR")}`);
-  setText("resultSub", `scheduler 완료 ${integer(campaign.scheduler_ok)}건 · 안정화 ${integer(campaign.settling_results)}건`);
+  setText(
+    "resultSub",
+    collectionVerified
+      ? collectionFresh
+        ? `atomic collection 검증 완료 · runner 마지막 관측 ${integer(campaign.runner_result_ok)} / ${total}`
+        : `마지막 검증값 ${result} / ${total} · snapshot 갱신 필요`
+      : `scheduler 완료 ${integer(campaign.scheduler_ok)}건 · 안정화 ${integer(campaign.settling_results)}건`,
+  );
   setText("activeSlots", schedulerFresh ? active.toLocaleString("ko-KR") : "—");
   setText("activeCap", `/ ${cap}`);
   setText(

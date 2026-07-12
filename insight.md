@@ -823,3 +823,19 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: the original collector SHA remains intact; only the paired-24 runner temporarily installs an exact two-profile validator, restores it in `finally`, and a no-replace finalizer independently replays all 24 rows before ranking.
 - Evidence: live v3 health recovered with Stage1 unchanged, remote task count stayed exactly 24, four independent-audit gaps were closed, dry-run submitted nothing, and full `.venv` discovery passed 987 tests with 5 skips.
 - Remaining risk: the quality choice remains unavailable until all 24 simulations finish and the strict finalizer verifies collection, runtime, and error gates.
+
+## 2026-07-12 17:31:34 +09:00 - Insight 91
+- Source loop: post-Stage1 runtime audit after the Slurm `fea_bursty` CPU-affinity fix.
+- Improvement: runtime evidence must bind the actual Slurm step CPU set and solver affinity, not merely requested CPUs, scheduler source, or a successful exit code.
+- Before: overlapping 4-CPU steps all received CPUs 0-3; 742/750 project tasks overlapped another task and the paired24 elapsed values could silently drive a false speed winner.
+- After: live smoke proves the fixed full allocation cpuset (16-51), legacy runtime selection is withheld, and post-fix evidence starts with an exact same-source two-profile pilot before full24 selection.
+- Evidence: pre-fix step records used 4 CPUs with up to 16 concurrent project tasks/allocation; post-fix task 28528 reported matching taskset and `sched_getaffinity` over 36 CPUs.
+- Remaining risk: node-load overpacking and scheduler deployment provenance remain separate gates; a two-case pilot can validate execution but cannot authorize production selection without full24 paired evidence.
+
+## 2026-07-12 18:08:00 +09:00 - Insight 92
+- Source loop: WEB UI remained at 696/700 after the Stage1 collector atomically published all 700 results.
+- Improvement: let a completed no-replace collection supersede a stale progress log only after replaying exact plan, raw-row schema/fingerprints, raw-to-merged equality, and identity-bound tree evidence under aggregate memory caps.
+- Before: the dashboard trusted only the last runner line, while a count-only collection fallback could have promoted forged raw files or exhausted memory on corrupt oversized CSVs.
+- After: runner counts remain visible as provenance, but a bounded cached audit promotes verified publication to 700/700 and invalid/partial/stale evidence stays fail-closed or explicitly last-verified.
+- Evidence: forged raw and raw/merged mismatch tests return invalid; live raw700/tree hash is verified with health=running/stale=false; full 1030 and final dashboard 97 tests pass.
+- Remaining risk: the collection has no producer-signed manifest, so the dashboard must continue replaying content on each identity change and rely on filesystem immutability between audits.

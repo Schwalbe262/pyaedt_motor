@@ -160,6 +160,182 @@ class CampaignLogTests(unittest.TestCase):
         self.assertTrue(any("감소" in warning for warning in result["warnings"]))
 
 
+class Stage1CollectionTests(unittest.TestCase):
+    @staticmethod
+    def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+
+    @staticmethod
+    def _result_row(case_id: str, *, status: str = "ok") -> dict[str, str]:
+        return {
+            "case_id": case_id,
+            "status": status,
+            "missing_required_outputs": "",
+            "design_hash": "d1",
+            "input_design_hash": "d1",
+            "input_dataset_schema_version": "ipmsm_v2",
+            "input_model_extent": "full_360",
+            "input_symmetry_factor": "1",
+            "input_use_periodic_boundary": "false",
+            "input_beta_convention": "dq_current_advance_v2",
+            "input_quality_profile": "reference_ultra",
+            "input_setup_fingerprint": "setup",
+            "input_material_fingerprint": "material",
+            "input_aedt_version": "2025.2",
+        }
+
+    def _collection_fixture(self, root: Path) -> tuple[Fixture, dashboard.DashboardConfig, Path]:
+        fixture = Fixture(root)
+        output_dir = root / "stage1-out"
+        rows = [self._result_row("a"), self._result_row("b")]
+        self._write_csv(output_dir / "merged_results.csv", rows)
+        (output_dir / dashboard.STAGE1_COLLECTION_PLAN_NAME).write_bytes(
+            (root / "stage1.csv").read_bytes()
+        )
+        results_dir = output_dir / dashboard.STAGE1_COLLECTION_RESULTS_DIR_NAME
+        self._write_csv(
+            results_dir / "a.csv",
+            [rows[0]],
+        )
+        self._write_csv(
+            results_dir / "b.csv",
+            [rows[1]],
+        )
+        runner_log = root / "runner.log"
+        runner_log.write_text(
+            "run_ipmsm_v2 scheduler_ok=2 result_ok=1 active=0 pending=0 "
+            "missing=0 retry=0 project_active=0 submitted=0 elapsed_s=10.0\n"
+            "wait_ipmsm_v2_result_audit pending=1 b:settling:5s\n",
+            encoding="utf-8",
+        )
+        config = dashboard.DashboardConfig(
+            workdir=root,
+            contract_path=fixture.contract_path,
+            runner_log=runner_log,
+            family_confirmation_root=root / "confirmation",
+        )
+        return fixture, config, output_dir
+
+    def test_verified_atomic_collection_overrides_stale_runner_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture, config, _ = self._collection_fixture(Path(tmp).resolve())
+            fixture.training()
+            result = dashboard.collect_local_state(config)
+
+        self.assertEqual(result["stage1_collection"]["status"], "verified")
+        self.assertEqual(result["stage1_collection"]["rows"], 2)
+        self.assertEqual(result["campaign"]["result_ok"], 2)
+        self.assertEqual(result["campaign"]["scheduler_ok"], 2)
+        self.assertEqual(result["campaign"]["runner_result_ok"], 1)
+        self.assertEqual(result["campaign"]["settling_results"], 0)
+        self.assertEqual(result["campaign"]["completion_source"], "atomic_collection")
+        self.assertEqual(result["campaign"]["source_status"], "ok")
+
+    def test_absent_collection_preserves_runner_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            fixture = Fixture(root)
+            config = dashboard.DashboardConfig(root, fixture.contract_path)
+            stage1 = fixture.pipeline["stage1"]
+            assert isinstance(stage1, dict)
+            collection = dashboard.inspect_stage1_collection(
+                config,
+                stage1,
+                expected_rows=2,
+            )
+            campaign = {"result_ok": 1, "scheduler_ok": 2, "warnings": [], "source_status": "ok"}
+            reconciled = dashboard.reconcile_campaign_with_stage1_collection(
+                campaign,
+                collection,
+            )
+
+        self.assertEqual(collection["status"], "absent")
+        self.assertEqual(reconciled["result_ok"], 1)
+        self.assertEqual(reconciled["collection_integrity_status"], "absent")
+        self.assertNotIn("completion_source", reconciled)
+
+    def test_raw_result_tamper_invalidates_cached_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            fixture, config, output_dir = self._collection_fixture(root)
+            stage1 = fixture.pipeline["stage1"]
+            assert isinstance(stage1, dict)
+            verified = dashboard.inspect_stage1_collection(
+                config,
+                stage1,
+                expected_rows=2,
+            )
+            self._write_csv(
+                output_dir / dashboard.STAGE1_COLLECTION_RESULTS_DIR_NAME / "b.csv",
+                [{"case_id": "b", "status": "ok"}],
+            )
+            invalid = dashboard.inspect_stage1_collection(
+                config,
+                stage1,
+                expected_rows=2,
+            )
+
+        self.assertEqual(verified["status"], "verified")
+        self.assertEqual(invalid["status"], "invalid")
+
+    def test_collection_size_caps_fail_closed_before_parsing(self) -> None:
+        for constant in (
+            "MAX_STAGE1_COLLECTION_RAW_BYTES",
+            "MAX_STAGE1_COLLECTION_MERGED_BYTES",
+        ):
+            with self.subTest(constant=constant), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                fixture, config, _ = self._collection_fixture(root)
+                stage1 = fixture.pipeline["stage1"]
+                assert isinstance(stage1, dict)
+                with mock.patch.object(dashboard, constant, 1):
+                    result = dashboard.inspect_stage1_collection(
+                        config,
+                        stage1,
+                        expected_rows=2,
+                    )
+
+                self.assertEqual(result["status"], "invalid")
+
+    def test_tampered_collection_never_promotes_and_invalidates_cached_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            fixture, config, output_dir = self._collection_fixture(root)
+            stage1 = fixture.pipeline["stage1"]
+            assert isinstance(stage1, dict)
+            verified = dashboard.inspect_stage1_collection(
+                config,
+                stage1,
+                expected_rows=2,
+            )
+            self._write_csv(
+                output_dir / "merged_results.csv",
+                [
+                    self._result_row("a"),
+                    self._result_row("b", status="failed"),
+                ],
+            )
+            invalid = dashboard.inspect_stage1_collection(
+                config,
+                stage1,
+                expected_rows=2,
+            )
+            reconciled = dashboard.reconcile_campaign_with_stage1_collection(
+                {"result_ok": 1, "scheduler_ok": 2, "warnings": [], "source_status": "ok"},
+                invalid,
+            )
+
+        self.assertEqual(verified["status"], "verified")
+        self.assertEqual(invalid["status"], "invalid")
+        self.assertEqual(reconciled["result_ok"], 1)
+        self.assertEqual(reconciled["source_status"], "degraded")
+        self.assertTrue(reconciled["warnings"])
+
+
 class CheckpointTests(unittest.TestCase):
     PROJECT = "PYAEDT_MOTOR_IPMSM_V2"
     NOW = datetime(2026, 7, 12, 1, 0, tzinfo=timezone.utc)

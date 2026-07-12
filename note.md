@@ -3789,3 +3789,19 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: independent audits closed stale-candidate, raw-tree-tamper, setup-fingerprint, and hardlink gaps; full `.venv`=987/987 (5 skipped), focused suites and static checks pass; dry-run exits 0 without submissions; live Stage1=681/700, profile=4 complete/20 active/0 failed, project=35/100.
 - Failure/next: in-app browser is unavailable, so API/static/semantic verification substitutes for screenshot QA; wait for 24/24, then the runner atomically collects/ranks and the UI exposes only a verified winner.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database at closeout.
+
+## 2026-07-12 17:31:34 +09:00 - Stage1 exact-700 gate and CPU-affinity incident
+- Part/goal: close Stage1 data generation, measure the real R2 gate, and revalidate the paired runtime experiment after the scheduler affinity fix.
+- Hypothesis/actions: audited 700/700 atomic collection, ran exact non-authoritative trainer semantics in an isolated diagnostic root, proved legacy `fea_bursty` steps collided on 0-3, disabled only the local legacy finalizer runner, and ran affinity smoke task 28528.
+- Candidates/options: retain legacy24 for physics only; use a same-source two-profile post-fix pilot before a full24 runtime replay; keep v4/cutover tools strictly read-only until operating inputs are confirmed.
+- Metrics/result: validation=700 rows/112 groups/28 repeats/failures0; diagnostic gate=run_stage2 with 0/9 pass, min/avg R2=0.624627/0.771923; smoke cpuset=16-51; full tests=1026/1026 (5 skipped).
+- Failure/next: old paired24 runtime is known-contaminated and its automatic finalizer remains Disabled; commit/push the inactive tools, run the two-case pilot, then expand to full24 only if affinity/node-load evidence passes.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database, and no v4 authority or production NSGA write occurred.
+
+## 2026-07-12 18:08:00 +09:00 - Atomic Stage1 dashboard reconciliation
+- Part/goal: replace the WEB UI's stale runner-only 696/700 count with authoritative, fail-closed Stage1 publication progress.
+- Hypothesis/actions: preserved runner counters for provenance, audited the contract plan against all 700 bounded raw CSVs, collector schema/fingerprints, merged rows, and a raw tree hash, then restarted only the read-only dashboard task.
+- Candidates/options: rejected existence/count-only promotion and unbounded CSV parsing; capped raw aggregate at 128 MiB and merged input at 64 MiB with identity-keyed positive caching.
+- Metrics/result: live API=700/700, runner original=696, raw files=700/25,723,638 bytes, merged=10,279,234 bytes, health=running, stale=false, current=Surrogate R2 gate; full suite=1030/1030 and final dashboard=97/97.
+- Failure/next: the in-app browser surface was unavailable, so live HTTP/API and frontend semantics replaced screenshot QA; commit/push the audited tools, then start the exact two-case post-affinity pilot.
+- Token usage: unavailable; the closeout sampler found no local Codex SQLite database.

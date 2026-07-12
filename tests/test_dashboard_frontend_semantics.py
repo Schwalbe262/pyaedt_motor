@@ -156,6 +156,29 @@ const stale = {
 context.__stale = stale;
 vm.runInContext("renderHeroOperations(__stale, overallState(__stale))", context);
 vm.runInContext("renderCampaign(__stale)", context);
+const staleView = {
+  readiness: byId("stage1Readiness").dataset.state,
+  detail: byId("stage1ReadinessDetail").textContent,
+  waitTitle: byId("heroWaitTitle").textContent,
+  activeSlots: byId("activeSlots").textContent,
+  slotSub: byId("slotSub").textContent,
+};
+const staleAtomic = JSON.parse(JSON.stringify(stale));
+staleAtomic.campaign = {
+  result_ok: 700,
+  total: 700,
+  completion_source: "atomic_collection",
+  collection_integrity_status: "verified",
+  collection_result_files: 700,
+  runner_result_ok: 696,
+};
+context.__staleAtomic = staleAtomic;
+vm.runInContext("renderHeroOperations(__staleAtomic, overallState(__staleAtomic))", context);
+vm.runInContext("renderCampaign(__staleAtomic)", context);
+const staleAtomicView = {
+  detail: byId("stage1ReadinessDetail").textContent,
+  resultSub: byId("resultSub").textContent,
+};
 
 const qualityExperiment = {
   integrity_status: "verified",
@@ -250,13 +273,8 @@ process.stdout.write(JSON.stringify({
     approved: pendingAuthorization.approved,
     rejected: pendingAuthorization.rejected,
   },
-  stale: {
-    readiness: byId("stage1Readiness").dataset.state,
-    detail: byId("stage1ReadinessDetail").textContent,
-    waitTitle: byId("heroWaitTitle").textContent,
-    activeSlots: byId("activeSlots").textContent,
-    slotSub: byId("slotSub").textContent,
-  },
+  stale: staleView,
+  staleAtomic: staleAtomicView,
   qualityRunning,
   qualityStale,
   qualityInvalid,
@@ -300,6 +318,9 @@ process.stdout.write(JSON.stringify({
         self.assertNotIn("수집 중", result["stale"]["waitTitle"])
         self.assertEqual(result["stale"]["activeSlots"], "—")
         self.assertIn("마지막 관측", result["stale"]["slotSub"])
+        self.assertIn("마지막 검증", result["staleAtomic"]["detail"])
+        self.assertIn("snapshot 갱신 필요", result["staleAtomic"]["resultSub"])
+        self.assertNotIn("무결성 검증 완료", result["staleAtomic"]["detail"])
         self.assertEqual(result["qualityRunning"]["state"], "running")
         self.assertEqual(result["qualityRunning"]["status"], "실행 중")
         self.assertEqual(result["qualityRunning"]["progress"], 5)
