@@ -850,6 +850,88 @@ function renderScheduler(data) {
   if (!nodes.length) nodeGrid.appendChild(element("p", "muted", "활성 노드 정보가 없습니다."));
 }
 
+function renderQualityProfileExperiment(data) {
+  const experiment = record(data.quality_profile_experiment);
+  const expected = Math.max(1, integer(experiment.expected_cases, 24));
+  const planned = count(experiment.planned);
+  const active = count(experiment.active);
+  const completed = count(experiment.completed);
+  const failed = count(experiment.failed);
+  const missing = count(experiment.missing);
+  const relationVerified = experiment.official_pipeline_stage === false
+    && experiment.official_speed_stage === false
+    && experiment.relation_to_official_speed === "separate_from_post_pareto_speed_validation";
+  const trusted = experiment.integrity_status === "verified"
+    && experiment.scheduler_integrity_status === "verified"
+    && experiment.scheduler_trusted === true
+    && experiment.history_complete === true
+    && relationVerified;
+  const invalid = experiment.integrity_status === "invalid"
+    || experiment.plan_integrity_status === "invalid"
+    || experiment.scheduler_integrity_status === "invalid"
+    || !relationVerified;
+  const partial = experiment.scheduler_integrity_status === "partial_history";
+  const rawStatus = trusted ? String(experiment.status || "ready") : invalid ? "invalid" : "unavailable";
+  const card = byId("qualityExperimentCard");
+  card.dataset.state = rawStatus;
+
+  const status = byId("qualityExperimentStatus");
+  const statusLabel = {
+    complete: "24-case 완료",
+    running: "실행 중",
+    failed: "실패 case 있음",
+    ready: "제출 대기",
+    invalid: "identity 검증 실패",
+    unavailable: partial ? "부분 이력 · 판정 보류" : "상태 확인 필요",
+  }[rawStatus] || "상태 확인 필요";
+  status.textContent = statusLabel;
+  status.className = `health-pill ${rawStatus === "complete" ? "complete" : rawStatus === "running" ? "running" : rawStatus === "failed" || rawStatus === "invalid" ? "failed" : "warning"}`;
+
+  const progress = byId("qualityExperimentProgress");
+  progress.max = expected;
+  progress.value = trusted ? Math.min(expected, completed ?? 0) : 0;
+  setText(
+    "qualityExperimentProgressLabel",
+    trusted
+      ? `${(completed ?? 0).toLocaleString("ko-KR")} / ${expected.toLocaleString("ko-KR")} complete · ${decimal(experiment.progress_pct, 1)}%`
+      : `${planned === null ? "—" : planned.toLocaleString("ko-KR")} planned · 진행률 판정 보류`,
+  );
+  setText("qualityExperimentPlanned", planned === null ? "—" : planned.toLocaleString("ko-KR"));
+
+  const observedCount = (value) => value === null
+    ? "—"
+    : trusted
+      ? value.toLocaleString("ko-KR")
+      : partial
+        ? `${value.toLocaleString("ko-KR")} 관측`
+        : "—";
+  setText("qualityExperimentActive", observedCount(active));
+  setText("qualityExperimentCompleted", observedCount(completed));
+  setText("qualityExperimentFailed", observedCount(failed));
+  setText("qualityExperimentMissing", trusted && missing !== null ? missing.toLocaleString("ko-KR") : "—");
+
+  const schedulerCounts = record(experiment.scheduler_status_counts);
+  setText(
+    "qualityExperimentSchedulerCounts",
+    `${trusted ? "정확한 task prefix 집계" : partial ? "부분 이력 관측값" : "집계 검증 보류"} · queued ${integer(schedulerCounts.queued)} · attaching ${integer(schedulerCounts.attaching)} · running ${integer(schedulerCounts.running)} · completed ${integer(schedulerCounts.completed)} · failed ${integer(schedulerCounts.failed)} · cancelled ${integer(schedulerCounts.cancelled)}`,
+  );
+  const profiles = Array.isArray(experiment.profiles) ? experiment.profiles : [];
+  setText(
+    "qualityExperimentProfiles",
+    experiment.plan_integrity_status === "verified" && profiles.length === 2
+      ? `${profiles[0]} ↔ ${profiles[1]} · ${integer(experiment.source_count, integer(experiment.expected_sources, 12))} paired sources`
+      : "Profile pair identity 검증 필요",
+  );
+
+  const projectActive = count(experiment.project_active);
+  const projectCap = count(experiment.project_cap);
+  const openSlots = count(experiment.project_open_slots);
+  const capRelation = projectActive !== null && projectCap !== null
+    ? `${trusted ? "" : "마지막 관측 · "}Project active ${projectActive.toLocaleString("ko-KR")} / cap ${projectCap.toLocaleString("ko-KR")} · 이 실험 active ${active === null ? "—" : active.toLocaleString("ko-KR")} (${decimal(experiment.experiment_active_share_pct, 1)}%) · open ${openSlots === null ? "—" : openSlots.toLocaleString("ko-KR")}`
+    : "Project cap 관계 확인 필요";
+  setText("qualityExperimentCap", capRelation);
+}
+
 function renderCheckpoint(data) {
   const checkpoint = data.checkpoint || data.scheduler?.checkpoint || {};
   const execution = checkpoint.execution || {};
@@ -1398,6 +1480,7 @@ function renderTasks(data) {
   tasks.forEach((task) => {
     const row = document.createElement("tr");
     const cleanName = (task.name || "—")
+      .replace("ipmsm-v2-profile-thirdpass-speed-v1-", "Quality A/B · ")
       .replace("ipmsm-v2-foundation-s1-", "S1 · ")
       .replace("ipmsm-v2-foundation-s2-", "S2 · ")
       .replace("ipmsm-v2-foundation-s3-", "S3 · ")
@@ -1444,6 +1527,7 @@ function render(data) {
     byId("alerts").prepend(element("div", "alert error", "대시보드 수집 시각이 30초 이상 갱신되지 않았습니다. 서버 health를 확인하세요."));
   }
   renderScheduler(data);
+  renderQualityProfileExperiment(data);
   renderCheckpoint(data);
   renderModel(data);
   renderPhysics(data);

@@ -3765,3 +3765,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Failure reason: a full discovery run exceeded 120 s without a result; focused dashboard coverage passed, and inactive-v4 audit P1s remain isolated from the live UI/cutover.
 - Next action: keep the UI live, finish the two inactive-v4 source-pin/hard-link recovery corrections, then create no contract or authorization artifact until production inputs are confirmed.
 - Token usage: unavailable because the local Codex SQLite database was not found.
+
+## 2026-07-12 13:40:18 +09:00 - Ancillary profile UI and legacy optimization guard
+- Part/goal: expose the paired-24 quality/speed experiment and prevent provisional v3 inputs from reaching automatic NSGA before v4 authorization.
+- Hypothesis/actions: added fail-closed plan/task reconciliation and UI, launched a cap-aware scheduled campaign, blocked all six v3 optimization/speed actions in the durable wrapper, then restarted the exact process tree and resumed Stage1 idempotently.
+- Candidates/options: retained the existing loopback dashboard and v3 Stage1/2/3 path; deferred v4 activation and every confirmation/receipt/NSGA write.
+- Metrics/result: dashboard 85/85, guard+artifact 14/14, profile tooling 32/32; live health=running, Stage1 validated=607/700, scheduler Stage1=86 active, profile=14 active/10 missing, project=100/100.
+- Failure/next: Task Scheduler stop left verified orphan campaign children, which were terminated without touching Slurm FEA before the guarded task restarted; finish confirmation crash recovery and transitive local-source pins, then repeat the no-write v4 dry-run.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.

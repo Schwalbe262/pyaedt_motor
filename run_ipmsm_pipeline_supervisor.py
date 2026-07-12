@@ -19,6 +19,34 @@ from typing import TextIO
 import supervise_ipmsm_v2_pipeline as supervisor
 
 
+LEGACY_UNAUTHORIZED_DOWNSTREAM_ACTIONS = frozenset(
+    {
+        "run_optimization_fresh",
+        "run_optimization_resume",
+        "run_speed_plan",
+        "run_speed_campaign",
+        "run_speed_rank",
+        "commit_speed_completion",
+    }
+)
+
+
+def _execute_with_authorization_guard(
+    executor: object,
+    contract: object,
+    snapshot: object,
+) -> object:
+    """Keep the durable v3 task from crossing the v4 human-authorization gate."""
+
+    action = getattr(snapshot, "next_action", None)
+    if action in LEGACY_UNAUTHORIZED_DOWNSTREAM_ACTIONS:
+        raise supervisor.PipelineStateError(
+            "legacy automatic optimization/speed execution is disabled; "
+            "activate the audited v4 authorization supervisor before continuing"
+        )
+    return executor(contract, snapshot)  # type: ignore[operator]
+
+
 def _atomic_pid_marker(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
@@ -71,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     streams: tuple[TextIO, TextIO] | None = None
     original_stdout, original_stderr = sys.stdout, sys.stderr
     original_subprocess_run = supervisor.subprocess.run
+    original_execute_action = supervisor.execute_action
     try:
         streams = _open_runtime_logs(stdout_log, stderr_log)
         sys.stdout, sys.stderr = streams
@@ -82,6 +111,15 @@ def main(argv: list[str] | None = None) -> int:
             return original_subprocess_run(*run_args, **run_kwargs)
 
         supervisor.subprocess.run = run_with_runtime_logs  # type: ignore[assignment]
+
+        def execute_with_authorization_guard(contract: object, snapshot: object) -> object:
+            return _execute_with_authorization_guard(
+                original_execute_action,
+                contract,
+                snapshot,
+            )
+
+        supervisor.execute_action = execute_with_authorization_guard  # type: ignore[assignment]
         print(
             "pipeline_supervisor_start "
             f"time={datetime.now(timezone.utc).isoformat()} pid={os.getpid()} contract={contract.name}",
@@ -98,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         _remove_own_marker(pid_file)
         supervisor.subprocess.run = original_subprocess_run
+        supervisor.execute_action = original_execute_action
         sys.stdout, sys.stderr = original_stdout, original_stderr
         if streams is not None:
             for stream in streams:

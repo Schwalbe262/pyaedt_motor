@@ -96,6 +96,34 @@ MAX_TAIL_BYTES = 128 * 1024
 MAX_JSON_BYTES = 16 * 1024 * 1024
 ACTIVE_STATUSES = frozenset({"queued", "attaching", "running"})
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+QUALITY_PROFILE_EXPERIMENT_SCHEMA_VERSION = (
+    "ipmsm-v2-ancillary-quality-profile-experiment-v1"
+)
+QUALITY_PROFILE_EXPERIMENT_ID = "profile_thirdpass_speed_v1"
+QUALITY_PROFILE_PLAN = Path(
+    "simul_log_smoke/profile_thirdpass_speed_v2s1_paired24_cases_v1.csv"
+)
+QUALITY_PROFILE_TASK_PREFIX = "ipmsm-v2-profile-thirdpass-speed-v1"
+QUALITY_PROFILE_DATASET_SCHEMA_VERSION = "ipmsm_v2"
+QUALITY_PROFILE_EXPECTED_CASES = 24
+QUALITY_PROFILE_EXPECTED_SOURCES = 12
+QUALITY_PROFILE_EXPECTED_PROFILES = (
+    "time_138_p12_baseline",
+    "time_135_p12_iron525",
+)
+QUALITY_PROFILE_REQUIRED_FIELDS = frozenset(
+    {
+        "case_id",
+        "source_case_id",
+        "dataset_schema_version",
+        "quality_profile",
+    }
+)
+QUALITY_PROFILE_CASE_ID_RE = re.compile(
+    r"^v2s1_thirdpass_speed_v1_(?P<ordinal>\d{4})_"
+    r"(?P<source>v2s1_\d{4}_(?:rated_torque|rated_power_at_max_speed)_\d{2})_"
+    r"(?P<profile>time_138_p12_baseline|time_135_p12_iron525)$"
+)
 TASK_PREFIXES = {
     "stage1": "ipmsm-v2-foundation-s1-",
     "stage2": "ipmsm-v2-foundation-s2-",
@@ -240,6 +268,356 @@ def _canonical_json_sha256(value: Any) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _quality_profile_experiment_state(
+    *,
+    plan_integrity_status: str,
+    planned: int,
+    source_count: int,
+    error_code: str = "",
+) -> dict[str, Any]:
+    return {
+        "schema_version": QUALITY_PROFILE_EXPERIMENT_SCHEMA_VERSION,
+        "experiment_id": QUALITY_PROFILE_EXPERIMENT_ID,
+        "label": "Pre-Stage 1 simulation-quality speed/mesh profile experiment",
+        "scope": "ancillary_pre_stage1_simulation_quality",
+        "official_pipeline_stage": False,
+        "official_speed_stage": False,
+        "relation_to_official_speed": "separate_from_post_pareto_speed_validation",
+        "plan_name": QUALITY_PROFILE_PLAN.name,
+        "task_prefix": QUALITY_PROFILE_TASK_PREFIX,
+        "dataset_schema_version": QUALITY_PROFILE_DATASET_SCHEMA_VERSION,
+        "profiles": list(QUALITY_PROFILE_EXPECTED_PROFILES),
+        "expected_cases": QUALITY_PROFILE_EXPECTED_CASES,
+        "expected_sources": QUALITY_PROFILE_EXPECTED_SOURCES,
+        "planned": planned,
+        "source_count": source_count,
+        "plan_integrity_status": plan_integrity_status,
+        "scheduler_integrity_status": "not_checked",
+        "integrity_status": (
+            "unavailable" if plan_integrity_status == "verified" else "invalid"
+        ),
+        "scheduler_trusted": False,
+        "history_complete": None,
+        "status": "ready" if plan_integrity_status == "verified" else "unavailable",
+        "scheduler_status_counts": {
+            status: 0 for status in RUNTIME_SCHEDULER_STATUSES
+        },
+        "active": 0,
+        "completed": 0,
+        "failed": 0,
+        "missing": None,
+        "progress_pct": None,
+        "project_active": None,
+        "project_cap": None,
+        "project_open_slots": None,
+        "project_utilization_pct": None,
+        "experiment_active_share_pct": None,
+        "cap_status": "unavailable",
+        "error_code": error_code,
+    }
+
+
+def inspect_quality_profile_experiment_plan(
+    config: "DashboardConfig",
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Validate the fixed 24-case ancillary plan without exposing its rows."""
+
+    path = config.workdir / QUALITY_PROFILE_PLAN
+    if not path.is_file():
+        return (
+            _quality_profile_experiment_state(
+                plan_integrity_status="absent",
+                planned=0,
+                source_count=0,
+                error_code="plan_missing",
+            ),
+            (),
+        )
+
+    error_code = "plan_unreadable"
+    try:
+        before = path.stat()
+        if before.st_size <= 0 or before.st_size > 2 * 1024 * 1024:
+            raise DashboardDataError(error_code)
+        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            fieldnames = list(reader.fieldnames or ())
+            if (
+                not fieldnames
+                or len(fieldnames) != len(set(fieldnames))
+                or not QUALITY_PROFILE_REQUIRED_FIELDS.issubset(fieldnames)
+            ):
+                error_code = "plan_schema_mismatch"
+                raise DashboardDataError(error_code)
+            rows: list[dict[str, str]] = []
+            for raw_row in reader:
+                if None in raw_row or any(value is None for value in raw_row.values()):
+                    error_code = "plan_schema_mismatch"
+                    raise DashboardDataError(error_code)
+                rows.append({key: str(value).strip() for key, value in raw_row.items()})
+                if len(rows) > QUALITY_PROFILE_EXPECTED_CASES:
+                    error_code = "plan_count_mismatch"
+                    raise DashboardDataError(error_code)
+        after = path.stat()
+        if (
+            before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or len(rows) != QUALITY_PROFILE_EXPECTED_CASES
+        ):
+            error_code = "plan_count_mismatch"
+            raise DashboardDataError(error_code)
+
+        expected_profiles = set(QUALITY_PROFILE_EXPECTED_PROFILES)
+        profiles_by_source: dict[str, set[str]] = {}
+        ordinal_by_source: dict[str, int] = {}
+        case_ids: set[str] = set()
+        task_names: list[str] = []
+        for row in rows:
+            if row["dataset_schema_version"] != QUALITY_PROFILE_DATASET_SCHEMA_VERSION:
+                error_code = "dataset_schema_mismatch"
+                raise DashboardDataError(error_code)
+            case_id = row["case_id"]
+            source = row["source_case_id"]
+            profile = row["quality_profile"]
+            match = QUALITY_PROFILE_CASE_ID_RE.fullmatch(case_id)
+            if (
+                match is None
+                or source != match.group("source")
+                or profile != match.group("profile")
+                or profile not in expected_profiles
+                or case_id in case_ids
+            ):
+                error_code = "case_identity_mismatch"
+                raise DashboardDataError(error_code)
+            ordinal = int(match.group("ordinal"))
+            previous_ordinal = ordinal_by_source.setdefault(source, ordinal)
+            if previous_ordinal != ordinal:
+                error_code = "case_identity_mismatch"
+                raise DashboardDataError(error_code)
+            case_ids.add(case_id)
+            profiles_by_source.setdefault(source, set()).add(profile)
+            safe_case_id = campaign_submitter.sanitize_case_id(case_id)
+            task_names.append(f"{QUALITY_PROFILE_TASK_PREFIX}-{safe_case_id}")
+
+        if (
+            len(profiles_by_source) != QUALITY_PROFILE_EXPECTED_SOURCES
+            or set(ordinal_by_source.values())
+            != set(range(1, QUALITY_PROFILE_EXPECTED_SOURCES + 1))
+            or any(profiles != expected_profiles for profiles in profiles_by_source.values())
+            or len(set(task_names)) != QUALITY_PROFILE_EXPECTED_CASES
+        ):
+            error_code = "profile_pairing_mismatch"
+            raise DashboardDataError(error_code)
+    except (OSError, UnicodeError, csv.Error, RuntimeError, ValueError, DashboardDataError):
+        return (
+            _quality_profile_experiment_state(
+                plan_integrity_status="invalid",
+                planned=0,
+                source_count=0,
+                error_code=error_code,
+            ),
+            (),
+        )
+
+    return (
+        _quality_profile_experiment_state(
+            plan_integrity_status="verified",
+            planned=QUALITY_PROFILE_EXPECTED_CASES,
+            source_count=len(profiles_by_source),
+        ),
+        tuple(task_names),
+    )
+
+
+def summarize_quality_profile_experiment(
+    *,
+    plan_state: Mapping[str, Any],
+    expected_task_names: Sequence[str],
+    tasks: Sequence[Mapping[str, Any]],
+    history_complete: bool,
+    project_active: int,
+    project_cap: int,
+) -> dict[str, Any]:
+    """Reconcile exact scheduler task identities for the ancillary experiment."""
+
+    state = dict(plan_state)
+    project_active = max(0, project_active)
+    project_cap = max(0, project_cap)
+    state.update(
+        project_active=project_active,
+        project_cap=project_cap,
+        project_open_slots=max(0, project_cap - project_active) if project_cap else None,
+        project_utilization_pct=(
+            round(100.0 * project_active / project_cap, 1) if project_cap else None
+        ),
+        experiment_active_share_pct=None,
+        cap_status=(
+            "unavailable"
+            if not project_cap
+            else "over_cap"
+            if project_active > project_cap
+            else "at_cap"
+            if project_active == project_cap
+            else "within_cap"
+        ),
+        history_complete=history_complete,
+    )
+
+    def invalidate(code: str, *, scheduler_status: str = "invalid") -> dict[str, Any]:
+        state.update(
+            scheduler_integrity_status=scheduler_status,
+            integrity_status="invalid",
+            scheduler_trusted=False,
+            status="unavailable",
+            scheduler_status_counts={
+                status: 0 for status in RUNTIME_SCHEDULER_STATUSES
+            },
+            active=0,
+            completed=0,
+            failed=0,
+            missing=None,
+            progress_pct=None,
+            experiment_active_share_pct=None,
+            error_code=code,
+        )
+        return state
+
+    if plan_state.get("plan_integrity_status") != "verified":
+        return invalidate(str(plan_state.get("error_code") or "plan_invalid"), scheduler_status="not_checked")
+    if len(expected_task_names) != QUALITY_PROFILE_EXPECTED_CASES:
+        return invalidate("expected_task_identity_mismatch", scheduler_status="not_checked")
+    if project_cap <= 0 or project_active > project_cap:
+        return invalidate("project_cap_invalid")
+
+    expected_names = set(expected_task_names)
+    task_prefix = f"{QUALITY_PROFILE_TASK_PREFIX}-"
+    safe_case_suffixes = tuple(
+        f"-{name[len(task_prefix):]}" for name in expected_task_names
+    )
+    tasks_by_name: dict[str, list[Mapping[str, Any]]] = {
+        name: [] for name in expected_task_names
+    }
+    prefix_mismatch = False
+    for task in tasks:
+        if not isinstance(task, Mapping):
+            continue
+        name = _clip_text(task.get("name"), 200)
+        if name in expected_names:
+            tasks_by_name[name].append(task)
+        elif name.startswith(task_prefix) or any(
+            name.endswith(suffix) for suffix in safe_case_suffixes
+        ):
+            prefix_mismatch = True
+    if prefix_mismatch:
+        return invalidate("task_prefix_mismatch")
+
+    raw_counts: Counter[str] = Counter()
+    active_cases = 0
+    completed_cases = 0
+    failed_cases = 0
+    missing_cases = 0
+
+    def scheduler_exit_code(item: Mapping[str, Any]) -> int | None:
+        raw = item.get("exit_code", item.get("return_code"))
+        if isinstance(raw, bool) or raw in (None, ""):
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    for name in expected_task_names:
+        attempts = tasks_by_name[name]
+        if not attempts:
+            missing_cases += 1
+            continue
+        statuses = [_clip_text(item.get("status"), 30).lower() for item in attempts]
+        if any(status not in ACTIVE_STATUSES | TERMINAL_STATUSES for status in statuses):
+            return invalidate("scheduler_status_invalid")
+        raw_counts.update(statuses)
+        successful = [
+            item
+            for item, status in zip(attempts, statuses, strict=True)
+            if status == "completed"
+            and scheduler_exit_code(item) == 0
+        ]
+        ambiguous_completed = [
+            item
+            for item, status in zip(attempts, statuses, strict=True)
+            if status == "completed" and scheduler_exit_code(item) is None
+        ]
+        active_attempts = [status for status in statuses if status in ACTIVE_STATUSES]
+        if ambiguous_completed or len(successful) > 1 or len(active_attempts) > 1:
+            return invalidate("scheduler_history_ambiguous")
+        if successful:
+            if active_attempts:
+                return invalidate("scheduler_history_ambiguous")
+            completed_cases += 1
+        elif active_attempts:
+            active_cases += 1
+        else:
+            failed_cases += 1
+
+    scheduler_counts = {
+        status: raw_counts.get(status, 0) for status in RUNTIME_SCHEDULER_STATUSES
+    }
+    if not history_complete:
+        state.update(
+            scheduler_integrity_status="partial_history",
+            integrity_status="unavailable",
+            scheduler_trusted=False,
+            status="unavailable",
+            scheduler_status_counts=scheduler_counts,
+            active=active_cases,
+            completed=completed_cases,
+            failed=failed_cases,
+            missing=None,
+            progress_pct=None,
+            experiment_active_share_pct=(
+                round(100.0 * active_cases / project_active, 1)
+                if project_active
+                else 0.0
+            ),
+            error_code="scheduler_history_incomplete",
+        )
+        return state
+
+    status = (
+        "complete"
+        if completed_cases == QUALITY_PROFILE_EXPECTED_CASES
+        and not active_cases
+        and not failed_cases
+        and not missing_cases
+        else "failed"
+        if failed_cases
+        else "running"
+        if active_cases
+        else "ready"
+    )
+    state.update(
+        scheduler_integrity_status="verified",
+        integrity_status="verified",
+        scheduler_trusted=True,
+        status=status,
+        scheduler_status_counts=scheduler_counts,
+        active=active_cases,
+        completed=completed_cases,
+        failed=failed_cases,
+        missing=missing_cases,
+        progress_pct=round(
+            100.0 * completed_cases / QUALITY_PROFILE_EXPECTED_CASES,
+            2,
+        ),
+        experiment_active_share_pct=(
+            round(100.0 * active_cases / project_active, 1)
+            if project_active
+            else 0.0
+        ),
+        error_code="",
+    )
+    return state
 
 
 def _iso_timestamp(epoch: float | None = None) -> str:
@@ -2196,6 +2574,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
     expected_stage1 = _safe_int(stage1.get("expected_rows"), 700)
     runner_log = config.runner_log or find_runner_log(artifact_dir)
     campaign = parse_campaign_log(runner_log, total_cases=expected_stage1, cap=config.cap)
+    quality_profile_experiment, _ = inspect_quality_profile_experiment_plan(config)
 
     stage2_argv = stage2.get("argv") if isinstance(stage2.get("argv"), list) else []
     stage3_argv = stage3.get("continuation_argv") if isinstance(stage3.get("continuation_argv"), list) else []
@@ -2524,6 +2903,13 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         )
     if speed_state.get("marker_status") == "invalid":
         alerts.append({"level": "warning", "message": "속도 검증 완료 marker 또는 artifact hash가 유효하지 않습니다."})
+    if quality_profile_experiment.get("plan_integrity_status") != "verified":
+        alerts.append(
+            {
+                "level": "error",
+                "message": "보조 simulation-quality profile 실험 계획의 identity/schema 검증에 실패했습니다.",
+            }
+        )
     if target_load_error:
         alerts.append({"level": "warning", "message": f"Target-load 진행 파일 검증 실패: {target_load_error}"})
     elif target_load_state.get("stale"):
@@ -2559,6 +2945,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         "checkpoint_execution": checkpoint_execution,
         "family_confirmation": family_confirmation,
         "speed": speed_state,
+        "quality_profile_experiment": quality_profile_experiment,
         "target_load": target_load_state,
         "processes": processes,
         "alerts": alerts,
@@ -3326,6 +3713,15 @@ def collect_scheduler_state(config: DashboardConfig) -> dict[str, Any]:
         cap=config.cap,
     )
     summary["project_matches"] = bool(summary.get("project_exists")) and summary.get("project") == config.project
+    quality_plan, expected_quality_tasks = inspect_quality_profile_experiment_plan(config)
+    summary["quality_profile_experiment"] = summarize_quality_profile_experiment(
+        plan_state=quality_plan,
+        expected_task_names=expected_quality_tasks,
+        tasks=tasks,
+        history_complete=summary["history_complete"] is True,
+        project_active=_safe_int(summary.get("active_count")),
+        project_cap=_safe_int(summary.get("cap"), config.cap),
+    )
     try:
         checkpoint = collect_stage1_checkpoint(config, tasks)
     except DashboardDataError:
@@ -3393,6 +3789,12 @@ class DashboardStateStore:
                     "optimization": {"decision": None, "seeds": []},
                     "governance": _governance_fallback(self.config),
                     "speed": {"complete": False},
+                    "quality_profile_experiment": _quality_profile_experiment_state(
+                        plan_integrity_status="absent",
+                        planned=0,
+                        source_count=0,
+                        error_code="local_state_unavailable",
+                    ),
                     "target_load": _empty_target_load_state(),
                     "family_confirmation": _empty_family_confirmation_state(
                         status="artifact_invalid",
@@ -3533,6 +3935,33 @@ class DashboardStateStore:
                 self._last_scheduler_refresh = now
 
         scheduler = dict(self._last_scheduler or {})
+        scheduler_quality_experiment = scheduler.get("quality_profile_experiment")
+        local_quality_experiment = local.get("quality_profile_experiment")
+        if isinstance(scheduler_quality_experiment, Mapping):
+            quality_profile_experiment = dict(scheduler_quality_experiment)
+        elif isinstance(local_quality_experiment, Mapping):
+            quality_profile_experiment = dict(local_quality_experiment)
+        else:
+            quality_profile_experiment = _quality_profile_experiment_state(
+                plan_integrity_status="not_checked",
+                planned=0,
+                source_count=0,
+                error_code="monitoring_not_available",
+            )
+            quality_profile_experiment["integrity_status"] = "unavailable"
+        quality_profile_experiment["scheduler_reachable"] = scheduler.get("reachable") is True
+        quality_profile_experiment["scheduler_stale"] = scheduler.get("stale") is True
+        if scheduler.get("reachable") is not True or scheduler.get("stale") is True:
+            if quality_profile_experiment.get("integrity_status") != "invalid":
+                quality_profile_experiment["integrity_status"] = "unavailable"
+            quality_profile_experiment.update(
+                scheduler_integrity_status="stale" if scheduler.get("stale") else "unavailable",
+                scheduler_trusted=False,
+                status="unavailable",
+                missing=None,
+                progress_pct=None,
+            )
+        local["quality_profile_experiment"] = quality_profile_experiment
         scheduler_checkpoint = scheduler.get("checkpoint")
         if isinstance(scheduler_checkpoint, Mapping):
             checkpoint = dict(scheduler_checkpoint)
@@ -3617,6 +4046,9 @@ class DashboardStateStore:
             "artifact_invalid",
         }
         governance_invalid = local.get("governance", {}).get("status") == "invalid"
+        quality_profile_integrity_invalid = (
+            local.get("quality_profile_experiment", {}).get("integrity_status") == "invalid"
+        )
         local.setdefault("campaign", {})["result_progress_stalled"] = result_progress_stalled
         stale = bool(
             errors
@@ -3633,6 +4065,7 @@ class DashboardStateStore:
             or target_load_stale
             or family_confirmation_degraded
             or governance_invalid
+            or quality_profile_integrity_invalid
             or (scheduler_active == 0 and campaign_status_stale and not automation_alive)
         )
         if not project_identity_ok:
@@ -3649,6 +4082,22 @@ class DashboardStateStore:
                 {
                     "level": "error",
                     "message": f"Scheduler project cap {scheduler_cap}과 로컬 설정 {self.config.cap}이 일치하지 않습니다.",
+                },
+            )
+        if quality_profile_integrity_invalid:
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "error",
+                    "message": "보조 simulation-quality profile 실험의 plan/schema/task-prefix identity를 검증하지 못했습니다.",
+                },
+            )
+        elif local.get("quality_profile_experiment", {}).get("status") == "failed":
+            local.setdefault("alerts", []).insert(
+                0,
+                {
+                    "level": "warning",
+                    "message": "보조 simulation-quality profile 실험에 실패 case가 있습니다. 공식 post-Pareto speed 단계와는 별도입니다.",
                 },
             )
         if result_count_regressed:

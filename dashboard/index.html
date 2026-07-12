@@ -156,6 +156,38 @@
             <div><span>실패 시도</span><strong id="schedulerFailed">—</strong></div>
             <div><span>1h 완료 시도</span><strong id="lastHour">—</strong></div>
           </div>
+          <section
+            class="quality-experiment-card"
+            id="qualityExperimentCard"
+            data-state="unavailable"
+            aria-labelledby="qualityExperimentTitle"
+            aria-describedby="qualityExperimentRelation qualityExperimentSchedulerCounts qualityExperimentCap"
+          >
+            <div class="quality-experiment-heading">
+              <div>
+                <span class="section-kicker">ANCILLARY QUALITY EXPERIMENT · OFFICIAL PIPELINE STAGE 아님</span>
+                <h3 id="qualityExperimentTitle">Pre-Stage 1 speed/mesh profile A/B</h3>
+              </div>
+              <span class="health-pill warning" id="qualityExperimentStatus" role="status">검증 중</span>
+            </div>
+            <p id="qualityExperimentRelation">
+              Stage 1 데이터 품질·실행시간 비교용 보조 실험이며, Pareto 이후 공식 Speed 검증 단계와 분리됩니다.
+            </p>
+            <div class="quality-experiment-progress-row">
+              <progress id="qualityExperimentProgress" max="24" value="0" aria-label="보조 quality-profile 실험 완료 진행률"></progress>
+              <strong id="qualityExperimentProgressLabel">0 / 24 complete</strong>
+            </div>
+            <div class="quality-experiment-counts" aria-label="보조 실험 case 상태">
+              <div><span>Planned</span><strong id="qualityExperimentPlanned">—</strong></div>
+              <div><span>Active</span><strong id="qualityExperimentActive">—</strong></div>
+              <div><span>Completed</span><strong id="qualityExperimentCompleted">—</strong></div>
+              <div><span>Failed</span><strong id="qualityExperimentFailed">—</strong></div>
+              <div><span>Missing</span><strong id="qualityExperimentMissing">—</strong></div>
+            </div>
+            <p class="quality-experiment-profiles" id="qualityExperimentProfiles">Profile pair identity 검증 중</p>
+            <p class="quality-experiment-scheduler" id="qualityExperimentSchedulerCounts">Scheduler 상태 집계 검증 중</p>
+            <p class="quality-experiment-cap" id="qualityExperimentCap">Project cap 관계 확인 중</p>
+          </section>
           <div class="subheading-row">
             <h3>노드별 활성 작업</h3>
             <span id="nodeCount">0 nodes</span>

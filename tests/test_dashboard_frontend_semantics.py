@@ -157,6 +157,61 @@ context.__stale = stale;
 vm.runInContext("renderHeroOperations(__stale, overallState(__stale))", context);
 vm.runInContext("renderCampaign(__stale)", context);
 
+const qualityExperiment = {
+  integrity_status: "verified",
+  plan_integrity_status: "verified",
+  scheduler_integrity_status: "verified",
+  scheduler_trusted: true,
+  history_complete: true,
+  status: "running",
+  official_pipeline_stage: false,
+  official_speed_stage: false,
+  relation_to_official_speed: "separate_from_post_pareto_speed_validation",
+  expected_cases: 24,
+  expected_sources: 12,
+  planned: 24,
+  source_count: 12,
+  active: 7,
+  completed: 5,
+  failed: 0,
+  missing: 12,
+  progress_pct: 20.83,
+  scheduler_status_counts: { queued: 2, attaching: 1, running: 4, completed: 5, failed: 0, cancelled: 0 },
+  profiles: ["time_138_p12_baseline", "time_135_p12_iron525"],
+  project_active: 100,
+  project_cap: 100,
+  project_open_slots: 0,
+  experiment_active_share_pct: 7,
+};
+context.__qualityExperiment = { quality_profile_experiment: qualityExperiment };
+vm.runInContext("renderQualityProfileExperiment(__qualityExperiment)", context);
+const qualityRunning = {
+  state: byId("qualityExperimentCard").dataset.state,
+  status: byId("qualityExperimentStatus").textContent,
+  progress: byId("qualityExperimentProgress").value,
+  progressLabel: byId("qualityExperimentProgressLabel").textContent,
+  active: byId("qualityExperimentActive").textContent,
+  missing: byId("qualityExperimentMissing").textContent,
+  scheduler: byId("qualityExperimentSchedulerCounts").textContent,
+  cap: byId("qualityExperimentCap").textContent,
+};
+const invalidQualityExperiment = JSON.parse(JSON.stringify(qualityExperiment));
+invalidQualityExperiment.integrity_status = "invalid";
+invalidQualityExperiment.scheduler_integrity_status = "invalid";
+invalidQualityExperiment.scheduler_trusted = false;
+invalidQualityExperiment.status = "complete";
+invalidQualityExperiment.completed = 24;
+invalidQualityExperiment.missing = 0;
+context.__invalidQualityExperiment = { quality_profile_experiment: invalidQualityExperiment };
+vm.runInContext("renderQualityProfileExperiment(__invalidQualityExperiment)", context);
+const qualityInvalid = {
+  state: byId("qualityExperimentCard").dataset.state,
+  status: byId("qualityExperimentStatus").textContent,
+  progress: byId("qualityExperimentProgress").value,
+  completed: byId("qualityExperimentCompleted").textContent,
+  missing: byId("qualityExperimentMissing").textContent,
+};
+
 process.stdout.write(JSON.stringify({
   contradiction: {
     resolved: contradictionState.resolved,
@@ -182,6 +237,8 @@ process.stdout.write(JSON.stringify({
     activeSlots: byId("activeSlots").textContent,
     slotSub: byId("slotSub").textContent,
   },
+  qualityRunning,
+  qualityInvalid,
 }));
 """
         completed = subprocess.run(
@@ -222,6 +279,24 @@ process.stdout.write(JSON.stringify({
         self.assertNotIn("수집 중", result["stale"]["waitTitle"])
         self.assertEqual(result["stale"]["activeSlots"], "—")
         self.assertIn("마지막 관측", result["stale"]["slotSub"])
+        self.assertEqual(result["qualityRunning"]["state"], "running")
+        self.assertEqual(result["qualityRunning"]["status"], "실행 중")
+        self.assertEqual(result["qualityRunning"]["progress"], 5)
+        self.assertIn("5 / 24", result["qualityRunning"]["progressLabel"])
+        self.assertEqual(result["qualityRunning"]["active"], "7")
+        self.assertEqual(result["qualityRunning"]["missing"], "12")
+        self.assertIn("queued 2", result["qualityRunning"]["scheduler"])
+        self.assertIn("Project active 100 / cap 100", result["qualityRunning"]["cap"])
+        self.assertEqual(
+            result["qualityInvalid"],
+            {
+                "state": "invalid",
+                "status": "identity 검증 실패",
+                "progress": 0,
+                "completed": "—",
+                "missing": "—",
+            },
+        )
 
 
 if __name__ == "__main__":

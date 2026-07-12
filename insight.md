@@ -799,3 +799,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: bounded content/source-keyed validation performs one strict load, exact producer and atomic-publish bytes invalidate on drift, and uniform single-link/no-follow containment rejects reproduced external-inode aliases.
 - Evidence: loader-count, source-mutation, NTFS hardlink, reparse/symlink, coordinated-rehash, and final TOCTOU tests pass; related 94/94 and full 828/828 are green with an independent no-P0/P1 audit.
 - Remaining risk: the optimization-input approval remains filesystem-ACL self-attestation, and the target-load root must remain uninitialized until official upstream gates are complete.
+
+## 2026-07-12 13:40:18 +09:00 - Insight 88
+- Source loop: guarded v3 pipeline-task restart before the human-authorization boundary.
+- Improvement: treat a Task Scheduler stop as a request, then verify the exact wrapper/child process tree and shared-lock owner before starting a replacement supervisor.
+- Before: the task became Ready and its wrapper exited, but the verified Stage1 campaign and descendant Python processes remained alive with a stale PID marker.
+- After: command-line/parent identity checks bounded cleanup to those orphan processes; the guarded wrapper restarted with a new PID and resumed the same campaign without duplicate submissions or Slurm FEA cancellation.
+- Evidence: old PIDs were absent, new wrapper/campaign descendants were alive, dashboard health returned running, and live Stage1 plus ancillary work remained exactly 100/100.
+- Remaining risk: the v3 wrapper is an operational guard rather than an immutable v4 authority; perform the final v4 cutover before the downstream authorization gate.

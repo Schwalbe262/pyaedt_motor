@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import copy
 import hashlib
 import http.client
@@ -1858,6 +1859,147 @@ class FamilyConfirmationTests(unittest.TestCase):
             self.assertIn(status, app)
 
 
+class QualityProfileExperimentTests(unittest.TestCase):
+    @staticmethod
+    def _write_plan(root: Path, *, schema: str = "ipmsm_v2", case_prefix: str = "v2s1_thirdpass_speed_v1") -> None:
+        path = root / dashboard.QUALITY_PROFILE_PLAN
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = [
+            "case_id",
+            "source_case_id",
+            "dataset_schema_version",
+            "quality_profile",
+        ]
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=fieldnames)
+            writer.writeheader()
+            for ordinal in range(1, 13):
+                source = f"v2s1_{ordinal:04d}_rated_torque_02"
+                for profile in dashboard.QUALITY_PROFILE_EXPECTED_PROFILES:
+                    writer.writerow(
+                        {
+                            "case_id": f"{case_prefix}_{ordinal:04d}_{source}_{profile}",
+                            "source_case_id": source,
+                            "dataset_schema_version": schema,
+                            "quality_profile": profile,
+                        }
+                    )
+
+    def test_plan_validation_pins_schema_pairing_case_identity_and_task_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_plan(root)
+            state, task_names = dashboard.inspect_quality_profile_experiment_plan(
+                dashboard.DashboardConfig(root, root / "unused.json")
+            )
+
+        self.assertEqual(state["plan_integrity_status"], "verified")
+        self.assertEqual(state["planned"], 24)
+        self.assertEqual(state["source_count"], 12)
+        self.assertEqual(len(task_names), 24)
+        self.assertTrue(
+            all(name.startswith(f"{dashboard.QUALITY_PROFILE_TASK_PREFIX}-") for name in task_names)
+        )
+        self.assertFalse(state["official_pipeline_stage"])
+        self.assertFalse(state["official_speed_stage"])
+
+    def test_plan_schema_or_case_prefix_mismatch_fails_closed(self) -> None:
+        for schema, case_prefix, error_code in (
+            ("", "v2s1_thirdpass_speed_v1", "dataset_schema_mismatch"),
+            ("ipmsm_v2", "v2s1_thirdpass_speed_v2", "case_identity_mismatch"),
+        ):
+            with self.subTest(error_code=error_code), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._write_plan(root, schema=schema, case_prefix=case_prefix)
+                state, task_names = dashboard.inspect_quality_profile_experiment_plan(
+                    dashboard.DashboardConfig(root, root / "unused.json")
+                )
+            self.assertEqual(state["integrity_status"], "invalid")
+            self.assertEqual(state["error_code"], error_code)
+            self.assertEqual(state["planned"], 0)
+            self.assertEqual(task_names, ())
+
+    def test_scheduler_reconciliation_reports_case_counts_progress_and_cap_relation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_plan(root)
+            plan, task_names = dashboard.inspect_quality_profile_experiment_plan(
+                dashboard.DashboardConfig(root, root / "unused.json")
+            )
+        tasks: list[dict[str, object]] = []
+        tasks.extend(
+            {"name": name, "status": "completed", "exit_code": 0}
+            for name in task_names[:4]
+        )
+        tasks.append({"name": task_names[4], "status": "completed", "return_code": 0})
+        tasks.append({"name": task_names[0], "status": "failed", "exit_code": 1})
+        tasks.extend({"name": name, "status": "running"} for name in task_names[5:8])
+        tasks.append({"name": task_names[8], "status": "failed", "exit_code": 1})
+
+        result = dashboard.summarize_quality_profile_experiment(
+            plan_state=plan,
+            expected_task_names=task_names,
+            tasks=tasks,
+            history_complete=True,
+            project_active=96,
+            project_cap=100,
+        )
+
+        self.assertTrue(result["scheduler_trusted"])
+        self.assertEqual(result["integrity_status"], "verified")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(
+            (result["planned"], result["active"], result["completed"], result["failed"], result["missing"]),
+            (24, 3, 5, 1, 15),
+        )
+        self.assertEqual(result["scheduler_status_counts"]["failed"], 2)
+        self.assertEqual(result["project_open_slots"], 4)
+        self.assertEqual(result["experiment_active_share_pct"], 3.1)
+        self.assertEqual(result["progress_pct"], 20.83)
+
+    def test_scheduler_prefix_mismatch_or_partial_history_never_claims_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_plan(root)
+            plan, task_names = dashboard.inspect_quality_profile_experiment_plan(
+                dashboard.DashboardConfig(root, root / "unused.json")
+            )
+        case_suffix = task_names[0].removeprefix(f"{dashboard.QUALITY_PROFILE_TASK_PREFIX}-")
+        mismatch = dashboard.summarize_quality_profile_experiment(
+            plan_state=plan,
+            expected_task_names=task_names,
+            tasks=[
+                {
+                    "name": f"ipmsm-v2-profile-thirdpass-speed-v2-{case_suffix}",
+                    "status": "running",
+                }
+            ],
+            history_complete=True,
+            project_active=93,
+            project_cap=100,
+        )
+        partial = dashboard.summarize_quality_profile_experiment(
+            plan_state=plan,
+            expected_task_names=task_names,
+            tasks=[{"name": task_names[0], "status": "completed", "exit_code": 0}],
+            history_complete=False,
+            project_active=93,
+            project_cap=100,
+        )
+
+        self.assertEqual(mismatch["integrity_status"], "invalid")
+        self.assertEqual(mismatch["error_code"], "task_prefix_mismatch")
+        self.assertFalse(mismatch["scheduler_trusted"])
+        self.assertIsNone(mismatch["progress_pct"])
+        self.assertIsNone(mismatch["missing"])
+        self.assertEqual(partial["integrity_status"], "unavailable")
+        self.assertEqual(partial["scheduler_integrity_status"], "partial_history")
+        self.assertEqual(partial["completed"], 1)
+        self.assertIsNone(partial["missing"])
+        self.assertIsNone(partial["progress_pct"])
+        self.assertFalse(partial["scheduler_trusted"])
+
+
 class SchedulerTests(unittest.TestCase):
     def test_scheduler_health_requires_live_nonstalled_thread(self) -> None:
         healthy = {
@@ -2727,6 +2869,8 @@ class HttpTests(unittest.TestCase):
         self.assertIn("scheduler.history_complete", app)
         self.assertIn("const overflow = Math.max(0, combined.length - 4)", app)
         self.assertIn("function renderTargetLoad(data)", app)
+        self.assertIn("function renderQualityProfileExperiment(data)", app)
+        self.assertIn("separate_from_post_pareto_speed_validation", app)
         self.assertIn("targetLoad.scheduler_counts", app)
         self.assertIn("failureNode.hidden = false", app)
         self.assertIn('setText("refreshButton", REFRESH_LOADING_LABEL)', app)
@@ -2740,6 +2884,11 @@ class HttpTests(unittest.TestCase):
         self.assertIn('id="targetLoadCandidates"', index)
         self.assertIn('id="targetLoadScheduler"', index)
         self.assertIn('id="targetLoadFailure"', index)
+        self.assertIn('id="qualityExperimentCard"', index)
+        self.assertIn('id="qualityExperimentProgress"', index)
+        self.assertIn('id="qualityExperimentSchedulerCounts"', index)
+        self.assertIn('id="qualityExperimentCap"', index)
+        self.assertIn("OFFICIAL PIPELINE STAGE 아님", index)
         self.assertIn("최신 스냅샷 다시 불러오기", index)
 
     def test_mutating_methods_and_path_traversal_are_rejected(self) -> None:
