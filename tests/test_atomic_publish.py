@@ -34,6 +34,62 @@ class AtomicPublishTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), b"owned")
             self.assertTrue(publisher.receipt_owns_destination(receipt))
 
+    @unittest.skipUnless(os.name == "nt", "Windows rename fallback is Windows-only")
+    def test_transient_windows_rename_denial_retries_without_replacing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.tmp"
+            output = root / "output.csv"
+            source.write_bytes(b"owned")
+            real_rename = publisher.os.rename
+            attempts = 0
+
+            def flaky_rename(staged: Path, destination: Path) -> None:
+                nonlocal attempts
+                attempts += 1
+                if attempts <= 2:
+                    denied = PermissionError("mapped-drive sharing window")
+                    denied.winerror = 5
+                    raise denied
+                real_rename(staged, destination)
+
+            with self._forced_windows_fallback(), mock.patch.object(
+                publisher.os, "rename", side_effect=flaky_rename
+            ), mock.patch.object(publisher.time, "sleep") as sleep:
+                receipt = publisher.publish_no_replace(source, output)
+
+            self.assertEqual(receipt.strategy, "windows_rename")
+            self.assertEqual(attempts, 3)
+            self.assertEqual(
+                [call.args[0] for call in sleep.call_args_list],
+                list(publisher.WINDOWS_RENAME_RETRY_DELAYS_SECONDS[:2]),
+            )
+            self.assertEqual(output.read_bytes(), b"owned")
+
+    @unittest.skipUnless(os.name == "nt", "Windows rename fallback is Windows-only")
+    def test_transient_rename_does_not_retry_after_external_winner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.tmp"
+            output = root / "output.csv"
+            source.write_bytes(b"ours")
+
+            def losing_rename(staged: Path, destination: Path) -> None:
+                destination.write_bytes(b"external")
+                denied = PermissionError("destination became busy")
+                denied.winerror = 5
+                raise denied
+
+            with self._forced_windows_fallback(), mock.patch.object(
+                publisher.os, "rename", side_effect=losing_rename
+            ), mock.patch.object(publisher.time, "sleep") as sleep:
+                with self.assertRaisesRegex(PermissionError, "destination became busy"):
+                    publisher.publish_no_replace(source, output)
+
+            sleep.assert_not_called()
+            self.assertEqual(source.read_bytes(), b"ours")
+            self.assertEqual(output.read_bytes(), b"external")
+
     @unittest.skipUnless(
         publisher._is_windows_remote_path(Path(__file__).resolve()),
         "workspace is not on a Windows mapped/UNC drive",

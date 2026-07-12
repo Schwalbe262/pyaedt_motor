@@ -15,12 +15,15 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any, Mapping
 
 
 PROOF_SCHEMA_VERSION = "atomic-no-replace-proof-v1"
 WINDOWS_ERROR_NOT_SUPPORTED = 50
 WINDOWS_DRIVE_REMOTE = 4
+WINDOWS_TRANSIENT_RENAME_ERRORS = frozenset({5, 32, 33})
+WINDOWS_RENAME_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
 
 
 @dataclass(frozen=True)
@@ -149,7 +152,21 @@ def _windows_rename_no_replace(source: Path, destination: Path) -> None:
 
     if os.name != "nt":
         raise OSError("Windows no-replace rename fallback requested on a non-Windows host")
-    os.rename(source, destination)
+    for attempt in range(len(WINDOWS_RENAME_RETRY_DELAYS_SECONDS) + 1):
+        try:
+            os.rename(source, destination)
+            return
+        except OSError as exc:
+            transient = getattr(exc, "winerror", None) in WINDOWS_TRANSIENT_RENAME_ERRORS
+            exhausted = attempt >= len(WINDOWS_RENAME_RETRY_DELAYS_SECONDS)
+            if (
+                not transient
+                or exhausted
+                or destination.exists()
+                or not source.exists()
+            ):
+                raise
+            time.sleep(WINDOWS_RENAME_RETRY_DELAYS_SECONDS[attempt])
 
 
 def publish_no_replace(

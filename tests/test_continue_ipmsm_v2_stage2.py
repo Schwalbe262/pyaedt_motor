@@ -1127,6 +1127,51 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
                 continuation._atomic_create_json(path, {"status": "new"}, "decision")
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"status": "new"})
 
+    def test_atomic_create_restages_after_transient_windows_rename_denial(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decision.json"
+            real_publish = continuation.publish_no_replace
+            staged_paths: list[Path] = []
+
+            def flaky_publish(source: Path, destination: Path) -> object:
+                staged_paths.append(Path(source))
+                if len(staged_paths) == 1:
+                    denied = PermissionError("mapped-drive file object stayed busy")
+                    denied.winerror = 5
+                    raise denied
+                return real_publish(source, destination)
+
+            with mock.patch.object(
+                continuation, "publish_no_replace", side_effect=flaky_publish
+            ):
+                continuation._atomic_create_json(path, {"status": "new"}, "decision")
+
+            self.assertEqual(len(staged_paths), 2)
+            self.assertNotEqual(staged_paths[0], staged_paths[1])
+            self.assertFalse(staged_paths[0].exists())
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"status": "new"})
+
+    def test_atomic_create_never_restages_after_external_race_winner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decision.json"
+
+            def losing_publish(source: Path, destination: Path) -> object:
+                destination.write_text("external", encoding="utf-8")
+                denied = PermissionError("destination became busy")
+                denied.winerror = 5
+                raise denied
+
+            with mock.patch.object(
+                continuation, "publish_no_replace", side_effect=losing_publish
+            ) as publish:
+                with self.assertRaisesRegex(
+                    continuation.ContinuationGateError, "already exists"
+                ):
+                    continuation._atomic_create_json(path, {"status": "new"}, "decision")
+
+            self.assertEqual(publish.call_count, 1)
+            self.assertEqual(path.read_text(encoding="utf-8"), "external")
+
     def test_staged_model_metadata_is_rebased_to_atomic_final_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             paths = fixture(Path(tmp), primary_r2=0.90)

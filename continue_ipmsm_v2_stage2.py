@@ -48,6 +48,8 @@ STANDARD_FINGERPRINTS = {
     "input_beta_convention": "dq_current_advance_v2",
     "input_model_extent": "full_360",
 }
+WINDOWS_TRANSIENT_CREATE_ERRORS = frozenset({5, 32, 33})
+ATOMIC_CREATE_STAGING_ATTEMPTS = 3
 
 
 class ContinuationGateError(RuntimeError):
@@ -897,28 +899,35 @@ def _atomic_create_json(path: Path, value: Mapping[str, Any], label: str) -> Non
     """Publish a complete JSON file without replacing an existing path."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".create.tmp",
-        dir=path.parent,
-        text=True,
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
-            stream.write(_json_text(value))
-            stream.flush()
-            os.fsync(stream.fileno())
+    for attempt in range(ATOMIC_CREATE_STAGING_ATTEMPTS):
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".create.tmp",
+            dir=path.parent,
+            text=True,
+        )
+        temporary = Path(temporary_name)
         try:
-            publish_no_replace(temporary, path)
-        except FileExistsError as exc:
-            raise ContinuationGateError(f"{label} already exists: {path}") from exc
-        except OSError as exc:
-            if path.exists():
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+                stream.write(_json_text(value))
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                publish_no_replace(temporary, path)
+            except FileExistsError as exc:
                 raise ContinuationGateError(f"{label} already exists: {path}") from exc
-            raise ContinuationGateError(f"cannot atomically create {label} {path}: {exc}") from exc
-    finally:
-        temporary.unlink(missing_ok=True)
+            except OSError as exc:
+                if path.exists():
+                    raise ContinuationGateError(f"{label} already exists: {path}") from exc
+                transient = getattr(exc, "winerror", None) in WINDOWS_TRANSIENT_CREATE_ERRORS
+                if transient and attempt + 1 < ATOMIC_CREATE_STAGING_ATTEMPTS:
+                    continue
+                raise ContinuationGateError(
+                    f"cannot atomically create {label} {path}: {exc}"
+                ) from exc
+            return
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def _new_owner(mode: str) -> dict[str, Any]:
