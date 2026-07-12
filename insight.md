@@ -967,3 +967,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: diagnostic v3 reproduces metadata drift exactly at0.0 without hiding invalid predictions, changing family selection aggregates, or granting production eligibility.
 - Evidence: baseline efficiency strict R2 null/invalid_rows1 versus legacy0.628625710741; confirmation integration audit passes; diagnose+confirm+watch tests45/45; commit `2828d2e`.
 - Remaining risk: the production trainer still uses finite-pair filtering; a future sealed contract must make invalid derived predictions an explicit gate failure before NSGA authorization.
+
+## 2026-07-13 08:24:00 +09:00 - Insight 109
+- Source loop: v4r6 target-load authorization publication and independent race review.
+- Improvement: bind production authorization to C-local live artifacts plus the exact original process argv, publish by no-replace rename, and retain canonical ownership proof as terminal evidence.
+- Before: path/hash strings and `sys.argv` tails could hide Y/reparse or interpreter-flag aliases, while cleanup races could delete proof or a concurrently adopted output.
+- After: live four-hash/snapshot/P=Tω audits and `sys.orig_argv` exact matching reject aliases; proofless or mutated states preserve evidence and fail closed without replacement or rollback.
+- Evidence: commit `89259f4`, pyaedt2026v1 tests30 pass/1 privilege skip, two independent final reviews with P0/P1 none.
+- Remaining risk: the v6 builder, supervisor, coordinator adapter, and real post-Pareto artifacts are not connected yet.

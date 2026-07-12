@@ -3958,3 +3958,7 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 ## 2026-07-13 07:44:00 +09:00 - Stage2 live evidence separated and dashboard redeployed
 - Actions/result: bound runner counts to the exact active decision/claim/owner PID/invocation and a <=5m latest log segment, added Stage3/fail-closed coverage, relabeled local final collection versus runner audit versus raw Slurm, and redeployed commit `1a1a9b4` to LF325.
 - Metrics/next: dashboard tests120/120; live health running/stale false/errors0, local0/300, runner221/300, audit pending0, submitted100, active50, missing29, raw Slurm222 completed/27 historical failed. Continue Stage2 without intervention while hardening the v4r6 matched-load authorization layer before commit.
+
+## 2026-07-13 08:24:00 +09:00 - v4r6 matched-load authority layer frozen
+- Actions/result: added a separate declaration/confirmation/no-replace receipt chain that makes measured target-load efficiency the final objective, screens all FEA-filtered candidates, binds current matching and beta±2° checks, and rejects Y/UNC/reparse, stale base hashes, inconsistent P=Tω, altered snapshots, or non-exact process argv.
+- Metrics/next: commit `89259f4`; pyaedt2026v1 tests30 pass/1 symlink-privilege skip, two independent reviews P0/P1 none. Stage2 has all129 official cases submitted; next implement the v6 builder/supervisor/adapter without connecting it to live v4r5 until actual Stage3/NSGA artifacts and new human confirmation exist.
