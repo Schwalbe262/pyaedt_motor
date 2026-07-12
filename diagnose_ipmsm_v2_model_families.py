@@ -24,7 +24,7 @@ from atomic_publish import cleanup_publish_receipt, publish_no_replace
 import train_ipmsm_lightgbm as trainer
 
 
-SCHEMA_VERSION = "ipmsm-v2-model-family-diagnostic-v2"
+SCHEMA_VERSION = "ipmsm-v2-model-family-diagnostic-v3"
 SELECTION_SCHEMA_VERSION = "ipmsm-v2-model-family-selection-lock-v1"
 PRIMARY_DIRECT = (
     "output_coreloss_last_avg_w",
@@ -529,6 +529,53 @@ def evaluate_predictions(
     }
 
 
+def legacy_finite_pair_r2_by_target(
+    prepared: Any,
+    split: Any,
+    predictions: Mapping[str, Sequence[object]],
+) -> dict[str, float]:
+    """Reproduce the historical trainer's finite-pair R2 without weakening strict rows."""
+
+    actual = prepared.output_name_map
+    result = {
+        requested: trainer.regression_metrics(
+            split.y_test[actual[requested]],
+            predictions[actual[requested]],
+        )["R2"]
+        for requested in PRIMARY_DIRECT
+    }
+    torque_target, core_target, solid_target = (actual[name] for name in COUPLED_REQUESTED)
+    true_total, true_efficiency, _ = _derived_arrays(
+        split.x_test,
+        split.y_test[torque_target].tolist(),
+        split.y_test[core_target].tolist(),
+        split.y_test[solid_target].tolist(),
+    )
+    pred_total, pred_efficiency, _ = _derived_arrays(
+        split.x_test,
+        predictions[torque_target],
+        predictions[core_target],
+        predictions[solid_target],
+    )
+    result[DERIVED_REQUESTED[0]] = trainer.regression_metrics(true_total, pred_total)["R2"]
+    result[DERIVED_REQUESTED[1]] = trainer.regression_metrics(true_efficiency, pred_efficiency)["R2"]
+    voltage = "output_phase_voltage_last_peak_abs_v"
+    result[voltage] = trainer.regression_metrics(
+        split.y_test[actual[voltage]],
+        predictions[actual[voltage]],
+    )["R2"]
+    if set(result) != set((*PRIMARY_DIRECT, *DERIVED_REQUESTED, voltage)):
+        raise DiagnosticError("legacy finite-pair R2 target coverage is incomplete")
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        for value in result.values()
+    ):
+        raise DiagnosticError("legacy finite-pair R2 contains a nonfinite value")
+    return {target: float(value) for target, value in result.items()}
+
+
 def _metadata_fingerprints(metadata: Mapping[str, Any]) -> dict[str, str]:
     raw = metadata.get("fingerprints")
     if not isinstance(raw, Mapping):
@@ -561,6 +608,7 @@ def audit_baseline_r2_reproduction(
     baseline_evaluation: Mapping[str, Any],
     *,
     maximum_drift: float,
+    published_r2_by_target: Mapping[str, Any] | None = None,
 ) -> float:
     if not math.isfinite(maximum_drift) or maximum_drift < 0.0:
         raise ValueError("maximum baseline R2 drift must be finite and >= 0")
@@ -570,11 +618,25 @@ def audit_baseline_r2_reproduction(
     rows = baseline_evaluation.get("rows")
     if not isinstance(rows, list):
         raise DiagnosticError("baseline evaluation metric rows are unavailable")
-    observed = {
-        str(row.get("target")): row.get("R2")
-        for row in rows
-        if isinstance(row, Mapping) and row.get("role") != "auxiliary_voltage"
-    }
+    if published_r2_by_target is None:
+        observed = {
+            str(row.get("target")): row.get("R2")
+            for row in rows
+            if isinstance(row, Mapping) and row.get("role") != "auxiliary_voltage"
+        }
+        voltage_rows = [
+            row
+            for row in rows
+            if isinstance(row, Mapping) and row.get("role") == "auxiliary_voltage"
+        ]
+        observed_voltage = voltage_rows[0].get("R2") if len(voltage_rows) == 1 else None
+    else:
+        published = dict(published_r2_by_target)
+        expected_published = set(expected_primary) | {"output_phase_voltage_last_peak_abs_v"}
+        if set(published) != expected_published:
+            raise DiagnosticError("published baseline R2 target coverage differs")
+        observed = {target: published[target] for target in expected_primary}
+        observed_voltage = published["output_phase_voltage_last_peak_abs_v"]
     if set(observed) != set(expected_primary):
         raise DiagnosticError("baseline metadata and reproduced primary target identities differ")
     drift: list[float] = []
@@ -591,7 +653,6 @@ def audit_baseline_r2_reproduction(
             raise DiagnosticError(f"baseline R2 is nonfinite for {target}")
         drift.append(abs(float(actual) - float(expected)))
     expected_voltage = metadata.get("voltage_test_r2")
-    observed_voltage = baseline_evaluation.get("voltage_r2")
     if (
         isinstance(expected_voltage, bool)
         or not isinstance(expected_voltage, (int, float))
@@ -853,11 +914,17 @@ def run_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
     }
     baseline_evaluation = evaluate_predictions(prepared, evaluation, baseline_predictions)
     selected_evaluation = evaluate_predictions(prepared, evaluation, selected_predictions)
+    published_baseline_r2 = legacy_finite_pair_r2_by_target(
+        prepared,
+        evaluation,
+        baseline_predictions,
+    )
 
     baseline_drift = audit_baseline_r2_reproduction(
         metadata,
         baseline_evaluation,
         maximum_drift=args.max_baseline_r2_drift,
+        published_r2_by_target=published_baseline_r2,
     )
     family_gain = bool(
         selected_evaluation["physical_validity"]["passed"]
@@ -929,6 +996,11 @@ def run_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
         },
         "outer_test": {
             "evaluated_after_selection_sha256": selection_sha256,
+            "baseline_metadata_reproduction": {
+                "max_abs_r2_drift": baseline_drift,
+                "r2_by_target": published_baseline_r2,
+                "semantics": "legacy_finite_pair_filter_v1",
+            },
             "baseline_control": baseline_evaluation,
             "selected_families": selected_evaluation,
         },

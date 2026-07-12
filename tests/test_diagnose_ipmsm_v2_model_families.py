@@ -247,6 +247,35 @@ class OuterEvaluationTests(unittest.TestCase):
         with self.assertRaisesRegex(diagnostic.DiagnosticError, "reproduction drift"):
             diagnostic.audit_baseline_r2_reproduction(drifted, result, maximum_drift=1.0e-12)
 
+    def test_baseline_reproduction_keeps_strict_invalid_prediction_visible(self) -> None:
+        predictions = dict(self.predictions)
+        predictions["output_torque_last_avg_nm"] = np.asarray([20.0, -1.0, 24.0, 26.0])
+        result = diagnostic.evaluate_predictions(self.prepared, self.split, predictions)
+        published = diagnostic.legacy_finite_pair_r2_by_target(
+            self.prepared,
+            self.split,
+            predictions,
+        )
+        metadata = {
+            "primary_test_r2": {
+                target: published[target]
+                for target in (*diagnostic.PRIMARY_DIRECT, *diagnostic.DERIVED_REQUESTED)
+            },
+            "voltage_test_r2": published["output_phase_voltage_last_peak_abs_v"],
+        }
+
+        drift = diagnostic.audit_baseline_r2_reproduction(
+            metadata,
+            result,
+            maximum_drift=1.0e-12,
+            published_r2_by_target=published,
+        )
+
+        efficiency = next(row for row in result["rows"] if row["target"] == "output_efficiency_last_pct")
+        self.assertEqual(drift, 0.0)
+        self.assertIsNone(efficiency["R2"])
+        self.assertFalse(result["physical_validity"]["passed"])
+
 
 if __name__ == "__main__":
     unittest.main()
