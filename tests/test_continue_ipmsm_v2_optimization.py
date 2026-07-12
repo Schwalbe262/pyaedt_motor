@@ -197,7 +197,11 @@ class OptimizationContinuationTests(unittest.TestCase):
         ])
         campaign_argv = output["planned_commands"][1]["argv"]
         self.assertIn("--submit", campaign_argv)
-        self.assertEqual(campaign_argv[campaign_argv.index("--project-active-cap") + 1], "100")
+        self.assertEqual(
+            campaign_argv[campaign_argv.index("--project-active-cap") + 1],
+            "50",
+            "production optimization must inherit the project cap50 policy",
+        )
         self.assertEqual(campaign_argv[campaign_argv.index("--max-plan-cases") + 1], "72")
         validator_argv = output["planned_commands"][2]["argv"]
         self.assertEqual(

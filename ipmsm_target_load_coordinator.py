@@ -3737,7 +3737,7 @@ def build_parser() -> argparse.ArgumentParser:
     initialize.add_argument("--beta-calibration-manifest", type=Path, required=True)
     initialize.add_argument("--project", default="PYAEDT_MOTOR_IPMSM_V2")
     initialize.add_argument("--project-id", type=int, default=2)
-    initialize.add_argument("--project-active-cap", type=int, default=100)
+    initialize.add_argument("--project-active-cap", type=int, default=50)
     initialize.add_argument("--remote-root", default="$HOME/slurm_scheduler/projects/PYAEDT_MOTOR_IPMSM_V2/pyaedt_motor")
     initialize.add_argument("--env-setup", default="module load ansys-electronics/v252")
     initialize.add_argument("--max-workers-per-node", type=int, default=4)

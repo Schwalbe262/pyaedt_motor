@@ -669,7 +669,7 @@ class UpstreamFinalFrontAuditTests(unittest.TestCase):
                 maximum_scale_per_attempt=1.5,
                 project="PYAEDT_MOTOR_IPMSM_V2",
                 project_id=2,
-                project_active_cap=100,
+                project_active_cap=50,
                 remote_root="$HOME/slurm_scheduler/projects/PYAEDT_MOTOR_IPMSM_V2/pyaedt_motor",
                 env_setup="module load ansys-electronics/v252",
                 max_workers_per_node=4,
@@ -685,7 +685,7 @@ class UpstreamFinalFrontAuditTests(unittest.TestCase):
                 result_identity_relative_tolerance=1.0e-6,
             )
             sentinel = {"sentinel": True}
-            snapshot = coordinator.SchedulerSnapshot((), 0, 0, 100)
+            snapshot = coordinator.SchedulerSnapshot((), 0, 0, 50)
             with mock.patch.object(
                 coordinator.SchedulerClient,
                 "snapshot",
@@ -708,6 +708,7 @@ class UpstreamFinalFrontAuditTests(unittest.TestCase):
             call["upstream_pareto_binding"]["selected_candidate_ids"],
             ["pareto_low"],
         )
+        self.assertEqual(call["scheduler_contract"]["server_cap"], 50)
         self.assertFalse(workspace.exists())
 
 

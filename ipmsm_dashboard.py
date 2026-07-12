@@ -187,7 +187,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--family-confirmation-pid", type=Path)
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--scheduler-url", default=DEFAULT_SCHEDULER_URL)
-    parser.add_argument("--project-active-cap", type=int, default=100)
+    parser.add_argument("--project-active-cap", type=int, default=50)
     parser.add_argument("--refresh-seconds", type=float, default=DEFAULT_REFRESH_SECONDS)
     parser.add_argument("--scheduler-refresh-seconds", type=float, default=DEFAULT_SCHEDULER_REFRESH_SECONDS)
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
@@ -198,8 +198,8 @@ def build_parser() -> argparse.ArgumentParser:
 def validate_args(args: argparse.Namespace) -> None:
     if not 1 <= args.port <= 65535:
         raise ValueError("--port must be between 1 and 65535")
-    if not 1 <= args.project_active_cap <= 100:
-        raise ValueError("--project-active-cap must be between 1 and 100")
+    if not 1 <= args.project_active_cap <= 50:
+        raise ValueError("--project-active-cap must be between 1 and 50")
     if not 1.0 <= args.refresh_seconds <= 300.0:
         raise ValueError("--refresh-seconds must be between 1 and 300")
     if args.scheduler_refresh_seconds < args.refresh_seconds or args.scheduler_refresh_seconds > 900.0:

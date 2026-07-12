@@ -103,9 +103,9 @@ $campaignArguments += @(
     '--cases', $pilotPlan,
     '--project', 'PYAEDT_MOTOR_IPMSM_V2',
     '--scheduler-url', 'http://127.0.0.1:8000',
-    # The scheduler project itself is sealed at 100. Phase selection is the
+    # The scheduler project itself is sealed at 50. Phase selection is the
     # hard pilot-concurrency boundary; max_workers_per_node is only advisory.
-    '--project-active-cap', '100',
+    '--project-active-cap', '50',
     '--task-prefix', 'ipmsm-v2-affinityfix-exclusive-seq-v2',
     '--remote-cases-dir', 'remote/ipmsm_v2_affinityfix_exclusive_seq_v2',
     '--result-dir', 'simul_log/ipmsm_v2_affinityfix_exclusive_seq_v2',

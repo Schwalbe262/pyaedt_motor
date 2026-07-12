@@ -20,7 +20,7 @@ $arguments = @(
     '--cases', (Join-Path $repoRoot 'simul_log_smoke\profile_thirdpass_speed_v2s1_paired24_cases_v1.csv'),
     '--project', 'PYAEDT_MOTOR_IPMSM_V2',
     '--scheduler-url', 'http://127.0.0.1:8000',
-    '--project-active-cap', '100',
+    '--project-active-cap', '50',
     '--task-prefix', 'ipmsm-v2-profile-thirdpass-speed-v1',
     '--remote-cases-dir', 'remote/ipmsm_v2_profile_thirdpass_speed_v1',
     '--result-dir', 'simul_log/ipmsm_v2_profile_thirdpass_speed_v1',

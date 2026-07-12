@@ -40,7 +40,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         args = parsed_args()
 
         self.assertFalse(args.submit)
-        self.assertEqual(args.project_active_cap, 100)
+        self.assertEqual(args.project_active_cap, 50)
         self.assertEqual(args.history_limit, 10000)
         self.assertEqual(args.cpus, 4)
         self.assertEqual(args.cores_per_process, 4)
@@ -54,7 +54,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
 
     def test_campaign_policy_cannot_exceed_cap_or_change_fea_environment(self) -> None:
         invalid = (
-            ("--project-active-cap", "101", "must be <= 100"),
+            ("--project-active-cap", "51", "must be <= 50"),
             ("--scheduling-profile", "standard", "require --scheduling-profile fea_bursty"),
             ("--required-capability", "conda:other", "require --required-capability"),
             ("--env-profile", "other", "require --env-profile"),
@@ -139,14 +139,14 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         rows = [{"case_id": "case-001", "beta_dq_deg": "0"}]
         active = [
             {"id": index, "project": "pyaedt_motor", "status": "queued"}
-            for index in range(100)
+            for index in range(50)
         ]
         with mock.patch.object(campaign, "load_and_validate_cases", return_value=rows):
             with mock.patch.object(campaign, "get_scheduler_task_history", return_value=active):
-                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 100, "max_active_tasks": 100}):
+                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 50, "max_active_tasks": 50}):
                     with mock.patch.object(campaign, "get_scheduler_tasks", return_value=active):
                         with mock.patch.object(campaign, "post_scheduler_task") as post:
-                            with self.assertRaisesRegex(RuntimeError, "active=100 cap=100"):
+                            with self.assertRaisesRegex(RuntimeError, "active=50 cap=50"):
                                 campaign.main(["--cases", "cases.csv", "--project", "pyaedt_motor", "--submit"])
 
         post.assert_not_called()
@@ -161,7 +161,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
             stdout = io.StringIO()
             with mock.patch.object(campaign, "load_and_validate_cases", return_value=rows):
                 with mock.patch.object(campaign, "get_scheduler_task_history", return_value=[]):
-                    with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 0, "max_active_tasks": 100}):
+                    with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 0, "max_active_tasks": 50}):
                         with mock.patch.object(campaign, "get_scheduler_tasks", return_value=[]):
                             with mock.patch.object(campaign, "post_scheduler_task") as post:
                                 with contextlib.redirect_stdout(stdout):
@@ -196,12 +196,12 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         ]
         active = [
             {"id": index, "project": "pyaedt_motor", "status": "running"}
-            for index in range(98)
+            for index in range(48)
         ]
         stdout = io.StringIO()
         with mock.patch.object(campaign, "load_and_validate_cases", return_value=rows):
             with mock.patch.object(campaign, "get_scheduler_task_history", return_value=active):
-                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 98, "max_active_tasks": 100}):
+                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 48, "max_active_tasks": 50}):
                     with mock.patch.object(campaign, "get_scheduler_tasks", return_value=active):
                         with mock.patch.object(
                             campaign,
@@ -216,7 +216,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         output = json.loads(stdout.getvalue())
         self.assertEqual(result, 0)
         self.assertEqual(post.call_count, 2)
-        self.assertEqual(output["project_active_initial"], 98)
+        self.assertEqual(output["project_active_initial"], 48)
         self.assertEqual(output["open_slots_initial"], 2)
         self.assertEqual(output["submitted"], 2)
         self.assertEqual(output["deferred_tasks"], 1)
@@ -247,7 +247,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         stdout = io.StringIO()
         with mock.patch.object(campaign, "load_and_validate_cases", return_value=rows):
             with mock.patch.object(campaign, "get_scheduler_task_history", return_value=history):
-                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 2, "max_active_tasks": 100}):
+                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 2, "max_active_tasks": 50}):
                     with mock.patch.object(campaign, "get_scheduler_tasks", return_value=[history[1]]):
                         with mock.patch.object(campaign, "post_scheduler_task") as post:
                             with contextlib.redirect_stdout(stdout):
@@ -280,7 +280,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         stdout = io.StringIO()
         with mock.patch.object(campaign, "load_and_validate_cases", return_value=rows):
             with mock.patch.object(campaign, "get_scheduler_task_history", return_value=history):
-                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 1, "max_active_tasks": 100}):
+                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 1, "max_active_tasks": 50}):
                     with mock.patch.object(campaign, "get_scheduler_tasks", return_value=[]):
                         with mock.patch.object(campaign, "post_scheduler_task", return_value={"id": 202}) as post:
                             with contextlib.redirect_stdout(stdout):
@@ -324,7 +324,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         ]
         with mock.patch.object(campaign, "load_and_validate_cases", return_value=rows):
             with mock.patch.object(campaign, "get_scheduler_task_history", return_value=history):
-                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 1, "max_active_tasks": 100}):
+                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 1, "max_active_tasks": 50}):
                     with mock.patch.object(campaign, "post_scheduler_task") as post:
                         with self.assertRaisesRegex(RuntimeError, "saturated scheduler history coverage is incomplete"):
                             campaign.main(
@@ -351,7 +351,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         stdout = io.StringIO()
         with mock.patch.object(campaign, "load_and_validate_cases", return_value=rows):
             with mock.patch.object(campaign, "get_scheduler_task_history", return_value=history):
-                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 2, "max_active_tasks": 100}):
+                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 2, "max_active_tasks": 50}):
                     with mock.patch.object(campaign, "get_scheduler_tasks", return_value=[]):
                         with mock.patch.object(campaign, "post_scheduler_task", return_value={"id": 4}) as post:
                             with contextlib.redirect_stdout(stdout):
@@ -384,7 +384,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         rows = [{"case_id": "case-001"}]
         with mock.patch.object(campaign, "load_and_validate_cases", return_value=rows):
             with mock.patch.object(campaign, "get_scheduler_task_history", return_value=[]):
-                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 0, "max_active_tasks": 100}):
+                with mock.patch.object(campaign, "get_scheduler_project_summary", return_value={"total_count": 0, "max_active_tasks": 50}):
                     with mock.patch.object(campaign, "get_scheduler_tasks", side_effect=OSError("offline")):
                         with mock.patch.object(campaign, "post_scheduler_task") as post:
                             with self.assertRaisesRegex(RuntimeError, "no task was submitted"):

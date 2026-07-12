@@ -11,7 +11,7 @@ class TorqueUnitReplayLauncherTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         required = (
             "torque_unit_replay_plan_sealed.csv",
-            "--project-active-cap', '100",
+            "--project-active-cap', '50",
             "--max-plan-cases', '4",
             "--task-prefix', 'ipmsm-v2-torqueunit-replay-v1",
             "--scheduling-profile', 'fea_bursty",

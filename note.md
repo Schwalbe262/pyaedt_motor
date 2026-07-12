@@ -3854,3 +3854,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: focused and related tests pass 59/59; live dry-run selects retry 29328 plus 29297-29299, excludes infra-failed 29288 (exit143), reports 0/4 complete, and performs zero remote-file fetches while pending.
 - Failure/next: raw proof remains pending on four running solves; rerun dry-run after completion, then `--publish` and use receipt-bound original case/geometry IDs plus the 704-column header hash for the separate replacement workflow.
 - Token usage: unavailable; no local Codex SQLite sample was exposed.
+
+## 2026-07-13 00:19:00 +09:00 - Project FEA concurrency reduced to 50
+- Part/goal: apply the user's 100-to-50 concurrency decision without cancelling valid running FEA or weakening scheduler enforcement.
+- Hypothesis/actions: full-upserted Scheduler project #2 with only `max_active_tasks` changed, preserved repo/setup/entrypoint fields, changed all authoritative campaign/Stage2/optimization/dashboard/target-load defaults and launchers to 50, then restarted only the local dashboard and torque-replay supervisors.
+- Metrics/result: live cap 100->50, active naturally declined below 50, config-preserved=true, dashboard configured/server/project caps all 50 with `cap_matches=true`; focused regression 235/235 (1 skip), campaign runner 21/21, parser-default audit 6/6.
+- Failure/next: v4r3 contract remains intentionally invalid/stopped; bind cap50 into the new v4r4 contract, finish torque replay/Stage2 audits, then resume only the clean recovery plan.
+- Token usage: sampler attempted once; local Codex SQLite database is unavailable.

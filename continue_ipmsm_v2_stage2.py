@@ -97,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--decision-output", type=Path, required=True)
     parser.add_argument("--project", required=True)
     parser.add_argument("--scheduler-url", default=campaign_runner.submit_campaign.DEFAULT_SCHEDULER_URL)
-    parser.add_argument("--project-active-cap", type=int, default=100)
+    parser.add_argument("--project-active-cap", type=int, default=50)
     parser.add_argument("--stage2-task-prefix", default="ipmsm-v2-foundation-s2")
     parser.add_argument("--stage2-remote-cases-dir", default="remote/ipmsm_v2_foundation_s2")
     parser.add_argument("--stage2-result-dir", default="simul_log/ipmsm_v2_foundation_s2")
@@ -698,8 +698,8 @@ def _assert_path_fresh(path: Path, label: str) -> None:
 def validate_args(args: argparse.Namespace) -> None:
     if not str(args.project or "").strip():
         raise ContinuationGateError("--project must not be blank")
-    if not 1 <= args.project_active_cap <= 100:
-        raise ContinuationGateError("--project-active-cap must be between 1 and 100")
+    if not 1 <= args.project_active_cap <= 50:
+        raise ContinuationGateError("--project-active-cap must be between 1 and 50")
     if not math.isfinite(args.r2_threshold) or not 0.0 < args.r2_threshold <= 1.0:
         raise ContinuationGateError("--r2-threshold must be finite and between 0 and 1")
     if not math.isfinite(args.poll_interval_seconds) or args.poll_interval_seconds <= 0.0:

@@ -145,7 +145,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
             args = runner.build_parser().parse_args(cli(output_dir))
 
             self.assertFalse(args.submit)
-            self.assertEqual(args.project_active_cap, 100)
+            self.assertEqual(args.project_active_cap, 50)
             self.assertEqual(args.terminal_retry_limit, 1)
             self.assertEqual(args.completed_result_settle_seconds, 300.0)
             self.assertEqual(args.poll_interval_seconds, 30.0)
@@ -232,7 +232,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     mock.patch.object(
                         runner.submit_campaign,
                         "get_scheduler_project_summary",
-                        return_value={"total_count": 0, "max_active_tasks": 100},
+                        return_value={"total_count": 0, "max_active_tasks": 50},
                     )
                 )
                 stack.enter_context(
@@ -281,7 +281,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     mock.patch.object(
                         runner.submit_campaign,
                         "get_scheduler_project_summary",
-                        return_value={"total_count": 0, "max_active_tasks": 100},
+                        return_value={"total_count": 0, "max_active_tasks": 50},
                     )
                 )
                 stack.enter_context(
@@ -337,7 +337,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     mock.patch.object(
                         runner.submit_campaign,
                         "get_scheduler_project_summary",
-                        return_value={"total_count": 0, "max_active_tasks": 100},
+                        return_value={"total_count": 0, "max_active_tasks": 50},
                     )
                 )
                 stack.enter_context(
@@ -742,9 +742,9 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                         runner.submit_campaign,
                         "get_scheduler_project_summary",
                         side_effect=[
-                            {"total_count": 1, "max_active_tasks": 100},
-                            {"total_count": 1, "max_active_tasks": 100},
-                            {"total_count": 2, "max_active_tasks": 100},
+                            {"total_count": 1, "max_active_tasks": 50},
+                            {"total_count": 1, "max_active_tasks": 50},
+                            {"total_count": 2, "max_active_tasks": 50},
                         ],
                     )
                 )
@@ -798,7 +798,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     mock.patch.object(
                         runner.submit_campaign,
                         "get_scheduler_project_summary",
-                        return_value={"total_count": 2, "max_active_tasks": 100},
+                        return_value={"total_count": 2, "max_active_tasks": 50},
                     )
                 )
                 stack.enter_context(
@@ -857,7 +857,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     mock.patch.object(
                         runner.submit_campaign,
                         "get_scheduler_project_summary",
-                        return_value={"total_count": 1, "max_active_tasks": 100},
+                        return_value={"total_count": 1, "max_active_tasks": 50},
                     )
                 )
                 stack.enter_context(
@@ -917,7 +917,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     mock.patch.object(
                         runner.submit_campaign,
                         "get_scheduler_project_summary",
-                        return_value={"total_count": 1, "max_active_tasks": 100},
+                        return_value={"total_count": 1, "max_active_tasks": 50},
                     )
                 )
                 stack.enter_context(
@@ -949,8 +949,8 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
 
     def test_history_coverage_and_server_cap_are_fail_closed(self) -> None:
         for project_summary, message in (
-            ({"total_count": 1, "max_active_tasks": 100}, "history coverage is incomplete"),
-            ({"total_count": 0, "max_active_tasks": 99}, "server=99 requested=100"),
+            ({"total_count": 1, "max_active_tasks": 50}, "history coverage is incomplete"),
+            ({"total_count": 0, "max_active_tasks": 49}, "server=49 requested=50"),
         ):
             with self.subTest(summary=project_summary):
                 with tempfile.TemporaryDirectory() as tmp:

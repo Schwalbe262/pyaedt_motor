@@ -37,6 +37,7 @@ class ProfileThirdpassSpeedRunnerTests(unittest.TestCase):
         self.assertIn("finalize_ipmsm_profile_thirdpass_speed_v1.py", script)
         self.assertIn("'--collection-dir', $outputDir", script)
         self.assertIn("'--output-dir', $analysisDir", script)
+        self.assertIn("'--project-active-cap', '50'", script)
         self.assertIn("$finalizerArguments += '--execute'", script)
         self.assertIn("if ($DryRun)", script)
         self.assertIn("'profile_thirdpass_speed_v1.dryrun'", script)

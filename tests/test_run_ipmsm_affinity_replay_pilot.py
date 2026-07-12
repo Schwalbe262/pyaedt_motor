@@ -34,7 +34,7 @@ class AffinityReplayPilotWrapperTests(unittest.TestCase):
         self.assertIn("'time_138_p12_baseline=1'", script)
         self.assertIn("'time_135_p12_iron525=1'", script)
         self.assertIn("'PYAEDT_MOTOR_IPMSM_V2'", script)
-        self.assertIn("'--project-active-cap', '100'", script)
+        self.assertIn("'--project-active-cap', '50'", script)
         self.assertIn("Phase selection is the", script)
         self.assertIn("max_workers_per_node is only advisory", script)
         self.assertIn("'--max-workers-per-node', '1'", script)

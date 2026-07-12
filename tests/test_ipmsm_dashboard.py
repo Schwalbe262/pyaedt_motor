@@ -2795,6 +2795,7 @@ class SchedulerTests(unittest.TestCase):
 
         self.assertEqual(dashboard.DEFAULT_TIMEOUT_SECONDS, 10.0)
         self.assertEqual(args.timeout_seconds, 10.0)
+        self.assertEqual(args.project_active_cap, 50)
 
     def test_scheduler_health_requires_live_nonstalled_thread(self) -> None:
         healthy = {

@@ -252,3 +252,6 @@
 - The old v4r3 supervisor remains intentionally stopped; remote Stage2 solves continue, while task 28880 and the Stage1 suspect are quarantined from future training pending replay proof.
 - Dashboard `http://127.0.0.1:8765/` now survives the intentional contract mismatch with audited Stage1 700/700 plus separate Stage2 Slurm complete/running and local validated/missing counts; 109/109 tests pass.
 - The `Llt / holdout` screen is unrelated port 8010 (`MFT_1MW_2026`): history exists but accepted current model pointer is absent; do not treat it as the IPMSM surrogate UI.
+- 2026-07-13 00:19 KST: user reduced the live project concurrency policy from 100 to 50; Scheduler project #2 now reports `max_active_tasks=50`, preserved all mutable project config, and no running FEA was cancelled because active was already below 50.
+- Submission, Stage2, optimization, target-load, dashboard, speed-pilot, and torque-replay defaults/launchers now use and enforce cap50; focused regression passed 235/235 (1 skip) plus campaign runner 21/21.
+- Dashboard and torque-replay supervisors were restarted locally with cap50; UI reports configured/server/project cap 50 with `cap_matches=true`, while v4r3 remains intentionally stopped and contract-degraded pending v4r4 recovery.

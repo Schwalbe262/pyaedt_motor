@@ -17,7 +17,7 @@ $arguments = @(
     'run_ipmsm_v2_campaign.py',
     '--cases', 'simul_log_smoke/v4r4/torque_unit_replay_plan_sealed.csv',
     '--project', 'PYAEDT_MOTOR_IPMSM_V2',
-    '--project-active-cap', '100',
+    '--project-active-cap', '50',
     '--max-plan-cases', '4',
     '--history-limit', '10000',
     '--task-prefix', 'ipmsm-v2-torqueunit-replay-v1',
