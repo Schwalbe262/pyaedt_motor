@@ -216,7 +216,7 @@ stage2Active.pipeline.stages[3] = {
     total: 300,
     unit: "result_rows",
     progress_pct: 0,
-    scheduler_counts: { completed: 0, running: 100, queued: 0, attaching: 0, failed: 0 },
+    scheduler_counts: { completed: 100, running: 99, queued: 0, attaching: 0, failed: 0 },
   },
 };
 stage2Active.overall = {
@@ -230,7 +230,7 @@ stage2Active.overall = {
   unit: "result_rows",
   progress_pct: 0,
 };
-stage2Active.scheduler = { reachable: true, stale: false, active_count: 100, cap: 100 };
+stage2Active.scheduler = { reachable: true, stale: false, active_count: 99, cap: 100 };
 context.__stage2Active = stage2Active;
 vm.runInContext("renderCampaign(__stage2Active)", context);
 const stage2View = {
@@ -396,13 +396,15 @@ process.stdout.write(JSON.stringify({
         self.assertIn("과거 기록(비권위)", result["freshAtomic"]["resultSub"])
         self.assertNotIn("696", result["freshAtomic"]["resultSub"])
         self.assertEqual(result["stage2"]["resultOk"], "700")
-        self.assertEqual(result["stage2"]["activeSlots"], "100")
+        self.assertEqual(result["stage2"]["activeSlots"], "99")
         self.assertEqual(result["stage2"]["rateLabel"], "Stage 2 보강 DOE 검증 결과")
         self.assertEqual(result["stage2"]["validated"], "0")
         self.assertEqual(result["stage2"]["validatedTotal"], "/ 300")
-        self.assertIn("Slurm 완료 0", result["stage2"]["rateSub"])
+        self.assertIn("Slurm 완료 100", result["stage2"]["rateSub"])
+        self.assertIn("수집/검증 0", result["stage2"]["rateSub"])
+        self.assertIn("미수집 100", result["stage2"]["rateSub"])
         self.assertEqual(result["stage2"]["etaLabel"], "Stage 2 보강 DOE 실행 중")
-        self.assertEqual(result["stage2"]["running"], "100")
+        self.assertEqual(result["stage2"]["running"], "99")
         self.assertIn("실패 0", result["stage2"]["etaSub"])
         self.assertEqual(result["qualityRunning"]["state"], "running")
         self.assertEqual(result["qualityRunning"]["status"], "실행 중")

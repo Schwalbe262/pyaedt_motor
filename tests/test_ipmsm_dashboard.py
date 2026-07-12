@@ -3764,10 +3764,25 @@ class SchedulerTests(unittest.TestCase):
 
         self.assertEqual(result["health"], "degraded")
         self.assertTrue(result["stale"])
+        self.assertEqual(result["errors"][0]["code"], "local_state_unavailable")
         self.assertEqual(set(result["overall"]), TimelineTests.OVERALL_FIELDS)
         self.assertEqual(result["overall"]["total_stages"], 0)
         self.assertEqual(result["target_load"]["integrity_status"], "absent")
         self.assertFalse(result["target_load"]["available"])
+
+        def contract_invalid(_: dashboard.DashboardConfig) -> dict[str, object]:
+            raise dashboard.DashboardDataError("pipeline contract audit failed")
+
+        contract_store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=contract_invalid,
+            scheduler_collector=lambda _: scheduler,
+        )
+        contract_result = contract_store.refresh_once(force_scheduler=True)
+        self.assertEqual(
+            contract_result["errors"][0]["code"],
+            "pipeline_contract_audit_failed",
+        )
 
 
 class HttpTests(unittest.TestCase):

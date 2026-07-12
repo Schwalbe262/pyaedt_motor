@@ -5051,7 +5051,13 @@ class DashboardStateStore:
         try:
             local = self.local_collector(self.config)
             local_ok = True
-        except Exception:
+        except Exception as exc:
+            collection_error_code = (
+                "pipeline_contract_audit_failed"
+                if isinstance(exc, DashboardDataError)
+                and str(exc) == "pipeline contract audit failed"
+                else "local_state_unavailable"
+            )
             fallback = {
                     "campaign": {"source_status": "unavailable", "total": 700, "result_ok": 0},
                     "pipeline": {"current_stage": "unknown", "current_label": "상태 확인 필요", "stages": []},
@@ -5101,7 +5107,13 @@ class DashboardStateStore:
                 else "invalid"
             )
             local["stale"] = True
-            errors.append({"source": "local", "message": "로컬 진행 상태를 읽을 수 없습니다."})
+            errors.append(
+                {
+                    "source": "local",
+                    "code": collection_error_code,
+                    "message": "로컬 진행 상태를 읽을 수 없습니다.",
+                }
+            )
 
         local.setdefault("governance", _governance_fallback(self.config))
 

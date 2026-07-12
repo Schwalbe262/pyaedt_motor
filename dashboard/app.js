@@ -737,6 +737,8 @@ function renderCampaign(data) {
   if (["stage2", "stage3"].includes(current.currentId)) {
     const counts = current.runtime.schedulerCounts || {};
     const completedTasks = integer(counts.completed);
+    const validatedTasks = current.runtime.completed === null ? 0 : current.runtime.completed;
+    const uncollectedTasks = Math.max(0, completedTasks - validatedTasks);
     const runningTasks = integer(counts.running);
     const queuedTasks = integer(counts.queued) + integer(counts.attaching);
     const failedTasks = integer(counts.failed);
@@ -753,7 +755,10 @@ function renderCampaign(data) {
         ? current.runtime.unit || "건"
         : `/ ${current.runtime.total.toLocaleString("ko-KR")}`,
     );
-    setText("rateSub", `Slurm 완료 ${completedTasks} · 결과 검증과 구분`);
+    setText(
+      "rateSub",
+      `Slurm 완료 ${completedTasks} · 수집/검증 ${validatedTasks} · 미수집 ${uncollectedTasks}`,
+    );
     setText("etaLabel", `${current.currentLabel} 실행 중`);
     setText("etaValue", schedulerFresh ? runningTasks.toLocaleString("ko-KR") : "—");
     setText("etaUnit", "건");
