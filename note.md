@@ -3924,3 +3924,7 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: expose the completed LF Stage1 preview without granting authority, diagnose its R2 gap, and remove the scheduler full-SHA deployment blocker.
 - Actions/result: audited validation/model hashes/R2 into model+checkpoint with dual backend/frontend gate denial; reproduced all metrics, measured sparse 16D coverage, and added exact detached-SHA fresh/existing repo sync on scheduler branch `dbd23ae` without touching live APIs or Y.
 - Metrics/failure/next: preview700 rows, hashes7, passed0/9, min/avg R2 0.624627/0.771923, distance-residual Pearson0.142; dashboard114/114 and scheduler18/18 pass; live scheduler has global active200 and old code, so deploy in a safe maintenance window before freezing five remotes and refilling Stage2 at cap50.
+
+## 2026-07-13 05:23:00 +09:00 - Local diagnostic dashboard deployed
+- Actions/result: committed/pushed `93c3564`, synced exact Git LF blobs to LF325, restarted only the local dashboard task, and verified status/static HTTP plus dual authority flags; Y/Slurm writes0.
+- Metrics/next: PID53540, root/app200, model available diagnostic, validation700, hashes7, passed0/9, min/avg0.624627/0.771923, authority/official eligibility false; intentional invalid-contract health remains degraded, and Stage2 stays stopped pending scheduler SHA-fix maintenance.

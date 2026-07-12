@@ -285,3 +285,5 @@
 - Scheduler project #2 is cap50/active0, but its five capable remote repos have heterogeneous HEADs despite stale identical deployment metadata; do not submit Stage2 yet.
 - Scheduler full-SHA checkout fix is committed/pushed on `fix/project-env-full-sha` at `dbd23ae`; focused API/sync tests pass18/18, but the live scheduler still runs old code and global active tasks are200.
 - Next: commit/push/sync/restart the local dashboard; merge/deploy the scheduler SHA fix only in a safe global maintenance window, then freeze all five repos to one pyaedt commit before cap50 Stage2 refill.
+- Dashboard commit `93c3564` is pushed and exact LF blobs are live from local mirror at `http://127.0.0.1:8765` (PID53540): API model is diagnostic-only, 0/9, min/avg0.624627/0.771923, authority/official eligibility false.
+- UI root/app return200 and explicitly show `DIAGNOSTIC ONLY`, `official gate` denial, and Production NSGA blocking; degraded/stale health remains intentional because the recovery manifest is not an activated official contract.
