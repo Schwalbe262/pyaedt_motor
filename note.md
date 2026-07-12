@@ -3943,3 +3943,7 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: publish official Stage1, start the exact cap50 Stage2 recovery wave, and replace the diagnostic-only dashboard authority without writing Y.
 - Actions/result: sealed v4r5 base/wrapper, published completion `3c2a4f61...43b8`, audited official argv, submitted exact tasks29967-30016, corrected the durable Task marker path, activated the v4r5 dashboard, and copied two hash-pinned ancillary inputs read-only from Y to LF325.
 - Metrics/failure/next: Stage1 700/700 and R2 0/9 min/avg0.624627/0.771923; Stage2 171 reused +27 retry +102 missing =129 eligible, wave50 running across3 nodes and79 deferred; dashboard116/116 tests, health running/stale false/errors0. A PowerShell reserved `$PID` collision stopped only the first executor parent while official child PID130716 retained the claim; recurring Task resumes after it exits. Monitor refill/results and combined gate.
+
+## 2026-07-13 06:49:00 +09:00 - Stage3 transition preflight closed
+- Actions/result: audited the C-native Stage3 merge/adaptive generation/continuation closure and exclusively initialized its otherwise unproduced predecessor marker with dead PID111588; regular file, nlink1, inactive verified.
+- Metrics/next: Stage3 tests63 pass/1 skip; plan contract300 rows/50 groups with residual0.50, uncertainty0.30, domain0.20, diversity0.20. Stage2 remains 50 running, 0 completed/failed, all Slurm steps accumulating CPU/RSS; wait for automatic refill and combined gate.

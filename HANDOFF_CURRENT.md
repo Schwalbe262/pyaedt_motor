@@ -295,6 +295,7 @@
 - Local C-native v4r5 base/wrapper are no-replace published; wrapper contract `3d304b8c...fa46` and official Stage1 completion `3c2a4f61...43b8` audit clean without Y writes.
 - Official Stage1 validation is 700/700 but the gate is 0/9, min/avg R2 0.624627/0.771923, so `decision=run_stage2`.
 - Stage2 wave1 is tasks29967-30016, exact sealed dedupe hash `2d26ed3b...be1577`; all 50 run across n110/n111/n114 under cap50, with 79 deferred for automatic refill.
+- Stage3 is source/contract/test ready (63 pass,1 skip); its sole missing predecessor marker is now exclusively initialized at `v4r4/foundation_stage2_continuation_watcher.pid` with inactive PID111588, regular nlink1.
 - Official child PID130716 is the sole Stage2 claim owner; do not kill it or delete the claim/decision. Corrected Task `PYAEDT_MOTOR_IPMSM_V2_PIPELINE_V4R5_NATIVE` retries every15m and resumes downstream after owner exit.
 - Dashboard commit `6d87d88` is deployed from LF325 at `http://127.0.0.1:8765`: health running, stale false, errors0, official 9-row model table visible, Stage2 50/50, ancillary plan integrity verified.
 - Next: monitor result/refill/infra retries through all 129 eligible cases, publish the 1000-row combined gate, and enter residual-adaptive Stage3 if R2 remains below0.95.
