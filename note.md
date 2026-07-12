@@ -3947,3 +3947,7 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 ## 2026-07-13 06:49:00 +09:00 - Stage3 transition preflight closed
 - Actions/result: audited the C-native Stage3 merge/adaptive generation/continuation closure and exclusively initialized its otherwise unproduced predecessor marker with dead PID111588; regular file, nlink1, inactive verified.
 - Metrics/next: Stage3 tests63 pass/1 skip; plan contract300 rows/50 groups with residual0.50, uncertainty0.30, domain0.20, diversity0.20. Stage2 remains 50 running, 0 completed/failed, all Slurm steps accumulating CPU/RSS; wait for automatic refill and combined gate.
+
+## 2026-07-13 07:12:00 +09:00 - Stage2 refill proved and strict family diagnostic completed
+- Actions/result: verified first25 completions triggered exact deferred refill IDs30017-30041 under cap50; audited first two remote rows including torque source units/physics; added diagnostic v3 separation of historical finite-pair R2 from strict nonfinite prediction validity and published diagnostic-only v3 artifacts.
+- Metrics/next: original completed25/failed0, refill prefix hash `7d5b9714...e4d1`; first runtime~37.3m and physics issues0. Official baseline has negative primitive predictions and one invalid derived-efficiency row; mixed family removes negative loss rows but retains one torque/efficiency invalid row, so action remains retain/more evidence. Commit2828d2e, related45/45 tests; wait for Stage2 combined gate, then freeze families on train-only evidence and confirm only on sealed Stage3 audit.

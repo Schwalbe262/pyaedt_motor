@@ -959,3 +959,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: no bridge is needed; official completion remains the sole authority and the exact 171/27/102/129/50/79 continuation plan executes under cap50.
 - Evidence: completion `3c2a4f61...43b8`, official dry-run exit0, wave dedupe `2d26ed3b...be1577`, and tasks29967-30016 match the sealed set and order.
 - Remaining risk: manual launchers can still bypass the supervisor; keep the recurring v4r5 executor Task and never repair legacy paths by copying official artifacts into them.
+
+## 2026-07-13 07:12:00 +09:00 - Insight 108
+- Source loop: official surrogate metadata reported a finite efficiency R2 although one derived prediction was nonfinite and strict family evaluation correctly rejected the whole target.
+- Improvement: keep strict metric rows and confirmation schema unchanged, and isolate historical finite-pair-filter R2 in a versioned baseline-reproduction evidence block.
+- Before: using strict R2 could not reproduce published metadata, while adding compatibility fields to every metric row broke no-replace confirmation self-audit.
+- After: diagnostic v3 reproduces metadata drift exactly at0.0 without hiding invalid predictions, changing family selection aggregates, or granting production eligibility.
+- Evidence: baseline efficiency strict R2 null/invalid_rows1 versus legacy0.628625710741; confirmation integration audit passes; diagnose+confirm+watch tests45/45; commit `2828d2e`.
+- Remaining risk: the production trainer still uses finite-pair filtering; a future sealed contract must make invalid derived predictions an explicit gate failure before NSGA authorization.
