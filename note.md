@@ -3938,3 +3938,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: remove the RaiDrive activation dependency without weakening the recovered v4r4 authority.
 - Actions/result: added an exact 12-leaf native revision, append-only source/base-builder provenance, fixed LF325/Python/module authority, in-memory v3 audit, bytecode suppression, TOCTOU checks, and crash-safe no-replace publication; no real base or LF/Y file was created.
 - Metrics/next: original34/native36 immutables, independent P0=0/P1 bytecode fix closed, related127/127 pass (3 skip); commit and sync the exact builder blob before the real zero-write dry-run.
+
+## 2026-07-13 06:43:00 +09:00 - Official C-native Stage2 launched and dashboard activated
+- Part/goal: publish official Stage1, start the exact cap50 Stage2 recovery wave, and replace the diagnostic-only dashboard authority without writing Y.
+- Actions/result: sealed v4r5 base/wrapper, published completion `3c2a4f61...43b8`, audited official argv, submitted exact tasks29967-30016, corrected the durable Task marker path, activated the v4r5 dashboard, and copied two hash-pinned ancillary inputs read-only from Y to LF325.
+- Metrics/failure/next: Stage1 700/700 and R2 0/9 min/avg0.624627/0.771923; Stage2 171 reused +27 retry +102 missing =129 eligible, wave50 running across3 nodes and79 deferred; dashboard116/116 tests, health running/stale false/errors0. A PowerShell reserved `$PID` collision stopped only the first executor parent while official child PID130716 retained the claim; recurring Task resumes after it exits. Monitor refill/results and combined gate.

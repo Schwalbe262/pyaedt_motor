@@ -951,3 +951,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: all five capable accounts resolve one verified SHA, the project is immutable at cap50, and the scheduler has a tested exact-SHA sync fix ready on `dbd23ae`.
 - Evidence: deployment refs and SSH HEADs are 5/5 `c9c7003...97633`, tracked/untracked-Python checks are clean, project active0, and scheduler sync/API tests pass18/18.
 - Remaining risk: the running scheduler still has old SHA sync code and global active200, so no update/deploy or service restart is safe until a controlled maintenance window.
+
+## 2026-07-13 06:43:00 +09:00 - Insight 107
+- Source loop: a direct Stage2 dry-run of the sealed base failed because its legacy Stage1 validation/model/R2 paths are intentionally absent after official-bundle publication.
+- Improvement: execute Stage2 only through the v4 supervisor, which audits the sole completion, replaces exactly three Stage1 artifact flags, dry-runs that resolved argv, and binds the same hashes into the decision.
+- Before: invoking `base.pipeline.stage2.argv` directly looked like a broken contract and encouraged unsafe copies, links, or a redundant contract revision.
+- After: no bridge is needed; official completion remains the sole authority and the exact 171/27/102/129/50/79 continuation plan executes under cap50.
+- Evidence: completion `3c2a4f61...43b8`, official dry-run exit0, wave dedupe `2d26ed3b...be1577`, and tasks29967-30016 match the sealed set and order.
+- Remaining risk: manual launchers can still bypass the supervisor; keep the recurring v4r5 executor Task and never repair legacy paths by copying official artifacts into them.
