@@ -3629,8 +3629,15 @@ def _audit_upstream_final_front(
     return filtered_plan, workflow.validate_upstream_pareto_binding(binding)
 
 
-def build_root_from_files(args: argparse.Namespace) -> dict[str, Any]:
+def build_root_from_files(
+    args: argparse.Namespace,
+    *,
+    pyaedt_core_source_bytes: bytes,
+) -> dict[str, Any]:
     """Build the frozen root from explicit, exact upstream artifacts."""
+
+    if not isinstance(pyaedt_core_source_bytes, bytes):
+        raise TargetLoadCoordinatorError("pyaedt core source injection must be exact bytes")
 
     try:
         spec_json = args.optimization_spec.read_bytes()
@@ -3696,7 +3703,9 @@ def build_root_from_files(args: argparse.Namespace) -> dict[str, Any]:
     runtime_sources = {
         field: path.read_bytes()
         for field, path in workflow.RUNTIME_SOURCE_PATHS.items()
+        if field != "pyaedt_core_source"
     }
+    runtime_sources["pyaedt_core_source"] = pyaedt_core_source_bytes
     return workflow.build_root_manifest(
         optimization_spec_json=spec_json,
         pareto_csv=pareto_csv,
@@ -3735,6 +3744,7 @@ def build_parser() -> argparse.ArgumentParser:
     initialize.add_argument("--model-metadata", type=Path, required=True)
     initialize.add_argument("--model-artifact-dir", type=Path, required=True)
     initialize.add_argument("--beta-calibration-manifest", type=Path, required=True)
+    initialize.add_argument("--pyaedt-core-source", type=Path, required=True)
     initialize.add_argument("--project", default="PYAEDT_MOTOR_IPMSM_V2")
     initialize.add_argument("--project-id", type=int, default=2)
     initialize.add_argument("--project-active-cap", type=int, default=50)
@@ -3821,7 +3831,16 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "init":
-            root = build_root_from_files(args)
+            try:
+                pyaedt_core_source_bytes = args.pyaedt_core_source.read_bytes()
+            except OSError as exc:
+                raise TargetLoadCoordinatorError(
+                    f"cannot read explicit pyaedt core source: {args.pyaedt_core_source}"
+                ) from exc
+            root = build_root_from_files(
+                args,
+                pyaedt_core_source_bytes=pyaedt_core_source_bytes,
+            )
             progress = initialize_workspace(args.workspace, root)
             _print_compact(
                 {

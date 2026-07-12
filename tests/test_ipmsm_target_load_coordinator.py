@@ -685,6 +685,11 @@ class UpstreamFinalFrontAuditTests(unittest.TestCase):
                 result_identity_relative_tolerance=1.0e-6,
             )
             sentinel = {"sentinel": True}
+            injected_pyaedt_core = b"# exact injected pyaedt core source\n"
+            runtime_paths = dict(workflow.RUNTIME_SOURCE_PATHS)
+            runtime_paths["pyaedt_core_source"] = mock.Mock(
+                **{"read_bytes.side_effect": AssertionError("fallback pyaedt path was read")}
+            )
             snapshot = coordinator.SchedulerSnapshot((), 0, 0, 50)
             with mock.patch.object(
                 coordinator.SchedulerClient,
@@ -694,8 +699,15 @@ class UpstreamFinalFrontAuditTests(unittest.TestCase):
                 workflow,
                 "build_root_manifest",
                 return_value=sentinel,
-            ) as build:
-                result = coordinator.build_root_from_files(args)
+            ) as build, mock.patch.object(
+                workflow,
+                "RUNTIME_SOURCE_PATHS",
+                runtime_paths,
+            ):
+                result = coordinator.build_root_from_files(
+                    args,
+                    pyaedt_core_source_bytes=injected_pyaedt_core,
+                )
             call = build.call_args.kwargs
             _, filtered_rows = workflow._strict_csv(
                 call["seed_fea_plan_csv"],
@@ -709,7 +721,39 @@ class UpstreamFinalFrontAuditTests(unittest.TestCase):
             ["pareto_low"],
         )
         self.assertEqual(call["scheduler_contract"]["server_cap"], 50)
+        self.assertEqual(call["pyaedt_core_source"], injected_pyaedt_core)
         self.assertFalse(workspace.exists())
+
+    def test_init_parser_requires_explicit_pyaedt_core_source(self) -> None:
+        argv = [
+            "init",
+            "--workspace",
+            "C:/target-load",
+            "--optimization-decision",
+            "C:/optimization-decision.json",
+            "--optimization-spec",
+            "C:/optimization-spec.json",
+            "--pareto-csv",
+            "C:/pareto.csv",
+            "--seed-fea-plan",
+            "C:/seed-plan.csv",
+            "--pareto-validation-summary",
+            "C:/validation.json",
+            "--pareto-final-front",
+            "C:/final-front.csv",
+            "--model-metadata",
+            "C:/metadata.json",
+            "--model-artifact-dir",
+            "C:/models",
+            "--beta-calibration-manifest",
+            "C:/beta.json",
+        ]
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            coordinator.build_parser().parse_args(argv)
+        parsed = coordinator.build_parser().parse_args(
+            [*argv, "--pyaedt-core-source", "C:/pydesktop.py"]
+        )
+        self.assertEqual(parsed.pyaedt_core_source, Path("C:/pydesktop.py"))
 
 
 class TargetLoadCoordinatorTests(unittest.TestCase):
