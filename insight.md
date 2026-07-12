@@ -807,3 +807,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: command-line/parent identity checks bounded cleanup to those orphan processes; the guarded wrapper restarted with a new PID and resumed the same campaign without duplicate submissions or Slurm FEA cancellation.
 - Evidence: old PIDs were absent, new wrapper/campaign descendants were alive, dashboard health returned running, and live Stage1 plus ancillary work remained exactly 100/100.
 - Remaining risk: the v3 wrapper is an operational guard rather than an immutable v4 authority; perform the final v4 cutover before the downstream authorization gate.
+
+## 2026-07-12 14:56:47 +09:00 - Insight 89
+- Source loop: v4 publication crash/race audit and dashboard stale-snapshot diagnosis.
+- Improvement: publish immutable authority through deterministic intent/stage/proof recovery, and report authoritative writes separately from temporary transaction mutations.
+- Before: a kill after training or linking could repeat expensive work, while an identical late publisher could clean its own sidecar yet falsely report that it recovered or wrote the authority; a fixed 3 s monitor timeout also mislabeled a healthy growing scheduler as stale.
+- After: exact manifests, inode-preserving links, full output replay, late-attempt cleanup, and outcome-aware telemetry converge without replacement or duplicate training; monitor timeout now covers the measured project-history query.
+- Evidence: repeated kill/race and Y:/UNC tests, independent no-P0/P1 QA, v4 136/136, full 962/962, and live dashboard health=ok with scheduler stale=false.
+- Remaining risk: completed/no-ready Stage1 is safely salvaged on execute but the read-only v4 inspector still labels that narrow window `needs_run`; refine the future v4 UI before activation if operator-facing recovery detail is required.

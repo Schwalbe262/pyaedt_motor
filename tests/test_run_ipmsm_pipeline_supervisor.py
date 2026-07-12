@@ -10,7 +10,7 @@ import run_ipmsm_pipeline_supervisor as entrypoint
 
 
 class PipelineSupervisorEntrypointTests(unittest.TestCase):
-    def test_guard_rejects_legacy_optimization_and_speed_actions(self) -> None:
+    def test_guard_rejects_every_legacy_post_campaign_action(self) -> None:
         executor = mock.Mock()
         for action in sorted(entrypoint.LEGACY_UNAUTHORIZED_DOWNSTREAM_ACTIONS):
             with self.subTest(action=action), self.assertRaises(
@@ -23,17 +23,15 @@ class PipelineSupervisorEntrypointTests(unittest.TestCase):
                 )
         executor.assert_not_called()
 
-    def test_guard_allows_stage1_stage2_and_stage3_actions(self) -> None:
+    def test_guard_allows_only_the_stage1_campaign_action(self) -> None:
         executor = mock.Mock(return_value="ok")
-        for action in ("run_stage1_campaign", "run_stage2_fresh", "run_stage3_resume"):
-            with self.subTest(action=action):
-                result = entrypoint._execute_with_authorization_guard(
-                    executor,
-                    "contract",
-                    SimpleNamespace(next_action=action),
-                )
-                self.assertEqual(result, "ok")
-        self.assertEqual(executor.call_count, 3)
+        result = entrypoint._execute_with_authorization_guard(
+            executor,
+            "contract",
+            SimpleNamespace(next_action="run_stage1_campaign"),
+        )
+        self.assertEqual(result, "ok")
+        executor.assert_called_once()
 
     def test_main_installs_and_restores_authorization_guard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

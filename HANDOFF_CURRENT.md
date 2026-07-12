@@ -8,8 +8,9 @@
 - Mesh and transient setup are controlled in `module/ipmsm_ppt_setup.py`.
 - Root project-memory files are now canonical; `md/` is template/archive context.
 - Live read-only dashboard: `http://127.0.0.1:8765/`; it now separates the 8-stage official pipeline from the ancillary paired-24 simulation-quality speed/mesh experiment.
-- 2026-07-12 13:40 KST: dashboard health=running, Stage1 validated=607/700, live Stage1=86 plus profile experiment=14 active, project=100/100, and dashboard regression=85/85.
-- The restarted v3 task has an explicit legacy optimization/speed guard, so Stage1/2/3 may continue but unapproved NSGA cannot launch; final v4 cutover remains held for confirmation recovery and transitive source-pin audit.
+- 2026-07-12 14:56 KST: dashboard health=ok, scheduler stale=false, Stage1 validated=660/700 with 40 active, ancillary profile=24 running, and project=64/100.
+- The restarted v3 task permits only the Stage1 campaign; every post-campaign validation/training/Stage2/Stage3/NSGA/speed action is held for the audited v4 supervisor.
+- Inactive v4 publication/recovery passed 136 focused and 962 full tests plus independent no-P0/P1 QA; dry-run wrote nothing, and no v4 authority, contract, or project task exists before production-input confirmation.
 - Crash-safe frozen-family sidecar commit `3c44b25` is pushed; scheduled task `PYAEDT_MOTOR_IPMSM_V2_FAMILY_CONFIRM` is Running with PID marker 43616, exact watcher SHA `f5fc5c69...c5ffe`, and is safely waiting for audited Stage1 results without creating the confirmation output root.
 
 ## Current objective

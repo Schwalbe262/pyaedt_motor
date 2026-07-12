@@ -6,9 +6,30 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $artifactDir = Join-Path $repoRoot 'simul_log_smoke\beta_zero_recovery_26092_26093'
+$outputDir = Join-Path $repoRoot 'collected\ipmsm_v2_profile_thirdpass_speed_v1'
+$mergedOutput = 'profile_thirdpass_speed_v2s1_paired24_results_v1.csv'
 $python = 'C:\Python314\python.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw "Python interpreter is unavailable: $python"
+}
+if (Test-Path -LiteralPath $outputDir) {
+    $selectedPlan = Join-Path $outputDir 'selected_cases.csv'
+    $mergedResult = Join-Path $outputDir $mergedOutput
+    $resultDir = Join-Path $outputDir 'results'
+    $resultCount = if (Test-Path -LiteralPath $resultDir -PathType Container) {
+        @(Get-ChildItem -LiteralPath $resultDir -Filter '*.csv' -File).Count
+    }
+    else {
+        0
+    }
+    if (
+        (Test-Path -LiteralPath $selectedPlan -PathType Leaf) -and
+        (Test-Path -LiteralPath $mergedResult -PathType Leaf) -and
+        $resultCount -eq 24
+    ) {
+        exit 0
+    }
+    throw "Existing profile collection is incomplete or ambiguous: $outputDir"
 }
 
 $arguments = @(
@@ -23,8 +44,8 @@ $arguments = @(
     '--result-dir', 'simul_log/ipmsm_v2_profile_thirdpass_speed_v1',
     '--simulation-dir', 'simulation/ipmsm_v2_profile_thirdpass_speed_v1',
     '--log-dir', 'simul_log_scheduler/ipmsm_v2_profile_thirdpass_speed_v1_logs',
-    '--output-dir', (Join-Path $repoRoot 'collected\ipmsm_v2_profile_thirdpass_speed_v1'),
-    '--merged-output', 'profile_thirdpass_speed_v2s1_paired24_results_v1.csv',
+    '--output-dir', $outputDir,
+    '--merged-output', $mergedOutput,
     '--beta-summary', (Join-Path $artifactDir 'beta_mtpa_summary.json'),
     '--beta-case-plan', (Join-Path $artifactDir 'beta_mtpa_cases.csv'),
     '--beta-results', (Join-Path $artifactDir 'beta_mtpa_collected_26094_26103\beta_mtpa_results.csv'),

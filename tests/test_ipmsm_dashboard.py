@@ -2001,6 +2001,12 @@ class QualityProfileExperimentTests(unittest.TestCase):
 
 
 class SchedulerTests(unittest.TestCase):
+    def test_default_scheduler_timeout_allows_slow_history_queries(self) -> None:
+        args = server.build_parser().parse_args([])
+
+        self.assertEqual(dashboard.DEFAULT_TIMEOUT_SECONDS, 10.0)
+        self.assertEqual(args.timeout_seconds, 10.0)
+
     def test_scheduler_health_requires_live_nonstalled_thread(self) -> None:
         healthy = {
             "ok": True,

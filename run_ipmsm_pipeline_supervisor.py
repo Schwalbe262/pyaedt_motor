@@ -21,6 +21,14 @@ import supervise_ipmsm_v2_pipeline as supervisor
 
 LEGACY_UNAUTHORIZED_DOWNSTREAM_ACTIONS = frozenset(
     {
+        "run_stage1_validation",
+        "run_stage1_training",
+        "run_stage2_fresh",
+        "run_stage2_resume",
+        "merge_stage12_plan",
+        "generate_stage3_plan",
+        "run_stage3_fresh",
+        "run_stage3_resume",
         "run_optimization_fresh",
         "run_optimization_resume",
         "run_speed_plan",
@@ -41,8 +49,8 @@ def _execute_with_authorization_guard(
     action = getattr(snapshot, "next_action", None)
     if action in LEGACY_UNAUTHORIZED_DOWNSTREAM_ACTIONS:
         raise supervisor.PipelineStateError(
-            "legacy automatic optimization/speed execution is disabled; "
-            "activate the audited v4 authorization supervisor before continuing"
+            "legacy automatic post-campaign execution is disabled; "
+            "activate the audited v4 supervisor before continuing"
         )
     return executor(contract, snapshot)  # type: ignore[operator]
 

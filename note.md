@@ -3773,3 +3773,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: dashboard 85/85, guard+artifact 14/14, profile tooling 32/32; live health=running, Stage1 validated=607/700, scheduler Stage1=86 active, profile=14 active/10 missing, project=100/100.
 - Failure/next: Task Scheduler stop left verified orphan campaign children, which were terminated without touching Slurm FEA before the guarded task restarted; finish confirmation crash recovery and transitive local-source pins, then repeat the no-write v4 dry-run.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-12 14:56:47 +09:00 - Durable v4 boundary and live dashboard recovery
+- Part/goal: finish the inactive v4 Stage1/human-authorization boundary and restore truthful whole-pipeline Web UI monitoring without authorizing production NSGA.
+- Hypothesis/actions: made confirmation, receipt, Stage1 bundle, and contract publication recover every audited kill/race window; pinned the 25-module/45-edge optimization closure; blocked every legacy post-campaign action; raised scheduler history timeout from 3 s to 10 s after the 750-task query exceeded 3 s; restarted only the read-only dashboard.
+- Candidates/options: preserved cap 100 and all live FEA; kept v4 contract/authority/task absent until the user confirms the operating-point, duty, and winding assumptions.
+- Metrics/result: independent QA found no functional P0/P1; v4 combined=136/136 (skip 3), full `.venv`=962/962 (skip 4), dry-run=`validated` with writes/mutations/paths created=0, source pins=31 and immutable inputs=32; live health=ok, Stage1=660/700 with 40 active, ancillary profile=24 running, project=64/100.
+- Failure/next: the initial full command used dependency-free Python 3.14 and produced environment-only pandas/scipy errors; the project `.venv` rerun passed. Keep the v3 guard closed, collect the paired-24 results, then publish/activate v4 only after explicit production-input confirmation.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database earlier in this execution loop.

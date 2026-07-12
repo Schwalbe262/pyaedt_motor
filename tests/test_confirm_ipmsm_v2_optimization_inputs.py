@@ -6,12 +6,14 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest import mock
 
+import atomic_publish
 import confirm_ipmsm_v2_optimization_inputs as confirmation
 import ipmsm_optimization as optimization
 import supervise_ipmsm_v2_pipeline as supervisor
@@ -159,6 +161,106 @@ class OptimizationInputConfirmationTests(unittest.TestCase):
             declaration_sha256=sha256(declaration_path),
         )
         return document, declaration_path
+
+    def pending_publication(
+        self,
+        state: str,
+        *,
+        output_name: str = "confirmation.json",
+    ) -> tuple[
+        dict[str, object],
+        Path,
+        confirmation.FileSnapshot,
+        Path,
+        Path,
+        Path,
+        atomic_publish.FileIdentity | None,
+    ]:
+        document, declaration_path = self.build()
+        declaration_snapshot = confirmation.read_stable_snapshot(
+            declaration_path, "declaration"
+        )
+        output = self.root / output_name
+        payload = confirmation.canonical_json_bytes(document)
+        attempt = confirmation._create_confirmation_attempt(
+            confirmation.confirmation_attempt_path(output, payload)
+        )
+        staged = confirmation.confirmation_staged_path(output, payload)
+        proof = confirmation.confirmation_proof_path(output)
+        if state == "pre_stage":
+            return (
+                document,
+                declaration_path,
+                declaration_snapshot,
+                output,
+                staged,
+                proof,
+                None,
+            )
+        staged.write_bytes(payload if state != "pre_stage_incomplete" else payload[:17])
+        identity = atomic_publish.FileIdentity.from_path(staged)
+        if state == "pre_stage_incomplete":
+            return (
+                document,
+                declaration_path,
+                declaration_snapshot,
+                output,
+                staged,
+                proof,
+                identity,
+            )
+        confirmation._create_confirmation_stage_ready(attempt)
+        if state == "pre_commit_no_proof":
+            return (
+                document,
+                declaration_path,
+                declaration_snapshot,
+                output,
+                staged,
+                proof,
+                identity,
+            )
+        if state == "pre_commit_proof_incomplete":
+            proof_payload = confirmation._proof_json_bytes(
+                {
+                    "schema_version": atomic_publish.PROOF_SCHEMA_VERSION,
+                    "source": str(staged),
+                    "destination": str(output),
+                    "identity": identity.as_mapping(),
+                }
+            )
+            proof.write_bytes(proof_payload[:19])
+            return (
+                document,
+                declaration_path,
+                declaration_snapshot,
+                output,
+                staged,
+                proof,
+                identity,
+            )
+        atomic_publish._write_proof_exclusive(
+            proof,
+            source=staged,
+            destination=output,
+            identity=identity,
+        )
+        if state in {"post_commit_stage_linked", "post_commit_stage_unlinked"}:
+            try:
+                os.link(staged, output)
+            except OSError as exc:
+                self.skipTest(f"hardlinks unavailable: {exc}")
+        if state == "post_commit_stage_unlinked":
+            staged.unlink()
+        return (
+            document,
+            declaration_path,
+            declaration_snapshot,
+            output,
+            staged,
+            proof,
+            identity,
+        )
 
     def test_template_is_read_only_and_requires_explicit_section_acknowledgements(self) -> None:
         template = confirmation.declaration_template(self.context)
@@ -371,11 +473,37 @@ class OptimizationInputConfirmationTests(unittest.TestCase):
         self.assertTrue(second.as_mapping()["authorized_for_production_optimization"])
 
         original = output.read_bytes()
-        with self.assertRaises(FileExistsError):
-            confirmation.publish_confirmation(
-                output, document, self.context, declaration_snapshot
-            )
+        original_identity = atomic_publish.FileIdentity.from_path(output)
+        repeated = confirmation.publish_confirmation(
+            output, document, self.context, declaration_snapshot
+        )
+        self.assertEqual(repeated.confirmation_sha256, document["confirmation_sha256"])
+        self.assertEqual(atomic_publish.FileIdentity.from_path(output), original_identity)
         self.assertEqual(output.read_bytes(), original)
+
+        for execute, expected_status in ((False, "already_confirmed"), (True, "confirmed")):
+            with self.subTest(execute=execute):
+                stdout = io.StringIO()
+                argv = [
+                    "--contract",
+                    str(self.contract_path),
+                    "--declaration",
+                    str(declaration_path),
+                    "--output",
+                    str(output),
+                ]
+                if execute:
+                    argv.append("--execute")
+                with mock.patch.object(
+                    confirmation, "load_bound_context", return_value=self.context
+                ), redirect_stdout(stdout):
+                    self.assertEqual(confirmation.main(argv), 0)
+                result = json.loads(stdout.getvalue())
+                self.assertEqual(result["status"], expected_status)
+                self.assertEqual(result["writes_performed"], 0)
+                self.assertEqual(
+                    atomic_publish.FileIdentity.from_path(output), original_identity
+                )
 
     def test_audit_rejects_noncanonical_and_hash_tampered_confirmation(self) -> None:
         document, _ = self.build()
@@ -525,7 +653,7 @@ class OptimizationInputConfirmationTests(unittest.TestCase):
         ):
             confirmation._read_json_snapshot(nonfinite, "fixture")
 
-    def test_publication_rolls_back_only_owned_output_when_post_audit_fails(self) -> None:
+    def test_post_audit_failure_preserves_proven_publication_for_retry(self) -> None:
         document, declaration_path = self.build()
         output = self.root / "confirmation.json"
         declaration_snapshot = confirmation.read_stable_snapshot(declaration_path, "declaration")
@@ -540,7 +668,509 @@ class OptimizationInputConfirmationTests(unittest.TestCase):
                 confirmation.publish_confirmation(
                     output, document, self.context, declaration_snapshot
                 )
-        self.assertFalse(output.exists())
+        pending = confirmation.inspect_confirmation_publication(
+            output, document, self.context, declaration_snapshot
+        )
+        self.assertEqual(pending.status, "publication_recovery_pending")
+        self.assertEqual(pending.pending_state, "post_commit_stage_unlinked")
+        recovered = confirmation.publish_confirmation(
+            output, document, self.context, declaration_snapshot
+        )
+        self.assertEqual(recovered.confirmation_sha256, document["confirmation_sha256"])
+
+    def test_read_only_inspection_reports_all_pending_kill_windows_without_writes(self) -> None:
+        for index, (fixture_state, pending_state) in enumerate(
+            (
+                ("pre_stage", "pre_stage"),
+                ("pre_stage_incomplete", "pre_stage_incomplete"),
+                ("pre_commit_no_proof", "pre_commit"),
+                ("pre_commit_proof_incomplete", "pre_commit_proof_incomplete"),
+                ("pre_commit", "pre_commit"),
+                ("post_commit_stage_linked", "post_commit_stage_linked"),
+                ("post_commit_stage_unlinked", "post_commit_stage_unlinked"),
+            )
+        ):
+            with self.subTest(pending_state=pending_state):
+                (
+                    document,
+                    declaration_path,
+                    declaration_snapshot,
+                    output,
+                    staged,
+                    proof,
+                    _,
+                ) = self.pending_publication(
+                    fixture_state, output_name=f"pending-{index}.json"
+                )
+                attempt = confirmation.confirmation_attempt_path(
+                    output, confirmation.canonical_json_bytes(document)
+                )
+                ready = attempt / confirmation.CONFIRMATION_STAGE_READY_NAME
+                paths = tuple(
+                    path
+                    for path in (attempt, ready, staged, output, proof)
+                    if os.path.lexists(path)
+                )
+
+                def evidence(path: Path) -> tuple[bytes, tuple[int, int, int, int, int]]:
+                    info = os.lstat(path)
+                    payload = b"<directory>" if path.is_dir() else path.read_bytes()
+                    return payload, (
+                        int(info.st_dev),
+                        int(info.st_ino),
+                        int(info.st_size),
+                        int(info.st_mtime_ns),
+                        int(info.st_nlink),
+                    )
+
+                before = {path: evidence(path) for path in paths}
+                inspection = confirmation.inspect_confirmation_publication(
+                    output, document, self.context, declaration_snapshot
+                )
+                self.assertEqual(inspection.status, "publication_recovery_pending")
+                self.assertEqual(inspection.pending_state, pending_state)
+                self.assertEqual({path: evidence(path) for path in paths}, before)
+
+                stdout = io.StringIO()
+                with mock.patch.object(
+                    confirmation, "load_bound_context", return_value=self.context
+                ), redirect_stdout(stdout):
+                    self.assertEqual(
+                        confirmation.main(
+                            [
+                                "--contract",
+                                str(self.contract_path),
+                                "--declaration",
+                                str(declaration_path),
+                                "--output",
+                                str(output),
+                            ]
+                        ),
+                        0,
+                    )
+                result = json.loads(stdout.getvalue())
+                self.assertEqual(result["status"], "publication_recovery_pending")
+                self.assertEqual(result["pending_state"], pending_state)
+                self.assertEqual(result["writes_performed"], 0)
+                self.assertEqual({path: evidence(path) for path in paths}, before)
+
+    def test_execute_recovers_each_kill_window_in_place_and_is_idempotent(self) -> None:
+        for index, pending_state in enumerate(
+            (
+                "pre_stage",
+                "pre_stage_incomplete",
+                "pre_commit_no_proof",
+                "pre_commit_proof_incomplete",
+                "pre_commit",
+                "post_commit_stage_linked",
+                "post_commit_stage_unlinked",
+            )
+        ):
+            with self.subTest(pending_state=pending_state):
+                (
+                    document,
+                    _,
+                    declaration_snapshot,
+                    output,
+                    staged,
+                    proof,
+                    identity,
+                ) = self.pending_publication(
+                    pending_state, output_name=f"recover-{index}.json"
+                )
+                result = confirmation.publish_confirmation_with_outcome(
+                    output, document, self.context, declaration_snapshot
+                )
+                audit = result.audit
+                self.assertTrue(result.recovered)
+                self.assertEqual(result.writes_performed, 1)
+                self.assertEqual(audit.confirmation_sha256, document["confirmation_sha256"])
+                if pending_state not in {"pre_stage", "pre_stage_incomplete"}:
+                    self.assertEqual(atomic_publish.FileIdentity.from_path(output), identity)
+                self.assertEqual(os.lstat(output).st_nlink, 1)
+                self.assertFalse(os.path.lexists(staged))
+                self.assertFalse(os.path.lexists(proof))
+                self.assertFalse(
+                    os.path.lexists(
+                        confirmation.confirmation_attempt_path(
+                            output, confirmation.canonical_json_bytes(document)
+                        )
+                    )
+                )
+                committed_identity = atomic_publish.FileIdentity.from_path(output)
+
+                repeated = confirmation.publish_confirmation(
+                    output, document, self.context, declaration_snapshot
+                )
+                self.assertEqual(repeated.file_sha256, audit.file_sha256)
+                self.assertEqual(
+                    atomic_publish.FileIdentity.from_path(output), committed_identity
+                )
+
+    def test_execute_main_reports_actual_recovery_and_publish_mutations(self) -> None:
+        (
+            _,
+            declaration_path,
+            _,
+            pending_output,
+            _,
+            _,
+            _,
+        ) = self.pending_publication("pre_stage", output_name="main-pending.json")
+        for output, expected_outcome, expected_recovered in (
+            (pending_output, "recovered", True),
+            (self.root / "main-fresh.json", "published", False),
+        ):
+            with self.subTest(expected_outcome=expected_outcome):
+                stdout = io.StringIO()
+                with mock.patch.object(
+                    confirmation, "load_bound_context", return_value=self.context
+                ), redirect_stdout(stdout):
+                    self.assertEqual(
+                        confirmation.main(
+                            [
+                                "--contract",
+                                str(self.contract_path),
+                                "--declaration",
+                                str(declaration_path),
+                                "--output",
+                                str(output),
+                                "--execute",
+                            ]
+                        ),
+                        0,
+                    )
+                result = json.loads(stdout.getvalue())
+                self.assertEqual(result["publication_outcome"], expected_outcome)
+                self.assertEqual(result["recovered"], expected_recovered)
+                self.assertEqual(result["writes_performed"], 1)
+                self.assertTrue(output.is_file())
+
+    def test_two_publishers_same_payload_race_converges_to_already_present(self) -> None:
+        document, declaration_path = self.build()
+        declaration_snapshot = confirmation.read_stable_snapshot(
+            declaration_path, "declaration"
+        )
+        output = self.root / "same-payload-race.json"
+        real_create = confirmation._create_confirmation_attempt
+        winner: dict[str, object] = {}
+        interleaved = False
+
+        def complete_winner_before_loser_acquires(path: Path):
+            nonlocal interleaved
+            if not interleaved:
+                interleaved = True
+                result = confirmation.publish_confirmation_with_outcome(
+                    output, document, self.context, declaration_snapshot
+                )
+                winner["result"] = result
+                winner["identity"] = atomic_publish.FileIdentity.from_path(output)
+            return real_create(path)
+
+        stdout = io.StringIO()
+        with mock.patch.object(
+            confirmation,
+            "_create_confirmation_attempt",
+            side_effect=complete_winner_before_loser_acquires,
+        ), mock.patch.object(
+            confirmation, "load_bound_context", return_value=self.context
+        ), redirect_stdout(stdout):
+            self.assertEqual(
+                confirmation.main(
+                    [
+                        "--contract",
+                        str(self.contract_path),
+                        "--declaration",
+                        str(declaration_path),
+                        "--output",
+                        str(output),
+                        "--execute",
+                    ]
+                ),
+                0,
+            )
+        winner_result = winner["result"]
+        self.assertIsInstance(winner_result, confirmation.ConfirmationPublicationResult)
+        self.assertEqual(winner_result.outcome, "published")
+        loser = json.loads(stdout.getvalue())
+        self.assertEqual(loser["publication_outcome"], "already_present")
+        self.assertTrue(loser["already_present"])
+        self.assertFalse(loser["recovered"])
+        self.assertEqual(loser["writes_performed"], 0)
+        self.assertEqual(
+            atomic_publish.FileIdentity.from_path(output), winner["identity"]
+        )
+        payload = confirmation.canonical_json_bytes(document)
+        self.assertFalse(
+            os.path.lexists(confirmation.confirmation_attempt_path(output, payload))
+        )
+        self.assertFalse(os.path.lexists(confirmation.confirmation_staged_path(output, payload)))
+        self.assertFalse(os.path.lexists(confirmation.confirmation_proof_path(output)))
+
+    def test_committed_attempt_cleanup_is_repeatable_and_foreign_content_fails_closed(self) -> None:
+        document, declaration_path = self.build()
+        snapshot = confirmation.read_stable_snapshot(declaration_path, "declaration")
+        output = self.root / "committed-cleanup-kill.json"
+        confirmation.publish_confirmation(output, document, self.context, snapshot)
+        output_identity = atomic_publish.FileIdentity.from_path(output)
+        attempt_path = confirmation.confirmation_attempt_path(
+            output, confirmation.canonical_json_bytes(document)
+        )
+        confirmation._create_confirmation_attempt(attempt_path)
+        inspection = confirmation.inspect_confirmation_publication(
+            output, document, self.context, snapshot
+        )
+        self.assertEqual(inspection.pending_state, "committed_attempt_cleanup")
+
+        real_remove = confirmation._remove_confirmation_attempt
+
+        def kill_after_attempt_removal(item) -> None:
+            real_remove(item)
+            raise KeyboardInterrupt("simulated kill after committed-attempt cleanup")
+
+        with mock.patch.object(
+            confirmation,
+            "_remove_confirmation_attempt",
+            side_effect=kill_after_attempt_removal,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                confirmation.publish_confirmation_with_outcome(
+                    output, document, self.context, snapshot
+                )
+        self.assertFalse(os.path.lexists(attempt_path))
+        repeated = confirmation.publish_confirmation_with_outcome(
+            output, document, self.context, snapshot
+        )
+        self.assertEqual(repeated.outcome, "already_present")
+        self.assertEqual(repeated.writes_performed, 0)
+        self.assertEqual(atomic_publish.FileIdentity.from_path(output), output_identity)
+
+        foreign_output = self.root / "committed-foreign-attempt.json"
+        confirmation.publish_confirmation(
+            foreign_output, document, self.context, snapshot
+        )
+        foreign_attempt = confirmation.confirmation_attempt_path(
+            foreign_output, confirmation.canonical_json_bytes(document)
+        )
+        confirmation._create_confirmation_attempt(foreign_attempt)
+        (foreign_attempt / "foreign").write_text("tamper", encoding="utf-8")
+        with self.assertRaisesRegex(
+            confirmation.OptimizationInputConfirmationError, "unauthorized entry"
+        ):
+            confirmation.inspect_confirmation_publication(
+                foreign_output, document, self.context, snapshot
+            )
+
+        sealed_output = self.root / "committed-sealed-attempt.json"
+        confirmation.publish_confirmation(sealed_output, document, self.context, snapshot)
+        sealed_attempt_path = confirmation.confirmation_attempt_path(
+            sealed_output, confirmation.canonical_json_bytes(document)
+        )
+        sealed_attempt = confirmation._create_confirmation_attempt(sealed_attempt_path)
+        confirmation._create_confirmation_stage_ready(sealed_attempt)
+        with self.assertRaisesRegex(
+            confirmation.OptimizationInputConfirmationError, "sealed foreign attempt"
+        ):
+            confirmation.inspect_confirmation_publication(
+                sealed_output, document, self.context, snapshot
+            )
+
+    def test_repeated_kill_recovery_continues_from_each_applied_mutation(self) -> None:
+        document, _, snapshot, output, staged, proof, identity = self.pending_publication(
+            "pre_commit", output_name="repeat-pre.json"
+        )
+        real_link = os.link
+
+        def kill_after_link(source: Path, destination: Path) -> None:
+            real_link(source, destination)
+            raise KeyboardInterrupt("simulated hard kill after commit")
+
+        with mock.patch.object(confirmation.os, "link", side_effect=kill_after_link):
+            with self.assertRaises(KeyboardInterrupt):
+                confirmation.publish_confirmation(output, document, self.context, snapshot)
+        self.assertEqual(
+            confirmation.inspect_confirmation_publication(
+                output, document, self.context, snapshot
+            ).pending_state,
+            "post_commit_stage_linked",
+        )
+        confirmation.publish_confirmation(output, document, self.context, snapshot)
+        self.assertEqual(atomic_publish.FileIdentity.from_path(output), identity)
+
+        document, _, snapshot, output, staged, proof, identity = self.pending_publication(
+            "post_commit_stage_linked", output_name="repeat-stage.json"
+        )
+        real_unlink_stage = confirmation._unlink_confirmation_stage
+
+        def kill_after_stage_unlink(item) -> None:
+            real_unlink_stage(item)
+            raise KeyboardInterrupt("simulated hard kill after stage unlink")
+
+        with mock.patch.object(
+            confirmation, "_unlink_confirmation_stage", side_effect=kill_after_stage_unlink
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                confirmation.publish_confirmation(output, document, self.context, snapshot)
+        self.assertEqual(
+            confirmation.inspect_confirmation_publication(
+                output, document, self.context, snapshot
+            ).pending_state,
+            "post_commit_stage_unlinked",
+        )
+        confirmation.publish_confirmation(output, document, self.context, snapshot)
+        self.assertEqual(atomic_publish.FileIdentity.from_path(output), identity)
+
+        document, _, snapshot, output, staged, proof, identity = self.pending_publication(
+            "post_commit_stage_unlinked", output_name="repeat-proof.json"
+        )
+        real_unlink_proof = confirmation._unlink_confirmation_proof
+
+        def kill_after_proof_unlink(item) -> None:
+            real_unlink_proof(item)
+            raise KeyboardInterrupt("simulated hard kill after proof unlink")
+
+        with mock.patch.object(
+            confirmation, "_unlink_confirmation_proof", side_effect=kill_after_proof_unlink
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                confirmation.publish_confirmation(output, document, self.context, snapshot)
+        self.assertEqual(
+            confirmation.inspect_confirmation_publication(
+                output, document, self.context, snapshot
+            ).status,
+            "committed",
+        )
+        confirmation.publish_confirmation(output, document, self.context, snapshot)
+        self.assertEqual(atomic_publish.FileIdentity.from_path(output), identity)
+
+    def test_recovery_rejects_foreign_links_and_proof_path_identity_or_byte_tamper(self) -> None:
+        document, _, snapshot, output, staged, _, _ = self.pending_publication(
+            "post_commit_stage_linked", output_name="foreign-link.json"
+        )
+        foreign = self.root / "foreign-link-alias.json"
+        try:
+            os.link(output, foreign)
+        except OSError as exc:
+            self.skipTest(f"hardlinks unavailable: {exc}")
+        with self.assertRaisesRegex(
+            confirmation.OptimizationInputConfirmationError, "hardlink ownership"
+        ):
+            confirmation.inspect_confirmation_publication(
+                output, document, self.context, snapshot
+            )
+
+        for index, tamper in enumerate(("path", "identity", "bytes", "proof_bytes")):
+            with self.subTest(tamper=tamper):
+                document, _, snapshot, output, staged, proof, _ = self.pending_publication(
+                    "pre_commit", output_name=f"tamper-{index}.json"
+                )
+                if tamper in {"path", "identity"}:
+                    raw = json.loads(proof.read_text(encoding="utf-8"))
+                    if tamper == "path":
+                        raw["source"] = str(
+                            output.with_name(
+                                f".{output.name}.invalid{confirmation.CONFIRMATION_STAGED_SUFFIX}"
+                            )
+                        )
+                    else:
+                        raw["identity"]["inode"] += 1
+                    proof.write_bytes(confirmation._proof_json_bytes(raw))
+                elif tamper == "bytes":
+                    payload = bytearray(staged.read_bytes())
+                    payload[0] = ord("[")
+                    staged.write_bytes(payload)
+                else:
+                    proof.write_bytes(proof.read_bytes() + b" ")
+                with self.assertRaises(confirmation.OptimizationInputConfirmationError):
+                    confirmation.inspect_confirmation_publication(
+                        output, document, self.context, snapshot
+                    )
+
+    def test_attempt_recovery_rejects_extra_entries_and_partial_artifact_hardlinks(self) -> None:
+        document, _, snapshot, output, staged, _, _ = self.pending_publication(
+            "pre_stage_incomplete", output_name="partial-stage-link.json"
+        )
+        try:
+            os.link(staged, self.root / "partial-stage-foreign.json")
+        except OSError as exc:
+            self.skipTest(f"hardlinks unavailable: {exc}")
+        with self.assertRaisesRegex(
+            confirmation.OptimizationInputConfirmationError, "foreign hardlink"
+        ):
+            confirmation.inspect_confirmation_publication(
+                output, document, self.context, snapshot
+            )
+
+        document, _, snapshot, output, _, proof, _ = self.pending_publication(
+            "pre_commit_proof_incomplete", output_name="partial-proof-link.json"
+        )
+        os.link(proof, self.root / "partial-proof-foreign.json")
+        with self.assertRaisesRegex(
+            confirmation.OptimizationInputConfirmationError, "foreign hardlink|hardlink"
+        ):
+            confirmation.inspect_confirmation_publication(
+                output, document, self.context, snapshot
+            )
+
+        document, _, snapshot, output, _, _, _ = self.pending_publication(
+            "pre_commit_no_proof", output_name="attempt-entry.json"
+        )
+        attempt = confirmation.confirmation_attempt_path(
+            output, confirmation.canonical_json_bytes(document)
+        )
+        (attempt / "foreign-entry").write_text("tamper", encoding="utf-8")
+        with self.assertRaisesRegex(
+            confirmation.OptimizationInputConfirmationError, "unauthorized entry"
+        ):
+            confirmation.inspect_confirmation_publication(
+                output, document, self.context, snapshot
+            )
+
+    def test_recovery_rejects_proofless_stage_and_changed_bound_declaration(self) -> None:
+        document, declaration_path = self.build()
+        snapshot = confirmation.read_stable_snapshot(declaration_path, "declaration")
+        output = self.root / "proofless.json"
+        staged = output.with_name(
+            f".{output.name}.{'2' * 32}{confirmation.CONFIRMATION_STAGED_SUFFIX}"
+        )
+        staged.write_bytes(confirmation.canonical_json_bytes(document))
+        with self.assertRaisesRegex(
+            confirmation.OptimizationInputConfirmationError, "staging path"
+        ):
+            confirmation.inspect_confirmation_publication(
+                output, document, self.context, snapshot
+            )
+
+        staged.unlink()
+        atomic_publish._write_proof_exclusive(
+            confirmation.confirmation_proof_path(output),
+            source=staged,
+            destination=output,
+            identity=atomic_publish.FileIdentity(1, 1, len(confirmation.canonical_json_bytes(document))),
+        )
+        staged.write_bytes(confirmation.canonical_json_bytes(document))
+        declaration_path.write_bytes(declaration_path.read_bytes() + b" ")
+        with self.assertRaisesRegex(
+            confirmation.OptimizationInputConfirmationError, "bound input changed"
+        ):
+            confirmation.inspect_confirmation_publication(
+                output, document, self.context, snapshot
+            )
+
+    def test_same_path_accepts_drive_unc_parent_alias_but_not_different_hardlink_name(self) -> None:
+        with mock.patch.object(confirmation.os.path, "samefile", return_value=True):
+            self.assertTrue(
+                confirmation._same_path(
+                    Path(r"Y:\git\pyaedt_motor\confirmation.json"),
+                    Path(r"\\RaiDrive-peets\ANSYS\git\pyaedt_motor\confirmation.json"),
+                )
+            )
+            self.assertFalse(
+                confirmation._same_path(
+                    Path(r"Y:\git\pyaedt_motor\confirmation.json"),
+                    Path(r"\\RaiDrive-peets\ANSYS\git\pyaedt_motor\alias.json"),
+                )
+            )
 
     def test_load_context_requires_exact_stage3_spec_and_immutable_source_hashes(self) -> None:
         contract_path = self.root / "pipeline-contract.json"
@@ -602,6 +1232,76 @@ class OptimizationInputConfirmationTests(unittest.TestCase):
                 "optimization spec must occur exactly once",
             ):
                 confirmation.load_bound_context(contract_path)
+
+    def test_v4_context_binds_envelope_base_and_pinned_helper(self) -> None:
+        v4_path = self.root / "pipeline-v4.json"
+        raw = {
+            "schema_version": "ipmsm-v2-pipeline-contract-v4",
+            "contract_sha256": "d" * 64,
+            "pipeline": {"fixture": True},
+        }
+        v4_path.write_text(json.dumps(raw, sort_keys=True) + "\n", encoding="utf-8")
+        v4_snapshot, v4_document = confirmation._read_json_snapshot(
+            v4_path, "v4 fixture"
+        )
+        _, base_document = confirmation._read_json_snapshot(
+            self.contract_path, "base fixture"
+        )
+        helper_path = Path(confirmation.__file__).resolve()
+        fake_contract = SimpleNamespace(
+            source=v4_path.resolve(),
+            source_sha256=sha256(v4_path),
+            canonical_sha256=supervisor._canonical_sha256(v4_document),
+            contract_sha256="d" * 64,
+            base_contract=SimpleNamespace(source=self.contract_path.resolve()),
+            base_contract_binding=SimpleNamespace(
+                path=self.contract_path.resolve(),
+                sha256=sha256(self.contract_path),
+                canonical_sha256=supervisor._canonical_sha256(base_document),
+                contract_sha256="a" * 64,
+            ),
+            source_pins={
+                "confirmation_helper": SimpleNamespace(
+                    path=helper_path,
+                    sha256=sha256(helper_path),
+                )
+            },
+        )
+        fake_v4 = SimpleNamespace(
+            load_contract=mock.Mock(return_value=fake_contract),
+            audit_contract=mock.Mock(),
+            v3=supervisor,
+        )
+        with mock.patch.object(
+            confirmation.importlib, "import_module", return_value=fake_v4
+        ), mock.patch.object(
+            confirmation, "load_bound_context", return_value=self.context
+        ):
+            context = confirmation._load_v4_bound_context(v4_snapshot, v4_document)
+        bindings = confirmation._context_bindings(context)
+        self.assertEqual(bindings["contract"]["path"], str(v4_path.resolve()))
+        self.assertEqual(
+            bindings["contract"]["canonical_sha256"],
+            supervisor._canonical_sha256(v4_document),
+        )
+        self.assertEqual(
+            bindings["base_contract"]["canonical_sha256"],
+            supervisor._canonical_sha256(base_document),
+        )
+        self.assertEqual(context.spec_sha256, self.context.spec_sha256)
+
+    def test_secure_snapshot_rejects_hardlink_alias(self) -> None:
+        source = self.root / "hardlink-source.json"
+        alias = self.root / "hardlink-alias.json"
+        source.write_text('{"value":1}\n', encoding="utf-8")
+        try:
+            os.link(source, alias)
+        except OSError as exc:
+            self.skipTest(f"hardlinks unavailable: {exc}")
+        with self.assertRaisesRegex(
+            confirmation.OptimizationInputConfirmationError, "hardlink"
+        ):
+            confirmation.read_stable_snapshot(alias, "hardlink fixture")
 
 
 if __name__ == "__main__":
