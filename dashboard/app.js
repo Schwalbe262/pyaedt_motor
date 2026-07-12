@@ -745,9 +745,14 @@ function renderCampaign(data) {
     // Remediation proof is separate from both Slurm completion and collected rows.
     const torqueReplay = data.torque_unit_replay || {};
     const torqueReplayPlanned = integer(torqueReplay.planned);
+    const torqueReplayFailed = integer(torqueReplay.failed);
+    const torqueReplayFailedAttempts = integer(torqueReplay.failed_attempts);
+    const torqueReplayRetryDetail = torqueReplayFailedAttempts > torqueReplayFailed
+      ? ` · 재시도 이력 ${torqueReplayFailedAttempts}`
+      : "";
     const torqueReplayDetail = torqueReplayPlanned > 0
       ? ` · 단위 재검증 ${integer(torqueReplay.completed)}/${torqueReplayPlanned}`
-        + ` (실행 ${integer(torqueReplay.active)}, 실패 ${integer(torqueReplay.failed)})`
+        + ` (실행 ${integer(torqueReplay.active)}, 실패 ${torqueReplayFailed}${torqueReplayRetryDetail})`
       : "";
     setText("rateLabel", `${current.currentLabel} 검증 결과`);
     setText(

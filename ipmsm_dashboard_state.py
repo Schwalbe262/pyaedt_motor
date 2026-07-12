@@ -4697,7 +4697,9 @@ def torque_unit_replay_state(counts: Mapping[str, Any]) -> dict[str, Any]:
     clean = {status: max(0, _safe_int(counts.get(status))) for status in RUNTIME_SCHEDULER_STATUSES}
     active = sum(clean[status] for status in ACTIVE_STATUSES)
     completed = clean["completed"]
-    failed = clean["failed"] + clean["cancelled"]
+    failed_attempts = clean["failed"] + clean["cancelled"]
+    covered_cases = min(4, completed + active)
+    failed = min(failed_attempts, max(0, 4 - covered_cases))
     if completed >= 4 and failed == 0 and active == 0:
         status = "complete"
     elif active:
@@ -4711,6 +4713,7 @@ def torque_unit_replay_state(counts: Mapping[str, Any]) -> dict[str, Any]:
         "completed": completed,
         "active": active,
         "failed": failed,
+        "failed_attempts": failed_attempts,
         "status": status,
         "scheduler_counts": clean,
     }

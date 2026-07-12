@@ -2946,10 +2946,16 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(running["completed"], 1)
         self.assertEqual(running["active"], 3)
         self.assertEqual(running["planned"], 4)
+        self.assertEqual(running["failed_attempts"], 0)
         self.assertEqual(
             dashboard.torque_unit_replay_state({"completed": 4})["status"],
             "complete",
         )
+        retried = dashboard.torque_unit_replay_state(
+            {"completed": 0, "running": 4, "failed": 1}
+        )
+        self.assertEqual(retried["failed"], 0)
+        self.assertEqual(retried["failed_attempts"], 1)
         failed = dashboard.torque_unit_replay_state({"completed": 3, "failed": 1})
         self.assertEqual(failed["status"], "failed")
         self.assertEqual(failed["failed"], 1)
