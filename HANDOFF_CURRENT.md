@@ -245,3 +245,9 @@
 - Stage2 DOE is leakage-safe and space-filling, but +42% train rows cannot guarantee R²>=0.95; repeats cover only 1200 rpm, so preserve the 66-row/11-geometry audit and route a miss to sealed residual-adaptive Stage3.
 - Authoritative beta evidence is discrete 30.0 deg on one reference geometry; after v4r3, use additive v4r4/v5 geometry-zero relabel + physical-beta retraining, then candidate-specific MTPA/FW FEA maps before NSGA-II.
 - Next: keep monitoring Stage2 collection/refill/failures, inspect all 300 rows and the 9-target gate, then request production target/duty/winding/volume confirmation before optimization.
+- 2026-07-12 23:34 KST: AEDT can export torque as `mNewtonMeter`; old unknown-unit scale=1 contaminated exactly Stage1 case `v2s1_0010_rated_torque_01` and observed Stage2 task 28880 by 1000x.
+- Commit `8d609d6` adds SI-prefix torque normalization, unknown-unit fail-close, and an apparent-power bound; related tests pass 118/118 (1 skip), and all five scheduler deployments received the fix.
+- Sealed forensic replay plan is 4x45, SHA `16d5730b...fc7a`; tasks 29288/29297/29298/29299 are running with `keep_projects`, cap-aware supervision, and no replay failure.
+- The old v4r3 supervisor remains intentionally stopped; remote Stage2 solves continue, while task 28880 and the Stage1 suspect are quarantined from future training pending replay proof.
+- Dashboard `http://127.0.0.1:8765/` now survives the intentional contract mismatch with audited Stage1 700/700 plus separate Stage2 Slurm complete/running and local validated/missing counts; 109/109 tests pass.
+- The `Llt / holdout` screen is unrelated port 8010 (`MFT_1MW_2026`): history exists but accepted current model pointer is absent; do not treat it as the IPMSM surrogate UI.

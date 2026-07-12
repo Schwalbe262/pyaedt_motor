@@ -3839,3 +3839,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Runtime/data evidence: first four Stage2 results are status=ok at 51.37-56.07 min; CPU-affinity remains roughly 2.8-3.1x faster than the old 154-159 min range, while current allocations are core-disjoint but not node-exclusive.
 - Failure/next: Stage2 validated merged rows remain 0 until collector publication; monitor filtered task/result evidence, audit 300/48/12 identities and R² slices, then allow sealed Stage3 if any of 9 targets misses 0.95.
 - Token usage: unavailable; no token sampler result was exposed in this environment.
+
+## 2026-07-12 23:34:00 +09:00 - Torque-unit quarantine, replay, and truthful recovery UI
+- Part/goal: prevent 1000x torque-unit contamination from reaching the surrogate while keeping simulation and WEB UI progress observable.
+- Hypothesis/actions: proved `mNewtonMeter` parser fallthrough with the apparent-power bound, stopped only the local v4r3 refill/collector, deployed SI-unit fail-close code, sealed a four-case suspect/control replay, and launched it with retained projects under cap100.
+- Candidates/options: preserve original rows/tasks as evidence; replace them only from verified replay rows; keep v4r3 artifacts immutable and issue a no-replace v4r4 contract rather than weakening source-hash audits.
+- Metrics/result: Stage1 violations=1/700, observed Stage2 violations=1/99; replay plan=4x45 SHA `16d5730b...fc7a`; tasks 29288/29297/29298/29299 running; dashboard Stage1=700/700, project active=95/100, and Stage2 Slurm complete=108/running=91 versus validated=0/300, with 109/109 dashboard tests passing.
+- Failure/next: replay raw reports/results are pending; fetch and hash retained torque headers, publish replacement receipts/plans, resume revised Stage2 without task28880, then retrain the clean 1000-row gate.
+- Token usage: unavailable; no local Codex SQLite sample was exposed.

@@ -879,3 +879,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: the 700-result deep audit takes 3.249 s, a cache hit takes 0.015 s, and the live service remains health=ok with ~3 s snapshot age across the five-minute boundary.
 - Evidence: raw modification/replacement tests still fail closed, immutable identity changes invalidate base/governance caches, full dashboard tests pass 108/108, and three production refresh samples plus the TTL-boundary sample stayed fresh.
 - Remaining risk: stat identity does not defend against an adversary that can rewrite bytes while perfectly restoring inode/size/mtime; production source control and the next cryptographic audit remain the authority for that threat model.
+
+## 2026-07-12 23:34:00 +09:00 - Insight 98
+- Source loop: a Stage2 row reported 710 Nm at 34.45 A although measured dq current matched the command.
+- Improvement: normalize every AEDT torque SI prefix explicitly, reject unknown report units, and gate `abs(Pmech)+loss <= 1.05*sum(Vphase_rms*Iphase_rms)` before publishing a row.
+- Before: `mNewtonMeter` silently used scale 1, creating one 1000x torque label in Stage1 and one in the first 99 Stage2 results.
+- After: `mNewtonMeter` maps to `1e-3 Nm`, unknown units fail closed, the validator flags exactly those two observed suspects, and four retained-project replays isolate proof from production data.
+- Evidence: retained export header `Moving1.Torque [mNewtonMeter]`, power-bound ratios 25.910x/105.198x before correction, related tests 118/118 (1 skip), and deployment to five accounts.
+- Remaining risk: cleaned official rows and raw per-task headers still require completed replay receipts before any retraining resumes.
