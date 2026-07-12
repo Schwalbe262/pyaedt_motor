@@ -232,6 +232,17 @@ _DECISION_CACHE_LOCK = threading.Lock()
 _DECISION_CACHE: dict[tuple[str, str], tuple[int, int, float, dict[str, Any]]] = {}
 _CONTRACT_CACHE_LOCK = threading.Lock()
 _CONTRACT_CACHE: dict[str, tuple[int, int, float, dict[str, Any], dict[str, Any]]] = {}
+_GOVERNANCE_CACHE_LOCK = threading.Lock()
+_GOVERNANCE_CACHE: dict[
+    str,
+    tuple[
+        tuple[int, int, int, int],
+        float,
+        tuple[Path, Path, Path, Path],
+        tuple[tuple[int, int, int, int] | None, ...],
+        dict[str, Any],
+    ],
+] = {}
 _STAGE1_COLLECTION_CACHE_LOCK = threading.Lock()
 _STAGE1_COLLECTION_CACHE: dict[
     tuple[str, str, int],
@@ -3031,6 +3042,21 @@ def _same_existing_file(left: Path, right: Path) -> bool:
         return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
 
 
+def _governance_file_signature(path: Path) -> tuple[int, int, int, int] | None:
+    try:
+        value = path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise DashboardDataError("governance artifact is unavailable") from exc
+    return (
+        int(value.st_dev),
+        int(value.st_ino),
+        int(value.st_size),
+        int(value.st_mtime_ns),
+    )
+
+
 def _official_r2_summary(contract: Any, official: Any) -> dict[str, Any]:
     gate = getattr(official, "gate", None)
     primary = getattr(gate, "primary_test_r2", None)
@@ -3063,8 +3089,31 @@ def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
     """Audit optional v4 authorities without exposing paths or exception text."""
 
     source = config.v4_contract_path
-    if source is None or not os.path.lexists(source):
+    if source is None:
         return _empty_governance_state()
+    try:
+        source_signature = _governance_file_signature(source)
+    except DashboardDataError:
+        return _governance_fallback(config)
+    if source_signature is None:
+        return _empty_governance_state()
+    cache_key = os.path.normcase(os.path.abspath(source))
+    now = time.monotonic()
+    with _GOVERNANCE_CACHE_LOCK:
+        cached = _GOVERNANCE_CACHE.get(cache_key)
+    if (
+        cached is not None
+        and cached[0] == source_signature
+        and now - cached[1] < CONTRACT_AUDIT_CACHE_SECONDS
+    ):
+        try:
+            dynamic_signature = tuple(
+                _governance_file_signature(path) for path in cached[2]
+            )
+        except DashboardDataError:
+            dynamic_signature = ()
+        if dynamic_signature == cached[3]:
+            return copy.deepcopy(cached[4])
     try:
         supervisor = importlib.import_module("supervise_ipmsm_v2_pipeline_v4")
         contract = supervisor.load_contract(source)
@@ -3078,8 +3127,20 @@ def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
 
     state = _empty_governance_state()
     state["contract"] = {"activated": True, "status": "verified"}
-    official_path = contract.stage1_official.completion
-    official_present = os.path.lexists(official_path)
+    authority = contract.optimization_confirmation
+    dynamic_paths = (
+        contract.stage1_official.completion,
+        authority.declaration,
+        authority.confirmation,
+        authority.receipt,
+    )
+    try:
+        before_signature = tuple(
+            _governance_file_signature(path) for path in dynamic_paths
+        )
+    except DashboardDataError:
+        return _invalid_governance_state()
+    official_present = before_signature[0] is not None
     if official_present:
         try:
             official = supervisor.audit_official_stage1(contract)
@@ -3099,9 +3160,8 @@ def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
             gate_status="waiting",
         )
 
-    authority = contract.optimization_confirmation
-    declaration_present = os.path.lexists(authority.declaration)
-    confirmation_present = os.path.lexists(authority.confirmation)
+    declaration_present = before_signature[1] is not None
+    confirmation_present = before_signature[2] is not None
     state["confirmation"].update(
         status="absent",
         declaration_status="present" if declaration_present else "absent",
@@ -3121,7 +3181,7 @@ def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
         except Exception:
             state["confirmation"].update(status="invalid", confirmed=False)
 
-    receipt_present = os.path.lexists(authority.receipt)
+    receipt_present = before_signature[3] is not None
     state["authorization"].update(status="absent", receipt_present=receipt_present)
     if receipt_present:
         if state["confirmation"]["status"] != "verified":
@@ -3163,6 +3223,21 @@ def collect_governance_state(config: "DashboardConfig") -> dict[str, Any]:
         state["status"] = "awaiting_confirmation"
     else:
         state["status"] = "awaiting_authorization"
+    try:
+        after_signature = tuple(
+            _governance_file_signature(path) for path in dynamic_paths
+        )
+    except DashboardDataError:
+        after_signature = ()
+    if after_signature == before_signature:
+        with _GOVERNANCE_CACHE_LOCK:
+            _GOVERNANCE_CACHE[cache_key] = (
+                source_signature,
+                time.monotonic(),
+                dynamic_paths,
+                before_signature,
+                copy.deepcopy(state),
+            )
     return state
 
 
@@ -3539,7 +3614,11 @@ def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[
 def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
     contract_document, pipeline = _pipeline_definition(config)
     governance = collect_governance_state(config)
-    artifact_dir = config.contract_path.parent
+    artifact_dir = (
+        config.runner_log.parent
+        if config.runner_log is not None
+        else config.contract_path.parent
+    )
     stage1 = pipeline.get("stage1") if isinstance(pipeline.get("stage1"), dict) else {}
     stage2 = pipeline.get("stage2") if isinstance(pipeline.get("stage2"), dict) else {}
     stage3 = pipeline.get("stage3") if isinstance(pipeline.get("stage3"), dict) else {}

@@ -235,6 +235,38 @@ class Stage1CollectionTests(unittest.TestCase):
         self.assertEqual(result["campaign"]["completion_source"], "atomic_collection")
         self.assertEqual(result["campaign"]["source_status"], "ok")
 
+    def test_explicit_runner_log_keeps_original_artifact_root_for_revised_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            fixture, original, _ = self._collection_fixture(root)
+            fixture.training()
+            revised = root / "revision" / "base-v3.json"
+            revised.parent.mkdir()
+            document = json.loads(fixture.contract_path.read_text(encoding="utf-8"))
+            document["pipeline"]["workdir"] = str(root)
+            document["contract_sha256"] = dashboard.pipeline_supervisor._canonical_sha256(
+                {
+                    "schema_version": document["schema_version"],
+                    "pipeline": document["pipeline"],
+                }
+            )
+            revised.write_text(json.dumps(document), encoding="utf-8")
+            config = dashboard.DashboardConfig(
+                workdir=root,
+                contract_path=revised,
+                runner_log=original.runner_log,
+                family_confirmation_root=root / "confirmation",
+            )
+
+            with mock.patch.object(
+                dashboard,
+                "_read_beta",
+                return_value={"available": False, "passed": False},
+            ) as read_beta:
+                dashboard.collect_local_state(config)
+
+            read_beta.assert_called_once_with(root)
+
     def test_absent_collection_preserves_runner_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -685,8 +717,11 @@ class GovernanceTests(unittest.TestCase):
             config = dashboard.DashboardConfig(root, base, v4_contract_path=v4)
             with mock.patch.object(dashboard.importlib, "import_module", side_effect=imported):
                 result = dashboard.collect_governance_state(config)
+                cached = dashboard.collect_governance_state(config)
 
         self.assertEqual(result["status"], "authorized")
+        self.assertEqual(cached, result)
+        self.assertEqual(supervisor.load_contract.call_count, 1)
         self.assertEqual(result["official_stage1"]["r2_authority"], "verified")
         self.assertEqual(result["official_stage1"]["gate_status"], "passed")
         self.assertEqual(result["official_stage1"]["passed_count"], 3)
@@ -696,6 +731,49 @@ class GovernanceTests(unittest.TestCase):
         encoded = json.dumps(result)
         self.assertNotIn(str(root), encoded)
         self.assertNotIn("private_path", encoded)
+
+    def test_governance_cache_invalidates_when_official_completion_appears(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base.json"
+            v4 = root / "v4.json"
+            completion = root / "completion.json"
+            base.write_text("{}", encoding="utf-8")
+            v4.write_text("{}", encoding="utf-8")
+            contract = SimpleNamespace(
+                source=v4,
+                base_contract_binding=SimpleNamespace(path=base),
+                base_contract=SimpleNamespace(stage1=SimpleNamespace(r2_threshold=0.95)),
+                stage1_official=SimpleNamespace(completion=completion),
+                optimization_confirmation=SimpleNamespace(
+                    declaration=root / "declaration.json",
+                    confirmation=root / "confirmation.json",
+                    receipt=root / "receipt.json",
+                ),
+            )
+            gate = SimpleNamespace(
+                primary_test_r2={"torque": 0.97},
+                voltage_test_r2=0.96,
+                passed=True,
+            )
+            supervisor = SimpleNamespace(
+                load_contract=mock.Mock(return_value=contract),
+                audit_contract=mock.Mock(),
+                audit_official_stage1=mock.Mock(return_value=SimpleNamespace(gate=gate)),
+            )
+            config = dashboard.DashboardConfig(root, base, v4_contract_path=v4)
+
+            with mock.patch.object(
+                dashboard.importlib, "import_module", return_value=supervisor
+            ):
+                before = dashboard.collect_governance_state(config)
+                completion.write_text("{}", encoding="utf-8")
+                after = dashboard.collect_governance_state(config)
+
+        self.assertEqual(before["status"], "awaiting_official_stage1")
+        self.assertEqual(after["status"], "awaiting_confirmation")
+        self.assertEqual(supervisor.load_contract.call_count, 2)
+        supervisor.audit_official_stage1.assert_called_once_with(contract)
 
     def test_invalid_receipt_is_fail_closed_without_exception_or_path_leak(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2045,8 +2123,10 @@ class FamilyConfirmationTests(unittest.TestCase):
         script = (
             Path(server.__file__).resolve().parent / "run_ipmsm_dashboard.ps1"
         ).read_text(encoding="utf-8")
-        self.assertIn("'simul_log_smoke\\v4r2'", script)
+        self.assertIn("'simul_log_smoke\\v4r3'", script)
+        self.assertIn("$contract = Join-Path $v4StateDir 'base_v3.json'", script)
         self.assertIn("$v4Contract = Join-Path $v4StateDir 'contract.json'", script)
+        self.assertIn("'--runner-log', $runnerLog", script)
         self.assertIn("'--v4-contract', $v4Contract", script)
         self.assertNotIn("Test-Path -LiteralPath $v4Contract", script)
 
