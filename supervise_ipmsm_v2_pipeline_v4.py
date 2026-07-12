@@ -983,7 +983,7 @@ def audit_official_stage1(contract: V4Contract) -> AuditedOfficialStage1:
     try:
         bundle = publisher.audit_completion(
             contract.stage1_official.completion,
-            contract,
+            contract.source,
             workspace=contract.stage1_official.workspace,
         )
     except Exception as exc:

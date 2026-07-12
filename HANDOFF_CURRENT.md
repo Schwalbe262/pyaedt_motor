@@ -8,12 +8,12 @@
 - Mesh and transient setup are controlled in `module/ipmsm_ppt_setup.py`.
 - Root project-memory files are now canonical; `md/` is template/archive context.
 - Live read-only dashboard: `http://127.0.0.1:8765/`; it separates the 8-stage official pipeline from the ancillary paired-24 experiment and fail-closed collection/ranking conclusion.
-- 2026-07-12 18:58 KST: live dashboard serves authoritative atomic Stage1 700/700 without the misleading runner 696/700 subtitle; official pipeline is truthfully `surrogate/waiting` on inactive audited-v4 production-input confirmation, while ancillary FEA remains separate.
-- The v3 guard still blocks every post-campaign action; a separate exact-trainer diagnostic failed 9/9 R2 targets (min 0.624627, avg 0.771923), so Stage2 coverage is required.
-- Inactive v4/cutover plus affinity-pilot tooling and dashboard are validated; no v4 contract/authority/receipt/task exists before production-input confirmation.
-- The legacy frozen-family watcher is stopped/Ready and is not authoritative for v4; no confirmation output root exists, so use the audited v4 path only after Stage1 and input approval.
+- 2026-07-12 20:08 KST: live dashboard is healthy at Stage1 700/700, v4 official gate 0/9 (min R2 0.624627), and `stage2/ready`; the stale runner 696/700 is not primary progress.
+- Official v4r2 contract `d7322815...2d8b` and completion `9be6124e...d629` are verified; production confirmation is required only before NSGA-II, not before Stage2/Stage3.
+- The v4r2 supervisor dry-run is `run_stage2_fresh` with a fresh 300-row plan; its on-demand Scheduled Task remains Disabled until the provisional operating contract is deliberately started.
+- Legacy v3 automation remains Disabled and non-authoritative; use only the audited v4r2 contract for continuation.
 - All legacy paired-24 tasks ran on the pre-fix shared 0-3 CPU mask, so its runtime ranking is withheld and the local task is Disabled; physics rows remain collectible only.
-- Live affinity smoke 28528 saw CPUs 16-51; fresh plan `352b1ebf...27c5` has zero old/source ID overlap, and baseline task 28644 is the sole task on exclusive allocation 8329 / n040 / Slurm 732099 with solve started at 18:45:53 KST; candidate remains unsubmitted.
+- Post-fix baseline 28644 completed in 2878.284 s versus pre-fix 9284.797 s (3.23x faster); candidate 28739 runs on n040, while true physical-exclusive scheduler commit `d0100a0` is live and smoke 28774 waits for an idle CPU node.
 
 ## Current objective
 

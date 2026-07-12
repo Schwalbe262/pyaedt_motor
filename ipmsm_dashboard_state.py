@@ -3895,8 +3895,8 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
             {
                 "level": "warning",
                 "message": (
-                    "공식 파이프라인은 감사된 v4 supervisor 활성화와 production input "
-                    "confirmation/authorization을 기다리고 있습니다."
+                    "공식 파이프라인은 감사된 v4 supervisor 활성화와 official "
+                    "Stage1 gate publication을 기다리고 있습니다."
                 ),
             },
         )
@@ -3967,7 +3967,28 @@ def build_stage_timeline(
     beta_status = "complete" if beta.get("passed") else "failed" if beta.get("available") else "unavailable"
     campaign_complete = _safe_int(campaign.get("result_ok")) >= _safe_int(campaign.get("total"), 1)
     campaign_status = "complete" if campaign_complete else "running"
-    model_gate_status = str(model.get("gate_status") or "").strip().lower()
+    governance_state = governance or {}
+    governance_contract = governance_state.get("contract")
+    governance_contract = governance_contract if isinstance(governance_contract, Mapping) else {}
+    official_stage1 = governance_state.get("official_stage1")
+    official_stage1 = official_stage1 if isinstance(official_stage1, Mapping) else {}
+    v4_active = governance_contract.get("activated") is True
+    official_verified = bool(
+        v4_active
+        and official_stage1.get("status") == "verified"
+        and official_stage1.get("completion_present") is True
+        and official_stage1.get("r2_authority") == "verified"
+    )
+    if official_verified:
+        model_gate_status = str(official_stage1.get("gate_status") or "").strip().lower()
+    elif v4_active:
+        model_gate_status = (
+            "unavailable"
+            if str(official_stage1.get("status") or "").strip().lower() == "invalid"
+            else "waiting"
+        )
+    else:
+        model_gate_status = str(model.get("gate_status") or "").strip().lower()
     if not campaign_complete:
         model_status = "waiting"
     elif model_gate_status == "passed":
@@ -3978,11 +3999,17 @@ def build_stage_timeline(
         model_status = "waiting"
     else:
         model_status = "unavailable"
-    governance_status = str((governance or {}).get("status") or "").strip().lower()
+    governance_status = str(governance_state.get("status") or "").strip().lower()
     if campaign_complete and model_status == "waiting" and governance_status == "not_activated":
         model_detail = (
             "감사된 v4 supervisor 활성화 대기 · "
-            "production input confirmation/authorization 미확정"
+            "official Stage1 gate publication 미생성"
+        )
+    elif official_verified:
+        model_detail = (
+            f"v4 official gate {_safe_int(official_stage1.get('passed_count'))} / "
+            f"{_safe_int(official_stage1.get('target_count'), 9)} 통과 · "
+            f"최소 R² {_safe_float(official_stage1.get('min_r2')) or 0.0:.6f}"
         )
     elif model_status == "waiting":
         model_detail = "공식 R² gate 산출물 대기"
@@ -5220,7 +5247,7 @@ class DashboardStateStore:
             health = "running" if scheduler_active > 0 else "idle"
             headline = (
                 "공식 파이프라인 차단 · 감사된 v4 supervisor 활성화 및 "
-                "production input confirmation 대기"
+                "official Stage1 gate publication 대기"
             )
         elif scheduler_active == scheduler_cap:
             health = "running"
@@ -5228,6 +5255,9 @@ class DashboardStateStore:
         elif current_stage.get("status") == "running":
             health = "running"
             headline = f"{current_stage.get('label', '파이프라인')} 실행 중"
+        elif current_stage.get("status") == "ready":
+            health = "idle"
+            headline = f"{current_stage.get('label', '파이프라인')} 실행 준비 완료"
         elif scheduler_active > 0:
             health = "running"
             headline = "FEA 진행 중"

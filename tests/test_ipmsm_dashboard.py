@@ -822,9 +822,37 @@ class TimelineTests(unittest.TestCase):
         surrogate = next(stage for stage in timeline if stage["id"] == "surrogate")
         self.assertEqual(surrogate["status"], "waiting")
         self.assertIn("감사된 v4 supervisor 활성화", surrogate["detail"])
-        self.assertIn("production input confirmation", surrogate["detail"])
+        self.assertIn("official Stage1 gate publication", surrogate["detail"])
         self.assertEqual(dashboard.select_current_stage(timeline)["id"], "surrogate")
         self.assertEqual(dashboard.build_overall_progress(timeline)["current_status"], "waiting")
+
+    def test_verified_v4_stage1_failure_makes_stage2_ready(self) -> None:
+        args = self.base_args()
+        args["model"] = {"available": False, "gate_status": "waiting"}
+        timeline = dashboard.build_stage_timeline(
+            **args,
+            governance={
+                "status": "awaiting_confirmation",
+                "contract": {"activated": True, "status": "verified"},
+                "official_stage1": {
+                    "status": "verified",
+                    "completion_present": True,
+                    "r2_authority": "verified",
+                    "gate_status": "failed",
+                    "passed_count": 0,
+                    "target_count": 9,
+                    "min_r2": 0.624627,
+                },
+            },
+            stage2_decision=None,
+            stage3_decision=None,
+        )
+
+        by_id = {stage["id"]: stage for stage in timeline}
+        self.assertEqual(by_id["surrogate"]["status"], "failed")
+        self.assertIn("v4 official gate 0 / 9", by_id["surrogate"]["detail"])
+        self.assertEqual(by_id["stage2"]["status"], "ready")
+        self.assertEqual(dashboard.select_current_stage(timeline)["id"], "stage2")
 
     def test_current_stage_prefers_downstream_running_or_ready_over_prior_failure(self) -> None:
         stages = [
@@ -2017,6 +2045,8 @@ class FamilyConfirmationTests(unittest.TestCase):
         script = (
             Path(server.__file__).resolve().parent / "run_ipmsm_dashboard.ps1"
         ).read_text(encoding="utf-8")
+        self.assertIn("'simul_log_smoke\\v4r2'", script)
+        self.assertIn("$v4Contract = Join-Path $v4StateDir 'contract.json'", script)
         self.assertIn("'--v4-contract', $v4Contract", script)
         self.assertNotIn("Test-Path -LiteralPath $v4Contract", script)
 
@@ -3298,6 +3328,50 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(result["health"], "running")
         self.assertIn("Surrogate", result["headline"])
 
+    def test_ready_pipeline_stage_has_explicit_ready_headline(self) -> None:
+        def local(_: dashboard.DashboardConfig) -> dict[str, object]:
+            return {
+                "campaign": {
+                    "active": 0,
+                    "total": 700,
+                    "result_ok": 700,
+                    "source_mtime_reliable": False,
+                },
+                "pipeline": {
+                    "stages": [
+                        {"id": "stage1", "label": "Stage 1", "status": "complete"},
+                        {"id": "surrogate", "label": "Surrogate", "status": "failed"},
+                        {"id": "stage2", "label": "Stage 2 DOE", "status": "ready"},
+                    ],
+                },
+                "model": {"available": True, "gate_status": "failed"},
+                "governance": {"status": "awaiting_confirmation"},
+                "beta": {"available": True},
+                "optimization": {"decision": None},
+                "speed": {"complete": False},
+                "processes": [],
+                "alerts": [],
+            }
+
+        scheduler = {
+            "reachable": True,
+            "stale": False,
+            "active_count": 0,
+            "cap": 100,
+            "campaign_status": {},
+        }
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=local,
+            scheduler_collector=lambda _: scheduler,
+        )
+
+        result = store.refresh_once(force_scheduler=True)
+
+        self.assertEqual(result["health"], "idle")
+        self.assertEqual(result["overall"]["current_stage"], "stage2")
+        self.assertEqual(result["headline"], "Stage 2 DOE 실행 준비 완료")
+
     def test_inactive_v4_snapshot_reports_pipeline_blocker_while_ancillary_fea_runs(self) -> None:
         def local(_: dashboard.DashboardConfig) -> dict[str, object]:
             stages = dashboard.build_stage_timeline(
@@ -3351,7 +3425,7 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(result["overall"]["current_stage"], "surrogate")
         self.assertEqual(result["overall"]["current_status"], "waiting")
         self.assertIn("감사된 v4 supervisor 활성화", result["headline"])
-        self.assertIn("production input confirmation", result["headline"])
+        self.assertIn("official Stage1 gate publication", result["headline"])
         self.assertNotIn("실행 중", result["headline"])
 
     def test_invalid_campaign_invariants_override_full_scheduler_utilization(self) -> None:

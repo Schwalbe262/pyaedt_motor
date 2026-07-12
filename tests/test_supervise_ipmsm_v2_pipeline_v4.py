@@ -1124,6 +1124,29 @@ class SupervisorV4Tests(unittest.TestCase):
             self.assertNotIn("legacy-models/metadata.json", rendered)
             self.assertNotIn("legacy-r2.csv", rendered)
 
+    def test_official_completion_audit_passes_bound_contract_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = Fixture(Path(tmp))
+            fixture.campaign()
+            expected = fixture.official()
+            publisher = mock.Mock()
+            publisher.audit_completion.return_value = expected.bundle
+
+            with mock.patch.object(
+                v4, "_loaded_module", return_value=publisher
+            ), mock.patch.object(
+                v4.v3, "_audit_stage1_training", return_value=expected.gate
+            ), mock.patch.object(v4, "audit_contract"):
+                observed = v4.audit_official_stage1(fixture.contract)
+
+            self.assertEqual(observed.stage1, expected.stage1)
+            self.assertEqual(observed.gate, expected.gate)
+            publisher.audit_completion.assert_called_once_with(
+                fixture.contract.stage1_official.completion,
+                fixture.contract.source,
+                workspace=fixture.contract.stage1_official.workspace,
+            )
+
     def test_missing_confirmation_waits_exit_zero_without_lock_or_child(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = Fixture(Path(tmp))

@@ -3813,3 +3813,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: plan SHA `352b1ebf...27c5`, dry-runs each selected/planned 1 with no history, task 28644 is sole active task on exclusive allocation 8329/n040/Slurm 732099, 4 CPUs/32 GiB, and reached `Solving design setup` at 18:45:53 KST; live dashboard is Stage1 700/700, surrogate waiting, errors0.
 - Failure/next: `max_workers_per_node=1` was advisory and contaminated the first retries; wait for baseline collection, then submit candidate on n040 and compare against old contaminated 9356s/10095s only as historical context, not selection authority.
 - Token usage: unavailable; the sampler was already attempted once in this execution loop and no local Codex SQLite database was available.
+
+## 2026-07-12 20:08:00 +09:00 - Official v4r2 gate, live Stage2 UI, and affinity timing
+- Part/goal: publish the exact Stage1 gate, repair the whole-project WEB UI, and quantify the scheduler CPU-affinity change without confusing it with node exclusivity.
+- Hypothesis/actions: fixed the v4 completion audit to bind the contract source, published the fresh v4r2 authority, derived Stage2 readiness from that official result, ran one post-fix baseline, submitted its same-node candidate, and deployed the scheduler's physical `--exclusive` fix.
+- Candidates/options: keep task 28739 as the post-fix same-node profile pair; keep smoke 28774 separate until a fully idle node proves Slurm-level exclusivity; do not use legacy 696 progress or pre-fix paired24 ranking as authority.
+- Metrics/result: official gate 0/9, min/avg R2 0.624627/0.771923; live UI Stage1=700/700, current=`stage2/ready`, stale=false, errors0; baseline task 28644 fell from historical 9284.797 s to 2878.284 s (3.23x, 69.0% reduction); dashboard 100/100 and v4 supervisor 25/25 (1 skip) passed.
+- Failure/next: baseline 28644 used the fixed CPU set but shared n040 because the old allocation builder omitted Slurm `--exclusive`; collect 28739, finish smoke 28774 when an idle node exists, then deliberately launch the 300-row Stage2 contract before NSGA confirmation.
+- Token usage: closeout sampler was already attempted in this execution loop and remains unavailable.

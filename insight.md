@@ -847,3 +847,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: fresh identities and paths prevent cancelled-history aliasing; task 28644 is the only active task on exclusive allocation 8329/n040, while candidate submission is code-gated on an explicit baseline node.
 - Evidence: scheduler detail preserves `exclusive_node=true`; allocation 8329 reports exclusive=1 and exactly one active task; Slurm 732099.0 has 4 CPUs and the Maxwell solve started normally.
 - Remaining risk: one isolated pair proves local before/after behavior only; production profile selection still requires the sealed full paired design and quality gates.
+
+## 2026-07-12 20:08:00 +09:00 - Insight 94
+- Source loop: exact-source post-affinity baseline replay plus Slurm allocation audit.
+- Improvement: report CPU-affinity speed evidence and physical-node exclusivity as separate claims, and verify the latter from Slurm rather than the scheduler DB flag.
+- Before: the same baseline case took 9284.797 s with every 4-core step pinned to CPUs 0-3, while `exclusive_node=true` misleadingly omitted `#SBATCH --exclusive`.
+- After: the fixed-affinity replay took 2878.284 s (3.23x faster, 69.0% lower), and the scheduler now requires a truly idle node and emits Slurm `--exclusive` for new dedicated allocations.
+- Evidence: historical task 28293 versus task 28644 with the same setup fingerprint; scheduler core 331/331 and live restart passed, while physical smoke 28774 correctly waits because no CPU node is idle.
+- Remaining risk: the speed comparison used different node/load conditions and task 28644 was still physically shared; only the paired candidate and a completed exclusive smoke can refine causality.
