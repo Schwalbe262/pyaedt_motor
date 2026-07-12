@@ -296,10 +296,11 @@
 - Official Stage1 validation is 700/700 but the gate is 0/9, min/avg R2 0.624627/0.771923, so `decision=run_stage2`.
 - Stage2 wave1 is tasks29967-30016, exact sealed dedupe hash `2d26ed3b...be1577`; all 50 run across n110/n111/n114 under cap50, with 79 deferred for automatic refill.
 - 2026-07-13 07:12 KST: original Stage2 has 25 completed/0 failed; refill IDs30017-30041 are the exact first25 deferred rows, unique/order hash `7d5b9714...e4d1`, and cap never exceeded50.
+- 2026-07-13 07:40 KST: official submissions reached100/129 with active50, runner-audited221/300, missing29, and no new failed/cancelled task; claim owner PID130716 remains healthy.
 - First results29967/29971 passed 704-field plan/physics audits; torque units normalize mNm×0.001 and Nm×1, runtime ~37.3m versus prior post-affinity ~47.5-48m (early two-case evidence only).
 - Stage3 is source/contract/test ready (63 pass,1 skip); its sole missing predecessor marker is now exclusively initialized at `v4r4/foundation_stage2_continuation_watcher.pid` with inactive PID111588, regular nlink1.
 - Official child PID130716 is the sole Stage2 claim owner; do not kill it or delete the claim/decision. Corrected Task `PYAEDT_MOTOR_IPMSM_V2_PIPELINE_V4R5_NATIVE` retries every15m and resumes downstream after owner exit.
-- Dashboard commit `6d87d88` is deployed from LF325 at `http://127.0.0.1:8765`: health running, stale false, errors0, official 9-row model table visible, Stage2 50/50, ancillary plan integrity verified.
+- Dashboard commit `1a1a9b4` is deployed from LF325 at `http://127.0.0.1:8765`: health running/stale false/errors0; local final collection, claim-bound runner audit, and raw Slurm counts are explicitly separated.
 - Model-family diagnostic v3 commit `2828d2e` separates legacy finite-pair metadata R2 from strict metrics; current 700-row baseline/selected families both have one invalid derived-efficiency row and remain non-promotable.
 - Beta is candidate-specific in surrogate current×beta search; post-Pareto v4r6 must run strict target-load current matching/local-beta validation before final volume-efficiency nondominated publication.
 - RaiDrive 2025.9.0 logged repeated cross-project SFTP index failures, then crashed/restarted at07:03; official motor execution remains C-native and current RaiDrive log has no post-restart errors.

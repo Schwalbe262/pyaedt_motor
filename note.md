@@ -3954,3 +3954,7 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 
 ## 2026-07-13 07:16:00 +09:00 - RaiDrive popup diagnosed read-only
 - Actions/result: RaiDrive 2025.9.0 logs prove the pictured v4r3 file upload failed at01:25/01:38 with its internal collection-index exception amid concurrent cross-project Git/AEDT SFTP errors; service later crashed with NullReferenceException at07:03 and restarted at07:04. No post-restart log errors or current pyaedt process Y-reference; keep official execution on C-native paths and treat new recurrence as RaiDrive/client activity, not FEA failure.
+
+## 2026-07-13 07:44:00 +09:00 - Stage2 live evidence separated and dashboard redeployed
+- Actions/result: bound runner counts to the exact active decision/claim/owner PID/invocation and a <=5m latest log segment, added Stage3/fail-closed coverage, relabeled local final collection versus runner audit versus raw Slurm, and redeployed commit `1a1a9b4` to LF325.
+- Metrics/next: dashboard tests120/120; live health running/stale false/errors0, local0/300, runner221/300, audit pending0, submitted100, active50, missing29, raw Slurm222 completed/27 historical failed. Continue Stage2 without intervention while hardening the v4r6 matched-load authorization layer before commit.
