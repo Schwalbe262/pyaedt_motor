@@ -28,6 +28,7 @@ class TorqueUnitReplayLauncherTest(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, text)
         self.assertIn("& $python @arguments", text)
+        self.assertIn("$ErrorActionPreference = 'Continue'", text)
         self.assertNotIn("Start-Process", text)
 
 

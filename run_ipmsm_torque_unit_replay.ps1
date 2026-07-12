@@ -10,8 +10,8 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 }
 
 New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
-$stdout = Join-Path $stateDir 'torque_unit_replay_supervisor.stdout.log'
-$stderr = Join-Path $stateDir 'torque_unit_replay_supervisor.stderr.log'
+$stdout = Join-Path $stateDir 'torque_unit_replay_supervisor_v2.stdout.log'
+$stderr = Join-Path $stateDir 'torque_unit_replay_supervisor_v2.stderr.log'
 $pidFile = Join-Path $stateDir 'torque_unit_replay_supervisor.pid'
 $arguments = @(
     'run_ipmsm_v2_campaign.py',
@@ -47,8 +47,13 @@ try {
     [IO.File]::WriteAllText($pidFile, "$PID`n", [Text.UTF8Encoding]::new($false))
     Push-Location -LiteralPath $repoRoot
     # Direct invocation preserves the spaced module command as one argv value.
+    # Windows PowerShell promotes native stderr to a terminating error while
+    # the script-wide preference is Stop, but runner status is written there.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & $python @arguments 1>> $stdout 2>> $stderr
     $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
 }
 finally {
     Pop-Location
