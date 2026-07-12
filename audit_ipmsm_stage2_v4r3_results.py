@@ -52,6 +52,8 @@ CHECKPOINT_SCHEMA_VERSION = "ipmsm-stage2-v4r3-result-checkpoint-v1"
 EXPECTED_PLAN_ROWS = 300
 REMOTE_FILE_BASE = "remote_cwd"
 MAX_JSON_BYTES = 2_000_000
+WINDOWS_TRANSIENT_REPLACE_ERRORS = frozenset({5, 32, 33})
+ATOMIC_REPLACE_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
 
 EXPECTED_POLICY = {
     "project": "PYAEDT_MOTOR_IPMSM_V2",
@@ -765,21 +767,156 @@ def audit_result_payload(
     return record
 
 
+@dataclass(frozen=True)
+class _FileSnapshot:
+    state: str
+    payload: bytes | None = None
+
+
+def _snapshot_file(path: Path) -> _FileSnapshot:
+    """Read a path twice without collapsing remote-drive ambiguity into absence."""
+
+    try:
+        first = path.read_bytes()
+    except FileNotFoundError:
+        return _FileSnapshot("missing")
+    except OSError:
+        return _FileSnapshot("unreadable")
+    try:
+        second = path.read_bytes()
+    except OSError:
+        return _FileSnapshot("ambiguous")
+    if second != first:
+        return _FileSnapshot("ambiguous")
+    return _FileSnapshot("present", first)
+
+
+def _wait_for_exact_staged_payload(path: Path, payload: bytes) -> None:
+    last = _FileSnapshot("missing")
+    for attempt in range(len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS) + 1):
+        last = _snapshot_file(path)
+        if last.state == "present" and last.payload == payload:
+            return
+        if attempt < len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS):
+            time.sleep(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS[attempt])
+    if last.state == "present":
+        raise RuntimeError(f"atomic staging payload mismatch: {path}")
+    raise RuntimeError(
+        f"atomic staging file stayed {last.state}; retained for recovery: {path}"
+    )
+
+
+def _verify_replaced_destination(
+    path: Path,
+    payload: bytes,
+    previous: _FileSnapshot,
+) -> None:
+    """Require exact destination bytes after a reported successful replace."""
+
+    last = _FileSnapshot("missing")
+    for attempt in range(len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS) + 1):
+        last = _snapshot_file(path)
+        if last.state == "present" and last.payload == payload:
+            return
+        if last.state == "present" and last != previous:
+            raise RuntimeError(f"atomic destination payload mismatch: {path}")
+        if attempt < len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS):
+            time.sleep(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS[attempt])
+    raise RuntimeError(
+        "atomic replace returned without an exact readable destination; "
+        f"staging was retained when still present: {path} ({last.state})"
+    )
+
+
+def _wait_for_retryable_stage_or_late_success(
+    staged: Path,
+    destination: Path,
+    payload: bytes,
+    previous: _FileSnapshot,
+) -> bool:
+    """Return true for exact late success, false when a retry remains safe."""
+
+    last_stage = _FileSnapshot("missing")
+    for attempt in range(len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS) + 1):
+        current = _snapshot_file(destination)
+        if current.state == "present" and current.payload == payload:
+            return True
+        if current != previous:
+            raise RuntimeError(
+                f"atomic destination became ambiguous after replace denial: {destination}"
+            )
+        last_stage = _snapshot_file(staged)
+        if last_stage.state == "present" and last_stage.payload == payload:
+            return False
+        if attempt < len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS):
+            time.sleep(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS[attempt])
+    raise RuntimeError(
+        "atomic replace outcome stayed ambiguous; staging was retained when "
+        f"still present: {staged} ({last_stage.state})"
+    )
+
+
 def _atomic_write(path: Path, payload: bytes) -> None:
+    """Replace one aggregate with bounded mapped-drive recovery checks.
+
+    Immutable result checkpoints remain the resume authority.  Any staging path
+    whose publication is ambiguous is deliberately retained for inspection.
+    """
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    previous = _snapshot_file(path)
+    if previous.state == "present" and previous.payload == payload:
+        return
+    if previous.state not in {"missing", "present"}:
+        raise RuntimeError(f"atomic destination is {previous.state}: {path}")
+
+    payload_sha256 = sha256_bytes(payload)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.{payload_sha256}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    staged = Path(temp_name)
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp_name, path)
-    except Exception:
+    except BaseException:
         try:
-            os.unlink(temp_name)
+            os.close(fd)
         except OSError:
             pass
         raise
+
+    _wait_for_exact_staged_payload(staged, payload)
+    for attempt in range(len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS) + 1):
+        current = _snapshot_file(path)
+        if current.state == "present" and current.payload == payload:
+            return
+        if current != previous:
+            raise RuntimeError(f"atomic destination changed before replacement: {path}")
+        _wait_for_exact_staged_payload(staged, payload)
+        try:
+            os.replace(staged, path)
+        except OSError as exc:
+            destination = _snapshot_file(path)
+            if destination.state == "present" and destination.payload == payload:
+                return
+            transient = getattr(exc, "winerror", None) in WINDOWS_TRANSIENT_REPLACE_ERRORS
+            exhausted = attempt >= len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS)
+            if not transient:
+                raise
+            if _wait_for_retryable_stage_or_late_success(
+                staged, path, payload, previous
+            ):
+                return
+            if exhausted:
+                raise
+            time.sleep(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS[attempt])
+            continue
+        _verify_replaced_destination(path, payload, previous)
+        return
 
 
 def _checkpoint_payload(

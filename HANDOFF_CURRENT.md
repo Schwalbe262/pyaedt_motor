@@ -259,3 +259,4 @@
 - A two-GET live probe reclassified task 28880 as `torque_unit_suspect` with only `apparent_power_bound` (ratio 105.198292); the full 300-case scan remains unrun until the last active v4r3 tasks finish.
 - Stage1 v4r4 rebuild tooling now fail-closes on fixed replay authorities, exact forensic scheduler provenance, any 700-row collection drift, or non-atomic publication; focused tests pass 19/19, while real output remains gated on published forensic/recovery receipts.
 - Torque-unit replay forensics are published 4/4 at receipt `28600d7f...2c23d0a`: selected tasks 29328/29297/29298/29299, excluded infra task 29288, with full-window raw exports and exact torque/power gates verified.
+- Stage2 audit aggregate publication now uses hash-named staging, bounded WinError retries, and exact-byte late-success checks; the earlier 5-checkpoint receipt materialized after its reported error, while the provider sidecar remains preserved.

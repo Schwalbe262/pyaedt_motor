@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 from urllib import error, parse
 
 import audit_ipmsm_stage2_v4r3_results as audit
@@ -206,6 +207,186 @@ class Stage2V4R3AuditTests(unittest.TestCase):
     def evidence(self, root: Path, count: int) -> audit.CampaignEvidence:
         plan, decision = write_fixture(root, count=count)
         return audit.load_campaign_evidence(plan, decision, expected_rows=count)
+
+    def test_atomic_write_retries_transient_winerror_with_owned_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / audit.RECEIPT_NAME
+            payload = b'{"generation":1}\n'
+            destination.write_bytes(b'{"generation":0}\n')
+            real_replace = audit.os.replace
+            calls = 0
+
+            def flaky_replace(source: Path, output: Path) -> None:
+                nonlocal calls
+                calls += 1
+                if calls <= 2:
+                    denied = PermissionError("mapped-drive sharing window")
+                    denied.winerror = 5
+                    raise denied
+                real_replace(source, output)
+
+            with mock.patch.object(
+                audit.os, "replace", side_effect=flaky_replace
+            ), mock.patch.object(audit.time, "sleep"):
+                audit._atomic_write(destination, payload)
+
+            self.assertEqual(calls, 3)
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertEqual(list(destination.parent.glob(f".{destination.name}.*.tmp")), [])
+
+    def test_atomic_write_accepts_only_exact_late_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / audit.RECEIPT_NAME
+            payload = b'{"generation":2}\n'
+            destination.write_bytes(b'{"generation":1}\n')
+            real_replace = audit.os.replace
+            calls = 0
+
+            def late_success(source: Path, output: Path) -> None:
+                nonlocal calls
+                calls += 1
+                real_replace(source, output)
+                denied = PermissionError("server acknowledged the move late")
+                denied.winerror = 5
+                raise denied
+
+            with mock.patch.object(audit.os, "replace", side_effect=late_success):
+                audit._atomic_write(destination, payload)
+
+            self.assertEqual(calls, 1)
+            self.assertEqual(destination.read_bytes(), payload)
+
+    def test_atomic_write_waits_for_exact_late_success_after_stage_disappears(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / audit.RECEIPT_NAME
+            payload = b'{"generation":2}\n'
+            real_snapshot = audit._snapshot_file
+            replace_failed = False
+            destination_checks = 0
+
+            def delayed_success(source: Path, _output: Path) -> None:
+                nonlocal replace_failed
+                replace_failed = True
+                source.unlink()
+                denied = PermissionError("server applied the move asynchronously")
+                denied.winerror = 5
+                raise denied
+
+            def controlled_snapshot(path: Path) -> audit._FileSnapshot:
+                nonlocal destination_checks
+                if path == destination and replace_failed:
+                    destination_checks += 1
+                    if destination_checks < 3:
+                        return audit._FileSnapshot("missing")
+                    destination.write_bytes(payload)
+                return real_snapshot(path)
+
+            with mock.patch.object(
+                audit.os, "replace", side_effect=delayed_success
+            ) as replace, mock.patch.object(
+                audit, "_snapshot_file", side_effect=controlled_snapshot
+            ), mock.patch.object(audit.time, "sleep") as sleep:
+                audit._atomic_write(destination, payload)
+
+            self.assertEqual(replace.call_count, 1)
+            self.assertEqual(sleep.call_count, 1)
+            self.assertEqual(destination.read_bytes(), payload)
+
+    def test_atomic_write_rejects_nonexact_late_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            destination = root / audit.RECEIPT_NAME
+            payload = b'{"generation":2}\n'
+
+            def foreign_winner(_source: Path, output: Path) -> None:
+                output.write_bytes(b"foreign")
+                denied = PermissionError("destination became busy")
+                denied.winerror = 5
+                raise denied
+
+            with mock.patch.object(
+                audit.os, "replace", side_effect=foreign_winner
+            ) as replace, mock.patch.object(audit.time, "sleep") as sleep:
+                with self.assertRaisesRegex(RuntimeError, "became ambiguous"):
+                    audit._atomic_write(destination, payload)
+
+            self.assertEqual(replace.call_count, 1)
+            sleep.assert_not_called()
+            self.assertEqual(destination.read_bytes(), b"foreign")
+            sha256 = audit.sha256_bytes(payload)
+            retained = list(root.glob(f".{destination.name}.{sha256}.*.tmp"))
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(retained[0].read_bytes(), payload)
+
+    def test_atomic_write_exhaustion_retains_hash_stage_and_existing_orphans(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            destination = root / audit.RECEIPT_NAME
+            payload = b'{"generation":3}\n'
+            legacy_stage = root / ".receipt.canonical.json.legacy.tmp"
+            provider_sidecar = root / "receipt.canonical.json.tmp"
+            legacy_stage.write_bytes(b"legacy-stage")
+            provider_sidecar.write_bytes(b"provider-sidecar")
+            denied = PermissionError("mapped-drive sharing window stayed open")
+            denied.winerror = 5
+
+            with mock.patch.object(
+                audit.os, "replace", side_effect=denied
+            ) as replace, mock.patch.object(audit.time, "sleep"):
+                with self.assertRaisesRegex(PermissionError, "sharing window"):
+                    audit._atomic_write(destination, payload)
+
+            self.assertEqual(
+                replace.call_count,
+                len(audit.ATOMIC_REPLACE_RETRY_DELAYS_SECONDS) + 1,
+            )
+            self.assertEqual(legacy_stage.read_bytes(), b"legacy-stage")
+            self.assertEqual(provider_sidecar.read_bytes(), b"provider-sidecar")
+            sha256 = audit.sha256_bytes(payload)
+            retained = list(root.glob(f".{destination.name}.{sha256}.*.tmp"))
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(retained[0].read_bytes(), payload)
+            self.assertFalse(destination.exists())
+
+    def test_atomic_write_fails_closed_when_success_has_no_visible_destination(self) -> None:
+        for destination_state in ("missing", "unreadable"):
+            with self.subTest(
+                destination_state=destination_state
+            ), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                destination = root / audit.RECEIPT_NAME
+                payload = b'{"generation":4}\n'
+                real_snapshot = audit._snapshot_file
+                replace_returned = False
+
+                def fake_replace(_source: Path, _output: Path) -> None:
+                    nonlocal replace_returned
+                    replace_returned = True
+
+                def controlled_snapshot(path: Path) -> audit._FileSnapshot:
+                    if path == destination and replace_returned:
+                        return audit._FileSnapshot(destination_state)
+                    return real_snapshot(path)
+
+                with mock.patch.object(
+                    audit.os, "replace", side_effect=fake_replace
+                ) as replace, mock.patch.object(
+                    audit, "_snapshot_file", side_effect=controlled_snapshot
+                ), mock.patch.object(audit.time, "sleep") as sleep:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "without an exact readable destination"
+                    ):
+                        audit._atomic_write(destination, payload)
+
+                self.assertEqual(replace.call_count, 1)
+                self.assertEqual(
+                    sleep.call_count,
+                    len(audit.ATOMIC_REPLACE_RETRY_DELAYS_SECONDS),
+                )
+                sha256 = audit.sha256_bytes(payload)
+                retained = list(root.glob(f".{destination.name}.{sha256}.*.tmp"))
+                self.assertEqual(len(retained), 1)
+                self.assertEqual(retained[0].read_bytes(), payload)
 
     def test_dry_run_queries_every_exact_identity_and_fetches_only_scheduler_success(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

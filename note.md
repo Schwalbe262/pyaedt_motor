@@ -3878,3 +3878,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: seal four successful replay results and retained torque reports before replacing either contaminated official row.
 - Actions/result: detected the Scheduler remote-file 256 KiB tail default, requested and bounded full 1 MiB windows, verified all 4 result/raw pairs, and published 8 byte-preserved artifacts plus canonical receipt `28600d7f...2c23d0a`; task 29288 remains explicitly excluded.
 - Metrics/next: selected 29328/29297/29298/29299, torque units `mNewtonMeter/NewtonMeter`, normalized torque and mechanical power exact, apparent-power ratios 0.0582-0.2253; wait for the full Stage2 audit before publishing recovery plans.
+
+## 2026-07-13 01:24:00 +09:00 - RaiDrive Stage2 audit publication recovery hardened
+- Part/goal: resume the 300-case GET-only audit without treating a delayed network-drive rename as loss or deleting ambiguous evidence.
+- Actions/result: added hash-named stages, exact double-read snapshots, transient WinError 5/32/33 retry, and exact-payload late-success acceptance; focused tests pass 17/17.
+- Evidence/next: the failed 6,443-byte stage independently materialized as canonical receipt with 5 audited checkpoints and 4 observations; the older provider sidecar remains untouched, and the full scan can now resume from immutable checkpoints.
