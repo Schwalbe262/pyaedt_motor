@@ -195,6 +195,26 @@ const qualityRunning = {
   scheduler: byId("qualityExperimentSchedulerCounts").textContent,
   cap: byId("qualityExperimentCap").textContent,
 };
+const staleQualityExperiment = JSON.parse(JSON.stringify(qualityExperiment));
+staleQualityExperiment.status = "complete";
+staleQualityExperiment.completed = 24;
+staleQualityExperiment.active = 0;
+staleQualityExperiment.missing = 0;
+staleQualityExperiment.analysis_integrity_status = "verified";
+staleQualityExperiment.analysis_outputs_verified = 4;
+staleQualityExperiment.chosen_candidate = "time_135_p12_iron525";
+context.__staleQualityExperiment = {
+  stale: true,
+  quality_profile_experiment: staleQualityExperiment,
+};
+vm.runInContext("renderQualityProfileExperiment(__staleQualityExperiment)", context);
+const qualityStale = {
+  state: byId("qualityExperimentCard").dataset.state,
+  progress: byId("qualityExperimentProgress").value,
+  selectedCandidateExposed: byId("qualityExperimentSelectedProfile").textContent.includes(
+    "time_135_p12_iron525",
+  ),
+};
 const invalidQualityExperiment = JSON.parse(JSON.stringify(qualityExperiment));
 invalidQualityExperiment.integrity_status = "invalid";
 invalidQualityExperiment.scheduler_integrity_status = "invalid";
@@ -238,6 +258,7 @@ process.stdout.write(JSON.stringify({
     slotSub: byId("slotSub").textContent,
   },
   qualityRunning,
+  qualityStale,
   qualityInvalid,
 }));
 """
@@ -287,6 +308,14 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(result["qualityRunning"]["missing"], "12")
         self.assertIn("queued 2", result["qualityRunning"]["scheduler"])
         self.assertIn("Project active 100 / cap 100", result["qualityRunning"]["cap"])
+        self.assertEqual(
+            result["qualityStale"],
+            {
+                "state": "unavailable",
+                "progress": 0,
+                "selectedCandidateExposed": False,
+            },
+        )
         self.assertEqual(
             result["qualityInvalid"],
             {

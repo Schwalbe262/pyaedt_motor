@@ -7,34 +7,16 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $artifactDir = Join-Path $repoRoot 'simul_log_smoke\beta_zero_recovery_26092_26093'
 $outputDir = Join-Path $repoRoot 'collected\ipmsm_v2_profile_thirdpass_speed_v1'
+$analysisDir = Join-Path $repoRoot 'collected\ipmsm_v2_profile_thirdpass_speed_v1_analysis_v1'
 $mergedOutput = 'profile_thirdpass_speed_v2s1_paired24_results_v1.csv'
 $python = 'C:\Python314\python.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw "Python interpreter is unavailable: $python"
 }
-if (Test-Path -LiteralPath $outputDir) {
-    $selectedPlan = Join-Path $outputDir 'selected_cases.csv'
-    $mergedResult = Join-Path $outputDir $mergedOutput
-    $resultDir = Join-Path $outputDir 'results'
-    $resultCount = if (Test-Path -LiteralPath $resultDir -PathType Container) {
-        @(Get-ChildItem -LiteralPath $resultDir -Filter '*.csv' -File).Count
-    }
-    else {
-        0
-    }
-    if (
-        (Test-Path -LiteralPath $selectedPlan -PathType Leaf) -and
-        (Test-Path -LiteralPath $mergedResult -PathType Leaf) -and
-        $resultCount -eq 24
-    ) {
-        exit 0
-    }
-    throw "Existing profile collection is incomplete or ambiguous: $outputDir"
-}
 
 $arguments = @(
     '-u',
-    (Join-Path $repoRoot 'run_ipmsm_v2_campaign.py'),
+    (Join-Path $repoRoot 'run_ipmsm_profile_thirdpass_speed_v1.py'),
     '--cases', (Join-Path $repoRoot 'simul_log_smoke\profile_thirdpass_speed_v2s1_paired24_cases_v1.csv'),
     '--project', 'PYAEDT_MOTOR_IPMSM_V2',
     '--scheduler-url', 'http://127.0.0.1:8000',
@@ -58,13 +40,38 @@ $arguments = @(
 if (-not $DryRun) {
     $arguments += '--submit'
 }
+$finalizerArguments = @(
+    '-u',
+    (Join-Path $repoRoot 'finalize_ipmsm_profile_thirdpass_speed_v1.py'),
+    '--collection-dir', $outputDir,
+    '--output-dir', $analysisDir
+)
+if (-not $DryRun) {
+    $finalizerArguments += '--execute'
+}
 
-$stdout = Join-Path $artifactDir 'profile_thirdpass_speed_v1.stdout.log'
-$stderr = Join-Path $artifactDir 'profile_thirdpass_speed_v1.stderr.log'
+$logStem = if ($DryRun) {
+    'profile_thirdpass_speed_v1.dryrun'
+}
+else {
+    'profile_thirdpass_speed_v1'
+}
+$stdout = Join-Path $artifactDir "$logStem.stdout.log"
+$stderr = Join-Path $artifactDir "$logStem.stderr.log"
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    & $python @arguments 1>> $stdout 2>> $stderr
+    if (-not (Test-Path -LiteralPath $outputDir)) {
+        & $python @arguments 1>> $stdout 2>> $stderr
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            exit $exitCode
+        }
+        if ($DryRun) {
+            exit 0
+        }
+    }
+    & $python @finalizerArguments 1>> $stdout 2>> $stderr
     $exitCode = $LASTEXITCODE
 }
 finally {

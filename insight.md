@@ -815,3 +815,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: exact manifests, inode-preserving links, full output replay, late-attempt cleanup, and outcome-aware telemetry converge without replacement or duplicate training; monitor timeout now covers the measured project-history query.
 - Evidence: repeated kill/race and Y:/UNC tests, independent no-P0/P1 QA, v4 136/136, full 962/962, and live dashboard health=ok with scheduler stale=false.
 - Remaining risk: completed/no-ready Stage1 is safely salvaged on execute but the read-only v4 inspector still labels that narrow window `needs_run`; refine the future v4 UI before activation if operator-facing recovery detail is required.
+
+## 2026-07-12 16:00:46 +09:00 - Insight 90
+- Source loop: paired-profile collector integration while sealed Stage1 was live.
+- Improvement: never edit a source-pinned live pipeline helper for an ancillary data exception; apply a narrowly scoped process adapter and bind downstream analysis to exact input, source, and output hashes.
+- Before: allowing two setup fingerprints inside the shared collector changed its pinned SHA, invalidated the v3 contract, and degraded the dashboard even though the experiment itself was valid.
+- After: the original collector SHA remains intact; only the paired-24 runner temporarily installs an exact two-profile validator, restores it in `finally`, and a no-replace finalizer independently replays all 24 rows before ranking.
+- Evidence: live v3 health recovered with Stage1 unchanged, remote task count stayed exactly 24, four independent-audit gaps were closed, dry-run submitted nothing, and full `.venv` discovery passed 987 tests with 5 skips.
+- Remaining risk: the quality choice remains unavailable until all 24 simulations finish and the strict finalizer verifies collection, runtime, and error gates.

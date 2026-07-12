@@ -1885,6 +1885,127 @@ class QualityProfileExperimentTests(unittest.TestCase):
                         }
                     )
 
+    def _write_artifact_fixture(
+        self,
+        root: Path,
+        *,
+        include_analysis: bool = True,
+    ) -> tuple[dashboard.DashboardConfig, tuple[str, ...], dict[str, object]]:
+        self._write_plan(root)
+        config = dashboard.DashboardConfig(root, root / "unused.json")
+        _, task_names = dashboard.inspect_quality_profile_experiment_plan(config)
+        collection = root / dashboard.QUALITY_PROFILE_COLLECTION
+        results = collection / "results"
+        results.mkdir(parents=True)
+        (collection / dashboard.QUALITY_PROFILE_COLLECTION_PLAN_NAME).write_bytes(
+            (root / dashboard.QUALITY_PROFILE_PLAN).read_bytes()
+        )
+        (collection / dashboard.QUALITY_PROFILE_COLLECTION_MERGED_NAME).write_text(
+            "merged\n", encoding="utf-8"
+        )
+        prefix = f"{dashboard.QUALITY_PROFILE_TASK_PREFIX}-"
+        candidate_tree_lines = []
+        for task_name in task_names:
+            name = f"{task_name.removeprefix(prefix)}.csv"
+            payload = b"candidate CSV fixture\n"
+            (results / name).write_bytes(payload)
+            candidate_tree_lines.append(
+                f"{name}\0{hashlib.sha256(payload).hexdigest()}\n"
+            )
+
+        reference_relative = Path("audit/complete42.csv")
+        reference = root / reference_relative
+        reference.parent.mkdir(parents=True)
+        reference.write_text("audited complete42 reference\n", encoding="utf-8")
+        source_files = {
+            label: Path("audit/sources") / f"{label}.py"
+            for label in dashboard.QUALITY_PROFILE_SOURCE_FILES
+        }
+        for label, relative in source_files.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"# {label}\n", encoding="utf-8")
+        patches: dict[str, object] = {
+            "QUALITY_PROFILE_FIXED_PLAN_SHA256": dashboard._file_sha256(
+                root / dashboard.QUALITY_PROFILE_PLAN
+            ),
+            "QUALITY_PROFILE_REFERENCE_RESULTS": reference_relative,
+            "QUALITY_PROFILE_REFERENCE_SHA256": dashboard._file_sha256(reference),
+            "QUALITY_PROFILE_SOURCE_FILES": source_files,
+        }
+        if not include_analysis:
+            return config, task_names, patches
+
+        analysis = root / dashboard.QUALITY_PROFILE_ANALYSIS
+        analysis.mkdir(parents=True)
+        artifacts = {
+            "rank.csv": b"rank summary\n",
+            "candidate_ab_comparison.csv": b"candidate A/B comparison\n",
+            "top_profiles.txt": (
+                b"reference_ultra,time_135_p12_iron525,time_138_p12_baseline\n"
+            ),
+        }
+        for name, payload in artifacts.items():
+            (analysis / name).write_bytes(payload)
+        manifest = {
+            "chosen_candidate": "time_135_p12_iron525",
+            "counts": {
+                "candidate_profiles": 2,
+                "candidate_result_files": 24,
+                "candidate_rows": 24,
+                "reference_rows": dashboard.QUALITY_PROFILE_REFERENCE_ROWS,
+                "strict_reference_rows": 12,
+            },
+            "experiment_id": dashboard.QUALITY_PROFILE_EXPERIMENT_ID,
+            "inputs": {
+                "audited_complete42_reference_sha256": patches[
+                    "QUALITY_PROFILE_REFERENCE_SHA256"
+                ],
+                "candidate_results_tree_sha256": hashlib.sha256(
+                    "".join(sorted(candidate_tree_lines)).encode("utf-8")
+                ).hexdigest(),
+                "collected_merged_results_sha256": dashboard._file_sha256(
+                    collection / dashboard.QUALITY_PROFILE_COLLECTION_MERGED_NAME
+                ),
+                "collected_selected_plan_sha256": dashboard._file_sha256(
+                    collection / dashboard.QUALITY_PROFILE_COLLECTION_PLAN_NAME
+                ),
+                "fixed_plan_sha256": patches["QUALITY_PROFILE_FIXED_PLAN_SHA256"],
+            },
+            "outputs": {
+                name: hashlib.sha256(payload).hexdigest()
+                for name, payload in artifacts.items()
+            },
+            "production_candidates": [
+                "time_135_p12_iron525",
+                "time_138_p12_baseline",
+            ],
+            "ranking": {
+                "complete_group_threshold": 1.0,
+                "reference_profile": "reference_ultra",
+                "runtime_baseline_profile": "reference_ultra",
+                "runtime_max_ratio": 1.2,
+            },
+            "schema_version": dashboard.QUALITY_PROFILE_ANALYSIS_SCHEMA_VERSION,
+            "sources": {
+                label: dashboard._file_sha256(root / relative)
+                for label, relative in source_files.items()
+            },
+        }
+        (analysis / "analysis_manifest.json").write_bytes(
+            (
+                json.dumps(
+                    manifest,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("utf-8")
+        )
+        return config, task_names, patches
+
     def test_plan_validation_pins_schema_pairing_case_identity_and_task_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1998,6 +2119,271 @@ class QualityProfileExperimentTests(unittest.TestCase):
         self.assertIsNone(partial["missing"])
         self.assertIsNone(partial["progress_pct"])
         self.assertFalse(partial["scheduler_trusted"])
+
+    def test_scheduler_twenty_four_of_twenty_four_is_collecting_not_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_plan(root)
+            plan, task_names = dashboard.inspect_quality_profile_experiment_plan(
+                dashboard.DashboardConfig(root, root / "unused.json")
+            )
+        result = dashboard.summarize_quality_profile_experiment(
+            plan_state=plan,
+            expected_task_names=task_names,
+            tasks=[
+                {"name": name, "status": "completed", "exit_code": 0}
+                for name in task_names
+            ],
+            history_complete=True,
+            project_active=0,
+            project_cap=100,
+        )
+
+        self.assertEqual(result["completed"], 24)
+        self.assertEqual(result["status"], "collecting")
+        self.assertNotEqual(result["status"], "complete")
+
+    def test_analysis_audit_distinguishes_absent_collection_and_pending_analysis(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_plan(root)
+            config = dashboard.DashboardConfig(root, root / "unused.json")
+            _, task_names = dashboard.inspect_quality_profile_experiment_plan(config)
+            absent = dashboard.inspect_quality_profile_experiment_analysis(
+                config, task_names
+            )
+
+            self.assertEqual(absent["collection_integrity_status"], "absent")
+            self.assertEqual(absent["analysis_integrity_status"], "absent")
+            self.assertEqual(absent["conclusion"], "waiting_for_collection")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config, task_names, patches = self._write_artifact_fixture(
+                Path(tmp), include_analysis=False
+            )
+            with mock.patch.multiple(dashboard, **patches):
+                pending = dashboard.inspect_quality_profile_experiment_analysis(
+                    config, task_names
+                )
+
+            self.assertEqual(pending["collection_integrity_status"], "verified")
+            self.assertEqual(pending["analysis_integrity_status"], "absent")
+            self.assertEqual(pending["conclusion"], "analysis_pending")
+
+    def test_verified_analysis_exposes_only_manifest_selected_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, task_names, patches = self._write_artifact_fixture(root)
+            with mock.patch.multiple(dashboard, **patches):
+                result = dashboard.inspect_quality_profile_experiment_analysis(
+                    config, task_names
+                )
+
+            self.assertEqual(result["analysis_integrity_status"], "verified")
+            self.assertEqual(result["analysis_outputs_verified"], 4)
+            self.assertEqual(result["chosen_candidate"], "time_135_p12_iron525")
+            self.assertEqual(result["production_candidates"][0], result["chosen_candidate"])
+            self.assertLess(len(json.dumps(result)), 2048)
+            self.assertNotIn("sources", result)
+            self.assertNotIn("inputs", result)
+
+    def test_partial_tampered_or_drifted_analysis_fails_closed(self) -> None:
+        cases = (
+            "partial",
+            "artifact",
+            "source",
+            "input",
+            "collection_plan",
+            "collection_merged",
+            "candidate_result",
+            "schema",
+        )
+        for failure in cases:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                config, task_names, patches = self._write_artifact_fixture(root)
+                analysis = root / dashboard.QUALITY_PROFILE_ANALYSIS
+                if failure == "partial":
+                    (analysis / "top_profiles.txt").unlink()
+                elif failure == "artifact":
+                    (analysis / "rank.csv").write_text("tampered\n", encoding="utf-8")
+                elif failure == "source":
+                    first_source = root / next(iter(patches["QUALITY_PROFILE_SOURCE_FILES"].values()))
+                    first_source.write_text("# drift\n", encoding="utf-8")
+                elif failure == "input":
+                    reference = root / patches["QUALITY_PROFILE_REFERENCE_RESULTS"]
+                    reference.write_text("reference drift\n", encoding="utf-8")
+                elif failure == "collection_plan":
+                    path = (
+                        root
+                        / dashboard.QUALITY_PROFILE_COLLECTION
+                        / dashboard.QUALITY_PROFILE_COLLECTION_PLAN_NAME
+                    )
+                    path.write_text("selected drift\n", encoding="utf-8")
+                elif failure == "collection_merged":
+                    path = (
+                        root
+                        / dashboard.QUALITY_PROFILE_COLLECTION
+                        / dashboard.QUALITY_PROFILE_COLLECTION_MERGED_NAME
+                    )
+                    path.write_text("merged drift\n", encoding="utf-8")
+                elif failure == "candidate_result":
+                    result_root = (
+                        root / dashboard.QUALITY_PROFILE_COLLECTION / "results"
+                    )
+                    next(iter(result_root.iterdir())).write_text(
+                        "candidate drift\n", encoding="utf-8"
+                    )
+                else:
+                    manifest_path = analysis / "analysis_manifest.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest["schema_version"] = "unsupported"
+                    manifest_path.write_text(
+                        json.dumps(
+                            manifest,
+                            ensure_ascii=False,
+                            allow_nan=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                with mock.patch.multiple(dashboard, **patches):
+                    result = dashboard.inspect_quality_profile_experiment_analysis(
+                        config, task_names
+                    )
+
+                self.assertEqual(result["analysis_integrity_status"], "invalid")
+                self.assertEqual(result["conclusion"], "integrity_invalid")
+                self.assertIsNone(result["chosen_candidate"])
+
+    def test_reconcile_requires_scheduler_collection_and_analysis_before_complete(self) -> None:
+        scheduler = {
+            "status": "collecting",
+            "integrity_status": "verified",
+            "scheduler_integrity_status": "verified",
+            "scheduler_trusted": True,
+            "history_complete": True,
+            "completed": 24,
+            "active": 0,
+            "failed": 0,
+            "missing": 0,
+        }
+        absent = dashboard.reconcile_quality_profile_experiment_artifacts(
+            scheduler,
+            dashboard._quality_profile_artifact_state(),
+        )
+        analyzing = dashboard.reconcile_quality_profile_experiment_artifacts(
+            scheduler,
+            dashboard._quality_profile_artifact_state(
+                collection_integrity_status="verified",
+                analysis_integrity_status="absent",
+            ),
+        )
+        complete = dashboard.reconcile_quality_profile_experiment_artifacts(
+            scheduler,
+            dashboard._quality_profile_artifact_state(
+                collection_integrity_status="verified",
+                analysis_integrity_status="verified",
+                analysis_outputs_verified=4,
+                chosen_candidate="time_135_p12_iron525",
+                production_candidates=["time_135_p12_iron525"],
+            ),
+        )
+        invalid = dashboard.reconcile_quality_profile_experiment_artifacts(
+            scheduler,
+            dashboard._quality_profile_invalid_artifact_state(
+                "analysis_source_drift", collection_status="verified"
+            ),
+        )
+        unavailable = dashboard.reconcile_quality_profile_experiment_artifacts(
+            scheduler,
+            dashboard._quality_profile_artifact_state(
+                collection_integrity_status="not_checked",
+                analysis_integrity_status="not_checked",
+            ),
+        )
+
+        self.assertEqual(absent["status"], "collecting")
+        self.assertEqual(analyzing["status"], "analyzing")
+        self.assertEqual(complete["status"], "complete")
+        self.assertEqual(complete["chosen_candidate"], "time_135_p12_iron525")
+        self.assertEqual(invalid["status"], "failed")
+        self.assertEqual(invalid["integrity_status"], "invalid")
+        self.assertIsNone(invalid["chosen_candidate"])
+        self.assertEqual(unavailable["status"], "unavailable")
+        self.assertEqual(unavailable["integrity_status"], "unavailable")
+        self.assertIsNone(unavailable["chosen_candidate"])
+
+    def test_local_collection_failure_withholds_cached_selected_candidate(self) -> None:
+        local = FamilyConfirmationTests._healthy_local("waiting_stage1")
+        local_profile = dashboard._quality_profile_experiment_state(
+            plan_integrity_status="verified",
+            planned=24,
+            source_count=12,
+        )
+        local_profile.update(
+            dashboard._quality_profile_artifact_state(
+                collection_integrity_status="verified",
+                analysis_integrity_status="verified",
+                analysis_outputs_verified=4,
+                chosen_candidate="time_135_p12_iron525",
+                production_candidates=["time_135_p12_iron525"],
+                conclusion="profile_selected",
+            )
+        )
+        local["quality_profile_experiment"] = local_profile
+
+        scheduler = FamilyConfirmationTests._healthy_scheduler()
+        scheduler_profile = dashboard._quality_profile_experiment_state(
+            plan_integrity_status="verified",
+            planned=24,
+            source_count=12,
+        )
+        scheduler_profile.update(
+            scheduler_integrity_status="verified",
+            integrity_status="verified",
+            scheduler_trusted=True,
+            history_complete=True,
+            status="collecting",
+            completed=24,
+            active=0,
+            failed=0,
+            missing=0,
+        )
+        scheduler["quality_profile_experiment"] = scheduler_profile
+        calls = 0
+
+        def collect_local(_: dashboard.DashboardConfig) -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return copy.deepcopy(local)
+            raise dashboard.DashboardDataError("local unavailable")
+
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=collect_local,
+            scheduler_collector=lambda _: copy.deepcopy(scheduler),
+        )
+        first = store.refresh_once(force_scheduler=True)
+        stale = store.refresh_once(force_scheduler=True)
+
+        self.assertEqual(first["quality_profile_experiment"]["status"], "complete")
+        self.assertEqual(
+            first["quality_profile_experiment"]["chosen_candidate"],
+            "time_135_p12_iron525",
+        )
+        self.assertTrue(stale["stale"])
+        stale_profile = stale["quality_profile_experiment"]
+        self.assertEqual(stale_profile["status"], "unavailable")
+        self.assertEqual(stale_profile["integrity_status"], "unavailable")
+        self.assertEqual(
+            stale_profile["error_code"], "analysis_monitoring_unavailable"
+        )
+        self.assertIsNone(stale_profile["chosen_candidate"])
+        self.assertEqual(stale_profile["production_candidates"], [])
 
 
 class SchedulerTests(unittest.TestCase):
@@ -2892,9 +3278,17 @@ class HttpTests(unittest.TestCase):
         self.assertIn('id="targetLoadFailure"', index)
         self.assertIn('id="qualityExperimentCard"', index)
         self.assertIn('id="qualityExperimentProgress"', index)
+        self.assertIn('id="qualityExperimentConclusion"', index)
+        self.assertIn('id="qualityExperimentSelectedProfile"', index)
+        self.assertIn('id="qualityExperimentAnalysis"', index)
         self.assertIn('id="qualityExperimentSchedulerCounts"', index)
         self.assertIn('id="qualityExperimentCap"', index)
         self.assertIn("OFFICIAL PIPELINE STAGE 아님", index)
+        self.assertIn('setText("qualityExperimentConclusion"', app)
+        self.assertIn('"qualityExperimentSelectedProfile"', app)
+        self.assertIn('"qualityExperimentAnalysis"', app)
+        self.assertIn("data.stale !== true", app)
+        self.assertIn("canonical manifest + 4 artifacts verified", app)
         self.assertIn("최신 스냅샷 다시 불러오기", index)
 
     def test_mutating_methods_and_path_traversal_are_rejected(self) -> None:

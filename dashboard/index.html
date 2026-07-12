@@ -161,7 +161,7 @@
             id="qualityExperimentCard"
             data-state="unavailable"
             aria-labelledby="qualityExperimentTitle"
-            aria-describedby="qualityExperimentRelation qualityExperimentSchedulerCounts qualityExperimentCap"
+            aria-describedby="qualityExperimentRelation qualityExperimentConclusion qualityExperimentSelectedProfile qualityExperimentAnalysis qualityExperimentSchedulerCounts qualityExperimentCap"
           >
             <div class="quality-experiment-heading">
               <div>
@@ -185,6 +185,9 @@
               <div><span>Missing</span><strong id="qualityExperimentMissing">—</strong></div>
             </div>
             <p class="quality-experiment-profiles" id="qualityExperimentProfiles">Profile pair identity 검증 중</p>
+            <p class="quality-experiment-profiles" id="qualityExperimentConclusion">Conclusion: simulation/collection/analysis 검증 중</p>
+            <p class="quality-experiment-profiles" id="qualityExperimentSelectedProfile">Selected profile: 판정 대기</p>
+            <p class="quality-experiment-scheduler" id="qualityExperimentAnalysis">Analysis manifest / 4 artifacts 검증 중</p>
             <p class="quality-experiment-scheduler" id="qualityExperimentSchedulerCounts">Scheduler 상태 집계 검증 중</p>
             <p class="quality-experiment-cap" id="qualityExperimentCap">Project cap 관계 확인 중</p>
           </section>

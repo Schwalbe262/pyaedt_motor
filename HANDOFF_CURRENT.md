@@ -7,11 +7,11 @@
 - Main run path: `controller.py` -> `simulation1.sh` -> `subprocess_run.py` -> `run_ipmsm_batch.py`.
 - Mesh and transient setup are controlled in `module/ipmsm_ppt_setup.py`.
 - Root project-memory files are now canonical; `md/` is template/archive context.
-- Live read-only dashboard: `http://127.0.0.1:8765/`; it now separates the 8-stage official pipeline from the ancillary paired-24 simulation-quality speed/mesh experiment.
-- 2026-07-12 14:56 KST: dashboard health=ok, scheduler stale=false, Stage1 validated=660/700 with 40 active, ancillary profile=24 running, and project=64/100.
+- Live read-only dashboard: `http://127.0.0.1:8765/`; it separates the 8-stage official pipeline from the ancillary paired-24 experiment and fail-closed collection/ranking conclusion.
+- 2026-07-12 15:59 KST: health=running, scheduler stale=false, Stage1 validated=681/700 with 19 active, ancillary profile=4 complete/20 active/0 failed, and project=35/100.
 - The restarted v3 task permits only the Stage1 campaign; every post-campaign validation/training/Stage2/Stage3/NSGA/speed action is held for the audited v4 supervisor.
-- Inactive v4 publication/recovery passed 136 focused and 962 full tests plus independent no-P0/P1 QA; dry-run wrote nothing, and no v4 authority, contract, or project task exists before production-input confirmation.
-- Crash-safe frozen-family sidecar commit `3c44b25` is pushed; scheduled task `PYAEDT_MOTOR_IPMSM_V2_FAMILY_CONFIRM` is Running with PID marker 43616, exact watcher SHA `f5fc5c69...c5ffe`, and is safely waiting for audited Stage1 results without creating the confirmation output root.
+- Inactive v4 plus ancillary/dashboard work passed 987 full tests (5 skipped); dry-runs wrote no authority, and no v4 contract, authority, or project task exists before production-input confirmation.
+- The legacy frozen-family watcher is stopped/Ready and is not authoritative for v4; no confirmation output root exists, so use the audited v4 path only after Stage1 and input approval.
 
 ## Current objective
 

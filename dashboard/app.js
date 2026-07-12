@@ -865,6 +865,7 @@ function renderQualityProfileExperiment(data) {
     && experiment.scheduler_integrity_status === "verified"
     && experiment.scheduler_trusted === true
     && experiment.history_complete === true
+    && data.stale !== true
     && relationVerified;
   const invalid = experiment.integrity_status === "invalid"
     || experiment.plan_integrity_status === "invalid"
@@ -877,7 +878,9 @@ function renderQualityProfileExperiment(data) {
 
   const status = byId("qualityExperimentStatus");
   const statusLabel = {
-    complete: "24-case 완료",
+    complete: "분석 완료",
+    collecting: "결과 수집 중",
+    analyzing: "A/B 분석 중",
     running: "실행 중",
     failed: "실패 case 있음",
     ready: "제출 대기",
@@ -885,7 +888,7 @@ function renderQualityProfileExperiment(data) {
     unavailable: partial ? "부분 이력 · 판정 보류" : "상태 확인 필요",
   }[rawStatus] || "상태 확인 필요";
   status.textContent = statusLabel;
-  status.className = `health-pill ${rawStatus === "complete" ? "complete" : rawStatus === "running" ? "running" : rawStatus === "failed" || rawStatus === "invalid" ? "failed" : "warning"}`;
+  status.className = `health-pill ${rawStatus === "complete" ? "complete" : ["running", "collecting", "analyzing"].includes(rawStatus) ? "running" : rawStatus === "failed" || rawStatus === "invalid" ? "failed" : "warning"}`;
 
   const progress = byId("qualityExperimentProgress");
   progress.max = expected;
@@ -921,6 +924,37 @@ function renderQualityProfileExperiment(data) {
     experiment.plan_integrity_status === "verified" && profiles.length === 2
       ? `${profiles[0]} ↔ ${profiles[1]} · ${integer(experiment.source_count, integer(experiment.expected_sources, 12))} paired sources`
       : "Profile pair identity 검증 필요",
+  );
+  const chosenCandidate = typeof experiment.chosen_candidate === "string"
+    && profiles.includes(experiment.chosen_candidate)
+    ? experiment.chosen_candidate
+    : "";
+  const analysisVerified = experiment.analysis_integrity_status === "verified"
+    && integer(experiment.analysis_outputs_verified) === 4;
+  const conclusion = {
+    complete: chosenCandidate && analysisVerified
+      ? `Conclusion: ${chosenCandidate}가 strict 12/12 A/B gate에서 선택됨`
+      : "Conclusion: 분석 무결성 재검증 필요",
+    analyzing: "Conclusion: 24/24 FEA 수집 완료 · strict A/B ranking 진행 중",
+    collecting: "Conclusion: scheduler 24/24 완료 · atomic collection 게시 대기",
+    running: "Conclusion: paired FEA 실행 중 · 아직 profile을 선택하지 않음",
+    ready: "Conclusion: scheduler 제출 대기 · 아직 profile을 선택하지 않음",
+    failed: "Conclusion: 실험 또는 산출물 무결성 실패 · 선택 무효",
+    invalid: "Conclusion: identity/manifest/hash 검증 실패 · 선택 무효",
+    unavailable: "Conclusion: 신뢰 가능한 전체 이력 확인 전 판정 보류",
+  }[rawStatus] || "Conclusion: 판정 보류";
+  setText("qualityExperimentConclusion", conclusion);
+  setText(
+    "qualityExperimentSelectedProfile",
+    rawStatus === "complete" && chosenCandidate && analysisVerified
+      ? `Selected profile: ${chosenCandidate} · canonical manifest + 4 artifacts verified`
+      : "Selected profile: — · verified analysis 완료 후에만 표시",
+  );
+  const collectionIntegrity = String(experiment.collection_integrity_status || "not_checked");
+  const analysisIntegrity = String(experiment.analysis_integrity_status || "not_checked");
+  setText(
+    "qualityExperimentAnalysis",
+    `Collection ${collectionIntegrity} · analysis ${analysisIntegrity} · verified artifacts ${integer(experiment.analysis_outputs_verified)} / 4 · official post-Pareto speed와 별도`,
   );
 
   const projectActive = count(experiment.project_active);

@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import stat
 import threading
 import time
 from collections import Counter
@@ -103,6 +104,43 @@ QUALITY_PROFILE_EXPERIMENT_ID = "profile_thirdpass_speed_v1"
 QUALITY_PROFILE_PLAN = Path(
     "simul_log_smoke/profile_thirdpass_speed_v2s1_paired24_cases_v1.csv"
 )
+QUALITY_PROFILE_FIXED_PLAN_SHA256 = (
+    "56d0c097e0a755baaaf96934b2c533d79eaab0230d10f5fd28c99a38ca82ec81"
+)
+QUALITY_PROFILE_REFERENCE_RESULTS = Path(
+    "simul_log_smoke/beta_zero_recovery_26092_26093/"
+    "foundation_stage1_complete42_snapshot_20260711_2305/merged_results.csv"
+)
+QUALITY_PROFILE_REFERENCE_SHA256 = (
+    "59c6670a8b9ac6b2a676b0217ec590a63856046d65bc64024b3ae4392385f31b"
+)
+QUALITY_PROFILE_REFERENCE_ROWS = 258
+QUALITY_PROFILE_COLLECTION = Path("collected/ipmsm_v2_profile_thirdpass_speed_v1")
+QUALITY_PROFILE_ANALYSIS = Path(
+    "collected/ipmsm_v2_profile_thirdpass_speed_v1_analysis_v1"
+)
+QUALITY_PROFILE_ANALYSIS_SCHEMA_VERSION = (
+    "ipmsm-profile-thirdpass-speed-finalization-v1"
+)
+QUALITY_PROFILE_COLLECTION_PLAN_NAME = "selected_cases.csv"
+QUALITY_PROFILE_COLLECTION_MERGED_NAME = (
+    "profile_thirdpass_speed_v2s1_paired24_results_v1.csv"
+)
+QUALITY_PROFILE_ANALYSIS_ARTIFACTS = (
+    "rank.csv",
+    "candidate_ab_comparison.csv",
+    "top_profiles.txt",
+    "analysis_manifest.json",
+)
+QUALITY_PROFILE_SOURCE_FILES = {
+    "finalizer": Path("finalize_ipmsm_profile_thirdpass_speed_v1.py"),
+    "quality_case_contract": Path("generate_ipmsm_quality_cases.py"),
+    "quality_result_contract": Path("analyze_ipmsm_quality_results.py"),
+    "quality_ranker": Path("rank_ipmsm_quality_profiles.py"),
+    "strict_case_contract": Path("generate_ipmsm_second_pass_cases.py"),
+    "strict_ranker": Path("rank_ipmsm_second_pass_profiles.py"),
+}
+QUALITY_PROFILE_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 QUALITY_PROFILE_TASK_PREFIX = "ipmsm-v2-profile-thirdpass-speed-v1"
 QUALITY_PROFILE_DATASET_SCHEMA_VERSION = "ipmsm_v2"
 QUALITY_PROFILE_EXPECTED_CASES = 24
@@ -315,6 +353,14 @@ def _quality_profile_experiment_state(
         "project_utilization_pct": None,
         "experiment_active_share_pct": None,
         "cap_status": "unavailable",
+        "collection_integrity_status": "not_checked",
+        "analysis_integrity_status": "not_checked",
+        "analysis_schema_version": QUALITY_PROFILE_ANALYSIS_SCHEMA_VERSION,
+        "analysis_outputs_verified": 0,
+        "chosen_candidate": None,
+        "production_candidates": [],
+        "conclusion": "waiting_for_scheduler",
+        "analysis_error_code": "",
         "error_code": error_code,
     }
 
@@ -428,6 +474,475 @@ def inspect_quality_profile_experiment_plan(
             source_count=len(profiles_by_source),
         ),
         tuple(task_names),
+    )
+
+
+def _quality_profile_artifact_state(
+    *,
+    collection_integrity_status: str = "absent",
+    analysis_integrity_status: str = "absent",
+    analysis_outputs_verified: int = 0,
+    chosen_candidate: str | None = None,
+    production_candidates: Sequence[str] = (),
+    conclusion: str = "waiting_for_scheduler",
+    analysis_error_code: str = "",
+    analysis_manifest_sha256: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "collection_integrity_status": collection_integrity_status,
+        "analysis_integrity_status": analysis_integrity_status,
+        "analysis_schema_version": QUALITY_PROFILE_ANALYSIS_SCHEMA_VERSION,
+        "analysis_outputs_verified": analysis_outputs_verified,
+        "analysis_manifest_sha256": analysis_manifest_sha256,
+        "chosen_candidate": chosen_candidate,
+        "production_candidates": list(production_candidates),
+        "conclusion": conclusion,
+        "analysis_error_code": analysis_error_code,
+    }
+
+
+def _quality_profile_invalid_artifact_state(
+    error_code: str,
+    *,
+    collection_status: str = "invalid",
+) -> dict[str, Any]:
+    return _quality_profile_artifact_state(
+        collection_integrity_status=collection_status,
+        analysis_integrity_status="invalid",
+        conclusion="integrity_invalid",
+        analysis_error_code=error_code,
+    )
+
+
+def _quality_profile_exact_entries(
+    root: Path,
+    expected: set[str],
+    *,
+    label: str,
+) -> None:
+    if _path_contains_symlink(root) or not root.is_dir():
+        raise DashboardDataError(f"{label} has an invalid path type")
+    try:
+        names = {entry.name for entry in root.iterdir()}
+    except OSError as exc:
+        raise DashboardDataError(f"cannot enumerate {label}") from exc
+    if names != expected:
+        raise DashboardDataError(f"{label} does not have the exact supported layout")
+
+
+def _quality_profile_require_regular_file(path: Path, *, label: str) -> None:
+    if _path_contains_symlink(path) or not path.is_file():
+        raise DashboardDataError(f"{label} has an invalid path type")
+
+
+def _quality_profile_stat_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+    )
+
+
+def _quality_profile_stable_file_sha256(path: Path, *, label: str) -> str:
+    """Hash one regular file while rejecting link and replacement races."""
+
+    if _path_contains_symlink(path):
+        raise DashboardDataError(f"{label} has an invalid path type")
+    try:
+        pathname_before = os.lstat(path)
+        if not stat.S_ISREG(pathname_before.st_mode):
+            raise DashboardDataError(f"{label} has an invalid path type")
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            opened_before = os.fstat(stream.fileno())
+            if _quality_profile_stat_identity(opened_before) != _quality_profile_stat_identity(
+                pathname_before
+            ):
+                raise DashboardDataError(f"{label} changed while it was opened")
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+            opened_after = os.fstat(stream.fileno())
+        pathname_after = os.lstat(path)
+    except DashboardDataError:
+        raise
+    except OSError as exc:
+        raise DashboardDataError(f"cannot read {label}") from exc
+    identities = {
+        _quality_profile_stat_identity(pathname_before),
+        _quality_profile_stat_identity(opened_before),
+        _quality_profile_stat_identity(opened_after),
+        _quality_profile_stat_identity(pathname_after),
+    }
+    if len(identities) != 1 or _path_contains_symlink(path):
+        raise DashboardDataError(f"{label} changed during audit")
+    return digest.hexdigest()
+
+
+def _quality_profile_candidate_tree_sha256(
+    result_root: Path,
+    expected_names: set[str],
+) -> str:
+    """Reproduce the finalizer's canonical filename/NUL/file-SHA tree digest."""
+
+    if _path_contains_symlink(result_root):
+        raise DashboardDataError("quality-profile result directory has an invalid path type")
+    try:
+        directory_before = os.lstat(result_root)
+    except OSError as exc:
+        raise DashboardDataError("cannot inspect quality-profile result directory") from exc
+    if not stat.S_ISDIR(directory_before.st_mode):
+        raise DashboardDataError("quality-profile result directory has an invalid path type")
+    lines = []
+    for name in sorted(expected_names):
+        digest = _quality_profile_stable_file_sha256(
+            result_root / name,
+            label="quality-profile candidate result",
+        )
+        lines.append(f"{name}\0{digest}\n")
+    try:
+        directory_after = os.lstat(result_root)
+    except OSError as exc:
+        raise DashboardDataError("quality-profile result directory changed during audit") from exc
+    if (
+        _quality_profile_stat_identity(directory_before)
+        != _quality_profile_stat_identity(directory_after)
+        or _path_contains_symlink(result_root)
+    ):
+        raise DashboardDataError("quality-profile result directory changed during audit")
+    return hashlib.sha256("".join(sorted(lines)).encode("utf-8")).hexdigest()
+
+
+def _quality_profile_require_keys(
+    value: Mapping[str, Any],
+    expected: set[str],
+    *,
+    label: str,
+) -> None:
+    if set(value) != expected:
+        raise DashboardDataError(f"{label} fields differ from the supported schema")
+
+
+def _quality_profile_digest(value: Any, *, label: str) -> str:
+    digest = str(value or "")
+    if QUALITY_PROFILE_SHA256_RE.fullmatch(digest) is None:
+        raise DashboardDataError(f"{label} is not a canonical SHA256 digest")
+    return digest
+
+
+def inspect_quality_profile_experiment_analysis(
+    config: "DashboardConfig",
+    expected_task_names: Sequence[str],
+) -> dict[str, Any]:
+    """Audit finalization artifacts and hash the 24 one-row candidate CSVs."""
+
+    if len(expected_task_names) != QUALITY_PROFILE_EXPECTED_CASES:
+        return _quality_profile_artifact_state(
+            collection_integrity_status="not_checked",
+            analysis_integrity_status="not_checked",
+            conclusion="waiting_for_valid_plan",
+        )
+    task_prefix = f"{QUALITY_PROFILE_TASK_PREFIX}-"
+    if any(not name.startswith(task_prefix) for name in expected_task_names):
+        return _quality_profile_invalid_artifact_state("analysis_task_identity_invalid")
+    expected_result_names = {
+        f"{name.removeprefix(task_prefix)}.csv" for name in expected_task_names
+    }
+    if len(expected_result_names) != QUALITY_PROFILE_EXPECTED_CASES:
+        return _quality_profile_invalid_artifact_state("analysis_task_identity_invalid")
+
+    collection = config.workdir / QUALITY_PROFILE_COLLECTION
+    analysis = config.workdir / QUALITY_PROFILE_ANALYSIS
+    collection_exists = os.path.lexists(collection)
+    analysis_exists = os.path.lexists(analysis)
+    if not collection_exists:
+        if analysis_exists:
+            return _quality_profile_invalid_artifact_state(
+                "analysis_without_collection",
+                collection_status="absent",
+            )
+        return _quality_profile_artifact_state(
+            collection_integrity_status="absent",
+            analysis_integrity_status="absent",
+            conclusion="waiting_for_collection",
+        )
+
+    try:
+        _quality_profile_exact_entries(
+            collection,
+            {
+                QUALITY_PROFILE_COLLECTION_PLAN_NAME,
+                QUALITY_PROFILE_COLLECTION_MERGED_NAME,
+                "results",
+            },
+            label="quality-profile collection",
+        )
+        _quality_profile_require_regular_file(
+            collection / QUALITY_PROFILE_COLLECTION_PLAN_NAME,
+            label="quality-profile selected plan",
+        )
+        _quality_profile_require_regular_file(
+            collection / QUALITY_PROFILE_COLLECTION_MERGED_NAME,
+            label="quality-profile merged results",
+        )
+        result_root = collection / "results"
+        _quality_profile_exact_entries(
+            result_root,
+            expected_result_names,
+            label="quality-profile result directory",
+        )
+        for name in expected_result_names:
+            _quality_profile_require_regular_file(
+                result_root / name,
+                label="quality-profile candidate result",
+            )
+    except (DashboardDataError, OSError):
+        return _quality_profile_invalid_artifact_state("collection_layout_invalid")
+
+    if not analysis_exists:
+        return _quality_profile_artifact_state(
+            collection_integrity_status="verified",
+            analysis_integrity_status="absent",
+            conclusion="analysis_pending",
+        )
+
+    try:
+        _quality_profile_exact_entries(
+            analysis,
+            set(QUALITY_PROFILE_ANALYSIS_ARTIFACTS),
+            label="quality-profile analysis",
+        )
+        for name in QUALITY_PROFILE_ANALYSIS_ARTIFACTS:
+            _quality_profile_require_regular_file(
+                analysis / name,
+                label=f"quality-profile {name}",
+            )
+    except (DashboardDataError, OSError):
+        return _quality_profile_invalid_artifact_state(
+            "analysis_layout_invalid",
+            collection_status="verified",
+        )
+
+    try:
+        manifest_path = analysis / "analysis_manifest.json"
+        manifest = read_json_file(manifest_path, max_bytes=64 * 1024)
+        canonical_manifest = (
+            json.dumps(
+                manifest,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+        if manifest_path.read_bytes() != canonical_manifest:
+            raise DashboardDataError("quality-profile manifest is not canonical JSON")
+        _quality_profile_require_keys(
+            manifest,
+            {
+                "chosen_candidate",
+                "counts",
+                "experiment_id",
+                "inputs",
+                "outputs",
+                "production_candidates",
+                "ranking",
+                "schema_version",
+                "sources",
+            },
+            label="quality-profile analysis manifest",
+        )
+        if (
+            manifest.get("schema_version") != QUALITY_PROFILE_ANALYSIS_SCHEMA_VERSION
+            or manifest.get("experiment_id") != QUALITY_PROFILE_EXPERIMENT_ID
+        ):
+            raise DashboardDataError("quality-profile manifest identity differs")
+
+        counts = manifest.get("counts")
+        if not isinstance(counts, Mapping):
+            raise DashboardDataError("quality-profile manifest counts are invalid")
+        expected_counts = {
+            "candidate_profiles": len(QUALITY_PROFILE_EXPECTED_PROFILES),
+            "candidate_result_files": QUALITY_PROFILE_EXPECTED_CASES,
+            "candidate_rows": QUALITY_PROFILE_EXPECTED_CASES,
+            "reference_rows": QUALITY_PROFILE_REFERENCE_ROWS,
+            "strict_reference_rows": QUALITY_PROFILE_EXPECTED_SOURCES,
+        }
+        _quality_profile_require_keys(
+            counts,
+            set(expected_counts),
+            label="quality-profile manifest counts",
+        )
+        if any(type(counts.get(key)) is not int or counts.get(key) != value for key, value in expected_counts.items()):
+            raise DashboardDataError("quality-profile manifest counts differ")
+
+        inputs = manifest.get("inputs")
+        if not isinstance(inputs, Mapping):
+            raise DashboardDataError("quality-profile manifest inputs are invalid")
+        input_names = {
+            "audited_complete42_reference_sha256",
+            "candidate_results_tree_sha256",
+            "collected_merged_results_sha256",
+            "collected_selected_plan_sha256",
+            "fixed_plan_sha256",
+        }
+        _quality_profile_require_keys(inputs, input_names, label="quality-profile manifest inputs")
+        input_hashes = {
+            name: _quality_profile_digest(inputs.get(name), label=f"quality-profile input {name}")
+            for name in input_names
+        }
+        plan_path = config.workdir / QUALITY_PROFILE_PLAN
+        reference_path = config.workdir / QUALITY_PROFILE_REFERENCE_RESULTS
+        _quality_profile_require_regular_file(plan_path, label="quality-profile fixed plan")
+        _quality_profile_require_regular_file(
+            reference_path,
+            label="quality-profile complete42 reference",
+        )
+        current_plan_sha = _file_sha256(plan_path)
+        current_reference_sha = _file_sha256(reference_path)
+        if (
+            current_plan_sha != QUALITY_PROFILE_FIXED_PLAN_SHA256
+            or input_hashes["fixed_plan_sha256"] != current_plan_sha
+            or current_reference_sha != QUALITY_PROFILE_REFERENCE_SHA256
+            or input_hashes["audited_complete42_reference_sha256"] != current_reference_sha
+        ):
+            raise DashboardDataError("quality-profile fixed input hash differs")
+        current_selected_sha = _file_sha256(
+            collection / QUALITY_PROFILE_COLLECTION_PLAN_NAME
+        )
+        current_merged_sha = _file_sha256(
+            collection / QUALITY_PROFILE_COLLECTION_MERGED_NAME
+        )
+        current_candidate_tree_sha = _quality_profile_candidate_tree_sha256(
+            result_root,
+            expected_result_names,
+        )
+        if (
+            current_selected_sha != current_plan_sha
+            or input_hashes["collected_selected_plan_sha256"]
+            != current_selected_sha
+            or input_hashes["collected_merged_results_sha256"]
+            != current_merged_sha
+            or input_hashes["candidate_results_tree_sha256"]
+            != current_candidate_tree_sha
+        ):
+            raise DashboardDataError("quality-profile collection input hash differs")
+
+        ranking = manifest.get("ranking")
+        if not isinstance(ranking, Mapping):
+            raise DashboardDataError("quality-profile manifest ranking is invalid")
+        _quality_profile_require_keys(
+            ranking,
+            {
+                "complete_group_threshold",
+                "reference_profile",
+                "runtime_baseline_profile",
+                "runtime_max_ratio",
+            },
+            label="quality-profile manifest ranking",
+        )
+        numeric_ranking = (
+            ranking.get("complete_group_threshold"),
+            ranking.get("runtime_max_ratio"),
+        )
+        if (
+            any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in numeric_ranking)
+            or float(numeric_ranking[0]) != 1.0
+            or float(numeric_ranking[1]) != 1.2
+            or ranking.get("reference_profile") != "reference_ultra"
+            or ranking.get("runtime_baseline_profile") != "reference_ultra"
+        ):
+            raise DashboardDataError("quality-profile ranking contract differs")
+
+        sources = manifest.get("sources")
+        if not isinstance(sources, Mapping):
+            raise DashboardDataError("quality-profile manifest sources are invalid")
+        _quality_profile_require_keys(
+            sources,
+            set(QUALITY_PROFILE_SOURCE_FILES),
+            label="quality-profile manifest sources",
+        )
+        for label, relative_path in QUALITY_PROFILE_SOURCE_FILES.items():
+            source_path = config.workdir / relative_path
+            _quality_profile_require_regular_file(
+                source_path,
+                label=f"quality-profile {label} source",
+            )
+            current = _file_sha256(source_path)
+            if _quality_profile_digest(sources.get(label), label=f"quality-profile {label} source") != current:
+                raise DashboardDataError("quality-profile source hash differs")
+
+        output_hashes = manifest.get("outputs")
+        expected_output_hash_names = {
+            "rank.csv",
+            "candidate_ab_comparison.csv",
+            "top_profiles.txt",
+        }
+        if not isinstance(output_hashes, Mapping):
+            raise DashboardDataError("quality-profile manifest outputs are invalid")
+        _quality_profile_require_keys(
+            output_hashes,
+            expected_output_hash_names,
+            label="quality-profile manifest outputs",
+        )
+        for name in expected_output_hash_names:
+            artifact_path = analysis / name
+            _quality_profile_require_regular_file(
+                artifact_path,
+                label=f"quality-profile {name}",
+            )
+            expected_hash = _quality_profile_digest(
+                output_hashes.get(name),
+                label=f"quality-profile output {name}",
+            )
+            if _file_sha256(artifact_path) != expected_hash:
+                raise DashboardDataError("quality-profile output hash differs")
+        manifest_candidates = manifest.get("production_candidates")
+        chosen = manifest.get("chosen_candidate")
+        expected_profiles = set(QUALITY_PROFILE_EXPECTED_PROFILES)
+        if (
+            not isinstance(manifest_candidates, list)
+            or not manifest_candidates
+            or len(manifest_candidates) > len(expected_profiles)
+            or any(type(item) is not str for item in manifest_candidates)
+            or len(manifest_candidates) != len(set(manifest_candidates))
+            or any(item not in expected_profiles for item in manifest_candidates)
+            or type(chosen) is not str
+            or chosen != manifest_candidates[0]
+            or chosen not in expected_profiles
+        ):
+            raise DashboardDataError("quality-profile chosen candidate differs")
+        production_candidates = list(manifest_candidates)
+    except DashboardDataError as exc:
+        message = str(exc)
+        error_code = (
+            "analysis_source_drift"
+            if "source hash differs" in message
+            else "analysis_input_drift"
+            if "input hash differs" in message
+            else "analysis_artifact_hash_mismatch"
+            if "output hash differs" in message
+            else "analysis_manifest_invalid"
+        )
+        return _quality_profile_invalid_artifact_state(
+            error_code,
+            collection_status="verified",
+        )
+    except (OSError, UnicodeError, ValueError, OverflowError):
+        return _quality_profile_invalid_artifact_state(
+            "analysis_manifest_invalid",
+            collection_status="verified",
+        )
+
+    return _quality_profile_artifact_state(
+        collection_integrity_status="verified",
+        analysis_integrity_status="verified",
+        analysis_outputs_verified=len(QUALITY_PROFILE_ANALYSIS_ARTIFACTS),
+        chosen_candidate=chosen,
+        production_candidates=production_candidates,
+        conclusion="profile_selected",
+        analysis_manifest_sha256=_file_sha256(manifest_path),
     )
 
 
@@ -585,7 +1100,7 @@ def summarize_quality_profile_experiment(
         return state
 
     status = (
-        "complete"
+        "collecting"
         if completed_cases == QUALITY_PROFILE_EXPECTED_CASES
         and not active_cases
         and not failed_cases
@@ -615,6 +1130,136 @@ def summarize_quality_profile_experiment(
             if project_active
             else 0.0
         ),
+        error_code="",
+    )
+    return state
+
+
+def reconcile_quality_profile_experiment_artifacts(
+    scheduler_state: Mapping[str, Any],
+    artifact_state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Require both trusted scheduler completion and verified final analysis."""
+
+    state = dict(scheduler_state)
+    artifact_fields = {
+        "collection_integrity_status",
+        "analysis_integrity_status",
+        "analysis_schema_version",
+        "analysis_outputs_verified",
+        "analysis_manifest_sha256",
+        "analysis_error_code",
+    }
+    for field in artifact_fields:
+        if field in artifact_state:
+            state[field] = copy.deepcopy(artifact_state[field])
+    state.update(
+        chosen_candidate=None,
+        production_candidates=[],
+        conclusion="waiting_for_scheduler",
+    )
+
+    collection_status = str(state.get("collection_integrity_status") or "not_checked")
+    analysis_status = str(state.get("analysis_integrity_status") or "not_checked")
+    if collection_status == "invalid" or analysis_status == "invalid":
+        state.update(
+            integrity_status="invalid",
+            status="failed",
+            conclusion="integrity_invalid",
+            error_code=str(
+                artifact_state.get("analysis_error_code")
+                or state.get("error_code")
+                or "analysis_integrity_invalid"
+            ),
+        )
+        return state
+
+    scheduler_complete = bool(
+        state.get("scheduler_integrity_status") == "verified"
+        and state.get("scheduler_trusted") is True
+        and state.get("history_complete") is True
+        and _safe_int(state.get("completed")) == QUALITY_PROFILE_EXPECTED_CASES
+        and _safe_int(state.get("active")) == 0
+        and _safe_int(state.get("failed")) == 0
+        and _safe_int(state.get("missing")) == 0
+    )
+    if not scheduler_complete:
+        if state.get("status") == "failed":
+            state["conclusion"] = "scheduler_failed"
+        elif state.get("status") == "running":
+            state["conclusion"] = "simulation_running"
+        elif state.get("status") == "ready":
+            state["conclusion"] = "waiting_for_scheduler"
+        return state
+
+    if collection_status == "absent":
+        state.update(status="collecting", conclusion="collecting_results", error_code="")
+        return state
+    if collection_status in {"not_checked", "unavailable"}:
+        state.update(
+            integrity_status="unavailable",
+            status="unavailable",
+            conclusion="analysis_monitoring_unavailable",
+            error_code="analysis_monitoring_unavailable",
+        )
+        return state
+    if collection_status != "verified":
+        state.update(
+            integrity_status="invalid",
+            status="failed",
+            conclusion="integrity_invalid",
+            error_code="collection_integrity_unavailable",
+        )
+        return state
+    if analysis_status == "absent":
+        state.update(status="analyzing", conclusion="ranking_candidates", error_code="")
+        return state
+    if analysis_status in {"not_checked", "unavailable"}:
+        state.update(
+            integrity_status="unavailable",
+            status="unavailable",
+            conclusion="analysis_monitoring_unavailable",
+            error_code="analysis_monitoring_unavailable",
+        )
+        return state
+    if analysis_status != "verified":
+        state.update(
+            integrity_status="invalid",
+            status="failed",
+            conclusion="integrity_invalid",
+            error_code=str(
+                artifact_state.get("analysis_error_code")
+                or "analysis_integrity_unavailable"
+            ),
+        )
+        return state
+
+    chosen = artifact_state.get("chosen_candidate")
+    production = artifact_state.get("production_candidates")
+    if (
+        type(chosen) is not str
+        or chosen not in QUALITY_PROFILE_EXPECTED_PROFILES
+        or not isinstance(production, list)
+        or not production
+        or production[0] != chosen
+        or any(type(item) is not str or item not in QUALITY_PROFILE_EXPECTED_PROFILES for item in production)
+        or len(production) != len(set(production))
+        or _safe_int(state.get("analysis_outputs_verified"))
+        != len(QUALITY_PROFILE_ANALYSIS_ARTIFACTS)
+    ):
+        state.update(
+            integrity_status="invalid",
+            status="failed",
+            conclusion="integrity_invalid",
+            error_code="analysis_conclusion_invalid",
+        )
+        return state
+    state.update(
+        integrity_status="verified",
+        status="complete",
+        chosen_candidate=chosen,
+        production_candidates=list(production),
+        conclusion="profile_selected",
         error_code="",
     )
     return state
@@ -2574,7 +3219,10 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
     expected_stage1 = _safe_int(stage1.get("expected_rows"), 700)
     runner_log = config.runner_log or find_runner_log(artifact_dir)
     campaign = parse_campaign_log(runner_log, total_cases=expected_stage1, cap=config.cap)
-    quality_profile_experiment, _ = inspect_quality_profile_experiment_plan(config)
+    quality_profile_experiment, expected_quality_tasks = inspect_quality_profile_experiment_plan(config)
+    quality_profile_experiment.update(
+        inspect_quality_profile_experiment_analysis(config, expected_quality_tasks)
+    )
 
     stage2_argv = stage2.get("argv") if isinstance(stage2.get("argv"), list) else []
     stage3_argv = stage3.get("continuation_argv") if isinstance(stage3.get("continuation_argv"), list) else []
@@ -3938,8 +4586,20 @@ class DashboardStateStore:
         scheduler_quality_experiment = scheduler.get("quality_profile_experiment")
         local_quality_experiment = local.get("quality_profile_experiment")
         if isinstance(scheduler_quality_experiment, Mapping):
-            quality_profile_experiment = dict(scheduler_quality_experiment)
-        elif isinstance(local_quality_experiment, Mapping):
+            artifact_state = (
+                local_quality_experiment
+                if local_ok and isinstance(local_quality_experiment, Mapping)
+                else _quality_profile_artifact_state(
+                    collection_integrity_status="not_checked",
+                    analysis_integrity_status="not_checked",
+                    conclusion="analysis_monitoring_unavailable",
+                )
+            )
+            quality_profile_experiment = reconcile_quality_profile_experiment_artifacts(
+                scheduler_quality_experiment,
+                artifact_state,
+            )
+        elif local_ok and isinstance(local_quality_experiment, Mapping):
             quality_profile_experiment = dict(local_quality_experiment)
         else:
             quality_profile_experiment = _quality_profile_experiment_state(
@@ -3957,9 +4617,15 @@ class DashboardStateStore:
             quality_profile_experiment.update(
                 scheduler_integrity_status="stale" if scheduler.get("stale") else "unavailable",
                 scheduler_trusted=False,
-                status="unavailable",
+                status=(
+                    "failed"
+                    if quality_profile_experiment.get("integrity_status") == "invalid"
+                    else "unavailable"
+                ),
                 missing=None,
                 progress_pct=None,
+                chosen_candidate=None,
+                production_candidates=[],
             )
         local["quality_profile_experiment"] = quality_profile_experiment
         scheduler_checkpoint = scheduler.get("checkpoint")
@@ -4089,7 +4755,7 @@ class DashboardStateStore:
                 0,
                 {
                     "level": "error",
-                    "message": "보조 simulation-quality profile 실험의 plan/schema/task-prefix identity를 검증하지 못했습니다.",
+                    "message": "보조 simulation-quality profile 실험의 plan/task/collection/analysis manifest 또는 hash 무결성 검증에 실패했습니다.",
                 },
             )
         elif local.get("quality_profile_experiment", {}).get("status") == "failed":

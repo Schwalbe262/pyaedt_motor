@@ -3781,3 +3781,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: independent QA found no functional P0/P1; v4 combined=136/136 (skip 3), full `.venv`=962/962 (skip 4), dry-run=`validated` with writes/mutations/paths created=0, source pins=31 and immutable inputs=32; live health=ok, Stage1=660/700 with 40 active, ancillary profile=24 running, project=64/100.
 - Failure/next: the initial full command used dependency-free Python 3.14 and produced environment-only pandas/scipy errors; the project `.venv` rerun passed. Keep the v3 guard closed, collect the paired-24 results, then publish/activate v4 only after explicit production-input confirmation.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database earlier in this execution loop.
+
+## 2026-07-12 16:00:46 +09:00 - Paired-profile finalization and truthful Web UI
+- Part/goal: finish the live whole-project dashboard and make the fixed paired-24 mesh/time experiment collect, rank, and display a conclusion without weakening sealed Stage1.
+- Hypothesis/actions: kept the source-pinned collector unchanged, added a process-scoped two-profile validator, strict atomic finalizer, input/source/output hash replay, dashboard collection/analysis integrity states, and an independent dry-run log path.
+- Candidates/options: compare only `time_138_p12_baseline` and `time_135_p12_iron525` against the fixed 12-case reference; no production profile is published when gates fail or artifacts drift.
+- Metrics/result: independent audits closed stale-candidate, raw-tree-tamper, setup-fingerprint, and hardlink gaps; full `.venv`=987/987 (5 skipped), focused suites and static checks pass; dry-run exits 0 without submissions; live Stage1=681/700, profile=4 complete/20 active/0 failed, project=35/100.
+- Failure/next: in-app browser is unavailable, so API/static/semantic verification substitutes for screenshot QA; wait for 24/24, then the runner atomically collects/ranks and the UI exposes only a verified winner.
+- Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database at closeout.
