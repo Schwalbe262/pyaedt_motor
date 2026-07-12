@@ -40,11 +40,25 @@ DEFAULT_TARGET_LOAD_PROGRESS = Path(
     "simul_log_smoke/beta_zero_recovery_26092_26093/"
     "ipmsm_target_load_v4/progress.json"
 )
+DEFAULT_FAMILY_CONFIRMATION_ROOT = Path(
+    "simul_log_smoke/beta_zero_recovery_26092_26093/"
+    "foundation_stage1_model_family_confirmation_v1"
+)
 DEFAULT_REFRESH_SECONDS = 5.0
 DEFAULT_SCHEDULER_REFRESH_SECONDS = 15.0
 DEFAULT_TIMEOUT_SECONDS = 3.0
 TARGET_LOAD_PROGRESS_SCHEMA_VERSION = "ipmsm-target-load-progress-v1"
 TARGET_LOAD_PROGRESS_STALE_SECONDS = 5 * 60.0
+FAMILY_CONFIRMATION_COMPLETION_SCHEMA_VERSION = (
+    "ipmsm-v2-model-family-confirmation-completion-v1"
+)
+FAMILY_CONFIRMATION_PID_SCHEMA_VERSION = "ipmsm-v2-model-family-confirmation-pid-v1"
+FAMILY_CONFIRMATION_REPORT_SCHEMA_VERSION = (
+    "ipmsm-v2-model-family-untouched-confirmation-v1"
+)
+FAMILY_CONFIRMATION_LOCK_NAME = "confirmation.lock.json"
+FAMILY_CONFIRMATION_REPORT_NAME = "confirmation.json"
+FAMILY_CONFIRMATION_COMPLETION_NAME = "completion.json"
 TARGET_LOAD_COUNT_FIELDS = frozenset(
     {
         "candidates_total",
@@ -135,12 +149,14 @@ PROCESS_LABELS = {
     "optimization": "NSGA-II / Pareto 감시",
     "speed": "속도 검증 감시",
     "provisional_checkpoint": "60-design 조기 Surrogate 진단",
+    "model_family_confirmation": "모델 계열 독립 확인",
 }
 
 _DECISION_CACHE_LOCK = threading.Lock()
 _DECISION_CACHE: dict[tuple[str, str], tuple[int, int, float, dict[str, Any]]] = {}
 _CONTRACT_CACHE_LOCK = threading.Lock()
 _CONTRACT_CACHE: dict[str, tuple[int, int, float, dict[str, Any], dict[str, Any]]] = {}
+_FAMILY_CONFIRMATION_REPLAY_LOCK = threading.Lock()
 
 
 class DashboardDataError(RuntimeError):
@@ -593,6 +609,641 @@ def _read_provisional_checkpoint_execution(
     if root.exists() or pid_path.exists():
         return {**base, "status": "resume_required", "phase": "resume_required", "process_state": process_state}
     return base
+
+
+def _empty_family_confirmation_state(
+    *,
+    status: str = "waiting_stage1",
+    phase: str | None = None,
+    integrity_status: str = "absent",
+    process_state: str = "stopped",
+) -> dict[str, Any]:
+    metric_summary = {
+        "min_r2": None,
+        "avg_r2": None,
+        "voltage_r2": None,
+    }
+    return {
+        "status": status,
+        "phase": phase or status,
+        "integrity_status": integrity_status,
+        "process_state": process_state,
+        "diagnostic_only": True,
+        "official_gate_eligible": False,
+        "decision": None,
+        "summary": {
+            "baseline": dict(metric_summary),
+            "selected": dict(metric_summary),
+        },
+    }
+
+
+def _parse_sidecar_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise DashboardDataError("sidecar JSON contains a non-finite number")
+    return parsed
+
+
+def _read_sidecar_json(path: Path, *, max_bytes: int = MAX_JSON_BYTES) -> tuple[bytes, dict[str, Any]]:
+    try:
+        size = path.stat().st_size
+        if size <= 0 or size > max_bytes:
+            raise DashboardDataError("sidecar JSON size is outside the dashboard limit")
+        raw = path.read_bytes()
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_constant,
+            parse_float=_parse_sidecar_float,
+        )
+    except DashboardDataError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, OverflowError) as exc:
+        raise DashboardDataError(f"cannot read sidecar JSON: {path.name}") from exc
+    if not isinstance(value, dict):
+        raise DashboardDataError(f"sidecar JSON is not an object: {path.name}")
+    return raw, value
+
+
+def _watcher_canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
+    try:
+        return (
+            json.dumps(
+                dict(value),
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise DashboardDataError("sidecar JSON cannot be canonicalized") from exc
+
+
+def _require_sidecar_keys(value: Mapping[str, Any], expected: set[str], *, label: str) -> None:
+    if set(value) != expected:
+        raise DashboardDataError(f"{label} fields differ from the supported schema")
+
+
+def _family_confirmation_prefix(root: Path) -> str:
+    if not os.path.lexists(root):
+        return "absent"
+    if root.is_symlink() or not root.is_dir():
+        raise DashboardDataError("family confirmation root has an invalid path type")
+    names: set[str] = set()
+    for path in root.iterdir():
+        if path.is_symlink() or not path.is_file():
+            raise DashboardDataError("family confirmation root contains an invalid entry")
+        names.add(path.name)
+    supported = {
+        frozenset(): "empty",
+        frozenset({FAMILY_CONFIRMATION_LOCK_NAME}): "lock",
+        frozenset({FAMILY_CONFIRMATION_LOCK_NAME, FAMILY_CONFIRMATION_REPORT_NAME}): (
+            "lock_report"
+        ),
+        frozenset(
+            {
+                FAMILY_CONFIRMATION_LOCK_NAME,
+                FAMILY_CONFIRMATION_REPORT_NAME,
+                FAMILY_CONFIRMATION_COMPLETION_NAME,
+            }
+        ): "complete",
+    }
+    prefix = supported.get(frozenset(names))
+    if prefix is None:
+        raise DashboardDataError("family confirmation output is not an exact supported prefix")
+    return prefix
+
+
+def _path_contains_symlink(path: Path) -> bool:
+    current = path.absolute()
+    while True:
+        if os.path.lexists(current) and (
+            current.is_symlink()
+            or bool(getattr(current, "is_junction", lambda: False)())
+        ):
+            return True
+        parent = current.parent
+        if parent == current:
+            return False
+        current = parent
+
+
+def _inspect_family_confirmation_pid(
+    path: Path,
+    *,
+    root: Path,
+    contract_path: Path,
+    expected_contract_sha256: str,
+) -> tuple[bool, str]:
+    if not os.path.lexists(path):
+        return False, "stopped"
+    if path.is_symlink() or not path.is_file():
+        raise DashboardDataError("family confirmation PID marker has an invalid path type")
+    raw, marker = _read_sidecar_json(path, max_bytes=64 * 1024)
+    if raw != _watcher_canonical_json_bytes(marker):
+        raise DashboardDataError("family confirmation PID marker is not canonical JSON")
+    expected_fields = {
+        "schema_version",
+        "contract_sha256",
+        "contract_file_sha256",
+        "watcher_sha256",
+        "output_dir",
+        "pid",
+        "nonce",
+        "boot_time_epoch",
+    }
+    _require_sidecar_keys(marker, expected_fields, label="family confirmation PID marker")
+    watcher_path = Path(__file__).resolve().with_name(
+        "watch_ipmsm_v2_model_family_confirmation.py"
+    )
+    expected_identity = {
+        "schema_version": FAMILY_CONFIRMATION_PID_SCHEMA_VERSION,
+        "contract_sha256": expected_contract_sha256,
+        "contract_file_sha256": _file_sha256(contract_path),
+        "watcher_sha256": _file_sha256(watcher_path),
+        "output_dir": str(root),
+    }
+    if any(marker.get(key) != value for key, value in expected_identity.items()):
+        raise DashboardDataError("family confirmation PID marker identity differs")
+    pid = marker.get("pid")
+    nonce = marker.get("nonce")
+    marker_boot = marker.get("boot_time_epoch")
+    boot = _boot_epoch()
+    if (
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid <= 0
+        or not isinstance(nonce, str)
+        or re.fullmatch(r"[0-9a-f]{32}", nonce) is None
+        or (
+            marker_boot is not None
+            and (_safe_float(marker_boot) is None or float(marker_boot) <= 0.0)
+        )
+        or (boot is not None and marker_boot is None)
+    ):
+        raise DashboardDataError("family confirmation PID marker values are invalid")
+    if boot is not None:
+        try:
+            current_boot = abs(float(marker_boot) - boot) <= 5.0 and path.stat().st_mtime >= boot - 2.0
+        except OSError as exc:
+            raise DashboardDataError("cannot stat family confirmation PID marker") from exc
+        if not current_boot:
+            return True, "stopped"
+    return True, _pid_running_without_signal(pid)
+
+
+def _family_summary_number(value: Any, *, label: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise DashboardDataError(f"{label} is not a finite R2 number")
+    try:
+        parsed = float(value)
+    except (ValueError, OverflowError) as exc:
+        raise DashboardDataError(f"{label} is not a finite R2 number") from exc
+    if not math.isfinite(parsed) or parsed > 1.0:
+        raise DashboardDataError(f"{label} is outside the supported R2 range")
+    return parsed
+
+
+def _audit_exact_confirmation_report(
+    *,
+    data_path: Path,
+    input_paths: Mapping[str, Path],
+    lock_path: Path,
+    report_path: Path,
+) -> dict[str, Any]:
+    """Replay the confirmer's exact lock/report audit without importing the watcher."""
+
+    try:
+        import confirm_ipmsm_v2_model_families as confirmation
+
+        _, frozen_manifest = confirmation.read_json_document(
+            input_paths["frozen_selection_manifest"]
+        )
+        selection = frozen_manifest.get("selection")
+        package_versions = (
+            selection.get("package_versions") if isinstance(selection, Mapping) else None
+        )
+        if not isinstance(package_versions, dict) or not all(
+            isinstance(name, str) and isinstance(version, str)
+            for name, version in package_versions.items()
+        ):
+            raise DashboardDataError("frozen selection package-version identity is invalid")
+        paths = {
+            "data": data_path,
+            "baseline_metadata": input_paths["baseline_metadata"],
+            "frozen_selection_manifest": input_paths["frozen_selection_manifest"],
+            "audit_case_plan": input_paths["audit_case_plan"],
+            "untouched_plan_manifest": input_paths["untouched_plan_manifest"],
+            "full_case_plan": input_paths["full_case_plan"],
+            "explored_case_plan": input_paths["explored_case_plan"],
+            "lock_output": lock_path,
+            "output": report_path,
+        }
+        with _FAMILY_CONFIRMATION_REPLAY_LOCK:
+            original_package_versions = confirmation._package_versions
+            confirmation._package_versions = lambda: dict(package_versions)
+            try:
+                context = confirmation._build_confirmation_context(paths)
+            finally:
+                confirmation._package_versions = original_package_versions
+        lock_file_sha256 = confirmation._validate_exact_lock(lock_path, context["lock"])
+        return confirmation._audit_completed_report(
+            paths,
+            context,
+            lock_file_sha256=lock_file_sha256,
+        )
+    except DashboardDataError:
+        raise
+    except Exception as exc:
+        raise DashboardDataError("exact family confirmation report replay failed") from exc
+
+
+def _audit_family_confirmation_complete(
+    root: Path,
+    *,
+    contract_path: Path,
+    expected_contract_sha256: str,
+) -> tuple[str, dict[str, Any]]:
+    lock_path = root / FAMILY_CONFIRMATION_LOCK_NAME
+    report_path = root / FAMILY_CONFIRMATION_REPORT_NAME
+    completion_path = root / FAMILY_CONFIRMATION_COMPLETION_NAME
+    completion_raw, completion = _read_sidecar_json(completion_path)
+    completion_fields = {
+        "schema_version",
+        "status",
+        "diagnostic_only",
+        "official_gate_eligible",
+        "production_eligible",
+        "contract",
+        "data",
+        "official_stage1",
+        "sources",
+        "inputs",
+        "confirmation_lock",
+        "confirmation_report",
+        "completion_sha256",
+    }
+    _require_sidecar_keys(completion, completion_fields, label="family confirmation completion")
+    if (
+        completion_raw != _watcher_canonical_json_bytes(completion)
+        or completion.get("schema_version") != FAMILY_CONFIRMATION_COMPLETION_SCHEMA_VERSION
+        or completion.get("status") != "complete"
+        or completion.get("diagnostic_only") is not True
+        or completion.get("official_gate_eligible") is not False
+        or completion.get("production_eligible") is not False
+    ):
+        raise DashboardDataError("family confirmation completion schema or flags differ")
+    unsigned = dict(completion)
+    completion_sha256 = unsigned.pop("completion_sha256", None)
+    expected_completion_sha256 = hashlib.sha256(
+        _watcher_canonical_json_bytes(unsigned)
+    ).hexdigest()
+    if completion_sha256 != expected_completion_sha256:
+        raise DashboardDataError("family confirmation completion SHA256 differs")
+
+    expected_contract = {
+        "path": str(contract_path),
+        "contract_sha256": expected_contract_sha256,
+        "file_sha256": _file_sha256(contract_path),
+    }
+    if completion.get("contract") != expected_contract:
+        raise DashboardDataError("family confirmation completion contract identity differs")
+    try:
+        validated_contract = pipeline_supervisor.load_contract(contract_path)
+        stage1 = validated_contract.stage1
+        gate = pipeline_supervisor._audit_stage1_training(stage1)
+    except Exception as exc:
+        raise DashboardDataError("official Stage1 artifacts failed confirmation replay") from exc
+    expected_data = {
+        "path": str(stage1.result),
+        "sha256": _file_sha256(stage1.result),
+        "rows": stage1.expected_rows,
+    }
+    expected_official_stage1 = {
+        "validation": {
+            "path": str(stage1.validation),
+            "sha256": _file_sha256(stage1.validation),
+        },
+        "metadata": {
+            "path": str(stage1.metadata),
+            "sha256": _file_sha256(stage1.metadata),
+        },
+        "r2": {
+            "path": str(stage1.r2),
+            "sha256": _file_sha256(stage1.r2),
+        },
+        "gate_decision": gate.decision,
+        "gate_passed": gate.passed,
+    }
+    source_dir = Path(__file__).resolve().parent
+    source_paths = {
+        "watcher": (source_dir / "watch_ipmsm_v2_model_family_confirmation.py").resolve(
+            strict=False
+        ),
+        "confirmation": (source_dir / "confirm_ipmsm_v2_model_families.py").resolve(
+            strict=False
+        ),
+        "trainer": (source_dir / "train_ipmsm_lightgbm.py").resolve(strict=False),
+        "diagnostic": (source_dir / "diagnose_ipmsm_v2_model_families.py").resolve(
+            strict=False
+        ),
+        "untouched_builder": (source_dir / "build_ipmsm_untouched_test_plan.py").resolve(
+            strict=False
+        ),
+    }
+    expected_sources = {
+        name: {"path": str(path), "sha256": _file_sha256(path)}
+        for name, path in sorted(source_paths.items())
+    }
+    artifact_dir = contract_path.parent
+    input_paths = {
+        "baseline_metadata": (
+            artifact_dir
+            / "foundation_stage1_provisional60_v1"
+            / "models"
+            / "training_metadata.json"
+        ).resolve(strict=False),
+        "frozen_selection_manifest": (
+            artifact_dir
+            / "foundation_stage1_provisional60_model_family_diagnostic_v5.selection.json"
+        ).resolve(strict=False),
+        "audit_case_plan": (
+            artifact_dir / "foundation_stage1_untouched_test8_plan_v3.csv"
+        ).resolve(strict=False),
+        "untouched_plan_manifest": (
+            artifact_dir / "foundation_stage1_untouched_test8_plan_v3.manifest.json"
+        ).resolve(strict=False),
+        "full_case_plan": stage1.case_plan.resolve(strict=False),
+        "explored_case_plan": (
+            artifact_dir
+            / "foundation_stage1_provisional60_v1"
+            / "snapshot"
+            / "selected_cases.csv"
+        ).resolve(strict=False),
+    }
+    expected_inputs = {
+        name: {"path": str(path), "sha256": _file_sha256(path)}
+        for name, path in sorted(input_paths.items())
+    }
+    if (
+        completion.get("data") != expected_data
+        or completion.get("official_stage1") != expected_official_stage1
+        or completion.get("sources") != expected_sources
+        or completion.get("inputs") != expected_inputs
+    ):
+        raise DashboardDataError("family confirmation completion input identity differs")
+    exact_report = _audit_exact_confirmation_report(
+        data_path=stage1.result,
+        input_paths=input_paths,
+        lock_path=lock_path,
+        report_path=report_path,
+    )
+
+    lock_reference = completion.get("confirmation_lock")
+    report_reference = completion.get("confirmation_report")
+    if not isinstance(lock_reference, Mapping) or not isinstance(report_reference, Mapping):
+        raise DashboardDataError("family confirmation artifact references are invalid")
+    _require_sidecar_keys(lock_reference, {"path", "sha256"}, label="confirmation lock reference")
+    _require_sidecar_keys(
+        report_reference,
+        {"path", "sha256", "status"},
+        label="confirmation report reference",
+    )
+    if (
+        lock_reference.get("path") != str(lock_path)
+        or report_reference.get("path") != str(report_path)
+        or lock_reference.get("sha256") != _file_sha256(lock_path)
+        or report_reference.get("sha256") != _file_sha256(report_path)
+    ):
+        raise DashboardDataError("family confirmation artifact path or SHA256 differs")
+
+    report_raw, report = _read_sidecar_json(report_path)
+    if hashlib.sha256(report_raw).hexdigest() != report_reference.get("sha256"):
+        raise DashboardDataError("family confirmation report changed during audit")
+    report_fields = {
+        "schema_version",
+        "status",
+        "diagnostic_only",
+        "official_gate_eligible",
+        "production_eligible",
+        "selection_frozen_before_confirmation",
+        "historical_metadata_r2_compared",
+        "baseline_control_scope",
+        "confirmation_lock",
+        "provenance",
+        "test_evaluation",
+        "prepared_data_contract",
+        "selected_family_by_target",
+        "baseline_control",
+        "selected_families",
+        "summary",
+    }
+    _require_sidecar_keys(report, report_fields, label="family confirmation report")
+    decision = report.get("status")
+    if (
+        report_raw != _watcher_canonical_json_bytes(report)
+        or report.get("schema_version") != FAMILY_CONFIRMATION_REPORT_SCHEMA_VERSION
+        or decision not in {"positive_confirmation", "negative_confirmation", "invalid"}
+        or report_reference.get("status") != decision
+        or report.get("diagnostic_only") is not True
+        or report.get("official_gate_eligible") is not False
+        or report.get("production_eligible") is not False
+        or report.get("selection_frozen_before_confirmation") is not True
+        or report.get("historical_metadata_r2_compared") is not False
+        or report.get("baseline_control_scope") != "simultaneous_same_untouched_cohort"
+    ):
+        raise DashboardDataError("family confirmation report schema, status, or flags differ")
+
+    raw_summary = report.get("summary")
+    if not isinstance(raw_summary, Mapping):
+        raise DashboardDataError("family confirmation report summary is invalid")
+    summary_fields = {
+        "decision_rule",
+        "family_gain",
+        "baseline_primary_min_r2",
+        "baseline_primary_avg_r2",
+        "baseline_voltage_r2",
+        "selected_primary_min_r2",
+        "selected_primary_avg_r2",
+        "selected_voltage_r2",
+    }
+    _require_sidecar_keys(raw_summary, summary_fields, label="family confirmation summary")
+    if (
+        raw_summary.get("decision_rule")
+        != "physical_valid && selected_avg_r2 > baseline_avg_r2 && selected_min_r2 > baseline_min_r2 && selected_voltage_r2 >= baseline_voltage_r2"
+        or not isinstance(raw_summary.get("family_gain"), bool)
+    ):
+        raise DashboardDataError("family confirmation decision summary differs")
+    baseline_evaluation = report.get("baseline_control")
+    selected_evaluation = report.get("selected_families")
+    if not isinstance(baseline_evaluation, Mapping) or not isinstance(
+        selected_evaluation, Mapping
+    ):
+        raise DashboardDataError("family confirmation evaluations are invalid")
+    aggregate_bindings = {
+        "baseline_primary_min_r2": baseline_evaluation.get("primary_min_r2"),
+        "baseline_primary_avg_r2": baseline_evaluation.get("primary_avg_r2"),
+        "baseline_voltage_r2": baseline_evaluation.get("voltage_r2"),
+        "selected_primary_min_r2": selected_evaluation.get("primary_min_r2"),
+        "selected_primary_avg_r2": selected_evaluation.get("primary_avg_r2"),
+        "selected_voltage_r2": selected_evaluation.get("voltage_r2"),
+    }
+    if any(raw_summary.get(name) != value for name, value in aggregate_bindings.items()):
+        raise DashboardDataError("family confirmation summary is not bound to its evaluations")
+    selected_physical = selected_evaluation.get("physical_validity")
+    selected_physical_passed = (
+        selected_physical.get("passed")
+        if isinstance(selected_physical, Mapping)
+        else None
+    )
+    if not isinstance(selected_physical_passed, bool):
+        raise DashboardDataError("family confirmation physical-validity flag is invalid")
+    baseline = {
+        "min_r2": _family_summary_number(
+            raw_summary.get("baseline_primary_min_r2"), label="baseline min R2"
+        ),
+        "avg_r2": _family_summary_number(
+            raw_summary.get("baseline_primary_avg_r2"), label="baseline average R2"
+        ),
+        "voltage_r2": _family_summary_number(
+            raw_summary.get("baseline_voltage_r2"), label="baseline voltage R2"
+        ),
+    }
+    selected = {
+        "min_r2": _family_summary_number(
+            raw_summary.get("selected_primary_min_r2"), label="selected min R2"
+        ),
+        "avg_r2": _family_summary_number(
+            raw_summary.get("selected_primary_avg_r2"), label="selected average R2"
+        ),
+        "voltage_r2": _family_summary_number(
+            raw_summary.get("selected_voltage_r2"), label="selected voltage R2"
+        ),
+    }
+    for label, values in (("baseline", baseline), ("selected", selected)):
+        if (
+            values["min_r2"] is not None
+            and values["avg_r2"] is not None
+            and values["min_r2"] > values["avg_r2"]
+            and not math.isclose(
+                values["min_r2"],
+                values["avg_r2"],
+                rel_tol=1.0e-12,
+                abs_tol=1.0e-12,
+            )
+        ):
+            raise DashboardDataError(f"family confirmation {label} min/average R2 is inconsistent")
+    complete_metrics = all(value is not None for value in (*baseline.values(), *selected.values()))
+    family_gain = raw_summary["family_gain"]
+    gain_predicate = bool(
+        complete_metrics
+        and selected_physical_passed
+        and (
+            selected["avg_r2"] > baseline["avg_r2"]
+            and selected["min_r2"] > baseline["min_r2"]
+            and selected["voltage_r2"] >= baseline["voltage_r2"]
+        )
+    )
+    expected_decision = (
+        "invalid"
+        if not selected_physical_passed or not complete_metrics
+        else "positive_confirmation"
+        if gain_predicate
+        else "negative_confirmation"
+    )
+    if decision != expected_decision or family_gain is not gain_predicate:
+        raise DashboardDataError("family confirmation decision is inconsistent")
+    try:
+        completion_stable = completion_path.read_bytes() == completion_raw
+    except OSError as exc:
+        raise DashboardDataError("family confirmation completion changed during audit") from exc
+    if (
+        exact_report != report
+        or not completion_stable
+        or _family_confirmation_prefix(root) != "complete"
+        or _file_sha256(lock_path) != lock_reference.get("sha256")
+        or _file_sha256(report_path) != report_reference.get("sha256")
+    ):
+        raise DashboardDataError("family confirmation artifacts changed during final replay")
+    return str(decision), {"baseline": baseline, "selected": selected}
+
+
+def _read_family_confirmation(
+    config: "DashboardConfig",
+    contract_document: Mapping[str, Any],
+) -> dict[str, Any]:
+    root = config.family_confirmation_root
+    if not root.is_absolute():
+        root = config.workdir / root
+    root = root.absolute()
+    pid_path = config.family_confirmation_pid
+    if pid_path is None:
+        pid_path = root.parent / f".{root.name}.pid.json"
+    elif not pid_path.is_absolute():
+        pid_path = config.workdir / pid_path
+    pid_path = pid_path.absolute()
+    expected_contract_sha256 = str(contract_document.get("contract_sha256") or "")
+    process_state = "unknown"
+    try:
+        if _path_contains_symlink(root) or _path_contains_symlink(pid_path):
+            raise DashboardDataError("family confirmation paths contain a symlink or junction")
+        pid_present, process_state = _inspect_family_confirmation_pid(
+            pid_path,
+            root=root,
+            contract_path=config.contract_path,
+            expected_contract_sha256=expected_contract_sha256,
+        )
+        prefix = _family_confirmation_prefix(root)
+        integrity_status = "absent" if prefix == "absent" else "valid"
+        if prefix == "complete":
+            decision, summary = _audit_family_confirmation_complete(
+                root,
+                contract_path=config.contract_path,
+                expected_contract_sha256=expected_contract_sha256,
+            )
+            return {
+                **_empty_family_confirmation_state(
+                    status=decision,
+                    phase="complete",
+                    integrity_status="verified",
+                    process_state=process_state,
+                ),
+                "decision": decision,
+                "summary": summary,
+            }
+        if prefix == "lock":
+            status = "running" if process_state == "alive" else "resume_required"
+            phase = "confirmation_training" if process_state == "alive" else "resume_required"
+        elif prefix == "lock_report":
+            status = "finalizing" if process_state == "alive" else "resume_required"
+            phase = "completion_pending" if process_state == "alive" else "resume_required"
+        elif prefix == "empty":
+            status = "running" if process_state == "alive" else "resume_required"
+            phase = "confirmation_starting" if process_state == "alive" else "resume_required"
+        elif pid_present and process_state != "alive":
+            status = "resume_required"
+            phase = "resume_required"
+        else:
+            status = "waiting_stage1"
+            phase = "waiting_stage1"
+        return _empty_family_confirmation_state(
+            status=status,
+            phase=phase,
+            integrity_status=integrity_status,
+            process_state=process_state,
+        )
+    except (DashboardDataError, OSError, UnicodeError, ValueError, OverflowError):
+        return _empty_family_confirmation_state(
+            status="artifact_invalid",
+            phase="artifact_audit_failed",
+            integrity_status="invalid",
+            process_state="unknown",
+        )
 
 
 def _argv_value(argv: Sequence[Any], option: str) -> str:
@@ -1281,6 +1932,8 @@ class DashboardConfig:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     runner_log: Path | None = None
     target_load_progress: Path | None = None
+    family_confirmation_root: Path = DEFAULT_FAMILY_CONFIRMATION_ROOT
+    family_confirmation_pid: Path | None = None
 
 
 def _pipeline_definition(config: DashboardConfig) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1501,6 +2154,15 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
             "activity": "running" if checkpoint_execution["status"] == "running" else checkpoint_execution["status"],
         }
     )
+    family_confirmation = _read_family_confirmation(config, contract_document)
+    processes.append(
+        {
+            "role": "model_family_confirmation",
+            "label": PROCESS_LABELS["model_family_confirmation"],
+            "state": family_confirmation["process_state"],
+            "activity": family_confirmation["status"],
+        }
+    )
 
     beta = _read_beta(artifact_dir)
     checkpoint_dir = _resolve(config.workdir, _argv_value(opt_argv, "--checkpoint-dir"))
@@ -1631,6 +2293,27 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         alerts.append({"level": "warning", "message": f"Target-load 진행 파일 검증 실패: {target_load_error}"})
     elif target_load_state.get("stale"):
         alerts.append({"level": "warning", "message": "Target-load 진행 파일이 5분 이상 갱신되지 않았습니다."})
+    if family_confirmation["status"] == "artifact_invalid":
+        alerts.append(
+            {
+                "level": "error",
+                "message": "모델 계열 독립 확인 산출물 감사에 실패했습니다.",
+            }
+        )
+    elif family_confirmation["status"] == "resume_required":
+        alerts.append(
+            {
+                "level": "error",
+                "message": "모델 계열 독립 확인 작업을 안전하게 재개해야 합니다.",
+            }
+        )
+    elif family_confirmation["status"] in {"negative_confirmation", "invalid"}:
+        alerts.append(
+            {
+                "level": "warning",
+                "message": "모델 계열 독립 확인 결과가 개선 미확인 또는 유효성 불충족입니다. 공식 R² gate와는 분리됩니다.",
+            }
+        )
     return {
         "campaign": campaign,
         "pipeline": {"current_stage": current["id"], "current_label": current["label"], "stages": stages},
@@ -1638,6 +2321,7 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         "beta": beta,
         "optimization": optimization_state,
         "checkpoint_execution": checkpoint_execution,
+        "family_confirmation": family_confirmation,
         "speed": speed_state,
         "target_load": target_load_state,
         "processes": processes,
@@ -2473,7 +3157,20 @@ class DashboardStateStore:
                     "optimization": {"decision": None, "seeds": []},
                     "speed": {"complete": False},
                     "target_load": _empty_target_load_state(),
-                    "processes": [],
+                    "family_confirmation": _empty_family_confirmation_state(
+                        status="artifact_invalid",
+                        phase="artifact_audit_failed",
+                        integrity_status="invalid",
+                        process_state="unknown",
+                    ),
+                    "processes": [
+                        {
+                            "role": "model_family_confirmation",
+                            "label": PROCESS_LABELS["model_family_confirmation"],
+                            "state": "unknown",
+                            "activity": "artifact_invalid",
+                        }
+                    ],
                     "alerts": [],
                 }
             local = copy.deepcopy(self._last_local) if self._last_local is not None else fallback
@@ -2657,6 +3354,13 @@ class DashboardStateStore:
             local.get("target_load", {}).get("integrity_status") == "invalid"
         )
         target_load_stale = bool(local.get("target_load", {}).get("stale"))
+        family_confirmation_status = str(
+            local.get("family_confirmation", {}).get("status") or ""
+        )
+        family_confirmation_degraded = family_confirmation_status in {
+            "resume_required",
+            "artifact_invalid",
+        }
         local.setdefault("campaign", {})["result_progress_stalled"] = result_progress_stalled
         stale = bool(
             errors
@@ -2671,6 +3375,7 @@ class DashboardStateStore:
             or result_count_regressed
             or target_load_integrity_invalid
             or target_load_stale
+            or family_confirmation_degraded
             or (scheduler_active == 0 and campaign_status_stale and not automation_alive)
         )
         if not project_identity_ok:
@@ -2866,7 +3571,20 @@ class DashboardStateStore:
             },
             "speed": {"complete": False},
             "target_load": _empty_target_load_state(),
-            "processes": [],
+            "family_confirmation": _empty_family_confirmation_state(
+                status="artifact_invalid",
+                phase="artifact_audit_failed",
+                integrity_status="invalid",
+                process_state="unknown",
+            ),
+            "processes": [
+                {
+                    "role": "model_family_confirmation",
+                    "label": PROCESS_LABELS["model_family_confirmation"],
+                    "state": "unknown",
+                    "activity": "artifact_invalid",
+                }
+            ],
             "alerts": [],
             "scheduler": {"reachable": False, "stale": True, "active_count": 0, "nodes": [], "recent_tasks": []},
             "errors": [{"source": "dashboard", "message": "상태 수집 중 오류가 발생해 다음 주기에 재시도합니다."}],

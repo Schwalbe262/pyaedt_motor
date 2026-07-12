@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import http.client
 import json
 import sys
@@ -14,7 +16,10 @@ from unittest import mock
 
 import ipmsm_dashboard as server
 import ipmsm_dashboard_state as dashboard
+import confirm_ipmsm_v2_model_families as confirmation
 import run_ipmsm_pipeline_supervisor as supervisor_entrypoint
+from tests.test_supervise_ipmsm_v2_pipeline import Fixture
+from tests.test_confirm_ipmsm_v2_model_families import ConfirmationLifecycleTests
 
 
 STATUS = (
@@ -961,6 +966,677 @@ class ArtifactTests(unittest.TestCase):
                 )
             self.assertEqual(first, second)
             self.assertEqual(audit.call_count, 1)
+
+
+class FamilyConfirmationTests(unittest.TestCase):
+    ALLOWED_FIELDS = {
+        "status",
+        "phase",
+        "integrity_status",
+        "process_state",
+        "diagnostic_only",
+        "official_gate_eligible",
+        "decision",
+        "summary",
+    }
+    DECISION_RULE = (
+        "physical_valid && selected_avg_r2 > baseline_avg_r2 && "
+        "selected_min_r2 > baseline_min_r2 && "
+        "selected_voltage_r2 >= baseline_voltage_r2"
+    )
+
+    @staticmethod
+    def _write_canonical(path: Path, value: dict[str, object]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(dashboard._watcher_canonical_json_bytes(value))
+
+    def _harness(self, root: Path) -> SimpleNamespace:
+        root = root.resolve()
+        fixture = Fixture(root)
+        fixture.stage1_campaign()
+        fixture.training()
+        contract_path = fixture.contract_path
+        contract_document = dashboard.read_json_file(contract_path)
+        frozen_inputs = (
+            root / "foundation_stage1_provisional60_v1" / "models" / "training_metadata.json",
+            root / "foundation_stage1_provisional60_model_family_diagnostic_v5.selection.json",
+            root / "foundation_stage1_untouched_test8_plan_v3.csv",
+            root / "foundation_stage1_untouched_test8_plan_v3.manifest.json",
+            root / "foundation_stage1_provisional60_v1" / "snapshot" / "selected_cases.csv",
+        )
+        for path in frozen_inputs:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("frozen\n", encoding="utf-8")
+        sidecar = root / "confirmation"
+        pid_path = root / ".confirmation.pid.json"
+        config = dashboard.DashboardConfig(
+            workdir=root,
+            contract_path=contract_path,
+            family_confirmation_root=sidecar,
+            family_confirmation_pid=pid_path,
+        )
+        return SimpleNamespace(
+            root=root,
+            config=config,
+            contract=contract_document,
+            sidecar=sidecar,
+            pid=pid_path,
+            fixture=fixture,
+        )
+
+    def _write_pid(self, harness: SimpleNamespace, *, pid: int = 1234) -> dict[str, object]:
+        watcher_path = Path(dashboard.__file__).resolve().with_name(
+            "watch_ipmsm_v2_model_family_confirmation.py"
+        )
+        marker: dict[str, object] = {
+            "schema_version": dashboard.FAMILY_CONFIRMATION_PID_SCHEMA_VERSION,
+            "contract_sha256": harness.contract["contract_sha256"],
+            "contract_file_sha256": dashboard._file_sha256(harness.config.contract_path),
+            "watcher_sha256": dashboard._file_sha256(watcher_path),
+            "output_dir": str(harness.sidecar),
+            "pid": pid,
+            "nonce": "a" * 32,
+            "boot_time_epoch": 1000.0,
+        }
+        self._write_canonical(harness.pid, marker)
+        return marker
+
+    @staticmethod
+    def _synthetic_exact_report(
+        *,
+        data_path: Path,
+        input_paths: object,
+        lock_path: Path,
+        report_path: Path,
+    ) -> dict[str, object]:
+        del data_path, input_paths, lock_path
+        _, report = dashboard._read_sidecar_json(report_path)
+        confirmation._audit_evaluation(
+            report["baseline_control"],
+            expected_rows=48,
+            label="synthetic baseline",
+        )
+        confirmation._audit_evaluation(
+            report["selected_families"],
+            expected_rows=48,
+            label="synthetic selected",
+        )
+        return report
+
+    def _read(
+        self,
+        harness: SimpleNamespace,
+        *,
+        process_state: str = "stopped",
+        exact_replay: object | None = None,
+    ) -> dict[str, object]:
+        replay = exact_replay or self._synthetic_exact_report
+        with (
+            mock.patch.object(dashboard, "_boot_epoch", return_value=1000.0),
+            mock.patch.object(
+                dashboard,
+                "_pid_running_without_signal",
+                return_value=process_state,
+            ),
+            mock.patch.object(
+                dashboard.pipeline_supervisor,
+                "_audit_stage1_training",
+                return_value=SimpleNamespace(decision="skip_stage2", passed=True),
+            ),
+            mock.patch.object(
+                dashboard,
+                "_audit_exact_confirmation_report",
+                side_effect=replay,
+            ),
+        ):
+            return dashboard._read_family_confirmation(harness.config, harness.contract)
+
+    def _publish_complete(
+        self,
+        harness: SimpleNamespace,
+        decision: str,
+    ) -> SimpleNamespace:
+        harness.sidecar.mkdir(parents=True)
+        lock_path = harness.sidecar / dashboard.FAMILY_CONFIRMATION_LOCK_NAME
+        report_path = harness.sidecar / dashboard.FAMILY_CONFIRMATION_REPORT_NAME
+        completion_path = harness.sidecar / dashboard.FAMILY_CONFIRMATION_COMPLETION_NAME
+        self._write_canonical(lock_path, {"sealed": True})
+        lifecycle = ConfirmationLifecycleTests()
+        if decision == "positive_confirmation":
+            baseline = lifecycle.evaluation(0.50)
+            selected = lifecycle.evaluation(0.75)
+            gain = True
+        elif decision == "negative_confirmation":
+            baseline = lifecycle.evaluation(0.50)
+            selected = lifecycle.evaluation(0.25)
+            gain = False
+        else:
+            baseline = lifecycle.evaluation(0.50)
+            selected = lifecycle.evaluation(0.75, physically_valid=False)
+            gain = False
+        report: dict[str, object] = {
+            "schema_version": dashboard.FAMILY_CONFIRMATION_REPORT_SCHEMA_VERSION,
+            "status": decision,
+            "diagnostic_only": True,
+            "official_gate_eligible": False,
+            "production_eligible": False,
+            "selection_frozen_before_confirmation": True,
+            "historical_metadata_r2_compared": False,
+            "baseline_control_scope": "simultaneous_same_untouched_cohort",
+            "confirmation_lock": {
+                "path": str(lock_path),
+                "sha256": dashboard._file_sha256(lock_path),
+            },
+            "provenance": {},
+            "test_evaluation": {},
+            "prepared_data_contract": {},
+            "selected_family_by_target": {},
+            "baseline_control": baseline,
+            "selected_families": selected,
+            "summary": {
+                "decision_rule": self.DECISION_RULE,
+                "family_gain": gain,
+                "baseline_primary_min_r2": baseline["primary_min_r2"],
+                "baseline_primary_avg_r2": baseline["primary_avg_r2"],
+                "baseline_voltage_r2": baseline["voltage_r2"],
+                "selected_primary_min_r2": selected["primary_min_r2"],
+                "selected_primary_avg_r2": selected["primary_avg_r2"],
+                "selected_voltage_r2": selected["voltage_r2"],
+            },
+        }
+        self._write_canonical(report_path, report)
+        stage1 = harness.fixture.load().stage1
+        source_dir = Path(dashboard.__file__).resolve().parent
+        source_paths = {
+            "watcher": source_dir / "watch_ipmsm_v2_model_family_confirmation.py",
+            "confirmation": source_dir / "confirm_ipmsm_v2_model_families.py",
+            "trainer": source_dir / "train_ipmsm_lightgbm.py",
+            "diagnostic": source_dir / "diagnose_ipmsm_v2_model_families.py",
+            "untouched_builder": source_dir / "build_ipmsm_untouched_test_plan.py",
+        }
+        input_paths = {
+            "baseline_metadata": (
+                harness.root
+                / "foundation_stage1_provisional60_v1"
+                / "models"
+                / "training_metadata.json"
+            ).resolve(),
+            "frozen_selection_manifest": (
+                harness.root
+                / "foundation_stage1_provisional60_model_family_diagnostic_v5.selection.json"
+            ).resolve(),
+            "audit_case_plan": (
+                harness.root / "foundation_stage1_untouched_test8_plan_v3.csv"
+            ).resolve(),
+            "untouched_plan_manifest": (
+                harness.root / "foundation_stage1_untouched_test8_plan_v3.manifest.json"
+            ).resolve(),
+            "full_case_plan": stage1.case_plan.resolve(),
+            "explored_case_plan": (
+                harness.root
+                / "foundation_stage1_provisional60_v1"
+                / "snapshot"
+                / "selected_cases.csv"
+            ).resolve(),
+        }
+        unsigned: dict[str, object] = {
+            "schema_version": dashboard.FAMILY_CONFIRMATION_COMPLETION_SCHEMA_VERSION,
+            "status": "complete",
+            "diagnostic_only": True,
+            "official_gate_eligible": False,
+            "production_eligible": False,
+            "contract": {
+                "path": str(harness.config.contract_path),
+                "contract_sha256": harness.contract["contract_sha256"],
+                "file_sha256": dashboard._file_sha256(harness.config.contract_path),
+            },
+            "data": {
+                "path": str(stage1.result),
+                "sha256": dashboard._file_sha256(stage1.result),
+                "rows": stage1.expected_rows,
+            },
+            "official_stage1": {
+                "validation": {
+                    "path": str(stage1.validation),
+                    "sha256": dashboard._file_sha256(stage1.validation),
+                },
+                "metadata": {
+                    "path": str(stage1.metadata),
+                    "sha256": dashboard._file_sha256(stage1.metadata),
+                },
+                "r2": {
+                    "path": str(stage1.r2),
+                    "sha256": dashboard._file_sha256(stage1.r2),
+                },
+                "gate_decision": "skip_stage2",
+                "gate_passed": True,
+            },
+            "sources": {
+                name: {"path": str(path), "sha256": dashboard._file_sha256(path)}
+                for name, path in sorted(source_paths.items())
+            },
+            "inputs": {
+                name: {"path": str(path), "sha256": dashboard._file_sha256(path)}
+                for name, path in sorted(input_paths.items())
+            },
+            "confirmation_lock": {
+                "path": str(lock_path),
+                "sha256": dashboard._file_sha256(lock_path),
+            },
+            "confirmation_report": {
+                "path": str(report_path),
+                "sha256": dashboard._file_sha256(report_path),
+                "status": decision,
+            },
+        }
+        completion = {
+            **unsigned,
+            "completion_sha256": hashlib.sha256(
+                dashboard._watcher_canonical_json_bytes(unsigned)
+            ).hexdigest(),
+        }
+        self._write_canonical(completion_path, completion)
+        return SimpleNamespace(
+            lock=lock_path,
+            report_path=report_path,
+            completion_path=completion_path,
+            report=report,
+            completion=completion,
+        )
+
+    @staticmethod
+    def _rehash_completion(completion: dict[str, object]) -> None:
+        unsigned = dict(completion)
+        unsigned.pop("completion_sha256", None)
+        completion["completion_sha256"] = hashlib.sha256(
+            dashboard._watcher_canonical_json_bytes(unsigned)
+        ).hexdigest()
+
+    def test_absent_output_with_live_pid_is_safe_waiting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = self._harness(Path(tmp))
+            self._write_pid(harness)
+            result = self._read(harness, process_state="alive")
+
+        self.assertEqual(result["status"], "waiting_stage1")
+        self.assertEqual(result["phase"], "waiting_stage1")
+        self.assertEqual(result["process_state"], "alive")
+        self.assertEqual(result["integrity_status"], "absent")
+        self.assertEqual(set(result), self.ALLOWED_FIELDS)
+
+    def test_exact_lock_only_is_running_or_resume_required(self) -> None:
+        for process_state, expected in (("alive", "running"), ("stopped", "resume_required")):
+            with self.subTest(process_state=process_state), tempfile.TemporaryDirectory() as tmp:
+                harness = self._harness(Path(tmp))
+                harness.sidecar.mkdir()
+                self._write_canonical(
+                    harness.sidecar / dashboard.FAMILY_CONFIRMATION_LOCK_NAME,
+                    {"sealed": True},
+                )
+                if process_state == "alive":
+                    self._write_pid(harness)
+                result = self._read(harness, process_state=process_state)
+
+            self.assertEqual(result["status"], expected)
+            self.assertEqual(result["process_state"], process_state)
+            self.assertEqual(result["integrity_status"], "valid")
+            self.assertEqual(set(result), self.ALLOWED_FIELDS)
+
+    def test_empty_prefix_is_starting_when_alive_and_resume_required_otherwise(self) -> None:
+        for process_state, expected_status, expected_phase in (
+            ("alive", "running", "confirmation_starting"),
+            ("stopped", "resume_required", "resume_required"),
+        ):
+            with self.subTest(process_state=process_state), tempfile.TemporaryDirectory() as tmp:
+                harness = self._harness(Path(tmp))
+                harness.sidecar.mkdir()
+                if process_state == "alive":
+                    self._write_pid(harness)
+                result = self._read(harness, process_state=process_state)
+
+            self.assertEqual(result["status"], expected_status)
+            self.assertEqual(result["phase"], expected_phase)
+            self.assertEqual(result["integrity_status"], "valid")
+            self.assertEqual(set(result), self.ALLOWED_FIELDS)
+
+    def test_root_and_pid_symlink_paths_fail_closed(self) -> None:
+        for path_kind in ("root", "pid"):
+            with self.subTest(path_kind=path_kind), tempfile.TemporaryDirectory() as tmp:
+                harness = self._harness(Path(tmp))
+                try:
+                    if path_kind == "root":
+                        target = harness.root / "confirmation-target"
+                        target.mkdir()
+                        harness.sidecar.symlink_to(target, target_is_directory=True)
+                    else:
+                        target = harness.root / "pid-target.json"
+                        target.write_text("{}\n", encoding="utf-8")
+                        harness.pid.symlink_to(target)
+                except OSError:
+                    forbidden = harness.sidecar if path_kind == "root" else harness.pid
+                    with mock.patch.object(
+                        dashboard,
+                        "_path_contains_symlink",
+                        side_effect=lambda path, expected=forbidden: path == expected,
+                    ):
+                        result = self._read(harness, process_state="alive")
+                else:
+                    result = self._read(harness, process_state="alive")
+                self.assertEqual(result["status"], "artifact_invalid")
+                self.assertEqual(result["integrity_status"], "invalid")
+                self.assertEqual(set(result), self.ALLOWED_FIELDS)
+
+    def test_exact_completed_positive_negative_and_invalid_are_allow_listed(self) -> None:
+        for decision in ("positive_confirmation", "negative_confirmation", "invalid"):
+            with self.subTest(decision=decision), tempfile.TemporaryDirectory() as tmp:
+                harness = self._harness(Path(tmp))
+                self._publish_complete(harness, decision)
+                result = self._read(harness)
+
+                self.assertEqual(result["status"], decision)
+                self.assertEqual(result["decision"], decision)
+                self.assertEqual(result["integrity_status"], "verified")
+                self.assertEqual(set(result), self.ALLOWED_FIELDS)
+                self.assertNotIn(str(harness.root), json.dumps(result, sort_keys=True))
+                self.assertTrue(result["diagnostic_only"])
+                self.assertFalse(result["official_gate_eligible"])
+
+    def test_completion_report_hash_canonical_prefix_and_pid_tamper_fail_closed(self) -> None:
+        mutations = (
+            "lock_hash",
+            "completion_hash",
+            "report_hash",
+            "report_canonical",
+            "completion_canonical",
+            "report_path",
+            "report_semantics",
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
+                harness = self._harness(Path(tmp))
+                artifacts = self._publish_complete(harness, "positive_confirmation")
+                if mutation == "lock_hash":
+                    artifacts.lock.write_text("tampered\n", encoding="utf-8")
+                elif mutation == "completion_hash":
+                    artifacts.completion["completion_sha256"] = "0" * 64
+                    self._write_canonical(artifacts.completion_path, artifacts.completion)
+                elif mutation == "report_hash":
+                    artifacts.completion["confirmation_report"]["sha256"] = "0" * 64
+                    self._rehash_completion(artifacts.completion)
+                    self._write_canonical(artifacts.completion_path, artifacts.completion)
+                elif mutation == "report_canonical":
+                    artifacts.report_path.write_text(
+                        json.dumps(artifacts.report, sort_keys=True),
+                        encoding="utf-8",
+                    )
+                    artifacts.completion["confirmation_report"]["sha256"] = dashboard._file_sha256(
+                        artifacts.report_path
+                    )
+                    self._rehash_completion(artifacts.completion)
+                    self._write_canonical(artifacts.completion_path, artifacts.completion)
+                elif mutation == "completion_canonical":
+                    artifacts.completion_path.write_text(
+                        json.dumps(artifacts.completion, sort_keys=True),
+                        encoding="utf-8",
+                    )
+                elif mutation == "report_path":
+                    artifacts.completion["confirmation_report"]["path"] = str(
+                        harness.sidecar / "elsewhere.json"
+                    )
+                    self._rehash_completion(artifacts.completion)
+                    self._write_canonical(artifacts.completion_path, artifacts.completion)
+                else:
+                    artifacts.report["summary"]["selected_primary_avg_r2"] = 0.1
+                    self._write_canonical(artifacts.report_path, artifacts.report)
+                    artifacts.completion["confirmation_report"]["sha256"] = dashboard._file_sha256(
+                        artifacts.report_path
+                    )
+                    self._rehash_completion(artifacts.completion)
+                    self._write_canonical(artifacts.completion_path, artifacts.completion)
+                result = self._read(harness)
+                self.assertEqual(result["status"], "artifact_invalid")
+                self.assertEqual(set(result), self.ALLOWED_FIELDS)
+
+        for entries in ((dashboard.FAMILY_CONFIRMATION_REPORT_NAME,), ("unknown.json",)):
+            with self.subTest(prefix=entries), tempfile.TemporaryDirectory() as tmp:
+                harness = self._harness(Path(tmp))
+                harness.sidecar.mkdir()
+                for name in entries:
+                    self._write_canonical(harness.sidecar / name, {})
+                self.assertEqual(self._read(harness)["status"], "artifact_invalid")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = self._harness(Path(tmp))
+            marker = self._write_pid(harness)
+            marker["watcher_sha256"] = "0" * 64
+            self._write_canonical(harness.pid, marker)
+            result = self._read(harness, process_state="alive")
+            self.assertEqual(result["status"], "artifact_invalid")
+            self.assertEqual(set(result), self.ALLOWED_FIELDS)
+
+    def test_coherent_rehash_during_exact_replay_is_caught_by_final_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = self._harness(Path(tmp))
+            artifacts = self._publish_complete(harness, "positive_confirmation")
+
+            def rewrite_after_exact_replay(**kwargs: object) -> dict[str, object]:
+                exact = self._synthetic_exact_report(**kwargs)
+                forged = copy.deepcopy(exact)
+                selected = forged["selected_families"]
+                for row in selected["rows"]:
+                    row["R2"] = 0.95
+                selected["primary_min_r2"] = 0.95
+                selected["primary_avg_r2"] = 0.95
+                selected["voltage_r2"] = 0.95
+                forged["summary"]["selected_primary_min_r2"] = 0.95
+                forged["summary"]["selected_primary_avg_r2"] = 0.95
+                forged["summary"]["selected_voltage_r2"] = 0.95
+                self._write_canonical(artifacts.report_path, forged)
+
+                completion = copy.deepcopy(artifacts.completion)
+                completion["confirmation_report"]["sha256"] = dashboard._file_sha256(
+                    artifacts.report_path
+                )
+                self._rehash_completion(completion)
+                self._write_canonical(artifacts.completion_path, completion)
+                return exact
+
+            result = self._read(harness, exact_replay=rewrite_after_exact_replay)
+
+        self.assertEqual(result["status"], "artifact_invalid")
+        self.assertEqual(result["integrity_status"], "invalid")
+        self.assertEqual(set(result), self.ALLOWED_FIELDS)
+
+    @staticmethod
+    def _healthy_local(status: str) -> dict[str, object]:
+        integrity = (
+            "invalid"
+            if status == "artifact_invalid"
+            else "verified"
+            if status in {"positive_confirmation", "negative_confirmation", "invalid"}
+            else "valid"
+        )
+        family = dashboard._empty_family_confirmation_state(
+            status=status,
+            phase="complete" if status in {"positive_confirmation", "negative_confirmation", "invalid"} else status,
+            integrity_status=integrity,
+            process_state="stopped",
+        )
+        family["decision"] = status if status in {
+            "positive_confirmation",
+            "negative_confirmation",
+            "invalid",
+        } else None
+        return {
+            "campaign": {
+                "elapsed_s": 1.0,
+                "active": 0,
+                "total": 700,
+                "result_ok": 700,
+                "source_status": "ok",
+            },
+            "pipeline": {
+                "current_stage": "stage1",
+                "current_label": "Stage 1",
+                "stages": [{"id": "stage1", "label": "Stage 1", "status": "complete"}],
+            },
+            "model": {"available": True, "gate_status": "pass", "metrics": []},
+            "beta": {"available": True, "passed": True},
+            "optimization": {"decision": None, "seeds": []},
+            "speed": {"complete": False},
+            "target_load": dashboard._empty_target_load_state(),
+            "family_confirmation": family,
+            "processes": [],
+            "alerts": [],
+        }
+
+    @staticmethod
+    def _healthy_scheduler() -> dict[str, object]:
+        return {
+            "reachable": True,
+            "stale": False,
+            "active_count": 0,
+            "cap": 100,
+            "project_matches": True,
+            "cap_matches": True,
+            "history_complete": True,
+            "campaign_status": {},
+        }
+
+    def test_state_store_degrades_only_resume_required_and_artifact_invalid(self) -> None:
+        statuses = (
+            "waiting_stage1",
+            "running",
+            "finalizing",
+            "positive_confirmation",
+            "negative_confirmation",
+            "invalid",
+            "resume_required",
+            "artifact_invalid",
+        )
+        for status in statuses:
+            with self.subTest(status=status):
+                local = self._healthy_local(status)
+                store = dashboard.DashboardStateStore(
+                    dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+                    local_collector=lambda _, value=local: value,
+                    scheduler_collector=lambda _: self._healthy_scheduler(),
+                )
+                result = store.refresh_once(force_scheduler=True)
+                expected_degraded = status in {"resume_required", "artifact_invalid"}
+                self.assertEqual(result["health"] == "degraded", expected_degraded)
+                self.assertEqual(result["stale"], expected_degraded)
+
+    def test_terminal_negative_adds_warning_without_changing_official_pipeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            fixture = Fixture(root)
+            fixture.stage1_campaign()
+            fixture.training()
+            runner_log = root / "runner.log"
+            runner_log.write_text(
+                "run_ipmsm_v2 scheduler_ok=2 result_ok=2 active=0 pending=0 "
+                "missing=0 retry=0 project_active=0 submitted=2 elapsed_s=10.0\n",
+                encoding="utf-8",
+            )
+            config = dashboard.DashboardConfig(
+                workdir=root,
+                contract_path=fixture.contract_path,
+                runner_log=runner_log,
+                family_confirmation_root=root / "confirmation",
+            )
+
+            def family(decision: str) -> dict[str, object]:
+                value = dashboard._empty_family_confirmation_state(
+                    status=decision,
+                    phase="complete",
+                    integrity_status="verified",
+                    process_state="stopped",
+                )
+                value["decision"] = decision
+                return value
+
+            with mock.patch.object(
+                dashboard,
+                "_read_family_confirmation",
+                return_value=family("positive_confirmation"),
+            ):
+                positive = dashboard.collect_local_state(config)
+            with mock.patch.object(
+                dashboard,
+                "_read_family_confirmation",
+                return_value=family("negative_confirmation"),
+            ):
+                negative = dashboard.collect_local_state(config)
+
+        self.assertEqual(negative["pipeline"], positive["pipeline"])
+        self.assertEqual(negative["model"], positive["model"])
+        family_alerts = [
+            item
+            for item in negative["alerts"]
+            if "모델 계열 독립 확인" in item.get("message", "")
+        ]
+        self.assertEqual([item["level"] for item in family_alerts], ["warning"])
+        self.assertFalse(any(stage.get("status") == "failed" for stage in negative["pipeline"]["stages"]))
+
+    def test_local_fallback_and_emergency_keep_safe_family_shape(self) -> None:
+        def unavailable(_: dashboard.DashboardConfig) -> dict[str, object]:
+            raise dashboard.DashboardDataError("local unavailable")
+
+        store = dashboard.DashboardStateStore(
+            dashboard.DashboardConfig(Path.cwd(), Path("unused.json")),
+            local_collector=unavailable,
+            scheduler_collector=lambda _: self._healthy_scheduler(),
+        )
+        fallback = store.refresh_once(force_scheduler=True)
+        store._publish_refresh_failure()
+        emergency = json.loads(store.encoded_snapshot())
+
+        for label, snapshot in (("fallback", fallback), ("emergency", emergency)):
+            with self.subTest(label=label):
+                family = snapshot["family_confirmation"]
+                self.assertEqual(set(family), self.ALLOWED_FIELDS)
+                self.assertEqual(family["status"], "artifact_invalid")
+                self.assertTrue(family["diagnostic_only"])
+                self.assertFalse(family["official_gate_eligible"])
+                processes = [
+                    item
+                    for item in snapshot["processes"]
+                    if item.get("role") == "model_family_confirmation"
+                ]
+                self.assertEqual(len(processes), 1)
+                self.assertNotIn(str(Path.cwd()), json.dumps(family, sort_keys=True))
+
+    def test_frontend_family_card_ids_and_render_entrypoint_are_stable(self) -> None:
+        root = Path(server.__file__).resolve().parent / "dashboard"
+        index = (root / "index.html").read_text(encoding="utf-8")
+        app = (root / "app.js").read_text(encoding="utf-8")
+        ids = {
+            "familyConfirmationCard",
+            "familyConfirmationStatus",
+            "familyConfirmationEvidence",
+            "familyConfirmationSummary",
+            "familyConfirmationResume",
+            "familyBaselineMin",
+            "familyBaselineAvg",
+            "familyBaselineVoltage",
+            "familySelectedMin",
+            "familySelectedAvg",
+            "familySelectedVoltage",
+            "familyConfirmationNote",
+        }
+        for element_id in ids:
+            self.assertIn(f'id="{element_id}"', index)
+            self.assertIn(f'"{element_id}"', app)
+        self.assertIn("function renderFamilyConfirmation", app)
+        self.assertIn("renderFamilyConfirmation(data.family_confirmation)", app)
+        for status in (
+            "resume_required",
+            "artifact_invalid",
+            "positive_confirmation",
+            "negative_confirmation",
+        ):
+            self.assertIn(status, app)
 
 
 class SchedulerTests(unittest.TestCase):

@@ -3733,3 +3733,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: focused=52/52, full=773/773, dry-run=`waiting/stage1_results` with zero writes; live task PID marker=43616, watcher SHA=`f5fc5c69...c5ffe`, Stage1=526/700, active=99/100, errors=0, output root absent.
 - Failure/next: the sidecar correctly waits until exact Stage1 results plus official validation/model/R² audit exist; then it will run the frozen 8x6 untouched confirmation and publish lock/report/completion evidence without gating Stage2.
 - Token usage: unavailable; `codex_ops.py` found no local Codex SQLite database.
+
+## 2026-07-12 09:09:15 +09:00 - Frozen-family progress in the live Web UI
+- Part/goal: expose the crash-safe model-family confirmation and evidence under the Surrogate panel without changing the official 8-stage pipeline.
+- Hypothesis/actions: added strict prefix/PID/symlink handling, exact confirmer lock/report replay, live data/official/source/input hashes, final TOCTOU replay, fallback/health isolation, and a baseline-to-selected R² card; restarted only the dashboard task.
+- Candidates/options: negative/invalid remain diagnostic warnings, while resume/artifact-invalid degrade dashboard health; a fully coherent local rewrite still requires an external signature or pinned digest to distinguish.
+- Metrics/result: dashboard+watcher=93/93 and full `.venv`=790/790; HTTP/static/healthz/CSP and headless Edge visual QA pass; live dashboard PID=82036, Stage1=551/700, active=100/100, family watcher=alive/waiting, integrity=absent.
+- Failure/next: no P0/P1 remains; keep Stage1 sealed to 700, then watch the same card audit and publish the untouched-family result after the official R² gate.
+- Token usage: unavailable; run `codex_ops.py` if a local Codex SQLite database becomes available.

@@ -324,6 +324,35 @@ progress::-moz-progress-bar { border-radius: 999px; background: linear-gradient(
 .metric-row.pass strong { color: var(--green); }
 .metric-row.fail strong { color: var(--red); }
 
+.family-confirmation-card { margin-top: 20px; padding: 15px; border: 1px solid rgba(54,217,238,.17); border-radius: 12px; background: linear-gradient(135deg, rgba(54,217,238,.055), rgba(7,19,32,.48)); }
+.family-confirmation-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.family-confirmation-heading h3 { margin: 5px 0 0; font-size: 12px; }
+.diagnostic-label { display: block; color: #75aebb; font-size: 7px; font-weight: 900; letter-spacing: .11em; }
+.family-confirmation-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.confirmation-state-badge, .confirmation-evidence-badge { min-height: 24px; display: inline-flex; align-items: center; padding: 4px 7px; border: 1px solid var(--line); border-radius: 7px; color: #8ca5b6; background: rgba(111,143,166,.08); font-size: 7px; font-weight: 850; line-height: 1.25; text-align: center; }
+.confirmation-state-badge.active, .confirmation-evidence-badge.active { color: var(--cyan); border-color: rgba(54,217,238,.22); background: var(--cyan-soft); }
+.confirmation-state-badge.positive, .confirmation-evidence-badge.verified { color: var(--green); border-color: rgba(78,224,163,.22); background: var(--green-soft); }
+.confirmation-state-badge.warning, .confirmation-evidence-badge.warning { color: var(--amber); border-color: rgba(255,186,102,.24); background: var(--amber-soft); }
+.family-confirmation-summary { margin: 10px 0 0; color: #8ba2b3; font-size: 9px; line-height: 1.55; }
+.family-resume-note { margin: 9px 0 0; padding: 7px 8px; border: 1px dashed rgba(255,186,102,.28); border-radius: 7px; color: #f1c997; background: rgba(255,186,102,.055); font-size: 8px; line-height: 1.45; }
+.family-resume-note[hidden] { display: none; }
+.family-metric-table { margin-top: 11px; border: 1px solid var(--line); border-radius: 9px; background: rgba(7,19,32,.38); overflow: hidden; }
+.family-metric-row { display: grid; grid-template-columns: minmax(82px, 1fr) minmax(52px, .65fr) 14px minmax(52px, .65fr); gap: 6px; align-items: center; min-height: 29px; padding: 0 9px; border-top: 1px solid var(--line); }
+.family-metric-row:first-child { border-top: 0; }
+.family-metric-row > span { min-width: 0; overflow: hidden; color: #7f98aa; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.family-metric-row > strong { color: #9bb0bf; font-size: 9px; text-align: right; font-variant-numeric: tabular-nums; }
+.family-metric-row > strong.selected { color: #b9d9df; }
+.family-metric-row > i { color: #526f82; font-size: 8px; font-style: normal; text-align: center; }
+.family-metric-head { min-height: 25px; background: rgba(83,126,151,.055); }
+.family-metric-head > span { color: #607b90; font-size: 7px; font-weight: 800; letter-spacing: .04em; text-align: right; }
+.family-metric-head > span:first-child { text-align: left; }
+.family-science-note { margin: 9px 1px 0; color: #718b9e; font-size: 8px; line-height: 1.5; }
+.family-confirmation-card[data-state="running"], .family-confirmation-card[data-state="finalizing"] { border-color: rgba(54,217,238,.26); }
+.family-confirmation-card[data-state="positive_confirmation"] { border-color: rgba(78,224,163,.25); background: linear-gradient(135deg, rgba(78,224,163,.06), rgba(7,19,32,.48)); }
+.family-confirmation-card[data-state="positive_confirmation"] .family-metric-row > strong.selected { color: var(--green); }
+.family-confirmation-card[data-state="resume_required"], .family-confirmation-card[data-state="artifact_invalid"], .family-confirmation-card[data-state="negative_confirmation"], .family-confirmation-card[data-state="invalid"] { border-color: rgba(255,186,102,.28); background: linear-gradient(135deg, rgba(255,186,102,.07), rgba(7,19,32,.48)); }
+.family-confirmation-card[data-state="negative_confirmation"] .family-metric-row > strong.selected, .family-confirmation-card[data-state="invalid"] .family-metric-row > strong.selected { color: var(--amber); }
+
 .beta-visual { display: grid; grid-template-columns: 130px 1fr; gap: 21px; align-items: center; padding: 2px 0 24px; }
 .beta-dial { position: relative; width: 122px; height: 122px; display: grid; place-items: center; border: 1px solid rgba(54,217,238,.3); border-radius: 50%; background: repeating-conic-gradient(from 0deg, rgba(54,217,238,.24) 0 1deg, transparent 1deg 15deg), radial-gradient(circle, #0f2b3d 0 30%, #091b2b 31% 56%, transparent 57%); }
 .beta-dial::after { content: ""; position: absolute; width: 3px; height: 40px; bottom: 61px; border-radius: 4px; background: var(--cyan); box-shadow: 0 0 12px rgba(54,217,238,.6); transform: rotate(30deg); transform-origin: 50% 100%; }
@@ -427,6 +456,10 @@ footer { display: flex; justify-content: space-between; width: min(1540px, calc(
   .project-identity small { text-align: left; }
   .node-grid, .process-grid { grid-template-columns: 1fr 1fr; }
   .metric-row { grid-template-columns: 88px 1fr 48px; gap: 8px; }
+  .family-confirmation-heading { display: grid; }
+  .family-confirmation-badges { justify-content: flex-start; }
+  .confirmation-state-badge, .confirmation-evidence-badge { min-height: 28px; }
+  .family-metric-row { grid-template-columns: minmax(74px, 1fr) minmax(48px, .62fr) 12px minmax(48px, .62fr); padding: 0 7px; }
   .beta-visual { grid-template-columns: 100px 1fr; }
   .beta-dial { width: 94px; height: 94px; }
   .beta-dial::after { height: 31px; bottom: 47px; }

@@ -172,6 +172,59 @@
             </div>
           </div>
           <div class="metric-list" id="metricList"></div>
+          <section
+            class="family-confirmation-card"
+            id="familyConfirmationCard"
+            data-state="waiting"
+            aria-labelledby="familyConfirmationTitle"
+            aria-describedby="familyConfirmationSummary familyConfirmationResume familyConfirmationNote"
+          >
+            <div class="family-confirmation-heading">
+              <div>
+                <span class="diagnostic-label">DIAGNOSTIC ONLY · OFFICIAL GATE 아님</span>
+                <h3 id="familyConfirmationTitle">모델 계열 독립 확인</h3>
+              </div>
+              <div class="family-confirmation-badges" aria-label="진단 상태와 산출물 무결성">
+                <span class="confirmation-state-badge pending" id="familyConfirmationStatus" role="status" aria-live="polite" aria-atomic="true">Stage 1 대기</span>
+                <span class="confirmation-evidence-badge pending" id="familyConfirmationEvidence">프로세스 대기 · 무결성 대기</span>
+              </div>
+            </div>
+            <p class="family-confirmation-summary" id="familyConfirmationSummary">
+              공식 Stage 1 감사 완료 후 동일 untouched cohort에서 baseline과 선택 모델 계열을 비교합니다.
+            </p>
+            <p class="family-resume-note" id="familyConfirmationResume" hidden>
+              재개 상태를 확인하고 있습니다.
+            </p>
+            <div class="family-metric-table" role="table" aria-label="Baseline과 선택 모델 계열 R² 비교">
+              <div class="family-metric-row family-metric-head" role="row">
+                <span role="columnheader">R² 지표</span>
+                <span role="columnheader">Baseline</span>
+                <span aria-hidden="true"></span>
+                <span role="columnheader">Selected</span>
+              </div>
+              <div class="family-metric-row" role="row">
+                <span role="rowheader">Primary 최소</span>
+                <strong id="familyBaselineMin" role="cell">—</strong>
+                <i aria-hidden="true">→</i>
+                <strong class="selected" id="familySelectedMin" role="cell">—</strong>
+              </div>
+              <div class="family-metric-row" role="row">
+                <span role="rowheader">Primary 평균</span>
+                <strong id="familyBaselineAvg" role="cell">—</strong>
+                <i aria-hidden="true">→</i>
+                <strong class="selected" id="familySelectedAvg" role="cell">—</strong>
+              </div>
+              <div class="family-metric-row" role="row">
+                <span role="rowheader">전압</span>
+                <strong id="familyBaselineVoltage" role="cell">—</strong>
+                <i aria-hidden="true">→</i>
+                <strong class="selected" id="familySelectedVoltage" role="cell">—</strong>
+              </div>
+            </div>
+            <p class="family-science-note" id="familyConfirmationNote" role="status">
+              이 비교는 과학적 진단이며 공식 R² gate와 전체 진행률을 변경하지 않습니다.
+            </p>
+          </section>
         </section>
 
         <section class="panel physics-panel" aria-labelledby="physicsTitle">

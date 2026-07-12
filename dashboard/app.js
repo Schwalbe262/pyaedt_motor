@@ -523,6 +523,225 @@ function renderCheckpoint(data) {
   setText("checkpointAction", action);
 }
 
+function familyRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function familyToken(value) {
+  if (typeof value === "string") return value.trim().toLowerCase();
+  const record = familyRecord(value);
+  return familyToken(record.status || record.state || record.decision || "");
+}
+
+function firstFinite(...values) {
+  return values.find((value) => finite(value));
+}
+
+function familyMetricValue(family, cohort, metricName) {
+  const metrics = family.metrics;
+  const metricsRecord = familyRecord(metrics);
+  const summary = familyRecord(family.summary || metricsRecord.summary);
+  const cohortAliases = cohort === "baseline"
+    ? ["baseline", "baseline_control"]
+    : ["selected", "selected_families", "selected_family"];
+  const metricAliases = {
+    primary_min_r2: ["primary_min_r2", "primary_min", "min_r2"],
+    primary_avg_r2: ["primary_avg_r2", "primary_avg", "avg_r2"],
+    voltage_r2: ["voltage_r2", "voltage"],
+  }[metricName];
+
+  for (const cohortAlias of cohortAliases) {
+    for (const source of [
+      familyRecord(metricsRecord[cohortAlias]),
+      familyRecord(summary[cohortAlias]),
+      familyRecord(family[cohortAlias]),
+    ]) {
+      const value = firstFinite(...metricAliases.map((alias) => source[alias]));
+      if (value !== undefined) return value;
+    }
+  }
+  for (const source of [metricsRecord, summary, family]) {
+    const flatKeys = cohortAliases.flatMap((cohortAlias) => metricAliases.map((alias) => `${cohortAlias}_${alias}`));
+    const value = firstFinite(...flatKeys.map((key) => source[key]));
+    if (value !== undefined) return value;
+  }
+  if (Array.isArray(metrics)) {
+    for (const row of metrics) {
+      const item = familyRecord(row);
+      const key = familyToken(item.key || item.name || item.metric || item.target);
+      if (!metricAliases.includes(key) && !metricAliases.some((alias) => key.endsWith(alias))) continue;
+      const value = firstFinite(
+        item[cohort],
+        item[`${cohort}_r2`],
+        familyRecord(item.values)[cohort],
+      );
+      if (value !== undefined) return value;
+    }
+  }
+  return undefined;
+}
+
+function familyConfirmationState(family) {
+  const status = familyToken(family.status);
+  const phase = familyToken(family.phase);
+  const decision = familyToken(family.decision || family.confirmation_status || family.result_status);
+  const integrity = familyToken(family.integrity || family.integrity_status);
+  const terminal = ["positive_confirmation", "negative_confirmation", "invalid"];
+  if ((family.diagnostic_only !== undefined && family.diagnostic_only !== true)
+    || (family.official_gate_eligible !== undefined && family.official_gate_eligible !== false)) {
+    return "artifact_invalid";
+  }
+  if (status === "artifact_invalid") return status;
+  if (terminal.includes(status)) return status;
+  if (["invalid", "corrupt", "tampered", "artifact_invalid"].includes(integrity)) return "artifact_invalid";
+  if (status === "resume_required") return status;
+  if (status === "finalizing" || phase === "finalizing") return "finalizing";
+  if (status === "running") return status;
+  if (["waiting", "waiting_stage1"].includes(status)) return "waiting";
+  if (status === "completion_pending") return "finalizing";
+  if (["complete", "already_complete"].includes(status)) {
+    return terminal.includes(decision) ? decision : "finalizing";
+  }
+  if (terminal.includes(decision)) return decision;
+  return "waiting";
+}
+
+function renderFamilyConfirmation(familyValue) {
+  const family = familyRecord(familyValue);
+  const state = familyConfirmationState(family);
+  const card = byId("familyConfirmationCard");
+  card.dataset.state = state;
+
+  const phase = familyToken(family.phase);
+  const phaseLabel = {
+    stage1_results: "Stage 1 결과 대기",
+    official_validation: "공식 validation 대기",
+    official_training: "공식 학습 감사 대기",
+    waiting_stage1: "Stage 1 결과 대기",
+    ready: "독립 확인 준비",
+    running: "모델 계열 비교 실행",
+    training: "모델 계열 비교 학습",
+    confirmation_starting: "모델 계열 비교 시작",
+    confirmation_training: "모델 계열 비교 학습",
+    completion_pending: "결과 무결성 최종 감사",
+    finalizing: "결과 무결성 최종 감사",
+  }[phase] || "Stage 1 감사 대기";
+  const statusLabel = {
+    waiting: phaseLabel,
+    running: "독립 확인 실행 중",
+    finalizing: "결과 최종 감사",
+    resume_required: "안전 재개 필요",
+    artifact_invalid: "진단 산출물 무효",
+    positive_confirmation: "선택 계열 개선 확인",
+    negative_confirmation: "개선 근거 미확인",
+    invalid: "비교 유효성 불충족",
+  }[state];
+  const statusTone = state === "positive_confirmation"
+    ? "positive"
+    : ["running", "finalizing"].includes(state)
+      ? "active"
+      : ["resume_required", "artifact_invalid", "negative_confirmation", "invalid"].includes(state)
+        ? "warning"
+        : "pending";
+  const status = byId("familyConfirmationStatus");
+  if (status.textContent !== statusLabel) status.textContent = statusLabel;
+  status.className = `confirmation-state-badge ${statusTone}`;
+
+  const process = familyRecord(family.process);
+  const processState = familyToken(
+    process.state || process.status || process.mode || family.process_state || family.process,
+  );
+  let processLabel = {
+    active: "프로세스 실행",
+    alive: "프로세스 실행",
+    running: "프로세스 실행",
+    managed: "프로세스 관리됨",
+    stale: "프로세스 재개 필요",
+    resume_required: "프로세스 재개 필요",
+    stopped: "프로세스 종료",
+    complete: "프로세스 종료",
+    exited: "프로세스 종료",
+    absent: "프로세스 대기",
+    inactive: "프로세스 대기",
+    waiting: "프로세스 대기",
+    unknown: "프로세스 확인 필요",
+  }[processState] || (["running", "finalizing"].includes(state) ? "프로세스 확인 중" : "프로세스 대기");
+  if (processState === "stopped" && state === "waiting") processLabel = "프로세스 대기";
+  if (processState === "stopped" && state === "resume_required") processLabel = "프로세스 재개 필요";
+  const integrity = familyRecord(family.integrity);
+  const integrityState = familyToken(
+    integrity.state || integrity.status || family.integrity_status || family.integrity,
+  );
+  const integrityLabel = {
+    verified: "무결성 검증됨",
+    valid: "산출물 구조 정상",
+    audited: "무결성 검증됨",
+    complete: "무결성 검증됨",
+    checking: "무결성 감사 중",
+    auditing: "무결성 감사 중",
+    running: "무결성 감사 중",
+    invalid: "무결성 오류",
+    corrupt: "무결성 오류",
+    tampered: "무결성 오류",
+    artifact_invalid: "무결성 오류",
+    pending: "무결성 대기",
+    waiting: "무결성 대기",
+  }[integrityState] || (state === "artifact_invalid" ? "무결성 오류" : "무결성 대기");
+  const evidenceTone = ["invalid", "corrupt", "tampered", "artifact_invalid"].includes(integrityState)
+    || ["stale", "resume_required"].includes(processState)
+    ? "warning"
+    : ["verified", "valid", "audited", "complete"].includes(integrityState)
+      ? "verified"
+      : ["active", "alive", "running", "managed"].includes(processState)
+        ? "active"
+        : "pending";
+  const evidence = byId("familyConfirmationEvidence");
+  evidence.textContent = `${processLabel} · ${integrityLabel}`;
+  evidence.className = `confirmation-evidence-badge ${evidenceTone}`;
+
+  const summaryText = {
+    waiting: `${phaseLabel} · 공식 R² gate와 분리된 진단입니다.`,
+    running: `${phaseLabel} 중입니다. 결과는 공식 모델 선택이나 전체 진행률을 바꾸지 않습니다.`,
+    finalizing: "lock·report·completion hash를 재검증한 뒤 진단 결과를 게시합니다.",
+    resume_required: "봉인된 부분 산출물을 감사한 뒤 같은 진단을 안전하게 이어야 합니다.",
+    artifact_invalid: "진단 산출물의 경로 또는 hash 감사가 실패해 결과를 사용할 수 없습니다.",
+    positive_confirmation: "동일 untouched cohort에서 선택 모델 계열의 동시 개선이 확인됐습니다.",
+    negative_confirmation: "선택 모델 계열이 baseline 대비 모든 판정 조건을 동시에 개선하지 못했습니다.",
+    invalid: "물리 또는 통계 유효성이 성립하지 않아 모델 계열 비교 결론을 사용할 수 없습니다.",
+  }[state];
+  setText("familyConfirmationSummary", summaryText);
+
+  const resumed = state === "resume_required"
+    || family.resumed === true
+    || family.resume_required === true
+    || process.resumed === true
+    || process.resume === true
+    || ["resume", "resumed", "stale", "resume_required"].includes(familyToken(process.mode || processState))
+    || integer(family.resume_count) > 0;
+  const resumeNote = byId("familyConfirmationResume");
+  resumeNote.hidden = !resumed;
+  resumeNote.textContent = state === "resume_required"
+    ? "재개 필요: 기존 lock과 PID 상태를 검증한 뒤 --resume 경로로 이어갑니다."
+    : "재개 실행: 검증된 기존 lock을 재사용해 중단 지점부터 이어서 처리했습니다.";
+
+  setText("familyBaselineMin", decimal(familyMetricValue(family, "baseline", "primary_min_r2"), 4));
+  setText("familyBaselineAvg", decimal(familyMetricValue(family, "baseline", "primary_avg_r2"), 4));
+  setText("familyBaselineVoltage", decimal(familyMetricValue(family, "baseline", "voltage_r2"), 4));
+  setText("familySelectedMin", decimal(familyMetricValue(family, "selected", "primary_min_r2"), 4));
+  setText("familySelectedAvg", decimal(familyMetricValue(family, "selected", "primary_avg_r2"), 4));
+  setText("familySelectedVoltage", decimal(familyMetricValue(family, "selected", "voltage_r2"), 4));
+
+  const scienceNote = {
+    positive_confirmation: "과학적 진단 결과입니다. 개선 확인은 공식 R² gate 통과를 의미하지 않습니다.",
+    negative_confirmation: "과학적 경고입니다. 개선 미확인은 공식 R² 실패로 처리되지 않습니다.",
+    invalid: "과학적 경고입니다. 유효성 불충족은 공식 R² 실패로 처리되지 않습니다.",
+    artifact_invalid: "진단 무결성 경고입니다. 공식 R² gate와 전체 진행률에는 영향이 없습니다.",
+    resume_required: "재개 상태는 진단 실행에만 적용되며 공식 Stage 상태를 변경하지 않습니다.",
+  }[state] || "이 비교는 DIAGNOSTIC ONLY이며 공식 R² gate와 전체 진행률을 변경하지 않습니다.";
+  setText("familyConfirmationNote", scienceNote);
+  card.setAttribute("aria-label", `모델 계열 독립 확인: ${statusLabel}. 진단 전용이며 공식 gate가 아닙니다.`);
+}
+
 function renderModel(data) {
   const model = data.model || {};
   setText("r2Threshold", finite(model.threshold) ? model.threshold.toFixed(2) : "0.95");
@@ -551,6 +770,7 @@ function renderModel(data) {
     row.appendChild(element("strong", "", finite(metric.r2) ? metric.r2.toFixed(4) : "대기"));
     list.appendChild(row);
   });
+  renderFamilyConfirmation(data.family_confirmation);
 }
 
 function renderPhysics(data) {

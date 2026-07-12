@@ -14,6 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 from ipmsm_dashboard_state import (
     DEFAULT_CONTRACT,
+    DEFAULT_FAMILY_CONFIRMATION_ROOT,
     DEFAULT_PROJECT,
     DEFAULT_REFRESH_SECONDS,
     DEFAULT_SCHEDULER_REFRESH_SECONDS,
@@ -177,6 +178,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--runner-log", type=Path)
     parser.add_argument("--target-load-progress", type=Path, default=DEFAULT_TARGET_LOAD_PROGRESS)
+    parser.add_argument("--family-confirmation-root", type=Path, default=DEFAULT_FAMILY_CONFIRMATION_ROOT)
+    parser.add_argument("--family-confirmation-pid", type=Path)
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--scheduler-url", default=DEFAULT_SCHEDULER_URL)
     parser.add_argument("--project-active-cap", type=int, default=100)
@@ -212,6 +215,12 @@ def _resolved_config(args: argparse.Namespace) -> DashboardConfig:
     target_load_progress = args.target_load_progress
     if target_load_progress is not None and not target_load_progress.is_absolute():
         target_load_progress = workdir / target_load_progress
+    family_confirmation_root = args.family_confirmation_root
+    if not family_confirmation_root.is_absolute():
+        family_confirmation_root = workdir / family_confirmation_root
+    family_confirmation_pid = args.family_confirmation_pid
+    if family_confirmation_pid is not None and not family_confirmation_pid.is_absolute():
+        family_confirmation_pid = workdir / family_confirmation_pid
     return DashboardConfig(
         workdir=workdir,
         contract_path=contract.resolve(strict=True),
@@ -221,6 +230,12 @@ def _resolved_config(args: argparse.Namespace) -> DashboardConfig:
         timeout_seconds=args.timeout_seconds,
         runner_log=runner_log,
         target_load_progress=target_load_progress.resolve(strict=False) if target_load_progress else None,
+        family_confirmation_root=family_confirmation_root.absolute(),
+        family_confirmation_pid=(
+            family_confirmation_pid.absolute()
+            if family_confirmation_pid is not None
+            else None
+        ),
     )
 
 
