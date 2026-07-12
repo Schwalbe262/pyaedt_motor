@@ -3432,6 +3432,27 @@ def _official_r2_summary(contract: Any, official: Any) -> dict[str, Any]:
     gate_passed = getattr(gate, "passed", None)
     if not isinstance(gate_passed, bool) or gate_passed != (passed_count == len(finite_values)):
         raise DashboardDataError("official Stage1 gate status is inconsistent")
+    raw_metrics = {
+        str(target): float(value)
+        for target, value in primary.items()
+        if _safe_float(value) is not None
+    }
+    raw_metrics["output_phase_voltage_last_peak_abs_v"] = voltage
+    metrics = (
+        [
+            {
+                "target": target,
+                "label": TARGET_LABELS[target],
+                "r2": round(raw_metrics[target], 6),
+                "passed": raw_metrics[target] >= threshold,
+            }
+            for target in TARGET_LABELS
+        ]
+        if set(raw_metrics) == set(TARGET_LABELS)
+        else []
+    )
+    validation = getattr(gate, "validation", None)
+    validation = validation if isinstance(validation, Mapping) else {}
     return {
         "status": "verified",
         "completion_present": True,
@@ -3442,6 +3463,64 @@ def _official_r2_summary(contract: Any, official: Any) -> dict[str, Any]:
         "target_count": len(finite_values),
         "min_r2": round(min(finite_values), 6),
         "avg_r2": round(sum(finite_values) / len(finite_values), 6),
+        "metrics": metrics,
+        "validation_rows": _safe_int(validation.get("rows")),
+        "validation_status": _clip_text(validation.get("status"), 40),
+    }
+
+
+def _official_model_metrics(governance: Mapping[str, Any]) -> dict[str, Any] | None:
+    official = governance.get("official_stage1")
+    if not isinstance(official, Mapping) or official.get("status") != "verified":
+        return None
+    raw_metrics = official.get("metrics")
+    if not isinstance(raw_metrics, list) or len(raw_metrics) != len(TARGET_LABELS):
+        return None
+    metrics: list[dict[str, Any]] = []
+    targets: set[str] = set()
+    for raw in raw_metrics:
+        if not isinstance(raw, Mapping):
+            return None
+        target = str(raw.get("target") or "")
+        value = _safe_float(raw.get("r2"))
+        if target not in TARGET_LABELS or target in targets or value is None:
+            return None
+        targets.add(target)
+        metrics.append(
+            {
+                "target": target,
+                "label": TARGET_LABELS[target],
+                "r2": round(value, 6),
+                "passed": bool(raw.get("passed")),
+            }
+        )
+    if targets != set(TARGET_LABELS):
+        return None
+    threshold = _safe_float(official.get("threshold"))
+    min_r2 = _safe_float(official.get("min_r2"))
+    avg_r2 = _safe_float(official.get("avg_r2"))
+    if threshold is None or min_r2 is None or avg_r2 is None:
+        return None
+    passed_count = sum(1 for metric in metrics if metric["passed"])
+    if passed_count != _safe_int(official.get("passed_count"), -1):
+        return None
+    return {
+        "available": True,
+        "stage": "Stage 1 official",
+        "threshold": threshold,
+        "gate_status": str(official.get("gate_status") or "unavailable"),
+        "metrics": metrics,
+        "min_r2": round(min_r2, 6),
+        "avg_r2": round(avg_r2, 6),
+        "passed_count": passed_count,
+        "target_count": len(metrics),
+        "validation_rows": _safe_int(official.get("validation_rows")),
+        "validation_status": _clip_text(official.get("validation_status"), 40),
+        "artifact_hash_count": len(metrics) - 2,
+        "integrity_status": "verified",
+        "authority_verified": True,
+        "official_gate_eligible": True,
+        "diagnostic_only": False,
     }
 
 
@@ -4039,6 +4118,38 @@ def reconcile_campaign_with_stage1_collection(
     return reconciled
 
 
+def _campaign_without_runner_log(*, total_cases: int, cap: int, source: Path) -> dict[str, Any]:
+    """Return a complete, non-authoritative runner shape for collection recovery."""
+
+    return {
+        "scheduler_ok": 0,
+        "result_ok": 0,
+        "active": 0,
+        "pending": 0,
+        "missing": total_cases,
+        "retry": 0,
+        "project_active": 0,
+        "submitted": 0,
+        "elapsed_s": 0.0,
+        "total": total_cases,
+        "cap": cap,
+        "progress_pct": 0.0,
+        "scheduler_progress_pct": 0.0,
+        "completion_rate_per_hour": 0.0,
+        "eta_hours": None,
+        "settling_results": 0,
+        "result_progress_log_age_seconds": 0.0,
+        "result_progress_log_transition_verified": False,
+        "result_progress_log_age_lower_bound": True,
+        "log_updated_at": "",
+        "log_age_seconds": None,
+        "source_file": source.name,
+        "source_mtime_reliable": False,
+        "warnings": ["Stage 1 runner log is unavailable; using atomic collection authority."],
+        "source_status": "degraded",
+    }
+
+
 def recover_contract_failure_progress(
     config: DashboardConfig,
     local: Mapping[str, Any],
@@ -4211,12 +4322,28 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
     speed = pipeline.get("speed") if isinstance(pipeline.get("speed"), dict) else {}
     expected_stage1 = _safe_int(stage1.get("expected_rows"), 700)
     runner_log = config.runner_log or find_runner_log(artifact_dir)
-    campaign = parse_campaign_log(runner_log, total_cases=expected_stage1, cap=config.cap)
     stage1_collection = inspect_stage1_collection(
         config,
         stage1,
         expected_rows=expected_stage1,
     )
+    try:
+        campaign = parse_campaign_log(
+            runner_log,
+            total_cases=expected_stage1,
+            cap=config.cap,
+        )
+    except DashboardDataError:
+        if (
+            stage1_collection.get("status") != "verified"
+            or stage1_collection.get("complete") is not True
+        ):
+            raise
+        campaign = _campaign_without_runner_log(
+            total_cases=expected_stage1,
+            cap=config.cap,
+            source=runner_log,
+        )
     campaign = reconcile_campaign_with_stage1_collection(campaign, stage1_collection)
     quality_profile_experiment, expected_quality_tasks = inspect_quality_profile_experiment_plan(config)
     quality_profile_experiment.update(
@@ -4308,6 +4435,9 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
         ),
         _safe_float(stage1.get("r2_threshold")) or 0.95,
     )
+    official_model = _official_model_metrics(governance)
+    if official_model is not None:
+        model = official_model
 
     stage2_decision_path = _resolve(config.workdir, stage2.get("decision"))
     stage3_decision_path = _resolve(config.workdir, stage3.get("decision"))

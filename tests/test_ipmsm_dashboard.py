@@ -235,6 +235,20 @@ class Stage1CollectionTests(unittest.TestCase):
         self.assertEqual(result["campaign"]["completion_source"], "atomic_collection")
         self.assertEqual(result["campaign"]["source_status"], "ok")
 
+    def test_verified_atomic_collection_recovers_missing_runner_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture, config, _ = self._collection_fixture(Path(tmp).resolve())
+            fixture.training()
+            assert config.runner_log is not None
+            config.runner_log.unlink()
+            result = dashboard.collect_local_state(config)
+
+        self.assertEqual(result["stage1_collection"]["status"], "verified")
+        self.assertEqual(result["campaign"]["result_ok"], 2)
+        self.assertEqual(result["campaign"]["runner_result_ok"], 0)
+        self.assertEqual(result["campaign"]["completion_source"], "atomic_collection")
+        self.assertEqual(result["campaign"]["source_status"], "ok")
+
     def test_explicit_runner_log_keeps_original_artifact_root_for_revised_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -689,6 +703,45 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(result["status"], "not_activated")
         self.assertFalse(result["contract"]["activated"])
         self.assertFalse(result["authorization"]["authorized"])
+
+    def test_official_governance_populates_model_metrics(self) -> None:
+        values = {
+            target: 0.90 + index / 100.0
+            for index, target in enumerate(dashboard.TARGET_LABELS)
+        }
+        metrics = [
+            {
+                "target": target,
+                "label": dashboard.TARGET_LABELS[target],
+                "r2": value,
+                "passed": value >= 0.95,
+            }
+            for target, value in values.items()
+        ]
+        governance = {
+            "official_stage1": {
+                "status": "verified",
+                "gate_status": "failed",
+                "threshold": 0.95,
+                "metrics": metrics,
+                "min_r2": min(values.values()),
+                "avg_r2": sum(values.values()) / len(values),
+                "passed_count": sum(value >= 0.95 for value in values.values()),
+                "validation_rows": 700,
+                "validation_status": "pass",
+            }
+        }
+
+        model = dashboard._official_model_metrics(governance)
+
+        self.assertIsNotNone(model)
+        assert model is not None
+        self.assertTrue(model["available"])
+        self.assertTrue(model["authority_verified"])
+        self.assertTrue(model["official_gate_eligible"])
+        self.assertFalse(model["diagnostic_only"])
+        self.assertEqual(len(model["metrics"]), 9)
+        self.assertEqual(model["validation_rows"], 700)
 
     def test_verified_v4_authorities_are_allow_listed_and_authorize_only_exact_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
