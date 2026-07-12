@@ -263,3 +263,4 @@
 - RaiDrive source upload errors are avoided by developing v3 on local NTFS; retained stages are validated but never promoted/deleted/used as evidence, and a retry re-fetches before fresh no-replace publication; focused 23/23 and related 54/54 (1 skip) pass.
 - Local v3 Stage2 audit is complete/ready at receipt `50405c72...82018`: coverage 300/300, physics_ok171, sole torque suspect task28880, retryable infrastructure27, unsubmitted101, active/pending0, and 172 final checkpoints validated.
 - `revise_ipmsm_v2_torque_recovery_base_v4r4.py` now gates a cap50 v4r4 base on all four recovery authorities, 299 preserved Stage2 dedupes, task28880-only physical contamination, and fresh output namespaces; tests pass 12/12, no base/wrapper published.
+- Stage1 rebuild provenance now matches the live replay task entrypoint `subprocess_run.py` (the fixture incorrectly used `simulation1.sh`); targeted real-shape/dry-run tests pass 2/2, with no collection published yet.

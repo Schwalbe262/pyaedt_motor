@@ -380,7 +380,7 @@ class Stage1TorqueUnitRebuildTests(unittest.TestCase):
                     "dedupe_key": expected_task.dedupe_key,
                     "remote_cwd": "/remote/worktree",
                     "remote_dir": "/remote/worktree",
-                    "entrypoint": "simulation1.sh",
+                    "entrypoint": "subprocess_run.py",
                     "required_capability": forensic_audit.EXPECTED_POLICY[
                         "required_capability"
                     ],
@@ -822,6 +822,31 @@ class Stage1TorqueUnitRebuildTests(unittest.TestCase):
                 self._run(
                     self.root / "dedupe-tamper-output",
                     self.root / "dedupe-tamper-receipt.json",
+                )
+        finally:
+            receipt_path.write_bytes(original)
+
+    def test_forensic_selected_entrypoint_must_match_live_scheduler_shape(self) -> None:
+        receipt_path = self.fixture["forensic_receipt"]
+        original = receipt_path.read_bytes()
+        try:
+            receipt = json.loads(original.decode("utf-8"))
+            record = receipt["cases"][0]
+            record["task"]["entrypoint"] = "simulation1.sh"
+            record["task_metadata_canonical_sha256"] = forensic_audit.canonical_sha256(
+                record["task"]
+            )
+            record["attempt_history"][-1]["task"] = dict(record["task"])
+            record["attempt_history"][-1][
+                "task_metadata_canonical_sha256"
+            ] = forensic_audit.canonical_sha256(record["task"])
+            receipt_path.write_bytes(forensic_audit.canonical_json_bytes(receipt))
+            with self.assertRaisesRegex(
+                rebuild.RebuildError, "selected task entrypoint changed"
+            ):
+                self._run(
+                    self.root / "entrypoint-tamper-output",
+                    self.root / "entrypoint-tamper-receipt.json",
                 )
         finally:
             receipt_path.write_bytes(original)

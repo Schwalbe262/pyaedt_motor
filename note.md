@@ -3898,3 +3898,8 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Part/goal: make the eventual cap50 pipeline contract depend on the complete forensic, recovery-plan, Stage1 rebuild, and Stage2 audit authorities without mutating v4r3.
 - Actions/result: added a dry-run-first/no-replace base-only revision with exact recursive allowlist, 299 Stage2 dedupe preservation, task28880-only contamination gate, live project id2/cap50 authority, crash recovery, and fresh v4r4 namespaces; focused tests pass 12/12.
 - Failure/next: recovery manifest and Stage1 rebuild receipt are not yet published, so the real default dry-run remains intentionally fail-closed and no v4r4 base or wrapper exists.
+
+## 2026-07-13 02:06:00 +09:00 - Live replay entrypoint provenance corrected
+- Part/goal: make the Stage1 rebuild consume the published replay receipt without weakening scheduler task identity.
+- Actions/result: the live four tasks prove `entrypoint=subprocess_run.py`; replaced the incorrect `simulation1.sh` fixture/authority, added a coherent task+history tamper regression, and passed targeted real-shape/dry-run tests 2/2.
+- Failure/next: regenerate the LF source snapshot and rerun the real 700-row dry-run before any collection publication.

@@ -435,7 +435,7 @@ def _validate_task_provenance(
         selected.get("remote_cwd") or ""
     ).strip():
         raise RebuildError(f"forensic selected task is not a successful remote solve: {case_id}")
-    if selected.get("entrypoint") != "simulation1.sh":
+    if selected.get("entrypoint") != "subprocess_run.py":
         raise RebuildError(f"forensic selected task entrypoint changed: {case_id}")
 
     history = record.get("attempt_history")
