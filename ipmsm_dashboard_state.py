@@ -177,6 +177,7 @@ TASK_PREFIXES = {
     "pareto": "ipmsm-v2-pareto-fea-",
     "speed": "ipmsm-profile-thirdpass-speed-strict-v2-v1-",
     "target_load": "ipmsm-target-load-v4-",
+    "torque_unit_replay": "ipmsm-v2-torqueunit-replay-v1-",
 }
 RUNTIME_SCHEDULER_STATUSES = (
     "queued",
@@ -4692,6 +4693,29 @@ def build_overall_progress(stages: Sequence[Mapping[str, Any]]) -> dict[str, Any
     }
 
 
+def torque_unit_replay_state(counts: Mapping[str, Any]) -> dict[str, Any]:
+    clean = {status: max(0, _safe_int(counts.get(status))) for status in RUNTIME_SCHEDULER_STATUSES}
+    active = sum(clean[status] for status in ACTIVE_STATUSES)
+    completed = clean["completed"]
+    failed = clean["failed"] + clean["cancelled"]
+    if completed >= 4 and failed == 0 and active == 0:
+        status = "complete"
+    elif active:
+        status = "running"
+    elif failed:
+        status = "failed"
+    else:
+        status = "waiting"
+    return {
+        "planned": 4,
+        "completed": completed,
+        "active": active,
+        "failed": failed,
+        "status": status,
+        "scheduler_counts": clean,
+    }
+
+
 def _fetch_json(url: str, timeout: float, *, max_bytes: int = 8 * 1024 * 1024) -> Any:
     req = request.Request(url, headers={"Accept": "application/json", "User-Agent": "ipmsm-dashboard/1"})
     try:
@@ -5378,6 +5402,9 @@ class DashboardStateStore:
             local["checkpoint"] = checkpoint
         campaign_status = scheduler.get("campaign_status")
         if isinstance(campaign_status, Mapping):
+            replay_counts = campaign_status.get("torque_unit_replay")
+            if isinstance(replay_counts, Mapping):
+                local["torque_unit_replay"] = torque_unit_replay_state(replay_counts)
             speed_counts = campaign_status.get("speed")
             if isinstance(speed_counts, Mapping):
                 local.setdefault("speed", {})["scheduler_counts"] = dict(speed_counts)

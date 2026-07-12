@@ -2888,6 +2888,11 @@ class SchedulerTests(unittest.TestCase):
             },
             {"id": 3, "name": "ipmsm-target-load-v4-probe-c", "status": "failed"},
             {"id": 4, "name": "ipmsm-v2-foundation-s2-case-a", "status": "running"},
+            {
+                "id": 5,
+                "name": "ipmsm-v2-torqueunit-replay-v1-case-a",
+                "status": "running",
+            },
         ]
         complete = dashboard.summarize_scheduler(
             project={
@@ -2912,22 +2917,42 @@ class SchedulerTests(unittest.TestCase):
             cap=100,
         )
 
-        self.assertEqual(complete["history_returned_count"], 4)
-        self.assertEqual(complete["project_total_count"], 4)
+        self.assertEqual(complete["history_returned_count"], 5)
+        self.assertEqual(complete["project_total_count"], 5)
         self.assertTrue(complete["history_complete"])
         self.assertEqual(
             complete["campaign_status"]["target_load"],
             {"completed": 1, "failed": 1, "queued": 1},
         )
         self.assertEqual(complete["campaign_status"]["stage2"], {"running": 1})
+        self.assertEqual(
+            complete["campaign_status"]["torque_unit_replay"],
+            {"running": 1},
+        )
 
-        self.assertEqual(partial["history_returned_count"], 4)
-        self.assertEqual(partial["project_total_count"], 10)
+        self.assertEqual(partial["history_returned_count"], 5)
+        self.assertEqual(partial["project_total_count"], 11)
         self.assertFalse(partial["history_complete"])
         self.assertEqual(
             partial["campaign_status"]["target_load"],
             {"completed": 1, "failed": 1, "queued": 1},
         )
+
+    def test_torque_unit_replay_state_keeps_execution_and_proof_counts_separate(self) -> None:
+        running = dashboard.torque_unit_replay_state(
+            {"completed": 1, "running": 2, "queued": 1, "failed": 0}
+        )
+        self.assertEqual(running["status"], "running")
+        self.assertEqual(running["completed"], 1)
+        self.assertEqual(running["active"], 3)
+        self.assertEqual(running["planned"], 4)
+        self.assertEqual(
+            dashboard.torque_unit_replay_state({"completed": 4})["status"],
+            "complete",
+        )
+        failed = dashboard.torque_unit_replay_state({"completed": 3, "failed": 1})
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(failed["failed"], 1)
 
     def test_failed_or_noncanonical_stage1_tasks_are_not_progress_evidence(self) -> None:
         finished_at = datetime.now(timezone.utc).isoformat()

@@ -742,6 +742,13 @@ function renderCampaign(data) {
     const runningTasks = integer(counts.running);
     const queuedTasks = integer(counts.queued) + integer(counts.attaching);
     const failedTasks = integer(counts.failed);
+    // Remediation proof is separate from both Slurm completion and collected rows.
+    const torqueReplay = data.torque_unit_replay || {};
+    const torqueReplayPlanned = integer(torqueReplay.planned);
+    const torqueReplayDetail = torqueReplayPlanned > 0
+      ? ` · 단위 재검증 ${integer(torqueReplay.completed)}/${torqueReplayPlanned}`
+        + ` (실행 ${integer(torqueReplay.active)}, 실패 ${integer(torqueReplay.failed)})`
+      : "";
     setText("rateLabel", `${current.currentLabel} 검증 결과`);
     setText(
       "completionRate",
@@ -757,7 +764,7 @@ function renderCampaign(data) {
     );
     setText(
       "rateSub",
-      `Slurm 완료 ${completedTasks} · 수집/검증 ${validatedTasks} · 미수집 ${uncollectedTasks}`,
+      `Slurm 완료 ${completedTasks} · 수집/검증 ${validatedTasks} · 미수집 ${uncollectedTasks}${torqueReplayDetail}`,
     );
     setText("etaLabel", `${current.currentLabel} 실행 중`);
     setText("etaValue", schedulerFresh ? runningTasks.toLocaleString("ko-KR") : "—");

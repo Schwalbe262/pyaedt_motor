@@ -231,6 +231,7 @@ stage2Active.overall = {
   progress_pct: 0,
 };
 stage2Active.scheduler = { reachable: true, stale: false, active_count: 99, cap: 100 };
+stage2Active.torque_unit_replay = { planned: 4, completed: 0, active: 4, failed: 0 };
 context.__stage2Active = stage2Active;
 vm.runInContext("renderCampaign(__stage2Active)", context);
 const stage2View = {
@@ -403,6 +404,8 @@ process.stdout.write(JSON.stringify({
         self.assertIn("Slurm 완료 100", result["stage2"]["rateSub"])
         self.assertIn("수집/검증 0", result["stage2"]["rateSub"])
         self.assertIn("미수집 100", result["stage2"]["rateSub"])
+        self.assertIn("단위 재검증 0/4", result["stage2"]["rateSub"])
+        self.assertIn("실행 4, 실패 0", result["stage2"]["rateSub"])
         self.assertEqual(result["stage2"]["etaLabel"], "Stage 2 보강 DOE 실행 중")
         self.assertEqual(result["stage2"]["running"], "99")
         self.assertIn("실패 0", result["stage2"]["etaSub"])
