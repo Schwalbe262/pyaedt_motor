@@ -21,11 +21,14 @@ class TorqueUnitReplayLauncherTest(unittest.TestCase):
             "--required-capability', 'conda:pyaedt2026v1",
             "--env-profile', 'pyaedt2026v1",
             "--completed-result-settle-seconds', '300",
+            "torque_unit_replay_supervisor.pid",
             "--submit",
         )
         for token in required:
             with self.subTest(token=token):
                 self.assertIn(token, text)
+        self.assertIn("& $python @arguments", text)
+        self.assertNotIn("Start-Process", text)
 
 
 if __name__ == "__main__":

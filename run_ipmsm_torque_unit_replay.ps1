@@ -43,19 +43,15 @@ $arguments = @(
     '--submit'
 )
 
-$process = Start-Process `
-    -FilePath $python `
-    -ArgumentList $arguments `
-    -WorkingDirectory $repoRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $stdout `
-    -RedirectStandardError $stderr `
-    -PassThru
 try {
-    [IO.File]::WriteAllText($pidFile, "$($process.Id)`n", [Text.UTF8Encoding]::new($false))
-    $process.WaitForExit()
-    exit $process.ExitCode
+    [IO.File]::WriteAllText($pidFile, "$PID`n", [Text.UTF8Encoding]::new($false))
+    Push-Location -LiteralPath $repoRoot
+    # Direct invocation preserves the spaced module command as one argv value.
+    & $python @arguments 1>> $stdout 2>> $stderr
+    $exitCode = $LASTEXITCODE
 }
 finally {
+    Pop-Location
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
 }
+exit $exitCode
