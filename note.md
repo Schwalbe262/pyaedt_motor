@@ -3741,3 +3741,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Metrics/result: dashboard+watcher=93/93 and full `.venv`=790/790; HTTP/static/healthz/CSP and headless Edge visual QA pass; live dashboard PID=82036, Stage1=551/700, active=100/100, family watcher=alive/waiting, integrity=absent.
 - Failure/next: no P0/P1 remains; keep Stage1 sealed to 700, then watch the same card audit and publish the untouched-family result after the official R² gate.
 - Token usage: unavailable; run `codex_ops.py` if a local Codex SQLite database becomes available.
+
+## 2026-07-12 10:18:42 +09:00 - Optimization-input confirmation gate
+- Part/goal: prepare a fail-closed human confirmation boundary before production NSGA-II without modifying sealed live v3.
+- Hypothesis/actions: bound exact contract/spec/implementation hashes and every effective operating-point, winding, inverter, geometry, constraint, beta, NSGA-II, volume, and efficiency value; added canonical no-replace publication, exact declaration replay, and final TOCTOU checks.
+- Candidates/options: kept filesystem-ACL self-attestation explicit and inactive; rejected silently accepting assumption-marked PPT values or treating the artifact as a digital signature.
+- Metrics/result: focused `.venv` 17/17; two independent P0/P1 audits found none within the documented trust model; Stage1 remained 575/700 with 100 active and no declaration/confirmation artifact was created.
+- Failure/next: current v3 does not pin or invoke the helper; a future resealed supervisor must pin it and audit the exact declaration/confirmation immediately before optimization after the operator confirms the production values.
