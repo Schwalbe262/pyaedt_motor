@@ -3974,3 +3974,6 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 
 ## 2026-07-13 09:47:00 +09:00 - Stage2 gate closed and target-load continuation checkpointed
 - Actions/result: Stage2 completed300/300 and published the1000-row combined decision, but gate remains0/9 with min/avg R²0.584231/0.765683; automatic Stage3 generation failed closed before submission because one derived-efficiency ensemble prediction was nonfinite. Committed/pushed `fe41a8e` contract-only target-load continuation adapter; related130 pass/2 skip, reviews P0/P1 none. Next: fix the deterministic acquisition signal and activate only through a new pinned C-native successor authority.
+
+## 2026-07-13 10:02:00 +09:00 - Stage3 nonphysical ensemble signal repaired
+- Actions/result: committed/pushed `103796d`; physically valid derived members retain ensemble std, invalid fraction becomes a ranked uncertainty signal, and up to2/20 train designs are reserved for invalid-region coverage without weakening strict point/R² gates. Production dry-run now yields300 rows/50 designs, pool invalid29/1024, selected invalid2 at ranks19/20, plan SHA `c8471101...c91ab`; tests21/21. Disabled the old recurring Task at active0 pending a provenance-bound v4r6 activation runner.

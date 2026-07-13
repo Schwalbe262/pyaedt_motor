@@ -991,3 +991,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: exact argv/source/resources, double strict replay, explicit pyaedt bytes, durable two-phase claim adoption, stable C-local parent identity, and double scheduler snapshot/replay fail closed across hard kills.
 - Evidence: commit `fe41a8e`; related130 pass/2 skip, adapter17/17, independent P0/P1 review clean.
 - Remaining risk: no continuation contract or human target-load authorization is published until real post-NSGA artifacts exist.
+
+## 2026-07-13 10:02:00 +09:00 - Insight 112
+- Source loop: Stage3 acquisition crashed when a derived efficiency member was NaN from negative predicted torque.
+- Improvement: separate strict point validity from ensemble acquisition validity; retain finite member statistics, record invalid-member fraction, rank it as uncertainty, and reserve minimal deterministic coverage of that region.
+- Before: one nonphysical ensemble member aborted all300 adaptive cases, while simply dropping it would hide the exact surrogate failure region.
+- After: audit/R² remains fail-closed, candidate proofs expose invalid fractions, and2/20 adaptive train designs cover the region using the same diversity/tie-break policy.
+- Evidence: commit `103796d`; real pool6144 member rows has102 negative-torque predictions across29 designs, dry-run300/50 succeeds, tests21/21.
+- Remaining risk: activation requires a separate LF-normalized source/provenance contract because old v4r5 pins the pre-fix generator.

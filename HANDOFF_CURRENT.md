@@ -298,8 +298,8 @@
 - 2026-07-13 07:12 KST: original Stage2 has 25 completed/0 failed; refill IDs30017-30041 are the exact first25 deferred rows, unique/order hash `7d5b9714...e4d1`, and cap never exceeded50.
 - 2026-07-13 07:40 KST: official submissions reached100/129 with active50, runner-audited221/300, missing29, and no new failed/cancelled task; claim owner PID130716 remains healthy.
 - First results29967/29971 passed 704-field plan/physics audits; torque units normalize mNm×0.001 and Nm×1, runtime ~37.3m versus prior post-affinity ~47.5-48m (early two-case evidence only).
-- Stage2 is complete at300/300 and the 1000-row combined gate still fails0/9 (min/avg R²0.584231/0.765683); Stage3 dry-run currently fails closed on a nonfinite derived-efficiency ensemble prediction before any submission.
-- No Stage2 claim/owner remains; corrected Task `PYAEDT_MOTOR_IPMSM_V2_PIPELINE_V4R5_NATIVE` is Ready after the Stage3 dry-run exit2 and must not be restarted until a successor authority pins the generator fix.
+- Stage2 is complete at300/300 and the 1000-row combined gate still fails0/9 (min/avg R²0.584231/0.765683); commit `103796d` converts nonphysical derived members into explicit Stage3 uncertainty/coverage evidence and the real dry-run succeeds300 rows/50 designs.
+- No Stage2 claim/owner remains; Task `PYAEDT_MOTOR_IPMSM_V2_PIPELINE_V4R5_NATIVE` is Disabled after the Stage3 dry-run exit2 and must remain so until a provenance-bound activation runner pins the versioned LF generator.
 - Dashboard commit `1a1a9b4` is deployed from LF325 at `http://127.0.0.1:8765`: health running/stale false/errors0; local final collection, claim-bound runner audit, and raw Slurm counts are explicitly separated.
 - Model-family diagnostic v3 commit `2828d2e` separates legacy finite-pair metadata R2 from strict metrics; current 700-row baseline/selected families both have one invalid derived-efficiency row and remain non-promotable.
 - Beta is candidate-specific in surrogate current×beta search; post-Pareto v4r6 must run strict target-load current matching/local-beta validation before final volume-efficiency nondominated publication.
@@ -308,4 +308,4 @@
 - Commits `4d85363`/`7a76748` require explicit pyaedt bytes and add the v4r6 authority builder with strict upstream replay, live artifact/per-case manifests, protected C-local inputs, and no-replace publication; pyaedt tests39 pass/1 privilege skip.
 - Commit `fe41a8e` adds the unconnected contract-only target-load continuation adapter: exact v4/v6/receipt/argv pins, strict upstream replay, explicit pyaedt bytes, cap50, durable recovery, double closing snapshots, and measured front completion-last; related130 pass/2 skip.
 - Dashboard commit `23260be` is live from LF325 (app SHA `084d8511...68f06`): Stage2/3 hero uses claim-bound runner progress when it leads local final collection, while the authoritative local collection card remains separate; tests120/120 pass.
-- Next: make invalid derived predictions an explicit deterministic Stage3 acquisition signal, publish a C-native successor authority for that pinned source change, then generate and submit the300-case adaptive plan under cap50.
+- Next: publish a separate v4r6 Stage3 activation contract/receipt without overwriting the old LF source, then generate and submit the300-case adaptive plan under cap50.
