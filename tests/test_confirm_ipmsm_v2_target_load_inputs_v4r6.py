@@ -25,7 +25,34 @@ class TargetLoadAuthorityTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        (self.root / "pareto_fea" / "results").mkdir(parents=True)
+        self.results_dir = self.root / "pareto_fea" / "results"
+        self.results_dir.mkdir(parents=True)
+        self.model_dir = self.root / "models"
+        self.model_dir.mkdir()
+        self.upstream_artifact = self.model_dir / "frozen_model.bin"
+        self.upstream_artifact.write_bytes(b"frozen model bytes\n")
+        self.builder_source = self.root / "authority_builder.py"
+        self.builder_source.write_bytes(b"# frozen builder source\n")
+        self.build_config = self.root / "authority_build_config.json"
+        self.build_config.write_bytes(b"{}\n")
+        self.selected_candidate_ids = [f"cand_{index:02d}" for index in range(1, 13)]
+        self.per_case_records: list[dict[str, object]] = []
+        for candidate_id in self.selected_candidate_ids:
+            for point in ("rated_torque", "rated_power"):
+                for role in ("center", "lower"):
+                    case_id = f"{candidate_id}_{point}_{role}"
+                    relative = f"{case_id}.csv"
+                    payload = f"case_id,status\n{case_id},ok\n".encode()
+                    (self.results_dir / relative).write_bytes(payload)
+                    self.per_case_records.append(
+                        {
+                            "candidate_id": candidate_id,
+                            "case_id": case_id,
+                            "relative_path": relative,
+                            "size": len(payload),
+                            "sha256": hashlib.sha256(payload).hexdigest(),
+                        }
+                    )
         self.pyaedt = self.root / "pydesktop.py"
         self.pyaedt.write_bytes(b"# frozen local pyaedt source\n")
         self.base_contract_path = self.root / "base_v4r5.json"
@@ -94,10 +121,64 @@ class TargetLoadAuthorityTests(unittest.TestCase):
                 "max_workers_per_node": 4,
             },
             "result_settle_seconds": 60,
+            "upstream_authority": {
+                "binding_schema_version": authority.UPSTREAM_BINDING_SCHEMA_VERSION,
+                "binding_hash_algorithm": authority.UPSTREAM_BINDING_HASH_ALGORITHM,
+                "upstream_binding_sha256": "b" * 64,
+                "selected_candidate_ids": list(self.selected_candidate_ids),
+                "filtered_plan_sha256": "c" * 64,
+                "builder_source": {
+                    "path": str(self.builder_source),
+                    "sha256": hashlib.sha256(self.builder_source.read_bytes()).hexdigest(),
+                },
+                "build_config": {
+                    "path": str(self.build_config),
+                    "sha256": hashlib.sha256(self.build_config.read_bytes()).hexdigest(),
+                },
+                "upstream_artifact_count": 1,
+                "upstream_artifacts_manifest_sha256": authority.canonical_sha256(
+                    {
+                        "schema_version": authority.UPSTREAM_ARTIFACTS_MANIFEST_SCHEMA_VERSION,
+                        "artifacts": [
+                            {
+                                "label": "frozen_model",
+                                "path": str(self.upstream_artifact),
+                                "size": self.upstream_artifact.stat().st_size,
+                                "sha256": hashlib.sha256(
+                                    self.upstream_artifact.read_bytes()
+                                ).hexdigest(),
+                            }
+                        ],
+                    }
+                ),
+                "upstream_artifacts": [
+                    {
+                        "label": "frozen_model",
+                        "path": str(self.upstream_artifact),
+                        "size": self.upstream_artifact.stat().st_size,
+                        "sha256": hashlib.sha256(
+                            self.upstream_artifact.read_bytes()
+                        ).hexdigest(),
+                    }
+                ],
+                "protected_input_directories": [
+                    str(self.root / "pareto_fea"),
+                    str(self.model_dir),
+                ],
+                "continuation_replay_requirement": authority.CONTINUATION_REPLAY_REQUIREMENT,
+            },
             "upstream_results": {
-                "pareto_fea_results_dir": str(self.root / "pareto_fea" / "results"),
+                "pareto_fea_results_dir": str(self.results_dir),
                 "path_policy": "derive_and_audit_from_v4r5_decision",
                 "original_per_case_files_required": True,
+                "per_case_result_count": len(self.per_case_records),
+                "per_case_results_manifest_sha256": authority.canonical_sha256(
+                    {
+                        "schema_version": authority.PER_CASE_RESULTS_MANIFEST_SCHEMA_VERSION,
+                        "results": self.per_case_records,
+                    }
+                ),
+                "per_case_results": deepcopy(self.per_case_records),
             },
             "pyaedt_core_snapshot": {
                 "path": str(self.pyaedt),
@@ -394,11 +475,13 @@ class TargetLoadAuthorityTests(unittest.TestCase):
     def test_missing_or_reparse_upstream_results_directory_is_rejected(self) -> None:
         self._write_contract()
         results = self.root / "pareto_fea" / "results"
-        results.rmdir()
-        with self.assertRaisesRegex(authority.TargetLoadAuthorityError, "cannot inspect"):
-            authority.load_authority_context(self.contract_path)
-
-        results.mkdir()
+        hidden_results = self.root / "pareto_fea" / "results-hidden"
+        results.rename(hidden_results)
+        try:
+            with self.assertRaisesRegex(authority.TargetLoadAuthorityError, "cannot inspect"):
+                authority.load_authority_context(self.contract_path)
+        finally:
+            hidden_results.rename(results)
         link_parent = self.root / "linked-parent"
         try:
             os.symlink(self.root, link_parent, target_is_directory=True)
@@ -409,6 +492,65 @@ class TargetLoadAuthorityTests(unittest.TestCase):
         target["upstream_results"]["pareto_fea_results_dir"] = str(linked_results)  # type: ignore[index]
         self._write_contract(target_load=target)
         with self.assertRaisesRegex(authority.TargetLoadAuthorityError, "reparse"):
+            authority.load_authority_context(self.contract_path)
+
+    def test_upstream_and_per_case_bytes_are_live_manifest_bound(self) -> None:
+        self._write_contract()
+        original_artifact = self.upstream_artifact.read_bytes()
+        self.upstream_artifact.write_bytes(b"tampered model bytes\n")
+        with self.assertRaisesRegex(authority.TargetLoadAuthorityError, "live file"):
+            authority.load_authority_context(self.contract_path)
+        self.upstream_artifact.write_bytes(original_artifact)
+
+        original_builder = self.builder_source.read_bytes()
+        self.builder_source.write_bytes(b"# changed builder source\n")
+        with self.assertRaisesRegex(authority.TargetLoadAuthorityError, "builder source"):
+            authority.load_authority_context(self.contract_path)
+        self.builder_source.write_bytes(original_builder)
+
+        first = self.per_case_records[0]
+        result_path = self.results_dir / str(first["relative_path"])
+        original_result = result_path.read_bytes()
+        result_path.write_bytes(original_result + b"tamper")
+        with self.assertRaisesRegex(authority.TargetLoadAuthorityError, "live file"):
+            authority.load_authority_context(self.contract_path)
+
+    def test_manifest_digest_and_protected_output_subtree_are_rejected(self) -> None:
+        target = self._target_load()
+        target["upstream_results"]["per_case_results_manifest_sha256"] = "f" * 64  # type: ignore[index]
+        self._write_contract(target_load=target)
+        with self.assertRaisesRegex(authority.TargetLoadAuthorityError, "manifest SHA256"):
+            authority.load_authority_context(self.contract_path)
+
+        target = self._target_load()
+        first = target["upstream_results"]["per_case_results"][0]  # type: ignore[index]
+        second = target["upstream_results"]["per_case_results"][1]  # type: ignore[index]
+        second["relative_path"] = str(first["relative_path"]).upper()
+        second["size"] = first["size"]
+        second["sha256"] = first["sha256"]
+        target["upstream_results"]["per_case_results_manifest_sha256"] = (  # type: ignore[index]
+            authority.canonical_sha256(
+                {
+                    "schema_version": authority.PER_CASE_RESULTS_MANIFEST_SCHEMA_VERSION,
+                    "results": target["upstream_results"]["per_case_results"],  # type: ignore[index]
+                }
+            )
+        )
+        self._write_contract(target_load=target)
+        with self.assertRaisesRegex(authority.TargetLoadAuthorityError, "unique CSV"):
+            authority.load_authority_context(self.contract_path)
+
+        self._write_contract()
+        nested = self.results_dir / "authority.json"
+
+        def mutate(document: dict[str, object]) -> None:
+            config = document["pipeline"]["target_load_confirmation"]  # type: ignore[index]
+            config["declaration_path"] = str(nested)
+            argv = config["authorizer_argv"]
+            argv[argv.index("--declaration") + 1] = str(nested)
+
+        self._rewrite_contract(mutate)
+        with self.assertRaisesRegex(authority.TargetLoadAuthorityError, "protected input"):
             authority.load_authority_context(self.contract_path)
 
     def test_legacy_hardlink_late_success_is_preserved_fail_closed(self) -> None:

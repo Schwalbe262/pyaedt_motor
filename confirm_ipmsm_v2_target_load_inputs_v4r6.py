@@ -38,6 +38,18 @@ ATTESTATION_KIND = "filesystem_acl_self_attestation"
 MAX_FUTURE_CLOCK_SKEW_SECONDS = 300
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 SAFE_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+PER_CASE_RESULTS_MANIFEST_SCHEMA_VERSION = (
+    "ipmsm-v2-pareto-per-case-results-manifest-v1"
+)
+UPSTREAM_ARTIFACTS_MANIFEST_SCHEMA_VERSION = (
+    "ipmsm-v2-target-load-upstream-artifacts-manifest-v1"
+)
+UPSTREAM_BINDING_SCHEMA_VERSION = "ipmsm-target-load-upstream-pareto-v1"
+UPSTREAM_BINDING_HASH_ALGORITHM = "canonical-json-sha256-v1"
+CONTINUATION_REPLAY_REQUIREMENT = (
+    "before_any_target_load_fea_recompute_coordinator_strict_upstream_binding_"
+    "and_filtered_plan_and_require_both_exact_canonical_sha256_matches"
+)
 
 ACKNOWLEDGEMENT_FIELDS = (
     "target_load_semantics_confirmed",
@@ -89,6 +101,9 @@ class TargetLoadAuthorityContext:
     target_load: Mapping[str, Any]
     upstream_results_dir: Path
     upstream_results_identity: tuple[int, int, int, int, int, int, int]
+    upstream_artifact_snapshots: tuple[FileSnapshot, ...]
+    per_case_result_snapshots: tuple[FileSnapshot, ...]
+    protected_input_directories: tuple[Path, ...]
     pyaedt_core_snapshot: FileSnapshot
     declaration_path: Path
     confirmation_path: Path
@@ -102,6 +117,8 @@ class TargetLoadAuthorityContext:
         return (
             self.contract,
             self.base_v4r5_contract,
+            *self.upstream_artifact_snapshots,
+            *self.per_case_result_snapshots,
             self.pyaedt_core_snapshot,
             self.authorizer_executable,
             self.authorizer_source,
@@ -467,12 +484,149 @@ def _assert_equal(actual: Any, expected: Any, label: str) -> None:
         raise TargetLoadAuthorityError(f"{label} differs from required v4r6 semantics")
 
 
+def _manifest_sha256(schema_version: str, key: str, records: list[dict[str, Any]]) -> str:
+    return canonical_sha256({"schema_version": schema_version, key: records})
+
+
+def _validated_upstream_artifacts(
+    value: Any,
+) -> tuple[dict[str, Any], tuple[FileSnapshot, ...], tuple[Path, ...]]:
+    upstream = _mapping(value, "target_load.upstream_authority")
+    _expect_keys(
+        upstream,
+        {
+            "binding_schema_version",
+            "binding_hash_algorithm",
+            "upstream_binding_sha256",
+            "selected_candidate_ids",
+            "filtered_plan_sha256",
+            "builder_source",
+            "build_config",
+            "upstream_artifact_count",
+            "upstream_artifacts_manifest_sha256",
+            "upstream_artifacts",
+            "protected_input_directories",
+            "continuation_replay_requirement",
+        },
+        "target_load.upstream_authority",
+    )
+    _assert_equal(
+        upstream["binding_schema_version"],
+        UPSTREAM_BINDING_SCHEMA_VERSION,
+        "upstream binding schema version",
+    )
+    _assert_equal(
+        upstream["binding_hash_algorithm"],
+        UPSTREAM_BINDING_HASH_ALGORITHM,
+        "upstream binding hash algorithm",
+    )
+    _assert_equal(
+        upstream["continuation_replay_requirement"],
+        CONTINUATION_REPLAY_REQUIREMENT,
+        "continuation strict replay requirement",
+    )
+    _sha256(upstream["upstream_binding_sha256"], "upstream binding SHA256")
+    _sha256(upstream["filtered_plan_sha256"], "filtered plan SHA256")
+    authority_snapshots: list[FileSnapshot] = []
+    for key, label in (
+        ("builder_source", "target-load authority builder source"),
+        ("build_config", "target-load authority build config"),
+    ):
+        record = _mapping(upstream[key], f"target_load.upstream_authority.{key}")
+        _expect_keys(record, {"path", "sha256"}, f"target_load.upstream_authority.{key}")
+        snapshot = read_single_link_snapshot(
+            _absolute_path(record["path"], f"target_load.upstream_authority.{key}.path"),
+            label,
+        )
+        if snapshot.sha256 != _sha256(
+            record["sha256"], f"target_load.upstream_authority.{key}.sha256"
+        ):
+            raise TargetLoadAuthorityError(f"{label} SHA256 differs from the live file")
+        authority_snapshots.append(snapshot)
+    selected = upstream["selected_candidate_ids"]
+    if not isinstance(selected, list) or not selected:
+        raise TargetLoadAuthorityError("selected_candidate_ids must be a nonempty list")
+    selected_ids = [
+        _strict_name(item, f"selected_candidate_ids[{index}]")
+        for index, item in enumerate(selected)
+    ]
+    if len(selected_ids) != len(set(selected_ids)):
+        raise TargetLoadAuthorityError("selected_candidate_ids must be unique")
+
+    raw_records = upstream["upstream_artifacts"]
+    if not isinstance(raw_records, list) or not raw_records:
+        raise TargetLoadAuthorityError("upstream_artifacts must be a nonempty list")
+    records: list[dict[str, Any]] = []
+    snapshots: list[FileSnapshot] = []
+    labels: set[str] = set()
+    paths: set[str] = set()
+    for index, raw in enumerate(raw_records):
+        label = f"upstream_artifacts[{index}]"
+        item = _mapping(raw, label)
+        _expect_keys(item, {"label", "path", "size", "sha256"}, label)
+        artifact_label = _nonblank(item["label"], f"{label}.label")
+        if artifact_label != item["label"] or artifact_label in labels:
+            raise TargetLoadAuthorityError("upstream artifact labels must be exact and unique")
+        path = _require_c_local(_absolute_path(item["path"], f"{label}.path"), f"{label}.path")
+        snapshot = read_single_link_snapshot(path, artifact_label)
+        path_key = str(snapshot.path).casefold()
+        if path_key in paths:
+            raise TargetLoadAuthorityError("upstream artifact paths must be unique")
+        if _positive_int(item["size"], f"{label}.size") != len(snapshot.payload):
+            raise TargetLoadAuthorityError(f"{label}.size differs from the live file")
+        if snapshot.sha256 != _sha256(item["sha256"], f"{label}.sha256"):
+            raise TargetLoadAuthorityError(f"{label}.sha256 differs from the live file")
+        labels.add(artifact_label)
+        paths.add(path_key)
+        records.append(dict(item))
+        snapshots.append(snapshot)
+    _assert_equal(
+        upstream["upstream_artifact_count"],
+        len(records),
+        "upstream artifact count",
+    )
+    expected_manifest_sha = _manifest_sha256(
+        UPSTREAM_ARTIFACTS_MANIFEST_SCHEMA_VERSION,
+        "artifacts",
+        records,
+    )
+    if _sha256(
+        upstream["upstream_artifacts_manifest_sha256"],
+        "upstream artifacts manifest SHA256",
+    ) != expected_manifest_sha:
+        raise TargetLoadAuthorityError("upstream artifacts manifest SHA256 mismatch")
+
+    raw_directories = upstream["protected_input_directories"]
+    if not isinstance(raw_directories, list) or not raw_directories:
+        raise TargetLoadAuthorityError("protected_input_directories must be a nonempty list")
+    directories: list[Path] = []
+    directory_keys: set[str] = set()
+    for index, raw in enumerate(raw_directories):
+        path = _require_c_local(
+            _absolute_path(raw, f"protected_input_directories[{index}]"),
+            f"protected_input_directories[{index}]",
+        ).resolve(strict=True)
+        _directory_identity(path, f"protected_input_directories[{index}]")
+        key = str(path).casefold()
+        if key in directory_keys:
+            raise TargetLoadAuthorityError("protected input directories must be unique")
+        directory_keys.add(key)
+        directories.append(path)
+    combined = (*authority_snapshots, *snapshots)
+    if len({str(item.path).casefold() for item in combined}) != len(combined):
+        raise TargetLoadAuthorityError("upstream authority input paths must be unique")
+    return deepcopy(upstream), tuple(combined), tuple(directories)
+
+
 def _validated_target_load(
     value: Any,
 ) -> tuple[
     dict[str, Any],
     Path,
     tuple[int, int, int, int, int, int, int],
+    tuple[FileSnapshot, ...],
+    tuple[FileSnapshot, ...],
+    tuple[Path, ...],
     FileSnapshot,
 ]:
     target = _mapping(value, "target_load")
@@ -487,6 +641,7 @@ def _validated_target_load(
             "beta_validation",
             "scheduler",
             "result_settle_seconds",
+            "upstream_authority",
             "upstream_results",
             "pyaedt_core_snapshot",
         },
@@ -512,6 +667,17 @@ def _validated_target_load(
     _assert_equal(scope["max_candidates"], 12, "maximum filtered-front candidates")
     if expected_count > 12:
         raise TargetLoadAuthorityError("expected candidate count exceeds the frozen maximum 12")
+
+    (
+        upstream_authority,
+        upstream_artifact_snapshots,
+        protected_input_directories,
+    ) = _validated_upstream_artifacts(target["upstream_authority"])
+    selected_candidate_ids = upstream_authority["selected_candidate_ids"]
+    if len(selected_candidate_ids) != expected_count:
+        raise TargetLoadAuthorityError(
+            "selected_candidate_ids count differs from expected_candidate_count"
+        )
 
     points = target["operating_points"]
     if not isinstance(points, list) or not points:
@@ -641,7 +807,14 @@ def _validated_target_load(
     upstream = _mapping(target["upstream_results"], "target_load.upstream_results")
     _expect_keys(
         upstream,
-        {"pareto_fea_results_dir", "path_policy", "original_per_case_files_required"},
+        {
+            "pareto_fea_results_dir",
+            "path_policy",
+            "original_per_case_files_required",
+            "per_case_result_count",
+            "per_case_results_manifest_sha256",
+            "per_case_results",
+        },
         "target_load.upstream_results",
     )
     results_dir = _require_c_local(
@@ -653,6 +826,70 @@ def _validated_target_load(
     _assert_equal(upstream["path_policy"], "derive_and_audit_from_v4r5_decision", "results path policy")
     _assert_equal(upstream["original_per_case_files_required"], True, "per-case results")
     results_identity = _directory_identity(results_dir, "pareto_fea results directory")
+    raw_per_case = upstream["per_case_results"]
+    if not isinstance(raw_per_case, list) or not raw_per_case:
+        raise TargetLoadAuthorityError("per_case_results must be a nonempty list")
+    per_case_records: list[dict[str, Any]] = []
+    per_case_snapshots: list[FileSnapshot] = []
+    seen_case_ids: set[str] = set()
+    seen_relative_paths: set[str] = set()
+    for index, raw in enumerate(raw_per_case):
+        label = f"per_case_results[{index}]"
+        item = _mapping(raw, label)
+        _expect_keys(
+            item,
+            {"candidate_id", "case_id", "relative_path", "size", "sha256"},
+            label,
+        )
+        candidate_id = _strict_name(item["candidate_id"], f"{label}.candidate_id")
+        if candidate_id not in selected_candidate_ids:
+            raise TargetLoadAuthorityError(f"{label}.candidate_id is not selected")
+        case_id = _nonblank(item["case_id"], f"{label}.case_id")
+        if case_id != item["case_id"] or case_id in seen_case_ids:
+            raise TargetLoadAuthorityError("per-case case IDs must be exact and unique")
+        relative_path = _nonblank(item["relative_path"], f"{label}.relative_path")
+        relative = Path(relative_path)
+        relative_key = relative_path.casefold()
+        if (
+            relative_path != item["relative_path"]
+            or relative.name != relative_path
+            or relative.suffix.lower() != ".csv"
+            or relative_key in seen_relative_paths
+        ):
+            raise TargetLoadAuthorityError(
+                "per-case relative paths must be unique CSV basenames"
+            )
+        snapshot = read_single_link_snapshot(
+            results_dir / relative,
+            f"original Pareto FEA result {case_id}",
+        )
+        if _positive_int(item["size"], f"{label}.size") != len(snapshot.payload):
+            raise TargetLoadAuthorityError(f"{label}.size differs from the live file")
+        if snapshot.sha256 != _sha256(item["sha256"], f"{label}.sha256"):
+            raise TargetLoadAuthorityError(f"{label}.sha256 differs from the live file")
+        seen_case_ids.add(case_id)
+        seen_relative_paths.add(relative_key)
+        per_case_records.append(dict(item))
+        per_case_snapshots.append(snapshot)
+    _assert_equal(
+        upstream["per_case_result_count"],
+        len(per_case_records),
+        "per-case result count",
+    )
+    minimum_per_case = expected_count * len(points) * 2
+    maximum_per_case = expected_count * len(points) * 3
+    if not minimum_per_case <= len(per_case_records) <= maximum_per_case:
+        raise TargetLoadAuthorityError("per-case result count is outside the frozen role bound")
+    expected_per_case_sha = _manifest_sha256(
+        PER_CASE_RESULTS_MANIFEST_SCHEMA_VERSION,
+        "results",
+        per_case_records,
+    )
+    if _sha256(
+        upstream["per_case_results_manifest_sha256"],
+        "per-case results manifest SHA256",
+    ) != expected_per_case_sha:
+        raise TargetLoadAuthorityError("per-case results manifest SHA256 mismatch")
 
     source = _mapping(target["pyaedt_core_snapshot"], "target_load.pyaedt_core_snapshot")
     _expect_keys(source, {"path", "sha256", "single_link_required"}, "pyaedt_core_snapshot")
@@ -664,7 +901,15 @@ def _validated_target_load(
     source_snapshot = read_single_link_snapshot(source_path, "pyaedt core snapshot")
     if source_snapshot.sha256 != _sha256(source["sha256"], "pyaedt_core_snapshot.sha256"):
         raise TargetLoadAuthorityError("pyaedt core snapshot SHA256 mismatch")
-    return deepcopy(target), results_dir, results_identity, source_snapshot
+    return (
+        deepcopy(target),
+        results_dir,
+        results_identity,
+        upstream_artifact_snapshots,
+        tuple(per_case_snapshots),
+        protected_input_directories,
+        source_snapshot,
+    )
 
 
 def validate_target_load_semantics(value: Any) -> dict[str, Any]:
@@ -695,6 +940,9 @@ def load_authority_context(contract_path: str | Path) -> TargetLoadAuthorityCont
         target_load,
         upstream_results_dir,
         upstream_results_identity,
+        upstream_artifact_snapshots,
+        per_case_result_snapshots,
+        protected_input_directories,
         pyaedt_core_snapshot,
     ) = _validated_target_load(pipeline["target_load"])
 
@@ -732,6 +980,38 @@ def load_authority_context(contract_path: str | Path) -> TargetLoadAuthorityCont
     )
     if len({str(declaration_path).lower(), str(confirmation_path).lower(), str(receipt_path).lower()}) != 3:
         raise TargetLoadAuthorityError("authority artifact paths must be distinct")
+    immutable_inputs = (
+        base_snapshot.path,
+        pyaedt_core_snapshot.path,
+        *[item.path for item in upstream_artifact_snapshots],
+        *[item.path for item in per_case_result_snapshots],
+    )
+    protected_files = {str(path).casefold() for path in immutable_inputs}
+    if len(protected_files) != len(immutable_inputs):
+        raise TargetLoadAuthorityError("immutable input paths must be globally unique")
+    if str(snapshot.path).casefold() in protected_files:
+        raise TargetLoadAuthorityError("v6 contract aliases an immutable input file")
+    for output, label in (
+        (snapshot.path, "v6 contract"),
+        (declaration_path, "declaration_path"),
+        (confirmation_path, "confirmation_path"),
+        (receipt_path, "authorization_receipt_path"),
+    ):
+        if str(output).casefold() in protected_files:
+            raise TargetLoadAuthorityError(f"{label} aliases an immutable input file")
+    for output, label in (
+        (snapshot.path, "v6 contract"),
+        (declaration_path, "declaration_path"),
+        (confirmation_path, "confirmation_path"),
+        (receipt_path, "authorization_receipt_path"),
+    ):
+        resolved_output = output.resolve(strict=False)
+        for directory in protected_input_directories:
+            try:
+                resolved_output.relative_to(directory)
+            except ValueError:
+                continue
+            raise TargetLoadAuthorityError(f"{label} is inside a protected input directory")
 
     source_binding = _mapping(config["authorizer_source"], "authorizer_source")
     _expect_keys(source_binding, {"path", "sha256"}, "authorizer_source")
@@ -758,6 +1038,23 @@ def load_authority_context(contract_path: str | Path) -> TargetLoadAuthorityCont
         executable_binding["sha256"], "authorizer_executable.sha256"
     ):
         raise TargetLoadAuthorityError("authorizer executable SHA256 mismatch")
+    immutable_authority_paths = {
+        str(authorizer_source.path).casefold(),
+        str(authorizer_executable.path).casefold(),
+    }
+    if (
+        len(immutable_authority_paths) != 2
+        or immutable_authority_paths & protected_files
+        or str(snapshot.path).casefold() in immutable_authority_paths
+    ):
+        raise TargetLoadAuthorityError("authority runtime paths alias another immutable input")
+    for output, label in (
+        (declaration_path, "declaration_path"),
+        (confirmation_path, "confirmation_path"),
+        (receipt_path, "authorization_receipt_path"),
+    ):
+        if str(output).casefold() in immutable_authority_paths:
+            raise TargetLoadAuthorityError(f"{label} aliases an immutable authority input")
 
     argv_raw = config["authorizer_argv"]
     if not isinstance(argv_raw, list):
@@ -797,6 +1094,9 @@ def load_authority_context(contract_path: str | Path) -> TargetLoadAuthorityCont
         target_load=target_load,
         upstream_results_dir=upstream_results_dir,
         upstream_results_identity=upstream_results_identity,
+        upstream_artifact_snapshots=upstream_artifact_snapshots,
+        per_case_result_snapshots=per_case_result_snapshots,
+        protected_input_directories=protected_input_directories,
         pyaedt_core_snapshot=pyaedt_core_snapshot,
         declaration_path=declaration_path,
         confirmation_path=confirmation_path,
@@ -831,14 +1131,8 @@ def declaration_template(context: TargetLoadAuthorityContext) -> dict[str, Any]:
 
 
 def assert_context_unchanged(context: TargetLoadAuthorityContext) -> None:
-    for snapshot, label in (
-        (context.contract, "v6 contract"),
-        (context.base_v4r5_contract, "base v4r5 contract"),
-        (context.pyaedt_core_snapshot, "pyaedt core snapshot"),
-        (context.authorizer_executable, "authorizer executable"),
-        (context.authorizer_source, "authorizer source"),
-    ):
-        assert_snapshot_unchanged(snapshot, label)
+    for index, snapshot in enumerate(context.bound_snapshots):
+        assert_snapshot_unchanged(snapshot, f"bound authority input {index}")
     assert_directory_unchanged(
         context.upstream_results_dir,
         context.upstream_results_identity,
