@@ -975,3 +975,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: live four-hash/snapshot/P=Tω audits and `sys.orig_argv` exact matching reject aliases; proofless or mutated states preserve evidence and fail closed without replacement or rollback.
 - Evidence: commit `89259f4`, pyaedt2026v1 tests30 pass/1 privilege skip, two independent final reviews with P0/P1 none.
 - Remaining risk: the v6 builder, supervisor, coordinator adapter, and real post-Pareto artifacts are not connected yet.
+
+## 2026-07-13 09:20:00 +09:00 - Insight 110
+- Source loop: converting completed surrogate/Pareto evidence into an independently authorized target-load FEA contract.
+- Improvement: bind a canonical strict-replay digest together with complete live artifact and original per-case manifests, then require the continuation adapter to recompute both the binding and filtered-plan digest before any solve.
+- Before: a downstream contract could preserve selected IDs while silently consuming changed model, validation, plan, or merged/per-case result bytes.
+- After: the builder replays the coordinator twice, snapshots every relevant live input, rejects protected-output aliases, and makes publication fail if any byte, directory identity, or manifest changes.
+- Evidence: commit `7a76748`; pyaedt2026v1 tests39 pass/1 privilege skip; independent final review found no P0/P1 issue.
+- Remaining risk: the continuation adapter must enforce the recorded replay requirement at execution time and remains unconnected to live v4r5.

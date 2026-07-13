@@ -3962,3 +3962,6 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 ## 2026-07-13 08:24:00 +09:00 - v4r6 matched-load authority layer frozen
 - Actions/result: added a separate declaration/confirmation/no-replace receipt chain that makes measured target-load efficiency the final objective, screens all FEA-filtered candidates, binds current matching and beta±2° checks, and rejects Y/UNC/reparse, stale base hashes, inconsistent P=Tω, altered snapshots, or non-exact process argv.
 - Metrics/next: commit `89259f4`; pyaedt2026v1 tests30 pass/1 symlink-privilege skip, two independent reviews P0/P1 none. Stage2 has all129 official cases submitted; next implement the v6 builder/supervisor/adapter without connecting it to live v4r5 until actual Stage3/NSGA artifacts and new human confirmation exist.
+
+## 2026-07-13 09:20:00 +09:00 - v4r6 authority builder checkpoint
+- Actions/result: committed/pushed `4d85363` explicit pyaedt-byte injection and `7a76748` strict target-load authority builder; it replays v4r5 completion twice, binds live artifact/per-case manifests, blocks protected/Y paths, and publishes no-replace. Metrics/next: pyaedt tests39 pass/1 privilege skip, reviews P0/P1 none; Stage2 is299/300 with one healthy n114 task and no plan holes, so finish collection/gate while implementing the unconnected continuation adapter.
