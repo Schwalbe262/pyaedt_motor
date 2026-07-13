@@ -999,3 +999,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: audit/R² remains fail-closed, candidate proofs expose invalid fractions, and2/20 adaptive train designs cover the region using the same diversity/tie-break policy.
 - Evidence: commit `103796d`; real pool6144 member rows has102 negative-torque predictions across29 designs, dry-run300/50 succeeds, tests21/21.
 - Remaining risk: activation requires a separate LF-normalized source/provenance contract because old v4r5 pins the pre-fix generator.
+
+## 2026-07-13 11:30:00 +09:00 - Insight 113
+- Source loop: the dashboard rejected a valid Stage3 log-identity receipt after moving its process from Python3.11 to Python3.14 on Windows.
+- Improvement: consume OS file-identity receipts with the same Python runtime that produced them unless the receipt schema explicitly defines a version-neutral Windows device representation.
+- Before: the same files had identical inode/type but different `st_dev` values across Python versions, so progress failed closed as unavailable.
+- After: the dashboard Task uses pyaedt2026v1 like the sealed runner; receipt validation succeeds and UI reports Stage3 active50/remaining250 without weakening identity checks.
+- Evidence: live API `runner_progress.available=true`; tests123/123 and exact deployed dashboard SHA `b6538b07...84d4`.
+- Remaining risk: the scheduler history endpoint can still exceed its timeout, so scheduler counts may remain stale while receipt-bound runner progress stays visible.

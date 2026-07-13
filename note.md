@@ -3977,3 +3977,7 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 
 ## 2026-07-13 10:02:00 +09:00 - Stage3 nonphysical ensemble signal repaired
 - Actions/result: committed/pushed `103796d`; physically valid derived members retain ensemble std, invalid fraction becomes a ranked uncertainty signal, and up to2/20 train designs are reserved for invalid-region coverage without weakening strict point/R² gates. Production dry-run now yields300 rows/50 designs, pool invalid29/1024, selected invalid2 at ranks19/20, plan SHA `c8471101...c91ab`; tests21/21. Disabled the old recurring Task at active0 pending a provenance-bound v4r6 activation runner.
+
+## 2026-07-13 11:30:00 +09:00 - Sealed Stage3 activated under cap50
+- Actions/result: committed/pushed `37d9c19`, deployed exact LF sources/config/contract on LF325, registered the Stage3-only 15m recovery Task, and submitted the first50/300 cases across seven nodes without entering optimization; old v4r5 Task remains Disabled.
+- Metrics/next: activation raw/logical `9b68bad3...a1ea`/`c0eaba04...345d`, tests120/120 (1 skip), active50/cap50/remaining250. Dashboard commit `d10d0db` now displays receipt-bound Stage3 progress after aligning its Python runtime; monitor completions and actual runtime, then run the1300-row gate before NSGA-II.

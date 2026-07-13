@@ -309,3 +309,11 @@
 - Commit `fe41a8e` adds the unconnected contract-only target-load continuation adapter: exact v4/v6/receipt/argv pins, strict upstream replay, explicit pyaedt bytes, cap50, durable recovery, double closing snapshots, and measured front completion-last; related130 pass/2 skip.
 - Dashboard commit `23260be` is live from LF325 (app SHA `084d8511...68f06`): Stage2/3 hero uses claim-bound runner progress when it leads local final collection, while the authoritative local collection card remains separate; tests120/120 pass.
 - Next: publish a separate v4r6 Stage3 activation contract/receipt without overwriting the old LF source, then generate and submit the300-case adaptive plan under cap50.
+- Commit `37d9c19` seals the C-native v4r6 Stage3-only activation; tests120/120 pass (1 skip), independent P0/P1 review is clean, and old v4r5 Task remains Disabled.
+- LF325 activation config SHA is `ca9362f1...d307`; contract raw/logical SHAs are `9b68bad3...a1ea`/`c0eaba04...345d`, with exact LF generator SHA `9b639f8a...4e97`.
+- Task `PYAEDT_MOTOR_IPMSM_V2_STAGE3_V4R6_NATIVE` runs every15m from LF325 and may only continue Stage3 under project cap50; it cannot auto-enter optimization.
+- Stage3 plan/manifest/receipt are published:300 rows/50 designs; first wave is50 active across n041/n043/n045/n047/n049/n073/n114, all request4 CPUs, with250 deferred.
+- Scheduler history GET is slow enough to make some runner invocations exit2 after a safe poll; the recurring Task resumes without duplicate submission and cap remains50.
+- Dashboard commit `d10d0db` is deployed; its Task now uses the same pyaedt2026v1 Python as the runner so Windows file-identity receipts compare exactly.
+- Live UI `http://127.0.0.1:8765` shows Stage3 running0/300, active50, remaining250 while preserving Stage1 atomic700/700; scheduler cache may still show stale.
+- RaiDrive popup was a replay of the 01:25/01:38 Y-based edit failure; no post-07:04 target retry exists and all current writes/execution remain C-native.
