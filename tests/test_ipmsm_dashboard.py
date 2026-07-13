@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
@@ -69,6 +70,113 @@ def write_active_runner_authority(
     }
     claim_path.write_text(json.dumps(claim), encoding="utf-8")
     return decision_path, claim_path
+
+
+def write_stage3_activation_runner(
+    root: Path,
+) -> tuple[dashboard.DashboardConfig, Path, Path, Path]:
+    activation_root = root / dashboard.STAGE3_ACTIVATION_RELATIVE_ROOT
+    activation_root.mkdir(parents=True)
+    plan_path = root / "stage3-plan.csv"
+    manifest_path = root / "stage3-plan.manifest.json"
+    decision_path = root / "stage3-decision.json"
+    plan_path.write_text("case_id\ns3-001\n", encoding="utf-8")
+    manifest_path.write_text('{"mode":"write"}\n', encoding="utf-8")
+    config = dashboard.DashboardConfig(root, root / "pipeline.json", cap=50)
+    outputs = {
+        "claim": str(activation_root / "runner.claim.json"),
+        "decision": str(decision_path),
+        "log_receipt": str(activation_root / "runner.logs.receipt.json"),
+        "manifest": str(manifest_path),
+        "plan": str(plan_path),
+        "plan_completion": str(activation_root / "plan_completion.json"),
+        "recovery": str(activation_root / "runner.claim.recovery.json"),
+        "stderr_log": str(activation_root / "runner.stderr.log"),
+        "stdout_log": str(activation_root / "runner.stdout.log"),
+    }
+    activation = {
+        "root": str(root),
+        "build_config": {},
+        "parent": {},
+        "sources": {},
+        "execution": {
+            "cwd": str(root),
+            "expected_stage3_rows": 300,
+            "scheduler": {
+                "project": config.project,
+                "project_active_cap": 50,
+                "scheduler_url": config.scheduler_url,
+                "task_prefix": dashboard.STAGE3_ACTIVATION_TASK_PREFIX,
+            },
+        },
+        "outputs": outputs,
+        "expected": {
+            "plan_sha256": dashboard._file_sha256(plan_path),
+            "manifest_sha256": dashboard._file_sha256(manifest_path),
+        },
+    }
+    unsigned = {
+        "schema_version": dashboard.STAGE3_ACTIVATION_CONTRACT_SCHEMA_VERSION,
+        "activation": activation,
+    }
+    contract = {
+        **unsigned,
+        "contract_sha256": dashboard._stage3_activation_contract_sha256(unsigned),
+    }
+    contract_path = activation_root / "contract.json"
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    contract_record = {
+        "path": str(contract_path),
+        "raw_sha256": dashboard._file_sha256(contract_path),
+        "contract_sha256": contract["contract_sha256"],
+    }
+    completion = {
+        "artifacts": {
+            "manifest": {"path": str(manifest_path), "sha256": dashboard._file_sha256(manifest_path)},
+            "plan": {"path": str(plan_path), "sha256": dashboard._file_sha256(plan_path)},
+        },
+        "contract": contract_record,
+        "generator": {},
+        "schema_version": dashboard.STAGE3_PLAN_COMPLETION_SCHEMA_VERSION,
+        "status": "complete",
+    }
+    (activation_root / "plan_completion.json").write_text(
+        json.dumps(completion),
+        encoding="utf-8",
+    )
+    token = "b" * 32
+    stdout_path = activation_root / f"runner.stdout.{token}.log"
+    stderr_path = activation_root / f"runner.stderr.{token}.log"
+    stdout_path.write_text("", encoding="utf-8")
+    stderr_path.write_text(
+        "run_ipmsm_v2 scheduler_ok=4 result_ok=3 active=50 pending=0 "
+        "missing=246 retry=0 project_active=50 submitted=50 elapsed_s=120.0\n",
+        encoding="utf-8",
+    )
+    receipt = {
+        "contract": contract_record,
+        "invocation_id": token,
+        "logs": {
+            "stdout_log": {
+                "path": str(stdout_path),
+                "identity": dashboard._stage3_activation_log_identity(
+                    stdout_path,
+                    label="test stdout",
+                ),
+            },
+            "stderr_log": {
+                "path": str(stderr_path),
+                "identity": dashboard._stage3_activation_log_identity(
+                    stderr_path,
+                    label="test stderr",
+                ),
+            },
+        },
+        "schema_version": dashboard.STAGE3_RUNNER_LOGS_SCHEMA_VERSION,
+    }
+    receipt_path = activation_root / f"runner.logs.receipt.{token}.json"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    return config, decision_path, plan_path, receipt_path
 
 
 class CampaignLogTests(unittest.TestCase):
@@ -245,6 +353,62 @@ class CampaignLogTests(unittest.TestCase):
         self.assertTrue(result["available"])
         self.assertEqual(result["result_ok"], 4)
         self.assertEqual(result["audit_pending"], 1)
+
+    def test_sealed_stage3_activation_log_reports_live_progress_without_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config, decision_path, plan_path, _ = write_stage3_activation_runner(Path(tmp))
+            result = dashboard.read_stage3_activation_runner_progress(
+                config,
+                decision_path=decision_path,
+                plan_path=plan_path,
+                total_cases=300,
+                cap=50,
+            )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["result_ok"], 3)
+        self.assertEqual(result["audit_pending"], 1)
+        self.assertEqual(result["submitted"], 50)
+        self.assertEqual(result["active"], 50)
+        self.assertEqual(result["missing"], 246)
+
+    def test_sealed_stage3_activation_log_rejects_receipt_contract_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config, decision_path, plan_path, receipt_path = write_stage3_activation_runner(Path(tmp))
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["contract"]["raw_sha256"] = "0" * 64
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            result = dashboard.read_stage3_activation_runner_progress(
+                config,
+                decision_path=decision_path,
+                plan_path=plan_path,
+                total_cases=300,
+                cap=50,
+            )
+
+        self.assertFalse(result["available"])
+        self.assertIsNone(result["result_ok"])
+
+    def test_sealed_stage3_activation_log_rejects_heartbeat_older_than_retry_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, decision_path, plan_path, _ = write_stage3_activation_runner(root)
+            stderr_path = next(
+                (root / dashboard.STAGE3_ACTIVATION_RELATIVE_ROOT).glob(
+                    "runner.stderr.*.log"
+                )
+            )
+            old = time.time() - dashboard.STAGE3_ACTIVATION_PROGRESS_MAX_AGE_SECONDS - 1
+            os.utime(stderr_path, (old, old))
+            result = dashboard.read_stage3_activation_runner_progress(
+                config,
+                decision_path=decision_path,
+                plan_path=plan_path,
+                total_cases=300,
+                cap=50,
+            )
+
+        self.assertFalse(result["available"])
 
     def test_rate_and_eta_use_only_latest_monotonic_elapsed_segment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -97,6 +97,15 @@ RESULT_PROGRESS_WARNING_SECONDS = 30 * 60.0
 RESULT_PROGRESS_STALLED_SECONDS = 2 * 60 * 60.0
 RESULT_PROGRESS_HARD_STALLED_SECONDS = 6 * 60 * 60.0
 STAGE_RUNNER_PROGRESS_MAX_AGE_SECONDS = 5 * 60.0
+STAGE3_ACTIVATION_RELATIVE_ROOT = Path("simul_log_smoke/v4r6_stage3_activation")
+STAGE3_ACTIVATION_CONTRACT_SCHEMA_VERSION = "ipmsm-v2-stage3-activation-contract-v1"
+STAGE3_PLAN_COMPLETION_SCHEMA_VERSION = "ipmsm-v2-stage3-plan-completion-v1"
+STAGE3_RUNNER_LOGS_SCHEMA_VERSION = "ipmsm-v2-stage3-runner-logs-v1"
+STAGE3_ACTIVATION_TASK_PREFIX = "ipmsm-v2-foundation-s3-v4r4"
+STAGE3_ACTIVATION_PROGRESS_MAX_AGE_SECONDS = 20 * 60.0
+STAGE3_RUNNER_RECEIPT_RE = re.compile(
+    r"^runner\.logs\.receipt\.(?P<token>[0-9a-f]{32})\.json$"
+)
 MAX_TAIL_BYTES = 128 * 1024
 MAX_JSON_BYTES = 16 * 1024 * 1024
 MAX_STAGE1_CASE_RESULT_BYTES = 4 * 1024 * 1024
@@ -1593,6 +1602,300 @@ def read_stage_runner_progress(
         return unavailable
     if progress.get("source_status") != "ok":
         return unavailable
+    scheduler_ok = max(0, _safe_int(progress.get("scheduler_ok")))
+    result_ok = max(0, _safe_int(progress.get("result_ok")))
+    if result_ok > scheduler_ok or scheduler_ok > total_cases:
+        return unavailable
+    return {
+        "available": True,
+        "result_ok": result_ok,
+        "audit_pending": max(
+            max(0, _safe_int(progress.get("settling_results"))),
+            scheduler_ok - result_ok,
+        ),
+        "submitted": max(0, _safe_int(progress.get("submitted"))),
+        "active": max(0, _safe_int(progress.get("active"))),
+        "missing": max(0, _safe_int(progress.get("missing"))),
+        "retry": max(0, _safe_int(progress.get("retry"))),
+        "scheduler_ok": scheduler_ok,
+        "total": total_cases,
+        "age_seconds": _safe_float(progress.get("log_age_seconds")),
+    }
+
+
+def _stage3_activation_unavailable(total_cases: int) -> dict[str, Any]:
+    return {
+        "available": False,
+        "result_ok": None,
+        "audit_pending": None,
+        "submitted": None,
+        "active": None,
+        "missing": None,
+        "retry": None,
+        "scheduler_ok": None,
+        "total": total_cases if total_cases > 0 else None,
+        "age_seconds": None,
+    }
+
+
+def _stage3_activation_json_snapshot(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[bytes, dict[str, Any], tuple[int, int, int, int]]:
+    _quality_profile_require_regular_file(path, label=label)
+    try:
+        before = os.lstat(path)
+    except OSError as exc:
+        raise DashboardDataError(f"cannot inspect {label}") from exc
+    if not stat.S_ISREG(before.st_mode) or int(before.st_nlink) != 1:
+        raise DashboardDataError(f"{label} must be a single-link regular file")
+    identity = _quality_profile_stat_identity(before)
+    expected_sha256 = _quality_profile_stable_file_sha256(path, label=label)
+    raw, document = _read_sidecar_json(path)
+    if (
+        hashlib.sha256(raw).hexdigest() != expected_sha256
+        or _quality_profile_stat_identity(os.lstat(path)) != identity
+    ):
+        raise DashboardDataError(f"{label} changed during audit")
+    return raw, document, identity
+
+
+def _stage3_activation_contract_sha256(document: Mapping[str, Any]) -> str:
+    try:
+        payload = (
+            json.dumps(
+                dict(document),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise DashboardDataError("Stage3 activation contract is not canonical JSON") from exc
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _stage3_activation_log_identity(path: Path, *, label: str) -> dict[str, int]:
+    _quality_profile_require_regular_file(path, label=label)
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise DashboardDataError(f"cannot inspect {label}") from exc
+    if not stat.S_ISREG(info.st_mode) or int(info.st_nlink) != 1:
+        raise DashboardDataError(f"{label} must be a single-link regular file")
+    return {
+        "device": int(info.st_dev),
+        "inode": int(info.st_ino),
+        "file_type": int(stat.S_IFMT(info.st_mode)),
+    }
+
+
+def read_stage3_activation_runner_progress(
+    config: DashboardConfig,
+    *,
+    decision_path: Path,
+    plan_path: Path,
+    total_cases: int,
+    cap: int,
+) -> dict[str, Any]:
+    """Read the newest receipt-bound Stage3 runner heartbeat fail-closed."""
+
+    unavailable = _stage3_activation_unavailable(total_cases)
+    if total_cases <= 0:
+        return unavailable
+    activation_root = (config.workdir / STAGE3_ACTIVATION_RELATIVE_ROOT).absolute()
+    contract_path = activation_root / "contract.json"
+    completion_path = activation_root / "plan_completion.json"
+    try:
+        contract_raw, contract, contract_identity = _stage3_activation_json_snapshot(
+            contract_path,
+            label="Stage3 activation contract",
+        )
+        if set(contract) != {"schema_version", "contract_sha256", "activation"}:
+            raise DashboardDataError("Stage3 activation contract fields differ")
+        activation = contract.get("activation")
+        if (
+            contract.get("schema_version") != STAGE3_ACTIVATION_CONTRACT_SCHEMA_VERSION
+            or not isinstance(activation, Mapping)
+            or set(activation)
+            != {"root", "build_config", "parent", "sources", "execution", "outputs", "expected"}
+        ):
+            raise DashboardDataError("Stage3 activation contract schema differs")
+        unsigned = {
+            "schema_version": contract["schema_version"],
+            "activation": dict(activation),
+        }
+        contract_sha256 = _stage3_activation_contract_sha256(unsigned)
+        if contract.get("contract_sha256") != contract_sha256:
+            raise DashboardDataError("Stage3 activation logical hash differs")
+        contract_record = {
+            "path": str(contract_path),
+            "raw_sha256": hashlib.sha256(contract_raw).hexdigest(),
+            "contract_sha256": contract_sha256,
+        }
+        if Path(str(activation.get("root"))).absolute() != config.workdir.absolute():
+            raise DashboardDataError("Stage3 activation workdir differs")
+
+        execution = activation.get("execution")
+        outputs = activation.get("outputs")
+        expected = activation.get("expected")
+        if (
+            not isinstance(execution, Mapping)
+            or not isinstance(outputs, Mapping)
+            or not isinstance(expected, Mapping)
+        ):
+            raise DashboardDataError("Stage3 activation runtime fields are invalid")
+        if set(outputs) != {
+            "claim",
+            "decision",
+            "log_receipt",
+            "manifest",
+            "plan",
+            "plan_completion",
+            "recovery",
+            "stderr_log",
+            "stdout_log",
+        }:
+            raise DashboardDataError("Stage3 activation output fields differ")
+        manifest_path = Path(str(outputs["manifest"])).absolute()
+        if (
+            _safe_int(execution.get("expected_stage3_rows"), -1) != total_cases
+            or Path(str(execution.get("cwd"))).absolute() != config.workdir.absolute()
+            or Path(str(outputs["plan"])).absolute() != plan_path.absolute()
+            or Path(str(outputs["decision"])).absolute() != decision_path.absolute()
+            or Path(str(outputs["plan_completion"])).absolute() != completion_path
+        ):
+            raise DashboardDataError("Stage3 activation runtime binding differs")
+        scheduler = execution.get("scheduler")
+        if not isinstance(scheduler, Mapping) or (
+            scheduler.get("project") != config.project
+            or scheduler.get("task_prefix") != STAGE3_ACTIVATION_TASK_PREFIX
+            or _safe_int(scheduler.get("project_active_cap"), -1) != cap
+            or str(scheduler.get("scheduler_url") or "").rstrip("/")
+            != config.scheduler_url.rstrip("/")
+        ):
+            raise DashboardDataError("Stage3 activation scheduler binding differs")
+
+        _, completion, completion_identity = _stage3_activation_json_snapshot(
+            completion_path,
+            label="Stage3 plan completion",
+        )
+        if (
+            set(completion)
+            != {"artifacts", "contract", "generator", "schema_version", "status"}
+            or completion.get("schema_version") != STAGE3_PLAN_COMPLETION_SCHEMA_VERSION
+            or completion.get("status") != "complete"
+            or completion.get("contract") != contract_record
+        ):
+            raise DashboardDataError("Stage3 plan completion binding differs")
+        artifacts = completion.get("artifacts")
+        if (
+            not isinstance(artifacts, Mapping)
+            or set(artifacts) != {"manifest", "plan"}
+        ):
+            raise DashboardDataError("Stage3 plan completion artifacts differ")
+        artifact_identities: dict[str, tuple[int, int, int, int]] = {}
+        for name, path in (("plan", plan_path.absolute()), ("manifest", manifest_path)):
+            record = artifacts.get(name)
+            if not isinstance(record, Mapping) or set(record) != {"path", "sha256"}:
+                raise DashboardDataError(f"Stage3 {name} completion record differs")
+            if Path(str(record.get("path"))).absolute() != path:
+                raise DashboardDataError(f"Stage3 {name} completion path differs")
+            _quality_profile_require_regular_file(path, label=f"Stage3 {name}")
+            artifact_identities[name] = _quality_profile_stat_identity(os.lstat(path))
+            live_sha256 = _quality_profile_stable_file_sha256(path, label=f"Stage3 {name}")
+            if (
+                record.get("sha256") != live_sha256
+                or expected.get(f"{name}_sha256") != live_sha256
+            ):
+                raise DashboardDataError(f"Stage3 {name} bytes differ")
+
+        receipts = []
+        for candidate in activation_root.glob("runner.logs.receipt.*.json"):
+            matched = STAGE3_RUNNER_RECEIPT_RE.fullmatch(candidate.name)
+            if matched is not None:
+                receipts.append(
+                    (os.lstat(candidate).st_mtime_ns, candidate, matched.group("token"))
+                )
+        if not receipts:
+            raise DashboardDataError("Stage3 runner log receipt is missing")
+        _, receipt_path, token = max(
+            receipts,
+            key=lambda item: (item[0], item[1].name),
+        )
+        _, receipt, receipt_identity = _stage3_activation_json_snapshot(
+            receipt_path,
+            label="Stage3 runner log receipt",
+        )
+        if (
+            set(receipt) != {"contract", "invocation_id", "logs", "schema_version"}
+            or receipt.get("schema_version") != STAGE3_RUNNER_LOGS_SCHEMA_VERSION
+            or receipt.get("invocation_id") != token
+            or receipt.get("contract") != contract_record
+        ):
+            raise DashboardDataError("Stage3 runner log receipt binding differs")
+        logs = receipt.get("logs")
+        if not isinstance(logs, Mapping) or set(logs) != {"stderr_log", "stdout_log"}:
+            raise DashboardDataError("Stage3 runner log records differ")
+        log_paths: dict[str, Path] = {}
+        log_identities: dict[str, tuple[int, int, int, int]] = {}
+        for name in ("stdout_log", "stderr_log"):
+            record = logs.get(name)
+            if not isinstance(record, Mapping) or set(record) != {"path", "identity"}:
+                raise DashboardDataError(f"Stage3 {name} receipt record differs")
+            expected_path = (
+                activation_root / f"runner.{name.removesuffix('_log')}.{token}.log"
+            )
+            path = Path(str(record.get("path"))).absolute()
+            if path != expected_path:
+                raise DashboardDataError(f"Stage3 {name} receipt path differs")
+            identity = record.get("identity")
+            if (
+                not isinstance(identity, Mapping)
+                or set(identity) != {"device", "file_type", "inode"}
+            ):
+                raise DashboardDataError(f"Stage3 {name} receipt identity differs")
+            if dict(identity) != _stage3_activation_log_identity(
+                path,
+                label=f"Stage3 {name}",
+            ):
+                raise DashboardDataError(f"Stage3 {name} inode differs")
+            log_paths[name] = path
+            log_identities[name] = _quality_profile_stat_identity(os.lstat(path))
+
+        stderr_path = log_paths["stderr_log"]
+        stderr_mtime = datetime.fromtimestamp(os.lstat(stderr_path).st_mtime, timezone.utc)
+        log_age = time.time() - stderr_mtime.timestamp()
+        if log_age < -30.0 or log_age > STAGE3_ACTIVATION_PROGRESS_MAX_AGE_SECONDS:
+            raise DashboardDataError("Stage3 activation runner log is stale")
+        progress = parse_campaign_log(
+            stderr_path,
+            total_cases=total_cases,
+            cap=cap,
+            latest_segment_only=True,
+        )
+        if progress.get("source_status") != "ok":
+            raise DashboardDataError("Stage3 activation runner heartbeat is degraded")
+        if (
+            _quality_profile_stat_identity(os.lstat(contract_path)) != contract_identity
+            or _quality_profile_stat_identity(os.lstat(completion_path)) != completion_identity
+            or _quality_profile_stat_identity(os.lstat(receipt_path)) != receipt_identity
+            or any(
+                _quality_profile_stat_identity(os.lstat(log_paths[name])) != identity
+                for name, identity in log_identities.items()
+            )
+            or any(
+                _quality_profile_stat_identity(os.lstat(path)) != artifact_identities[name]
+                for name, path in (("plan", plan_path.absolute()), ("manifest", manifest_path))
+            )
+        ):
+            raise DashboardDataError("Stage3 activation evidence changed during audit")
+    except (DashboardDataError, OSError, TypeError, ValueError):
+        return unavailable
+
     scheduler_ok = max(0, _safe_int(progress.get("scheduler_ok")))
     result_ok = max(0, _safe_int(progress.get("result_ok")))
     if result_ok > scheduler_ok or scheduler_ok > total_cases:
@@ -4839,13 +5142,26 @@ def collect_local_state(config: DashboardConfig) -> dict[str, Any]:
             else config.contract_path.parent
         )
         active_runtime = local_runtime[active_runner_stage]
-        active_runtime["runner_progress"] = read_stage_runner_progress(
-            runner_root / "pipeline_executor.stderr.log",
-            decision_path=active_runner_decision,
-            workdir=config.workdir,
-            total_cases=_safe_int(active_runtime.get("total"), -1),
-            cap=config.cap,
-        )
+        total_cases = _safe_int(active_runtime.get("total"), -1)
+        if active_runner_stage == "stage3" and stage3_plan_path is not None:
+            runner_progress = read_stage3_activation_runner_progress(
+                config,
+                decision_path=active_runner_decision,
+                plan_path=stage3_plan_path,
+                total_cases=total_cases,
+                cap=config.cap,
+            )
+        else:
+            runner_progress = _stage3_activation_unavailable(total_cases)
+        if runner_progress.get("available") is not True:
+            runner_progress = read_stage_runner_progress(
+                runner_root / "pipeline_executor.stderr.log",
+                decision_path=active_runner_decision,
+                workdir=config.workdir,
+                total_cases=total_cases,
+                cap=config.cap,
+            )
+        active_runtime["runner_progress"] = runner_progress
     for stage in stages:
         runtime = local_runtime.get(str(stage.get("id") or ""))
         if runtime is not None:
