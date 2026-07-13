@@ -42,6 +42,7 @@ def history_task(
 ) -> dict[str, object]:
     record: dict[str, object] = {
         "id": task_id,
+        "name": task.task_name,
         "project": "pyaedt_motor",
         "status": status,
         "dedupe_key": task.dedupe_key,
@@ -225,7 +226,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                 stack.enter_context(
                     mock.patch.object(runner.submit_campaign, "load_and_validate_cases", return_value=rows)
                 )
-                stack.enter_context(
+                history_get = stack.enter_context(
                     mock.patch.object(runner.submit_campaign, "get_scheduler_task_history", return_value=[])
                 )
                 stack.enter_context(
@@ -252,6 +253,13 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
             self.assertEqual(output["planned_submissions"], 2)
             self.assertEqual(stdout.getvalue().count("\n"), 1)
             self.assertFalse(output_dir.exists())
+            history_get.assert_called_once_with(
+                "http://localhost:8000",
+                60.0,
+                10000,
+                "pyaedt_motor",
+                "ipmsm-v2",
+            )
             post.assert_not_called()
             collect.assert_not_called()
 
@@ -947,17 +955,20 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
             sleep.assert_not_called()
             self.assertFalse(output_dir.exists())
 
-    def test_history_coverage_and_server_cap_are_fail_closed(self) -> None:
-        for project_summary, message in (
-            ({"total_count": 1, "max_active_tasks": 50}, "history coverage is incomplete"),
-            ({"total_count": 0, "max_active_tasks": 49}, "server=49 requested=50"),
+    def test_scheduler_history_rejects_foreign_project_or_name_prefix_before_post(self) -> None:
+        for field, value in (
+            ("project", "other-project"),
+            ("name", "other-prefix-case-001"),
         ):
-            with self.subTest(summary=project_summary):
+            with self.subTest(field=field):
                 with tempfile.TemporaryDirectory() as tmp:
                     root = Path(tmp)
                     output_dir = root / "out"
                     beta_summary, beta_args = beta_gate_files(root)
                     rows = [foundation_row(beta_summary, "case-001")]
+                    task = campaign_tasks(output_dir, rows)[0]
+                    foreign = history_task(task, 1, "running")
+                    foreign[field] = value
                     with ExitStack() as stack:
                         stack.enter_context(
                             mock.patch.object(
@@ -970,7 +981,58 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                             mock.patch.object(
                                 runner.submit_campaign,
                                 "get_scheduler_task_history",
-                                return_value=[],
+                                return_value=[foreign],
+                            )
+                        )
+                        stack.enter_context(
+                            mock.patch.object(
+                                runner.submit_campaign,
+                                "get_scheduler_project_summary",
+                                return_value={"total_count": 1, "max_active_tasks": 50},
+                            )
+                        )
+                        active_get = stack.enter_context(
+                            mock.patch.object(runner.submit_campaign, "get_scheduler_tasks")
+                        )
+                        post = stack.enter_context(
+                            mock.patch.object(runner.submit_campaign, "post_scheduler_task")
+                        )
+                        with self.assertRaisesRegex(RuntimeError, "outside the exact"):
+                            runner.main(cli(output_dir, "--submit", *beta_args))
+                    active_get.assert_not_called()
+                    post.assert_not_called()
+                    self.assertFalse(output_dir.exists())
+
+    def test_saturated_history_and_server_cap_are_fail_closed(self) -> None:
+        for saturated, project_summary, message in (
+            (True, {"total_count": 1, "max_active_tasks": 50}, "saturated scheduler campaign"),
+            (False, {"total_count": 0, "max_active_tasks": 49}, "server=49 requested=50"),
+        ):
+            with self.subTest(saturated=saturated):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    output_dir = root / "out"
+                    beta_summary, beta_args = beta_gate_files(root)
+                    rows = [foundation_row(beta_summary, "case-001")]
+                    history = (
+                        [history_task(campaign_tasks(output_dir, rows)[0], 1, "running")]
+                        if saturated
+                        else []
+                    )
+                    limit_args = ["--history-limit", "1"] if saturated else []
+                    with ExitStack() as stack:
+                        stack.enter_context(
+                            mock.patch.object(
+                                runner.submit_campaign,
+                                "load_and_validate_cases",
+                                return_value=rows,
+                            )
+                        )
+                        stack.enter_context(
+                            mock.patch.object(
+                                runner.submit_campaign,
+                                "get_scheduler_task_history",
+                                return_value=history,
                             )
                         )
                         stack.enter_context(
@@ -984,7 +1046,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                             mock.patch.object(runner.submit_campaign, "post_scheduler_task")
                         )
                         with self.assertRaisesRegex(RuntimeError, message):
-                            runner.main(cli(output_dir, "--submit", *beta_args))
+                            runner.main(cli(output_dir, *limit_args, "--submit", *beta_args))
                     post.assert_not_called()
                     self.assertFalse(output_dir.exists())
 

@@ -223,11 +223,15 @@ def get_scheduler_task_history(
     timeout: float,
     history_limit: int,
     project: str = "",
+    name_prefix: str = "",
 ) -> list[dict[str, Any]]:
     query_values: dict[str, Any] = {"limit": history_limit}
     project_name = str(project or "").strip()
     if project_name:
         query_values["project"] = project_name
+    task_name_prefix = str(name_prefix or "").strip()
+    if task_name_prefix:
+        query_values["name_prefix"] = task_name_prefix
     query = parse.urlencode(query_values)
     url = scheduler_url.rstrip("/") + f"/api/tasks?{query}"
     with request.urlopen(url, timeout=timeout) as response:
@@ -342,6 +346,8 @@ def classify_campaign_history(
 def validate_args(args: argparse.Namespace) -> None:
     if not str(args.project or "").strip():
         raise RuntimeError("--project must not be blank")
+    if not str(args.task_prefix or "").strip():
+        raise RuntimeError("--task-prefix must not be blank")
     if args.project_active_cap < 1:
         raise RuntimeError("--project-active-cap must be >= 1")
     if args.project_active_cap > MAX_PROJECT_ACTIVE_CAP:

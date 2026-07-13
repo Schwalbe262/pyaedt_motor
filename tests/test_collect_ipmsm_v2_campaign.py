@@ -64,6 +64,7 @@ def completed_history(
     return [
         {
             "id": first_id + index,
+            "name": task.task_name,
             "project": "pyaedt_motor",
             "status": "completed",
             "exit_code": 0,
@@ -100,6 +101,7 @@ class CollectIpmsmV2CampaignTests(unittest.TestCase):
             active = [
                 {
                     "id": 100,
+                    "name": task.task_name,
                     "project": "pyaedt_motor",
                     "status": "running",
                     "dedupe_key": task.dedupe_key,
@@ -145,7 +147,13 @@ class CollectIpmsmV2CampaignTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(history_get.call_count, 2)
-        self.assertEqual(project_get.call_count, 2)
+        self.assertTrue(
+            all(
+                call.args == ("http://localhost:8000", 60.0, 10000, "pyaedt_motor", "ipmsm-v2")
+                for call in history_get.call_args_list
+            )
+        )
+        project_get.assert_not_called()
         sleep.assert_called_once_with(0.01)
         self.assertIn("wait_ipmsm_v2 active=1", stderr.getvalue())
         self.assertNotIn("wait_ipmsm_v2", stdout.getvalue())
@@ -160,6 +168,7 @@ class CollectIpmsmV2CampaignTests(unittest.TestCase):
             active = [
                 {
                     "id": 100,
+                    "name": task.task_name,
                     "project": "pyaedt_motor",
                     "status": "running",
                     "dedupe_key": task.dedupe_key,
@@ -206,7 +215,7 @@ class CollectIpmsmV2CampaignTests(unittest.TestCase):
             with mock.patch.object(
                 collector,
                 "read_history_snapshot",
-                side_effect=[(active, 1, 1), (failed, 1, 1)],
+                side_effect=[(active, 1), (failed, 1)],
             ):
                 with mock.patch.object(collector.time, "monotonic", side_effect=[0.0, 0.0]):
                     with mock.patch.object(collector.time, "sleep") as sleep:
@@ -237,7 +246,7 @@ class CollectIpmsmV2CampaignTests(unittest.TestCase):
             with mock.patch.object(
                 collector,
                 "read_history_snapshot",
-                return_value=(active, len(active), len(active)),
+                return_value=(active, len(active)),
             ):
                 with mock.patch.object(collector.time, "monotonic", side_effect=[0.0, 0.0, 2.0]):
                     with mock.patch.object(collector.time, "sleep"):
@@ -388,39 +397,35 @@ class CollectIpmsmV2CampaignTests(unittest.TestCase):
 
         self.assertEqual(resolved[0][1]["id"], 11)
 
-    def test_history_and_project_lookup_failures_write_nothing(self) -> None:
+    def test_history_lookup_failure_writes_nothing_without_project_wide_fallback(self) -> None:
         rows = [{"case_id": "case-a", "design_hash": "hash-a"}]
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            for label in ("history", "project"):
-                output_dir = root / label
-                with self.subTest(label=label):
-                    with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
-                        history_patch = mock.patch.object(
-                            submit_campaign,
-                            "get_scheduler_task_history",
-                            side_effect=OSError("offline") if label == "history" else [],
-                        )
-                        project_patch = mock.patch.object(
-                            submit_campaign,
-                            "get_scheduler_project_summary",
-                            side_effect=OSError("offline") if label == "project" else {"total_count": 0},
-                        )
-                        with history_patch, project_patch:
-                            with mock.patch.object(collector, "fetch_task_remote_file") as fetch:
-                                with self.assertRaisesRegex(RuntimeError, "no files were written"):
-                                    collector.main(
-                                        [
-                                            "--cases",
-                                            "cases.csv",
-                                            "--project",
-                                            "pyaedt_motor",
-                                            "--output-dir",
-                                            str(output_dir),
-                                        ]
-                                    )
-                    fetch.assert_not_called()
-                    self.assertFalse(output_dir.exists())
+            output_dir = Path(tmp) / "out"
+            with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
+                with mock.patch.object(
+                    submit_campaign,
+                    "get_scheduler_task_history",
+                    side_effect=OSError("offline"),
+                ):
+                    with mock.patch.object(
+                        submit_campaign,
+                        "get_scheduler_project_summary",
+                    ) as project_get:
+                        with mock.patch.object(collector, "fetch_task_remote_file") as fetch:
+                            with self.assertRaisesRegex(RuntimeError, "no files were written"):
+                                collector.main(
+                                    [
+                                        "--cases",
+                                        "cases.csv",
+                                        "--project",
+                                        "pyaedt_motor",
+                                        "--output-dir",
+                                        str(output_dir),
+                                    ]
+                                )
+            project_get.assert_not_called()
+            fetch.assert_not_called()
+            self.assertFalse(output_dir.exists())
 
     def test_no_final_writes_before_all_remote_payloads_validate(self) -> None:
         rows = [
@@ -452,28 +457,41 @@ class CollectIpmsmV2CampaignTests(unittest.TestCase):
             self.assertFalse(output_dir.exists())
             self.assertEqual(list(Path(tmp).glob(".collected.staging-*")), [])
 
-    def test_incomplete_project_history_coverage_writes_nothing(self) -> None:
+    def test_saturated_or_foreign_campaign_history_writes_nothing(self) -> None:
         rows = [{"case_id": "case-a", "design_hash": "hash-a"}]
-        with tempfile.TemporaryDirectory() as tmp:
-            output_dir = Path(tmp) / "collected"
-            with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
-                with mock.patch.object(submit_campaign, "get_scheduler_task_history", return_value=[]):
-                    with mock.patch.object(submit_campaign, "get_scheduler_project_summary", return_value={"total_count": 1}):
-                        with mock.patch.object(collector, "fetch_task_remote_file") as fetch:
-                            with self.assertRaisesRegex(RuntimeError, "coverage is incomplete"):
-                                collector.main(
-                                    [
-                                        "--cases",
-                                        "cases.csv",
-                                        "--project",
-                                        "pyaedt_motor",
-                                        "--output-dir",
-                                        str(output_dir),
-                                    ]
-                                )
+        for mode, message in (("saturated", "saturated scheduler campaign"), ("foreign", "outside the exact")):
+            with self.subTest(mode=mode):
+                with tempfile.TemporaryDirectory() as tmp:
+                    output_dir = Path(tmp) / "collected"
+                    args = collector_args(output_dir)
+                    task = campaign_tasks(args, rows)[0]
+                    history = completed_history([task])
+                    extra = ["--history-limit", "1"] if mode == "saturated" else []
+                    if mode == "foreign":
+                        history[0]["project"] = "other-project"
+                    with mock.patch.object(submit_campaign, "load_and_validate_cases", return_value=rows):
+                        with mock.patch.object(
+                            submit_campaign,
+                            "get_scheduler_task_history",
+                            return_value=history,
+                        ) as history_get:
+                            with mock.patch.object(collector, "fetch_task_remote_file") as fetch:
+                                with self.assertRaisesRegex(RuntimeError, message):
+                                    collector.main(
+                                        [
+                                            "--cases",
+                                            "cases.csv",
+                                            "--project",
+                                            "pyaedt_motor",
+                                            "--output-dir",
+                                            str(output_dir),
+                                            *extra,
+                                        ]
+                                    )
 
-            fetch.assert_not_called()
-            self.assertFalse(output_dir.exists())
+                    self.assertEqual(history_get.call_args.args[4], "ipmsm-v2")
+                    fetch.assert_not_called()
+                    self.assertFalse(output_dir.exists())
 
 
 if __name__ == "__main__":

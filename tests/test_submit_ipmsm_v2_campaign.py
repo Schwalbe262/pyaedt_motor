@@ -19,7 +19,7 @@ def parsed_args(*extra: str) -> object:
 
 
 class SubmitIpmsmV2CampaignTests(unittest.TestCase):
-    def test_history_lookup_can_filter_project_before_scheduler_limit(self) -> None:
+    def test_history_lookup_can_filter_project_and_exact_name_prefix_before_limit(self) -> None:
         response = mock.MagicMock()
         response.__enter__.return_value = response
         response.read.return_value = b"[]"
@@ -29,12 +29,20 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
                 12.0,
                 700,
                 "pyaedt_motor",
+                "ipmsm-v2-stage3",
             )
 
         url = urlopen.call_args.args[0]
         query = parse.parse_qs(parse.urlparse(url).query)
         self.assertEqual(history, [])
-        self.assertEqual(query, {"limit": ["700"], "project": ["pyaedt_motor"]})
+        self.assertEqual(
+            query,
+            {
+                "limit": ["700"],
+                "name_prefix": ["ipmsm-v2-stage3"],
+                "project": ["pyaedt_motor"],
+            },
+        )
 
     def test_defaults_are_fea_bursty_and_dry_run(self) -> None:
         args = parsed_args()
@@ -54,6 +62,7 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
 
     def test_campaign_policy_cannot_exceed_cap_or_change_fea_environment(self) -> None:
         invalid = (
+            ("--task-prefix", "", "must not be blank"),
             ("--project-active-cap", "51", "must be <= 50"),
             ("--scheduling-profile", "standard", "require --scheduling-profile fea_bursty"),
             ("--required-capability", "conda:other", "require --required-capability"),

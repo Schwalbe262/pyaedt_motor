@@ -357,35 +357,39 @@ def _stage_and_commit(
 
 def read_history_snapshot(
     args: argparse.Namespace,
-) -> tuple[list[dict[str, Any]], int, int]:
+) -> tuple[list[dict[str, Any]], int]:
     try:
         history = submit_campaign.get_scheduler_task_history(
             args.scheduler_url,
             args.scheduler_timeout,
             args.history_limit,
             args.project,
+            args.task_prefix,
         )
     except Exception as exc:
         raise RuntimeError(f"cannot inspect scheduler task history; no files were written: {exc}") from exc
-    try:
-        project_summary = submit_campaign.get_scheduler_project_summary(
-            args.scheduler_url,
-            args.project,
-            args.scheduler_timeout,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"cannot verify project history coverage; no files were written: {exc}") from exc
-    history_project_tasks = sum(
-        1 for task in history if submit_campaign.task_belongs_to_project(task, args.project)
-    )
-    project_total_count = int(project_summary["total_count"])
-    if history_project_tasks != project_total_count:
+    unexpected_history = [
+        task
+        for task in history
+        if not submit_campaign.task_belongs_to_project(task, args.project)
+        or not str(task.get("name") or "").startswith(args.task_prefix)
+    ]
+    if unexpected_history:
+        first = unexpected_history[0]
         raise RuntimeError(
-            "scheduler history coverage is incomplete; no files were written: "
-            f"history_project_tasks={history_project_tasks} project_total_count={project_total_count} "
-            f"history_rows={len(history)} history_limit={args.history_limit}"
+            "scheduler campaign history returned a row outside the exact project/name_prefix "
+            "filters; no files were written: "
+            f"unexpected_rows={len(unexpected_history)} first_task_id={first.get('id')!r} "
+            f"first_project={first.get('project')!r} first_name={first.get('name')!r}"
         )
-    return history, history_project_tasks, project_total_count
+    if len(history) >= args.history_limit:
+        raise RuntimeError(
+            "saturated scheduler campaign history cannot prove complete bounded coverage; "
+            "no files were written: "
+            f"task_prefix={args.task_prefix!r} history_rows={len(history)} "
+            f"history_limit={args.history_limit}"
+        )
+    return history, len(history)
 
 
 def wait_for_successful_tasks(
@@ -395,16 +399,15 @@ def wait_for_successful_tasks(
     list[tuple[submit_campaign.CampaignTask, dict[str, Any]]],
     list[dict[str, Any]],
     int,
-    int,
 ]:
     started = time.monotonic()
     previous_signature: tuple[tuple[str, str, int | None], ...] | None = None
     polls = 0
     while True:
-        history, history_project_tasks, project_total_count = read_history_snapshot(args)
+        history, campaign_history_tasks = read_history_snapshot(args)
         resolved, active = inspect_history_task_states(campaign_tasks, history, args.project)
         if not active:
-            return resolved, history, history_project_tasks, project_total_count
+            return resolved, history, campaign_history_tasks
         if not args.wait:
             statuses = sorted({str(item["status"]) for item in active})
             raise RuntimeError(
@@ -451,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
         first_row_number=args.case_start_index,
     )
 
-    resolved, history, history_project_tasks, project_total_count = wait_for_successful_tasks(
+    resolved, history, campaign_history_tasks = wait_for_successful_tasks(
         args,
         campaign_tasks,
     )
@@ -497,8 +500,7 @@ def main(argv: list[str] | None = None) -> int:
         "successful_tasks": len(resolved),
         "collected_results": len(result_paths),
         "history_rows": len(history),
-        "history_project_tasks": history_project_tasks,
-        "project_total_count": project_total_count,
+        "history_campaign_tasks": campaign_history_tasks,
         "selected_plan": str(plan_path),
         "merged_output": str(merged_path),
         "output_dir": str(args.output_dir),

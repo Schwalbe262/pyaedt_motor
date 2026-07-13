@@ -59,7 +59,7 @@ class CampaignState:
 @dataclass(frozen=True)
 class SchedulerSnapshot:
     history: list[dict[str, Any]]
-    history_project_tasks: int
+    campaign_history_tasks: int
     project_total_count: int
     server_project_cap: int
     project_active_count: int
@@ -572,6 +572,7 @@ def read_scheduler_snapshot(args: argparse.Namespace) -> SchedulerSnapshot:
             args.timeout,
             args.history_limit,
             args.project,
+            args.task_prefix,
         )
     except Exception as exc:
         raise RuntimeError(
@@ -585,27 +586,35 @@ def read_scheduler_snapshot(args: argparse.Namespace) -> SchedulerSnapshot:
         )
     except Exception as exc:
         raise RuntimeError(
-            "cannot verify scheduler project history coverage; "
+            "cannot verify scheduler project cap; "
             f"no POST was attempted in this polling loop: {exc}"
         ) from exc
     server_project_cap = submit_campaign.require_scheduler_project_cap(
         project_summary,
         args.project_active_cap,
     )
-    history_project_tasks = sum(
-        1
+    unexpected_history = [
+        task
         for task in history
-        if submit_campaign.task_belongs_to_project(task, args.project)
-    )
-    project_total_count = int(project_summary["total_count"])
-    if history_project_tasks != project_total_count:
-        saturated = "saturated " if len(history) >= args.history_limit else ""
+        if not submit_campaign.task_belongs_to_project(task, args.project)
+        or not str(task.get("name") or "").startswith(args.task_prefix)
+    ]
+    if unexpected_history:
+        first = unexpected_history[0]
         raise RuntimeError(
-            f"{saturated}scheduler history coverage is incomplete; "
+            "scheduler campaign history returned a row outside the exact project/name_prefix "
+            "filters; no POST was attempted in this polling loop: "
+            f"unexpected_rows={len(unexpected_history)} first_task_id={first.get('id')!r} "
+            f"first_project={first.get('project')!r} first_name={first.get('name')!r}"
+        )
+    campaign_history_tasks = len(history)
+    project_total_count = int(project_summary["total_count"])
+    if campaign_history_tasks >= args.history_limit:
+        raise RuntimeError(
+            "saturated scheduler campaign history cannot prove complete bounded coverage; "
             "no POST was attempted in this polling loop: "
-            f"history_project_tasks={history_project_tasks} "
-            f"project_total_count={project_total_count} history_rows={len(history)} "
-            f"history_limit={args.history_limit}"
+            f"task_prefix={args.task_prefix!r} campaign_history_tasks={campaign_history_tasks} "
+            f"history_limit={args.history_limit} project_total_count={project_total_count}"
         )
     try:
         active_tasks = submit_campaign.get_scheduler_tasks(args.scheduler_url, args.timeout)
@@ -629,7 +638,7 @@ def read_scheduler_snapshot(args: argparse.Namespace) -> SchedulerSnapshot:
         )
     return SchedulerSnapshot(
         history=history,
-        history_project_tasks=history_project_tasks,
+        campaign_history_tasks=campaign_history_tasks,
         project_total_count=project_total_count,
         server_project_cap=server_project_cap,
         project_active_count=project_active_count,
