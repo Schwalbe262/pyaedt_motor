@@ -1007,3 +1007,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: the dashboard Task uses pyaedt2026v1 like the sealed runner; receipt validation succeeds and UI reports Stage3 active50/remaining250 without weakening identity checks.
 - Evidence: live API `runner_progress.available=true`; tests123/123 and exact deployed dashboard SHA `b6538b07...84d4`.
 - Remaining risk: the scheduler history endpoint can still exceed its timeout, so scheduler counts may remain stale while receipt-bound runner progress stays visible.
+
+## 2026-07-13 12:10:00 +09:00 - Insight 114
+- Source loop: dashboard and Stage3 runner repeatedly timed out against the same project history endpoint.
+- Improvement: monitoring must request a bounded recent window and use the project summary for exact active counts; only the execution authority should pay for complete history replay.
+- Before: dashboard requested up to5000 rows every15s, and abandoned synchronous responses amplified the scheduler's allocation N+1 serialization.
+- After: dashboard requests50 rows, exposes `history_complete=false`, and uses exact queued/attaching/executing counts; live API is nonstale and one runner replay fell from >68s to52.7s.
+- Evidence: commit `cefd644`, tests124/124, live active50/cap50/reachable=true.
+- Remaining risk: the shared scheduler still needs allocation prefetch to make every full-history runner poll reliably finish within60s.

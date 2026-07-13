@@ -317,3 +317,8 @@
 - Dashboard commit `d10d0db` is deployed; its Task now uses the same pyaedt2026v1 Python as the runner so Windows file-identity receipts compare exactly.
 - Live UI `http://127.0.0.1:8765` shows Stage3 running0/300, active50, remaining250 while preserving Stage1 atomic700/700; scheduler cache may still show stale.
 - RaiDrive popup was a replay of the 01:25/01:38 Y-based edit failure; no post-07:04 target retry exists and all current writes/execution remain C-native.
+- Dashboard commit `cefd644` is deployed (LF SHA `e0c7b1ab...a66e`): scheduler history is project-scoped recent50, project summary supplies exact active counts, API is reachable/nonstale and tests124/124 pass.
+- Shared scheduler still serializes full history with ~2 allocation queries/task; runner polls may exceed60s, but timeout is pre-POST and the15m Task resumes without duplicates/cap breach.
+- Stage3 remains50 running/0 terminal under cap50 on11 nodes, task IDs30487-30536,4 CPUs/FEA; first runtime comparison awaits the first completion.
+- Commit `cd2251e` adds the production target-load continuation contract builder and hardens its consumer; related pyaedt tests72 pass/1 skip and final review found no P0/P1, but no live target-load artifact exists.
+- Next: complete/refill Stage3 and evaluate the1300-row gate; only a pass may open optimization authority, current×beta NSGA-II/Pareto FEA, then the separate human-authorized measured target-load continuation.

@@ -3981,3 +3981,9 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 ## 2026-07-13 11:30:00 +09:00 - Sealed Stage3 activated under cap50
 - Actions/result: committed/pushed `37d9c19`, deployed exact LF sources/config/contract on LF325, registered the Stage3-only 15m recovery Task, and submitted the first50/300 cases across seven nodes without entering optimization; old v4r5 Task remains Disabled.
 - Metrics/next: activation raw/logical `9b68bad3...a1ea`/`c0eaba04...345d`, tests120/120 (1 skip), active50/cap50/remaining250. Dashboard commit `d10d0db` now displays receipt-bound Stage3 progress after aligning its Python runtime; monitor completions and actual runtime, then run the1300-row gate before NSGA-II.
+
+## 2026-07-13 12:10:00 +09:00 - Dashboard scheduler pressure bounded
+- Actions/result: committed/pushed/deployed `cefd644`; replaced 15-second full5000 history requests with project-scoped recent50 and project-summary active counts. Live UI is reachable/nonstale, active50/cap50, tests124/124; one runner full poll improved to52.7s, though the shared scheduler N+1 still causes intermittent pre-POST timeouts.
+
+## 2026-07-13 12:12:00 +09:00 - Production target-load continuation builder closed
+- Actions/result: committed/pushed `cd2251e`; builder requires completed Stage3/optimization replay, exact human receipt, candidate order, PyAEDT/source closure, cap50 and fresh C-local outputs. Consumer fences submit/final publications and claim/recovery inode races. Related pyaedt tests72 pass/1 skip, final review P0/P1 none; no live contract/FEA was created.
