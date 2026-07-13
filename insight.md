@@ -983,3 +983,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: the builder replays the coordinator twice, snapshots every relevant live input, rejects protected-output aliases, and makes publication fail if any byte, directory identity, or manifest changes.
 - Evidence: commit `7a76748`; pyaedt2026v1 tests39 pass/1 privilege skip; independent final review found no P0/P1 issue.
 - Remaining risk: the continuation adapter must enforce the recorded replay requirement at execution time and remains unconnected to live v4r5.
+
+## 2026-07-13 09:47:00 +09:00 - Insight 111
+- Source loop: implementing a resumable target-load FEA continuation after immutable human authorization.
+- Improvement: make execution contract-only and close both authority and scheduler state before publishing measured CSV, manifest, then completion last.
+- Before: caller overrides, stale claims, parent reparse races, or one scheduler snapshot could change the selected candidates or final measured front across recovery.
+- After: exact argv/source/resources, double strict replay, explicit pyaedt bytes, durable two-phase claim adoption, stable C-local parent identity, and double scheduler snapshot/replay fail closed across hard kills.
+- Evidence: commit `fe41a8e`; related130 pass/2 skip, adapter17/17, independent P0/P1 review clean.
+- Remaining risk: no continuation contract or human target-load authorization is published until real post-NSGA artifacts exist.

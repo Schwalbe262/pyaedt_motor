@@ -3971,3 +3971,6 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 
 ## 2026-07-13 09:27:00 +09:00 - Stage2 hero deployed
 - Actions/result: committed/pushed `23260be` and deployed exact LF325 app SHA `084d8511...68f06`; HTTP asset is200/no-cache and contains the live-runner label. In-app browser had no available tab, so 120/120 frontend tests plus served-asset equality remain the render authority; Stage2 is still299/300 with one healthy active case.
+
+## 2026-07-13 09:47:00 +09:00 - Stage2 gate closed and target-load continuation checkpointed
+- Actions/result: Stage2 completed300/300 and published the1000-row combined decision, but gate remains0/9 with min/avg R²0.584231/0.765683; automatic Stage3 generation failed closed before submission because one derived-efficiency ensemble prediction was nonfinite. Committed/pushed `fe41a8e` contract-only target-load continuation adapter; related130 pass/2 skip, reviews P0/P1 none. Next: fix the deterministic acquisition signal and activate only through a new pinned C-native successor authority.
