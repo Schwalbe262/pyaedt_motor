@@ -555,6 +555,175 @@ class GenerateIpmsmV2CasesTests(unittest.TestCase):
         self.assertEqual(len(first["candidate_pool"]["pool_sha256"]), 64)
         self.assertEqual(len(first["candidate_pool"]["signals_sha256"]), 64)
 
+    def test_stage3_derived_member_signal_records_nonphysical_efficiency_members(self) -> None:
+        direct_predictions = {
+            "output_torque_last_avg_nm": [[-1.0], [20.0]],
+            "output_coreloss_last_avg_w": [[2.0], [2.0]],
+            "output_solidloss_last_avg_w": [[3.0], [3.0]],
+        }
+        output_name_map = {target: target for target in direct_predictions}
+        input_columns = (
+            "input_i_peak_a",
+            "input_phase_resistance_ohm",
+            "input_base_rpm",
+        )
+        features = (10.0, 0.1, 1000.0)
+
+        efficiencies, invalid_fraction = generator._target_member_signal(
+            "output_efficiency_last_pct",
+            0,
+            direct_predictions,
+            output_name_map,
+            input_columns,
+            features,
+        )
+        losses, invalid_loss_fraction = generator._target_member_signal(
+            "output_total_loss_last_avg_w",
+            0,
+            direct_predictions,
+            output_name_map,
+            input_columns,
+            features,
+        )
+
+        self.assertEqual(len(efficiencies), 1)
+        self.assertGreater(efficiencies[0], 0.0)
+        self.assertLessEqual(efficiencies[0], 100.0)
+        self.assertEqual(invalid_fraction, 0.5)
+        self.assertEqual(losses, [20.0, 20.0])
+        self.assertEqual(invalid_loss_fraction, 0.0)
+        nonphysical_point_predictions = {
+            **direct_predictions,
+            "output_torque_last_avg_nm": [[-1.0], [-2.0]],
+        }
+        with self.assertRaisesRegex(ValueError, "adaptive point prediction.*must be finite"):
+            generator._target_point_value(
+                "output_efficiency_last_pct",
+                0,
+                nonphysical_point_predictions,
+                output_name_map,
+                input_columns,
+                features,
+            )
+
+    def test_stage3_adaptive_selection_scores_invalid_derived_predictions_productively(self) -> None:
+        spec = valid_spec()
+        evidence = {
+            "audit_features": [
+                (0.0, 0.0, 0.0, 0.0),
+                (0.5, 0.5, 0.5, 0.5),
+                (1.0, 1.0, 1.0, 1.0),
+            ],
+            "audit_residuals": [0.1, 0.2, 0.3],
+            "bounds": [
+                (120.0, 200.0),
+                (0.0, spec.effective_peak_current_limit_a),
+                (0.0, 1.0),
+                (1200.0, 3000.0),
+            ],
+            "input_columns": (
+                "input_stator_outer_radius",
+                "input_i_peak_a",
+                "input_phase_resistance_ohm",
+                "input_base_rpm",
+            ),
+            "models": {
+                "output_torque_last_avg_nm": (
+                    LinearEnsembleMember(1.0, -130.0),
+                    LinearEnsembleMember(0.0, 20.0),
+                ),
+                "output_coreloss_last_avg_w": (
+                    LinearEnsembleMember(0.0, 2.0),
+                    LinearEnsembleMember(0.0, 3.0),
+                ),
+                "output_solidloss_last_avg_w": (
+                    LinearEnsembleMember(0.0, 4.0),
+                    LinearEnsembleMember(0.0, 5.0),
+                ),
+            },
+            "output_name_map": {
+                target: target
+                for target in (
+                    "output_torque_last_avg_nm",
+                    "output_coreloss_last_avg_w",
+                    "output_solidloss_last_avg_w",
+                )
+            },
+            "proof": {"evidence_sha256": "b" * 64},
+            "signal_targets": ("output_efficiency_last_pct",),
+            "target_scales": {"output_efficiency_last_pct": 100.0},
+        }
+
+        def projected_outer_radius(candidate, _features, _residuals):
+            return candidate[0]
+
+        with (
+            mock.patch.object(
+                generator,
+                "_project_audit_residual",
+                side_effect=projected_outer_radius,
+            ),
+            mock.patch.object(generator, "STAGE3_RESIDUAL_WEIGHT", 1.0),
+            mock.patch.object(generator, "STAGE3_UNCERTAINTY_WEIGHT", 0.0),
+            mock.patch.object(generator, "STAGE3_DOMAIN_DISTANCE_WEIGHT", 0.0),
+        ):
+            first_rows, first = generator.select_stage3_adaptive_train_rows(
+                spec,
+                excluded_design_hashes=set(),
+                adaptive_evidence=evidence,
+                adaptation_seed=1301,
+                candidate_pool_geometries=64,
+                case_prefix="derived-invalid",
+            )
+            second_rows, second = generator.select_stage3_adaptive_train_rows(
+                spec,
+                excluded_design_hashes=set(),
+                adaptive_evidence=evidence,
+                adaptation_seed=1301,
+                candidate_pool_geometries=64,
+                case_prefix="derived-invalid",
+            )
+
+        self.assertEqual(first_rows, second_rows)
+        self.assertEqual(first, second)
+        self.assertEqual(first["mode"], "stage3_audit_residual_adaptive_v2")
+        self.assertGreater(
+            first["candidate_pool"]["invalid_derived_prediction_geometry_count"],
+            0,
+        )
+        self.assertGreater(
+            first["candidate_pool"]["max_invalid_derived_prediction_fraction"],
+            0.0,
+        )
+        self.assertEqual(
+            first["candidate_pool"]["required_invalid_derived_prediction_geometry_count"],
+            2,
+        )
+        self.assertGreaterEqual(
+            first["candidate_pool"]["selected_invalid_derived_prediction_geometry_count"],
+            2,
+        )
+        forced = [
+            row
+            for row in first["selected"]
+            if row["selection_constraint"] == "invalid_derived_minimum_coverage"
+        ]
+        self.assertEqual([row["rank"] for row in forced], [19, 20])
+        self.assertTrue(all(row["diversity_score_at_selection"] > 0.0 for row in forced))
+        self.assertEqual(len(set(first["design_hashes"])), 20)
+        self.assertEqual(
+            first["scoring"]["uncertainty_component_policy"],
+            "max_rank_of_finite_ensemble_std_and_invalid_derived_prediction_fraction",
+        )
+        self.assertEqual(
+            first["scoring"]["invalid_derived_prediction_coverage_policy"],
+            "reserve_final_slots_for_up_to_two_invalid_geometries_with_greedy_diversity",
+        )
+        self.assertEqual(
+            first["scoring"]["invalid_derived_prediction_minimum_geometry_coverage"],
+            2,
+        )
+
     def test_stage3_adaptive_model_loader_requires_recorded_pickle_hash(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

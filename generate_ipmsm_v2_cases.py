@@ -51,12 +51,13 @@ STAGE3_CALIBRATION_SEED = 730_033
 STAGE3_FINAL_AUDIT_SEED = 730_037
 STAGE3_CANDIDATE_POOL_GEOMETRIES = 1024
 STAGE3_NEAREST_AUDIT_ROWS = 5
-STAGE3_ADAPTIVE_SELECTION_VERSION = "stage3_audit_residual_adaptive_v1"
+STAGE3_ADAPTIVE_SELECTION_VERSION = "stage3_audit_residual_adaptive_v2"
 TRAINING_ARTIFACT_CONTRACT_SCHEMA_VERSION = trainer.V2_ARTIFACT_CONTRACT_SCHEMA_VERSION
 STAGE3_RESIDUAL_WEIGHT = 0.50
 STAGE3_UNCERTAINTY_WEIGHT = 0.30
 STAGE3_DOMAIN_DISTANCE_WEIGHT = 0.20
 STAGE3_DIVERSITY_WEIGHT = 0.20
+STAGE3_MIN_INVALID_DERIVED_GEOMETRIES = 2
 
 METADATA_FIELDS = (
     "case_id",
@@ -1119,19 +1120,19 @@ def _prediction_members_by_target(
     return predictions
 
 
-def _target_member_values(
+def _target_member_signal(
     target: str,
     row_index: int,
     direct_predictions: Mapping[str, Sequence[Sequence[float]]],
     output_name_map: Mapping[str, str],
     input_columns: Sequence[str],
     features: Sequence[float],
-) -> list[float]:
+) -> tuple[list[float], float]:
     if target not in trainer.V2_DERIVED_OUTPUT_COLUMNS:
         model_target = str(output_name_map.get(target) or target)
         if model_target not in direct_predictions:
             raise ValueError(f"adaptive predictions are missing target {target!r}")
-        return [member[row_index] for member in direct_predictions[model_target]]
+        return [member[row_index] for member in direct_predictions[model_target]], 0.0
 
     required = (
         "output_torque_last_avg_nm",
@@ -1143,8 +1144,14 @@ def _target_member_values(
         raise ValueError(f"adaptive derived prediction {target!r} is missing primitive models")
     feature_by_name = dict(zip(input_columns, features))
     try:
-        member_count = len(direct_predictions[mapped[required[0]]])
-        values = []
+        member_counts = {len(direct_predictions[mapped[name]]) for name in required}
+        if len(member_counts) != 1 or not member_counts:
+            raise ValueError(f"adaptive derived prediction {target!r} has inconsistent ensembles")
+        member_count = next(iter(member_counts))
+        if member_count <= 0:
+            raise ValueError(f"adaptive derived prediction {target!r} has an empty ensemble")
+        values: list[float] = []
+        invalid_count = 0
         for member_index in range(member_count):
             derived = trainer.derive_v2_outputs(
                 torque_avg_nm=direct_predictions[mapped[required[0]]][member_index][row_index],
@@ -1154,8 +1161,16 @@ def _target_member_values(
                 phase_resistance_ohm=feature_by_name["input_phase_resistance_ohm"],
                 rpm=feature_by_name["input_base_rpm"],
             )
-            values.append(_finite_float(derived[target], f"adaptive derived prediction {target}"))
-        return values
+            value = trainer.finite_float(derived[target])
+            physically_valid = math.isfinite(value) and (
+                (target == "output_total_loss_last_avg_w" and value >= 0.0)
+                or (target == "output_efficiency_last_pct" and 0.0 <= value <= 100.0)
+            )
+            if physically_valid:
+                values.append(value)
+            else:
+                invalid_count += 1
+        return values, invalid_count / member_count
     except KeyError as exc:
         raise ValueError(f"adaptive derived prediction lacks required feature {exc}") from exc
 
@@ -1488,6 +1503,9 @@ def load_stage3_adaptive_evidence(
     direct_predictions = _prediction_members_by_target(models, audit_matrix)
     actual_by_target: dict[str, list[float]] = {target: [] for target in gate_targets}
     member_by_target: dict[str, list[list[float]]] = {target: [] for target in gate_targets}
+    invalid_member_fraction_by_target: dict[str, list[float]] = {
+        target: [] for target in gate_targets
+    }
     point_by_target: dict[str, list[float]] = {target: [] for target in gate_targets}
     for row_index, features in enumerate(audit_matrix):
         for target in gate_targets:
@@ -1500,16 +1518,16 @@ def load_stage3_adaptive_evidence(
                     features,
                 )
             )
-            member_by_target[target].append(
-                _target_member_values(
-                    target,
-                    row_index,
-                    direct_predictions,
-                    output_name_map,
-                    input_columns,
-                    features,
-                )
+            finite_members, invalid_fraction = _target_member_signal(
+                target,
+                row_index,
+                direct_predictions,
+                output_name_map,
+                input_columns,
+                features,
             )
+            member_by_target[target].append(finite_members)
+            invalid_member_fraction_by_target[target].append(invalid_fraction)
             point_by_target[target].append(
                 _target_point_value(
                     target,
@@ -1574,6 +1592,9 @@ def load_stage3_adaptive_evidence(
 
     signal_actual_by_target = {target: actual_by_target[target] for target in signal_targets}
     signal_member_by_target = {target: member_by_target[target] for target in signal_targets}
+    signal_invalid_fraction_by_target = {
+        target: invalid_member_fraction_by_target[target] for target in signal_targets
+    }
     signal_point_by_target = {target: point_by_target[target] for target in signal_targets}
     target_scales = {
         target: max(_p90_absolute(values), 1e-12)
@@ -1589,8 +1610,9 @@ def load_stage3_adaptive_evidence(
                 signal_point_by_target[target][row_index] - signal_actual_by_target[target][row_index]
             ) / target_scales[target]
             residuals_by_target[target].append(residual)
+            finite_members = signal_member_by_target[target][row_index]
             uncertainty_by_target[target].append(
-                _population_std(signal_member_by_target[target][row_index]) / target_scales[target]
+                (_population_std(finite_members) / target_scales[target]) if finite_members else 0.0
             )
             row_values.append(residual)
         audit_residuals.append(max(row_values))
@@ -1604,6 +1626,10 @@ def load_stage3_adaptive_evidence(
             },
             "normalized_ensemble_std": {
                 target: uncertainty_by_target[target][index] for target in signal_targets
+            },
+            "invalid_derived_prediction_fraction": {
+                target: signal_invalid_fraction_by_target[target][index]
+                for target in signal_targets
             },
             "residual_signal": audit_residuals[index],
         }
@@ -1623,6 +1649,12 @@ def load_stage3_adaptive_evidence(
                     "max_normalized_ensemble_std": max(uncertainty_by_target[target]),
                     "mean_normalized_absolute_residual": _mean(residuals_by_target[target]),
                     "mean_normalized_ensemble_std": _mean(uncertainty_by_target[target]),
+                    "max_invalid_derived_prediction_fraction": max(
+                        signal_invalid_fraction_by_target[target]
+                    ),
+                    "mean_invalid_derived_prediction_fraction": _mean(
+                        signal_invalid_fraction_by_target[target]
+                    ),
                     "scale": target_scales[target],
                 }
                 for target in signal_targets
@@ -1707,14 +1739,16 @@ def select_stage3_adaptive_train_rows(
     for design_hash, indexes in indexes_by_hash.items():
         residual_values: list[float] = []
         uncertainty_values: list[float] = []
+        invalid_derived_values: list[float] = []
         domain_values: list[float] = []
         for row_index in indexes:
             residual_values.append(
                 _project_audit_residual(normalized[row_index], audit_features, audit_residuals)
             )
             target_uncertainty = []
+            target_invalid_derived = []
             for target in signal_targets:
-                members = _target_member_values(
+                members, invalid_fraction = _target_member_signal(
                     target,
                     row_index,
                     direct_predictions,
@@ -1722,38 +1756,67 @@ def select_stage3_adaptive_train_rows(
                     input_columns,
                     matrix[row_index],
                 )
-                target_uncertainty.append(_population_std(members) / target_scales[target])
+                target_uncertainty.append(
+                    (_population_std(members) / target_scales[target]) if members else 0.0
+                )
+                target_invalid_derived.append(invalid_fraction)
             uncertainty_values.append(max(target_uncertainty))
+            invalid_derived_values.append(max(target_invalid_derived))
             domain_values.append(_domain_distance(normalized[row_index]))
         raw_signals[design_hash] = {
             "domain_distance_signal": max(domain_values),
+            "invalid_derived_prediction_signal": max(invalid_derived_values),
             "residual_signal": max(residual_values),
             "uncertainty_signal": max(uncertainty_values),
         }
 
     residual_ranks = _rank_signals({key: value["residual_signal"] for key, value in raw_signals.items()})
     uncertainty_ranks = _rank_signals({key: value["uncertainty_signal"] for key, value in raw_signals.items()})
+    invalid_derived_ranks = _rank_signals(
+        {key: value["invalid_derived_prediction_signal"] for key, value in raw_signals.items()}
+    )
     domain_ranks = _rank_signals({key: value["domain_distance_signal"] for key, value in raw_signals.items()})
     candidates: dict[str, dict[str, Any]] = {}
     for design_hash, signals in raw_signals.items():
         first = groups[design_hash][0]
+        uncertainty_component = max(
+            uncertainty_ranks[design_hash],
+            invalid_derived_ranks[design_hash],
+        )
         acquisition = (
             STAGE3_RESIDUAL_WEIGHT * residual_ranks[design_hash]
-            + STAGE3_UNCERTAINTY_WEIGHT * uncertainty_ranks[design_hash]
+            + STAGE3_UNCERTAINTY_WEIGHT * uncertainty_component
             + STAGE3_DOMAIN_DISTANCE_WEIGHT * domain_ranks[design_hash]
         )
         candidates[design_hash] = {
             **signals,
             "acquisition_score": acquisition,
             "geometry_vector": _geometry_vector(spec, first),
+            "uncertainty_component_rank": uncertainty_component,
         }
 
     selected: list[str] = []
     selected_records: list[dict[str, Any]] = []
+    invalid_derived_candidates = {
+        design_hash
+        for design_hash, candidate in candidates.items()
+        if candidate["invalid_derived_prediction_signal"] > 0.0
+    }
+    required_invalid_derived = min(
+        STAGE3_MIN_INVALID_DERIVED_GEOMETRIES,
+        len(invalid_derived_candidates),
+        STAGE3_TRAIN_GEOMETRIES,
+    )
     while len(selected) < STAGE3_TRAIN_GEOMETRIES:
+        selected_invalid_derived = len(invalid_derived_candidates.intersection(selected))
+        remaining_invalid_required = required_invalid_derived - selected_invalid_derived
+        remaining_slots = STAGE3_TRAIN_GEOMETRIES - len(selected)
+        require_invalid_derived = remaining_invalid_required >= remaining_slots
         scored: list[tuple[float, float, str, float]] = []
         for design_hash, candidate in candidates.items():
             if design_hash in selected:
+                continue
+            if require_invalid_derived and design_hash not in invalid_derived_candidates:
                 continue
             diversity = (
                 1.0
@@ -1768,6 +1831,8 @@ def select_stage3_adaptive_train_rows(
                 + STAGE3_DIVERSITY_WEIGHT * diversity
             )
             scored.append((final_score, candidate["acquisition_score"], design_hash, diversity))
+        if not scored:
+            raise RuntimeError("Stage3 adaptive selection has no candidate satisfying coverage")
         scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
         final_score, _, design_hash, diversity = scored[0]
         selected.append(design_hash)
@@ -1779,11 +1844,24 @@ def select_stage3_adaptive_train_rows(
                 "diversity_score_at_selection": diversity,
                 "domain_distance_signal": candidate["domain_distance_signal"],
                 "final_selection_score": final_score,
+                "invalid_derived_prediction_signal": candidate[
+                    "invalid_derived_prediction_signal"
+                ],
                 "rank": len(selected),
                 "residual_signal": candidate["residual_signal"],
+                "selection_constraint": (
+                    "invalid_derived_minimum_coverage"
+                    if require_invalid_derived
+                    else "adaptive_score"
+                ),
+                "uncertainty_component_rank": candidate["uncertainty_component_rank"],
                 "uncertainty_signal": candidate["uncertainty_signal"],
             }
         )
+
+    selected_invalid_derived_count = len(invalid_derived_candidates.intersection(selected))
+    if selected_invalid_derived_count < required_invalid_derived:
+        raise RuntimeError("Stage3 invalid-derived minimum coverage was not satisfied")
 
     ordered_groups = [(design_hash, groups[design_hash]) for design_hash in selected]
     rows = _rename_stage3_train_rows(ordered_groups, case_prefix=case_prefix)
@@ -1808,7 +1886,16 @@ def select_stage3_adaptive_train_rows(
     return rows, {
         "candidate_pool": {
             "geometry_count": candidate_pool_geometries,
+            "invalid_derived_prediction_geometry_count": sum(
+                value["invalid_derived_prediction_signal"] > 0.0
+                for value in raw_signals.values()
+            ),
+            "max_invalid_derived_prediction_fraction": max(
+                value["invalid_derived_prediction_signal"] for value in raw_signals.values()
+            ),
             "pool_sha256": _canonical_sha256(pool_contract),
+            "required_invalid_derived_prediction_geometry_count": required_invalid_derived,
+            "selected_invalid_derived_prediction_geometry_count": selected_invalid_derived_count,
             "signals_sha256": _canonical_sha256(all_signal_records),
         },
         "design_hashes": selected,
@@ -1820,6 +1907,15 @@ def select_stage3_adaptive_train_rows(
             "domain_distance_weight": STAGE3_DOMAIN_DISTANCE_WEIGHT,
             "nearest_audit_rows": STAGE3_NEAREST_AUDIT_ROWS,
             "residual_weight": STAGE3_RESIDUAL_WEIGHT,
+            "invalid_derived_prediction_coverage_policy": (
+                "reserve_final_slots_for_up_to_two_invalid_geometries_with_greedy_diversity"
+            ),
+            "invalid_derived_prediction_minimum_geometry_coverage": (
+                STAGE3_MIN_INVALID_DERIVED_GEOMETRIES
+            ),
+            "uncertainty_component_policy": (
+                "max_rank_of_finite_ensemble_std_and_invalid_derived_prediction_fraction"
+            ),
             "uncertainty_weight": STAGE3_UNCERTAINTY_WEIGHT,
         },
         "seed": adaptation_seed,
