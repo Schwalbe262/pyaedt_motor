@@ -3453,6 +3453,65 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(args.timeout_seconds, 10.0)
         self.assertEqual(args.project_active_cap, 50)
 
+    def test_scheduler_poll_bounds_history_and_uses_project_active_count(self) -> None:
+        root = Path("C:/dashboard-test")
+        config = dashboard.DashboardConfig(root, root / "contract.json", cap=50)
+        seen: list[str] = []
+
+        def fetch(url: str, _timeout: float) -> object:
+            seen.append(url)
+            if url.endswith("/api/health"):
+                return {
+                    "ok": True,
+                    "scheduler_thread_alive": True,
+                    "scheduler_stalled": False,
+                    "scheduler_ok": True,
+                }
+            if "/api/projects/" in url:
+                return {
+                    "id": 2,
+                    "name": dashboard.DEFAULT_PROJECT,
+                    "total_count": 1090,
+                    "logical_active_count": 50,
+                    "queued_count": 10,
+                    "attaching_count": 2,
+                    "executing_count": 38,
+                    "max_active_tasks": 50,
+                    "deployments": [],
+                }
+            if "/api/tasks?" in url:
+                return [{"id": 1, "name": "recent", "status": "completed"}]
+            if url.endswith("/api/allocations"):
+                return []
+            raise AssertionError(url)
+
+        with (
+            mock.patch.object(dashboard, "_fetch_json", side_effect=fetch),
+            mock.patch.object(
+                dashboard,
+                "inspect_quality_profile_experiment_plan",
+                return_value=({}, ()),
+            ),
+            mock.patch.object(
+                dashboard,
+                "summarize_quality_profile_experiment",
+                return_value={},
+            ),
+            mock.patch.object(dashboard, "collect_stage1_checkpoint", return_value={}),
+        ):
+            result = dashboard.collect_scheduler_state(config)
+
+        task_url = next(url for url in seen if "/api/tasks?" in url)
+        self.assertIn("limit=50", task_url)
+        self.assertIn("project=PYAEDT_MOTOR_IPMSM_V2", task_url)
+        self.assertEqual(result["active_count"], 50)
+        self.assertEqual(result["utilization_pct"], 100.0)
+        self.assertEqual(
+            result["status_counts"],
+            {"attaching": 2, "completed": 1, "queued": 10, "running": 38},
+        )
+        self.assertFalse(result["history_complete"])
+
     def test_scheduler_health_requires_live_nonstalled_thread(self) -> None:
         healthy = {
             "ok": True,

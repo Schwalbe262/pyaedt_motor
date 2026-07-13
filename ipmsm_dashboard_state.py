@@ -103,6 +103,7 @@ STAGE3_PLAN_COMPLETION_SCHEMA_VERSION = "ipmsm-v2-stage3-plan-completion-v1"
 STAGE3_RUNNER_LOGS_SCHEMA_VERSION = "ipmsm-v2-stage3-runner-logs-v1"
 STAGE3_ACTIVATION_TASK_PREFIX = "ipmsm-v2-foundation-s3-v4r4"
 STAGE3_ACTIVATION_PROGRESS_MAX_AGE_SECONDS = 20 * 60.0
+DASHBOARD_SCHEDULER_HISTORY_LIMIT = 50
 STAGE3_RUNNER_RECEIPT_RE = re.compile(
     r"^runner\.logs\.receipt\.(?P<token>[0-9a-f]{32})\.json$"
 )
@@ -5944,6 +5945,19 @@ def summarize_scheduler(
     clean_tasks = [item for item in tasks if isinstance(item, Mapping)]
     status_counts = Counter(_clip_text(item.get("status"), 30).lower() or "unknown" for item in clean_tasks)
     active = [item for item in clean_tasks if _clip_text(item.get("status"), 30).lower() in ACTIVE_STATUSES]
+    project_active_count = _safe_int(project.get("logical_active_count"), -1)
+    if project_active_count < 0:
+        project_active_count = len(active)
+    for status, field in (
+        ("queued", "queued_count"),
+        ("attaching", "attaching_count"),
+        ("running", "executing_count"),
+    ):
+        exact_count = _safe_int(project.get(field), -1)
+        if status == "running" and exact_count < 0:
+            exact_count = _safe_int(project.get("running_count"), -1)
+        if exact_count >= 0:
+            status_counts[status] = exact_count
     allocation_index = {
         _safe_int(item.get("id"), -1): item
         for item in allocations
@@ -6054,12 +6068,14 @@ def summarize_scheduler(
         "project_total_count": project_total_count,
         "history_returned_count": history_returned_count,
         "history_complete": history_returned_count == project_total_count,
-        "active_count": len(active),
+        "active_count": project_active_count,
         "configured_cap": cap,
         "server_cap": server_cap,
         "cap": server_cap,
         "cap_matches": server_cap == cap,
-        "utilization_pct": round(100.0 * len(active) / server_cap, 1) if server_cap else 0.0,
+        "utilization_pct": (
+            round(100.0 * project_active_count / server_cap, 1) if server_cap else 0.0
+        ),
         "status_counts": dict(sorted(status_counts.items())),
         "completed_last_hour": completed_last_hour,
         "campaign_status": campaign_status,
@@ -6073,7 +6089,9 @@ def summarize_scheduler(
 
 def collect_scheduler_state(config: DashboardConfig) -> dict[str, Any]:
     root = config.scheduler_url.rstrip("/")
-    query = parse.urlencode({"project": config.project, "limit": 5000})
+    query = parse.urlencode(
+        {"project": config.project, "limit": DASHBOARD_SCHEDULER_HISTORY_LIMIT}
+    )
     urls = {
         "health": f"{root}/api/health",
         "project": f"{root}/api/projects/{parse.quote(config.project, safe='')}",
