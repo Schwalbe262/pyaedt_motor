@@ -220,8 +220,8 @@ stage2Active.pipeline.stages[3] = {
     scheduler_counts: { completed: 100, running: 99, queued: 0, attaching: 0, failed: 0 },
     runner_progress: {
       available: true,
-      result_ok: 198,
-      audit_pending: 16,
+      result_ok: 299,
+      audit_pending: 1,
       submitted: 93,
       active: 50,
       missing: 36,
@@ -251,8 +251,17 @@ stage2Active.torque_unit_replay = {
   failed_attempts: 1,
 };
 context.__stage2Active = stage2Active;
+vm.runInContext("renderOverview(__stage2Active)", context);
 vm.runInContext("renderCampaign(__stage2Active)", context);
 const stage2View = {
+  heroPercent: byId("heroPercent").textContent,
+  heroPercentLabel: byId("heroPercentLabel").textContent,
+  heroProgress: byId("heroProgress").value,
+  heroProgressMax: byId("heroProgress").max,
+  heroProgressLabel: byId("heroProgressLabel").textContent,
+  currentDetail: byId("currentDetail").textContent,
+  overallPercent: byId("overallPercent").textContent,
+  overallProgressNote: byId("overallProgressNote").textContent,
   resultOk: byId("resultOk").textContent,
   activeSlots: byId("activeSlots").textContent,
   rateLabel: byId("rateLabel").textContent,
@@ -477,11 +486,31 @@ process.stdout.write(JSON.stringify({
         self.assertNotIn("696", result["freshAtomic"]["resultSub"])
         self.assertEqual(result["stage2"]["resultOk"], "700")
         self.assertEqual(result["stage2"]["activeSlots"], "99")
+        self.assertEqual(result["stage2"]["heroPercent"], "99.7%")
+        self.assertEqual(
+            result["stage2"]["heroPercentLabel"],
+            "Stage 2 보강 DOE · live runner 검증",
+        )
+        self.assertEqual(result["stage2"]["heroProgress"], 299)
+        self.assertEqual(result["stage2"]["heroProgressMax"], 300)
+        self.assertIn(
+            "299 / 300 live runner 검증 · 99.7%",
+            result["stage2"]["heroProgressLabel"],
+        )
+        self.assertIn(
+            "299 / 300 live runner 검증 · 99.7%",
+            result["stage2"]["currentDetail"],
+        )
+        self.assertEqual(result["stage2"]["overallPercent"], "37.5%")
+        self.assertIn(
+            "현재 Stage 2 보강 DOE live runner 검증 99.7%",
+            result["stage2"]["overallProgressNote"],
+        )
         self.assertEqual(result["stage2"]["rateLabel"], "Stage 2 보강 DOE 로컬 최종 수집")
         self.assertEqual(result["stage2"]["validated"], "0")
         self.assertEqual(result["stage2"]["validatedTotal"], "/ 300")
-        self.assertIn("runner 검증 198/300", result["stage2"]["rateSub"])
-        self.assertIn("결과 감사 대기 16", result["stage2"]["rateSub"])
+        self.assertIn("runner 검증 299/300", result["stage2"]["rateSub"])
+        self.assertIn("결과 감사 대기 1", result["stage2"]["rateSub"])
         self.assertIn("제출 93", result["stage2"]["rateSub"])
         self.assertIn("실행 50", result["stage2"]["rateSub"])
         self.assertIn("잔여 36", result["stage2"]["rateSub"])

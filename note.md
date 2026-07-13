@@ -3965,3 +3965,6 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 
 ## 2026-07-13 09:20:00 +09:00 - v4r6 authority builder checkpoint
 - Actions/result: committed/pushed `4d85363` explicit pyaedt-byte injection and `7a76748` strict target-load authority builder; it replays v4r5 completion twice, binds live artifact/per-case manifests, blocks protected/Y paths, and publishes no-replace. Metrics/next: pyaedt tests39 pass/1 privilege skip, reviews P0/P1 none; Stage2 is299/300 with one healthy n114 task and no plan holes, so finish collection/gate while implementing the unconnected continuation adapter.
+
+## 2026-07-13 09:23:00 +09:00 - Stage2 hero live progress semantics
+- Actions/result: added a display-only Stage2/3 progress runtime so available claim-bound runner299/300 drives hero/current counters while local final collection remains0/300 and explicitly labeled; dashboard tests120/120 pass. Next: review, commit, and deploy with the coordinated dashboard checkpoint.

@@ -102,6 +102,27 @@ function runtimeCounter(runtime, includePercent = true) {
   return parts.join(" · ");
 }
 
+function currentProgressRuntime(currentId, runtime) {
+  const runner = runtime.runnerProgress || {};
+  const runnerAhead = ["stage2", "stage3"].includes(currentId)
+    && runner.available === true
+    && runner.resultOk !== null
+    && runner.total !== null
+    && runner.total > 0
+    && runner.resultOk <= runner.total
+    && (runtime.completed === null || runner.resultOk > runtime.completed);
+  if (!runnerAhead) return { ...runtime, progressSource: "final_collection" };
+  return {
+    ...runtime,
+    completed: runner.resultOk,
+    total: runner.total,
+    rawUnit: "live_runner_results",
+    unit: "live runner 검증",
+    progressPct: Math.max(0, Math.min(100, 100 * runner.resultOk / runner.total)),
+    progressSource: "live_runner",
+  };
+}
+
 function schedulerComposition(rawCounts) {
   const counts = rawCounts && typeof rawCounts === "object" ? rawCounts : {};
   const active = integer(counts.queued) + integer(counts.attaching) + integer(counts.running);
@@ -229,6 +250,10 @@ function overallState(data) {
       : overall.current_status || currentStage.status || "waiting",
     currentDetail: currentStage.detail || "현재 단계 산출물을 확인합니다.",
     runtime,
+    progressRuntime: currentProgressRuntime(
+      effectivePipeline.forcedCurrentId || overall.current_stage || currentStage.id || "unknown",
+      runtime,
+    ),
     resolved,
     totalStages,
     nextStageId: effectivePipeline.forcedCurrentId ? nextStage?.id || "" : overall.next_stage || nextStage?.id || "",
@@ -498,10 +523,11 @@ function authorizationGateState(data) {
 }
 
 function renderHeroOperations(data, state) {
+  const progressRuntime = state.progressRuntime || state.runtime;
   const totalStages = Math.max(1, state.totalStages || state.stages.length || 1);
   const currentResolved = ["complete", "skipped"].includes(state.currentStatus);
-  const currentFraction = !currentResolved && state.runtime.progressPct !== null
-    ? Math.max(0, Math.min(1, state.runtime.progressPct / 100))
+  const currentFraction = !currentResolved && progressRuntime.progressPct !== null
+    ? Math.max(0, Math.min(1, progressRuntime.progressPct / 100))
     : 0;
   const stageUnits = Math.min(totalStages, state.resolved + currentFraction);
   const overallPct = 100 * stageUnits / totalStages;
@@ -511,7 +537,7 @@ function renderHeroOperations(data, state) {
   setText("overallPercent", `${overallPct.toFixed(1)}%`);
   setText(
     "overallProgressNote",
-    `${state.resolved}/${totalStages}단계 해결 · 현재 ${state.currentLabel} ${state.runtime.progressPct === null ? "수치 대기" : `${state.runtime.progressPct.toFixed(1)}%`} · 단계별 균등 가중`,
+    `${state.resolved}/${totalStages}단계 해결 · 현재 ${state.currentLabel} ${progressRuntime.progressSource === "live_runner" ? "live runner 검증 " : ""}${progressRuntime.progressPct === null ? "수치 대기" : `${progressRuntime.progressPct.toFixed(1)}%`} · 단계별 균등 가중`,
   );
 
   const campaign = data.campaign || {};
@@ -697,7 +723,8 @@ function renderHeroOperations(data, state) {
 
 function renderOverview(data) {
   const state = overallState(data);
-  const counter = runtimeCounter(state.runtime);
+  const progressRuntime = state.progressRuntime || state.runtime;
+  const counter = runtimeCounter(progressRuntime);
   const composition = schedulerComposition(state.runtime.schedulerCounts);
   const currentParts = [counter, state.currentDetail].filter(Boolean);
   if (composition.active || composition.completed || composition.failed) {
@@ -707,18 +734,20 @@ function renderOverview(data) {
   setText("resolvedStages", `해결된 단계 ${state.resolved} / ${state.totalStages}`);
   setText("heroTitle", `${state.currentLabel} · ${statusKorean[state.currentStatus] || state.currentStatus}`);
   setText("heroDescription", `${state.currentDetail} 해결된 단계는 ${state.resolved}/${state.totalStages}이며, 아래 진행률은 현재 단계만 표시합니다.`);
-  setText("heroPercent", state.runtime.progressPct === null ? "—" : `${state.runtime.progressPct.toFixed(1)}%`);
-  setText("heroPercentLabel", state.currentLabel);
+  setText("heroPercent", progressRuntime.progressPct === null ? "—" : `${progressRuntime.progressPct.toFixed(1)}%`);
+  setText("heroPercentLabel", progressRuntime.progressSource === "live_runner"
+    ? `${state.currentLabel} · live runner 검증`
+    : state.currentLabel);
   const progress = byId("heroProgress");
-  progress.setAttribute("aria-label", `${state.currentLabel} 진행률`);
-  if (state.runtime.completed !== null && state.runtime.total !== null && state.runtime.total > 0) {
-    progress.max = state.runtime.total;
-    progress.value = Math.min(state.runtime.completed, state.runtime.total);
+  progress.setAttribute("aria-label", `${state.currentLabel}${progressRuntime.progressSource === "live_runner" ? " live runner 검증" : ""} 진행률`);
+  if (progressRuntime.completed !== null && progressRuntime.total !== null && progressRuntime.total > 0) {
+    progress.max = progressRuntime.total;
+    progress.value = Math.min(progressRuntime.completed, progressRuntime.total);
     setText("heroProgressLabel", counter);
-  } else if (state.runtime.progressPct !== null) {
+  } else if (progressRuntime.progressPct !== null) {
     progress.max = 100;
-    progress.value = state.runtime.progressPct;
-    setText("heroProgressLabel", `${state.runtime.progressPct.toFixed(1)}%`);
+    progress.value = progressRuntime.progressPct;
+    setText("heroProgressLabel", `${progressRuntime.progressPct.toFixed(1)}%`);
   } else {
     progress.max = 1;
     progress.value = 0;
