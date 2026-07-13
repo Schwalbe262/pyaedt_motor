@@ -9,6 +9,7 @@ immutable continuation contract.
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -64,12 +65,23 @@ FRONT_ORDER = (
 REQUIRED_SOURCE_PINS = frozenset(
     {
         "continuation_adapter",
+        "continuation_builder",
         "target_load_authority",
         "target_load_authority_builder",
         "target_load_coordinator",
         "target_load_workflow",
         "target_load_matching",
         "atomic_publish",
+        "run_ipmsm_batch",
+        "submit_ipmsm_scheduler_job",
+        "submit_ipmsm_scheduler_task",
+        "submit_ipmsm_v2_campaign",
+        "subprocess_run",
+        "pareto_validator",
+        "ipmsm_geometry",
+        "ipmsm_ppt_setup",
+        "variable",
+        "pyaedt_core",
     }
 )
 
@@ -90,6 +102,9 @@ class ContinuationContext:
     scheduler: Mapping[str, Any]
     runtime: Mapping[str, Any]
     runner_argv: tuple[str, ...]
+    source_pins: Mapping[str, authority.FileSnapshot]
+    runner_executable: authority.FileSnapshot
+    runner_source: authority.FileSnapshot
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
@@ -189,19 +204,56 @@ def _four_hash_binding(value: Any, label: str) -> tuple[dict[str, str], authorit
         raise TargetLoadContinuationError(str(exc)) from exc
 
 
-def _source_pins(value: Any) -> dict[str, authority.FileSnapshot]:
+def _source_pins(
+    value: Any,
+    *,
+    pyaedt_core_path: Path,
+) -> dict[str, authority.FileSnapshot]:
     records = _mapping(value, "continuation.source_pins")
     if set(records) != REQUIRED_SOURCE_PINS:
         raise TargetLoadContinuationError("continuation source pin coverage is not exact")
     expected_paths = {
         "continuation_adapter": Path(__file__).resolve(strict=True),
+        "continuation_builder": Path(__file__).with_name(
+            "build_ipmsm_v2_target_load_continuation_v4r6.py"
+        ).resolve(strict=True),
         "target_load_authority": Path(authority.__file__).resolve(strict=True),
         "target_load_authority_builder": Path(authority_builder.__file__).resolve(strict=True),
         "target_load_coordinator": Path(coordinator.__file__).resolve(strict=True),
         "target_load_workflow": Path(workflow.__file__).resolve(strict=True),
         "target_load_matching": Path(matching.__file__).resolve(strict=True),
         "atomic_publish": Path(atomic_publish.__file__).resolve(strict=True),
+        "run_ipmsm_batch": workflow.RUNTIME_SOURCE_PATHS[
+            "run_ipmsm_batch_source"
+        ].resolve(strict=True),
+        "submit_ipmsm_scheduler_job": workflow.RUNTIME_SOURCE_PATHS[
+            "submit_ipmsm_scheduler_job_source"
+        ].resolve(strict=True),
+        "submit_ipmsm_scheduler_task": workflow.RUNTIME_SOURCE_PATHS[
+            "submit_ipmsm_scheduler_task_source"
+        ].resolve(strict=True),
+        "submit_ipmsm_v2_campaign": workflow.RUNTIME_SOURCE_PATHS[
+            "submit_ipmsm_v2_campaign_source"
+        ].resolve(strict=True),
+        "subprocess_run": workflow.RUNTIME_SOURCE_PATHS[
+            "subprocess_run_source"
+        ].resolve(strict=True),
+        "pareto_validator": workflow.RUNTIME_SOURCE_PATHS[
+            "validator_source"
+        ].resolve(strict=True),
+        "ipmsm_geometry": workflow.RUNTIME_SOURCE_PATHS[
+            "ipmsm_geometry_source"
+        ].resolve(strict=True),
+        "ipmsm_ppt_setup": workflow.RUNTIME_SOURCE_PATHS[
+            "ipmsm_ppt_setup_source"
+        ].resolve(strict=True),
+        "variable": workflow.RUNTIME_SOURCE_PATHS["variable_source"].resolve(strict=True),
+        "pyaedt_core": pyaedt_core_path.resolve(strict=True),
     }
+    if len({str(path).casefold() for path in expected_paths.values()}) != len(
+        expected_paths
+    ):
+        raise TargetLoadContinuationError("continuation source pin paths must be unique")
     result: dict[str, authority.FileSnapshot] = {}
     for name in sorted(REQUIRED_SOURCE_PINS):
         record = _mapping(records[name], f"source_pins.{name}")
@@ -442,7 +494,10 @@ def load_continuation_context(contract_path: str | Path) -> ContinuationContext:
     if receipt != expected_receipt:
         raise TargetLoadContinuationError("v4r6 authorization receipt binding changed")
 
-    _source_pins(continuation["source_pins"])
+    source_pins = _source_pins(
+        continuation["source_pins"],
+        pyaedt_core_path=authority_context.pyaedt_core_snapshot.path,
+    )
     runner = _mapping(continuation["runner"], "continuation.runner")
     _expect_keys(runner, {"executable", "source", "argv"}, "continuation.runner")
     executable_record = _mapping(runner["executable"], "runner.executable")
@@ -492,6 +547,9 @@ def load_continuation_context(contract_path: str | Path) -> ContinuationContext:
         for item in (
             *authority_context.bound_snapshots,
             authority_context.contract,
+            *source_pins.values(),
+            executable,
+            source,
         )
     }
     immutable_paths.update(
@@ -564,6 +622,9 @@ def load_continuation_context(contract_path: str | Path) -> ContinuationContext:
         scheduler=scheduler,
         runtime=runtime,
         runner_argv=runner_argv,
+        source_pins=source_pins,
+        runner_executable=executable,
+        runner_source=source,
     )
 
 
@@ -630,8 +691,62 @@ def _strict_upstream_replay(
         raise TargetLoadContinuationError(
             "strict coordinator upstream replay differs: " + ", ".join(mismatches)
         )
+    for index, snapshot in enumerate(upstream.snapshots):
+        authority.assert_snapshot_unchanged(snapshot, f"strict upstream input {index}")
     authority.assert_context_unchanged(context.authority_context)
     return upstream, decision, paths
+
+
+def _assert_upstream_snapshots_unchanged(
+    upstream: authority_builder.CompletedUpstreamAudit,
+) -> None:
+    for index, snapshot in enumerate(upstream.snapshots):
+        authority.assert_snapshot_unchanged(snapshot, f"strict upstream input {index}")
+
+
+def _validate_built_root_authority(
+    context: ContinuationContext,
+    upstream: authority_builder.CompletedUpstreamAudit,
+    root: Mapping[str, Any],
+) -> None:
+    try:
+        workflow.validate_root_manifest(root)
+        identity = _mapping(root.get("identity"), "target-load root identity")
+        root_upstream = _mapping(
+            identity.get("upstream_pareto_binding"),
+            "target-load root upstream binding",
+        )
+        documents = _mapping(
+            identity.get("source_documents_base64"),
+            "target-load root source documents",
+        )
+        seed_plan = base64.b64decode(
+            _nonblank(documents.get("seed_fea_plan_csv"), "root filtered seed plan"),
+            validate=True,
+        )
+        source_hashes = _mapping(
+            identity.get("source_hashes"), "target-load root source hashes"
+        )
+    except (ValueError, workflow.TargetLoadWorkflowError) as exc:
+        raise TargetLoadContinuationError(
+            f"built target-load root authority is invalid: {exc}"
+        ) from exc
+    target = context.authority_context.target_load["upstream_authority"]
+    mismatches: list[str] = []
+    if authority.canonical_sha256(root_upstream) != target["upstream_binding_sha256"]:
+        mismatches.append("upstream binding SHA256")
+    if hashlib.sha256(seed_plan).hexdigest() != target["filtered_plan_sha256"]:
+        mismatches.append("filtered plan SHA256")
+    if identity.get("candidate_order") != list(upstream.candidate_ids):
+        mismatches.append("candidate order")
+    if source_hashes.get("pyaedt_core_source_sha256") != (
+        context.authority_context.pyaedt_core_snapshot.sha256
+    ):
+        mismatches.append("PyAEDT source SHA256")
+    if mismatches:
+        raise TargetLoadContinuationError(
+            "built target-load root differs from human authority: " + ", ".join(mismatches)
+        )
 
 
 def _coordinator_args(context: ContinuationContext, paths: SimpleNamespace) -> SimpleNamespace:
@@ -710,6 +825,7 @@ def _publish_no_replace_bytes(path: Path, payload: bytes, label: str) -> bool:
     staged = path.with_name(f".{path.name}.{token}.tmp")
     descriptor = -1
     created_stage = False
+    created_stage_snapshot: authority.FileSnapshot | None = None
     try:
         try:
             descriptor = os.open(
@@ -726,6 +842,19 @@ def _publish_no_replace_bytes(path: Path, payload: bytes, label: str) -> bool:
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
+                opened_stage = os.fstat(stream.fileno())
+            created_stage_snapshot = authority.read_single_link_snapshot(
+                staged, f"created {label} staging"
+            )
+            if (
+                not authority._opened_file_matches(
+                    opened_stage, created_stage_snapshot.identity
+                )
+                or created_stage_snapshot.payload != payload
+            ):
+                raise TargetLoadContinuationError(
+                    f"created {label} staging changed after fsync"
+                )
         except FileExistsError:
             try:
                 staged_payload = authority.read_single_link_snapshot(
@@ -763,13 +892,17 @@ def _publish_no_replace_bytes(path: Path, payload: bytes, label: str) -> bool:
         # A completed rename removes staging.  Preserve every pre-commit stage
         # on error so a later exact invocation can either adopt the complete
         # bytes or fail closed on a partial/foreign artifact.
-        if created_stage and path.is_file() and staged.is_file():
+        if (
+            created_stage
+            and created_stage_snapshot is not None
+            and path.is_file()
+            and os.path.lexists(staged)
+        ):
             try:
-                if authority.read_single_link_snapshot(
-                    staged, f"raced {label} staging"
-                ).payload == payload:
-                    staged.unlink()
-            except (OSError, authority.TargetLoadAuthorityError):
+                _unlink_bound_snapshot(
+                    created_stage_snapshot, f"created {label} staging"
+                )
+            except (OSError, authority.TargetLoadAuthorityError, TargetLoadContinuationError):
                 pass
 
 
@@ -831,6 +964,29 @@ def _pid_is_running(pid: int) -> bool:
 def _read_claim(path: Path, label: str) -> dict[str, Any]:
     _, value = _strict_document(path, label)
     return value
+
+
+def _unlink_bound_snapshot(snapshot: authority.FileSnapshot, label: str) -> None:
+    """Remove only the exact file object that was validated by the caller."""
+
+    try:
+        authority.assert_snapshot_unchanged(snapshot, label)
+    except authority.TargetLoadAuthorityError as exc:
+        raise TargetLoadContinuationError(f"{label} changed before removal: {exc}") from exc
+    receipt = atomic_publish.PublishReceipt(
+        source=snapshot.path,
+        destination=snapshot.path,
+        identity=atomic_publish.FileIdentity(
+            device=snapshot.identity[0],
+            inode=snapshot.identity[1],
+            size=snapshot.identity[4],
+        ),
+        strategy="bound-snapshot-delete",
+    )
+    if not atomic_publish.rollback_owned_output(receipt):
+        raise TargetLoadContinuationError(f"{label} ownership changed before removal")
+    if os.path.lexists(snapshot.path):
+        raise TargetLoadContinuationError(f"{label} still exists after removal")
 
 
 def _validate_claim(value: Mapping[str, Any], context: ContinuationContext) -> None:
@@ -932,10 +1088,9 @@ def _resume_interrupted_recovery(
     claim_path = context.paths["claim"]
     if not recovery_path.exists():
         return False
-    recovery_snapshot = authority.read_single_link_snapshot(
+    recovery_snapshot, recovery = _strict_document(
         recovery_path, "claim recovery lock"
     )
-    recovery = _read_claim(recovery_path, "claim recovery lock")
     _expect_keys(
         recovery,
         {
@@ -965,15 +1120,14 @@ def _resume_interrupted_recovery(
     if hashlib.sha256(stale_payload).hexdigest() != recovery["stale_claim_sha256"]:
         raise TargetLoadContinuationError("claim recovery stale-claim SHA256 changed")
     if claim_path.exists():
-        current_snapshot = authority.read_single_link_snapshot(
+        current_snapshot, current = _strict_document(
             claim_path, "claim after interrupted recovery"
         )
-        current = _read_claim(claim_path, "claim after interrupted recovery")
         _validate_claim(current, context)
         if current_snapshot.sha256 == recovery["stale_claim_sha256"]:
-            claim_path.unlink()
+            _unlink_bound_snapshot(current_snapshot, "claim after interrupted recovery")
         elif current.get("owner") == recovery_owner:
-            claim_path.unlink()
+            _unlink_bound_snapshot(current_snapshot, "claim after interrupted recovery")
         elif current.get("original_owner") == stale_claim["original_owner"]:
             replacement_owner = _mapping(
                 current.get("owner"), "interrupted replacement claim owner"
@@ -988,7 +1142,7 @@ def _resume_interrupted_recovery(
                 raise TargetLoadContinuationError(
                     "interrupted replacement claim owner is still active"
                 )
-            claim_path.unlink()
+            _unlink_bound_snapshot(current_snapshot, "claim after interrupted recovery")
         else:
             raise TargetLoadContinuationError(
                 "claim differs from both sides of interrupted recovery"
@@ -1002,7 +1156,7 @@ def _resume_interrupted_recovery(
         _claim_payload(context, new_owner, stale_claim["original_owner"]),
         "recovered continuation claim",
     )
-    recovery_path.unlink()
+    _unlink_bound_snapshot(recovery_snapshot, "claim recovery lock")
     return True
 
 
@@ -1020,8 +1174,7 @@ def _acquire_claim(context: ContinuationContext, new_owner: Mapping[str, Any]) -
         )
         return claim_path
 
-    old_snapshot = authority.read_single_link_snapshot(claim_path, "stale continuation claim")
-    old_claim = _read_claim(claim_path, "stale continuation claim")
+    old_snapshot, old_claim = _strict_document(claim_path, "stale continuation claim")
     _validate_claim(old_claim, context)
     old_owner = _mapping(old_claim["owner"], "stale claim owner")
     if old_owner["hostname"] != socket.gethostname():
@@ -1037,17 +1190,22 @@ def _acquire_claim(context: ContinuationContext, new_owner: Mapping[str, Any]) -
         "owner": dict(new_owner),
     }
     _publish_no_replace_json(recovery_path, recovery, "claim recovery lock")
+    recovery_snapshot, committed_recovery = _strict_document(
+        recovery_path, "claim recovery lock"
+    )
+    if committed_recovery != recovery:
+        raise TargetLoadContinuationError("claim recovery lock changed after publication")
     if authority.read_single_link_snapshot(
         claim_path, "stale continuation claim"
     ).sha256 != old_snapshot.sha256:
         raise TargetLoadContinuationError("stale claim changed during recovery")
-    claim_path.unlink()
+    _unlink_bound_snapshot(old_snapshot, "stale continuation claim")
     _publish_no_replace_json(
         claim_path,
         _claim_payload(context, new_owner, old_claim["original_owner"]),
         "adopted continuation claim",
     )
-    recovery_path.unlink()
+    _unlink_bound_snapshot(recovery_snapshot, "claim recovery lock")
     return claim_path
 
 
@@ -1084,16 +1242,22 @@ def _publish_decision(context: ContinuationContext, owner: Mapping[str, Any]) ->
 def _prepare_workspace(
     context: ContinuationContext,
 ) -> tuple[coordinator.SchedulerClient, Mapping[str, Any]]:
+    _assert_authority_unchanged(context)
     upstream, _, upstream_paths = _strict_upstream_replay(context)
     args = _coordinator_args(context, upstream_paths)
+    _assert_upstream_snapshots_unchanged(upstream)
     root = coordinator.build_root_from_files(
         args,
         pyaedt_core_source_bytes=context.authority_context.pyaedt_core_snapshot.payload,
     )
+    _validate_built_root_authority(context, upstream, root)
+    _assert_upstream_snapshots_unchanged(upstream)
+    _assert_authority_unchanged(context)
     progress = coordinator.initialize_workspace(context.paths["workspace"], root)
     if progress["root_manifest_sha256"] != workflow.canonical_json_sha256(root):
         raise TargetLoadContinuationError("initialized root identity differs")
     for candidate_id in upstream.candidate_ids:
+        _assert_upstream_snapshots_unchanged(upstream)
         evidence = coordinator.build_fixed_mtpa_evidence_from_results(
             root,
             candidate_id,
@@ -1102,9 +1266,11 @@ def _prepare_workspace(
         coordinator.publish_fixed_mtpa_evidence(
             context.paths["workspace"], candidate_id, evidence
         )
+    _assert_upstream_snapshots_unchanged(upstream)
     state = coordinator.replay_workspace(context.paths["workspace"], repair=False)
     if state.root != root:
         raise TargetLoadContinuationError("coordinator root differs after fixed-MTPA import")
+    _assert_authority_unchanged(context)
     return _client(context), root
 
 
@@ -1232,6 +1398,16 @@ def _assert_authority_unchanged(context: ContinuationContext) -> None:
         authority.assert_snapshot_unchanged(
             context.snapshot, "target-load continuation contract"
         )
+        for name, snapshot in sorted(context.source_pins.items()):
+            authority.assert_snapshot_unchanged(
+                snapshot, f"target-load continuation source {name}"
+            )
+        authority.assert_snapshot_unchanged(
+            context.runner_executable, "target-load continuation executable"
+        )
+        authority.assert_snapshot_unchanged(
+            context.runner_source, "target-load continuation runner"
+        )
         authority.assert_context_unchanged(context.authority_context)
         live_authorization = authority.audit_authorization_receipt(
             context.authority_context.contract.path
@@ -1291,9 +1467,16 @@ def _publish_final_outputs(
     _publish_no_replace_json(
         context.paths["measured_front_manifest"], manifest, "measured target-load front manifest"
     )
+    csv_snapshot = authority.read_single_link_snapshot(
+        context.paths["measured_front_csv"], "measured target-load front"
+    )
+    if csv_snapshot.payload != csv_payload:
+        raise TargetLoadContinuationError("measured target-load front bytes changed")
     manifest_snapshot = authority.read_single_link_snapshot(
         context.paths["measured_front_manifest"], "measured front manifest"
     )
+    if manifest_snapshot.payload != authority.canonical_json_bytes(manifest):
+        raise TargetLoadContinuationError("measured front manifest bytes changed")
     completion_core = {
         "schema_version": COMPLETION_SCHEMA_VERSION,
         "status": "complete",
@@ -1309,6 +1492,8 @@ def _publish_final_outputs(
         },
     }
     _assert_authority_unchanged(context)
+    authority.assert_snapshot_unchanged(csv_snapshot, "measured target-load front")
+    authority.assert_snapshot_unchanged(manifest_snapshot, "measured front manifest")
     if not _claim_owned(context, owner):
         raise TargetLoadContinuationError("claim ownership was lost before completion publication")
     if context.paths["completion"].is_file():
@@ -1317,6 +1502,13 @@ def _publish_final_outputs(
         if {key: completion[key] for key in completion_core} != completion_core:
             raise TargetLoadContinuationError("existing completion differs from live measured front")
         _nonblank(completion["completed_at_utc"], "completion.completed_at_utc")
+        authority.assert_snapshot_unchanged(csv_snapshot, "measured target-load front")
+        authority.assert_snapshot_unchanged(manifest_snapshot, "measured front manifest")
+        _assert_authority_unchanged(context)
+        if not _claim_owned(context, owner):
+            raise TargetLoadContinuationError(
+                "claim ownership was lost while auditing existing completion"
+            )
         return completion
     completion = {
         **completion_core,
@@ -1324,6 +1516,17 @@ def _publish_final_outputs(
     }
     # Completion is deliberately the final publication.
     _publish_no_replace_json(context.paths["completion"], completion, "target-load completion")
+    completion_snapshot, committed_completion = _strict_document(
+        context.paths["completion"], "target-load completion"
+    )
+    if committed_completion != completion:
+        raise TargetLoadContinuationError("committed completion bytes changed")
+    authority.assert_snapshot_unchanged(csv_snapshot, "measured target-load front")
+    authority.assert_snapshot_unchanged(manifest_snapshot, "measured front manifest")
+    authority.assert_snapshot_unchanged(completion_snapshot, "target-load completion")
+    _assert_authority_unchanged(context)
+    if not _claim_owned(context, owner):
+        raise TargetLoadContinuationError("claim ownership was lost after completion publication")
     return completion
 
 
@@ -1342,9 +1545,11 @@ def execute(context: ContinuationContext) -> Mapping[str, Any]:
         client, _ = _prepare_workspace(context)
         deadline = time.monotonic() + float(context.runtime["overall_timeout_seconds"])
         while True:
+            _assert_authority_unchanged(context)
             result = coordinator.advance_workspace_once(
                 context.paths["workspace"], client, submit=True
             )
+            _assert_authority_unchanged(context)
             if result["status"] == "failed":
                 raise TargetLoadContinuationError("target-load coordinator entered failed state")
             if result["status"] == "complete":
@@ -1365,7 +1570,16 @@ def execute(context: ContinuationContext) -> Mapping[str, Any]:
         )
         if not _claim_owned(context, current_owner):
             raise TargetLoadContinuationError("claim ownership was lost after final publication")
-        context.paths["claim"].unlink()
+        _assert_authority_unchanged(context)
+        claim_snapshot, final_claim = _strict_document(
+            context.paths["claim"], "completed continuation claim"
+        )
+        _validate_claim(final_claim, context)
+        if final_claim["owner"] != dict(current_owner):
+            raise TargetLoadContinuationError(
+                "claim ownership was lost before completed claim removal"
+            )
+        _unlink_bound_snapshot(claim_snapshot, "completed continuation claim")
         return completion
     except BaseException:
         # Keep the claim as durable recovery evidence.  A later exact invocation may

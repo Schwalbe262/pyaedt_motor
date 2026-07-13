@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import csv
 import hashlib
 import io
@@ -248,6 +249,141 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
             self.assertEqual(recovered["owner"], resumed_owner)
             self.assertFalse(context.paths["recovery"].exists())
 
+    def test_failed_recovery_lock_removal_preserves_new_claim_and_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(dir="C:/") as temporary:
+            root = Path(temporary)
+            contract_path = root / "contract.json"
+            contract_path.write_bytes(b"{}\n")
+            context = SimpleNamespace(
+                path=contract_path,
+                snapshot=authority.read_single_link_snapshot(contract_path, "contract"),
+                contract_sha256="9" * 64,
+                paths={
+                    "decision": root / "decision.json",
+                    "claim": root / "decision.json.claim",
+                    "recovery": root / "decision.json.claim.recover",
+                },
+            )
+            original = {
+                "hostname": continuation.socket.gethostname(),
+                "pid": 999_951,
+                "invocation_id": "original",
+                "mode": "execute",
+                "started_at_utc": "2026-07-13T00:00:00+00:00",
+            }
+            stale_claim = continuation._claim_payload(context, original, original)
+            recovery_owner = {**original, "pid": 999_952, "invocation_id": "recovery"}
+            resumed_owner = {**original, "pid": 999_953, "invocation_id": "resumed"}
+            continuation._publish_no_replace_json(
+                context.paths["recovery"],
+                {
+                    "schema_version": continuation.RECOVERY_SCHEMA_VERSION,
+                    "contract_sha256": context.contract_sha256,
+                    "claim_path": str(context.paths["claim"]),
+                    "stale_claim_sha256": hashlib.sha256(
+                        authority.canonical_json_bytes(stale_claim)
+                    ).hexdigest(),
+                    "stale_claim": stale_claim,
+                    "owner": recovery_owner,
+                },
+                "claim recovery lock",
+            )
+            exact_unlink = continuation._unlink_bound_snapshot
+
+            def fail_recovery_removal(snapshot, label):
+                if label == "claim recovery lock":
+                    raise continuation.TargetLoadContinuationError(
+                        "claim recovery lock ownership changed before removal"
+                    )
+                return exact_unlink(snapshot, label)
+
+            with mock.patch.object(
+                continuation, "_pid_is_running", return_value=False
+            ), mock.patch.object(
+                continuation,
+                "_unlink_bound_snapshot",
+                side_effect=fail_recovery_removal,
+            ):
+                with self.assertRaisesRegex(
+                    continuation.TargetLoadContinuationError,
+                    "recovery lock ownership changed",
+                ):
+                    continuation._acquire_claim(context, resumed_owner)
+            self.assertTrue(context.paths["claim"].is_file())
+            self.assertTrue(context.paths["recovery"].is_file())
+            self.assertEqual(
+                continuation._read_claim(context.paths["claim"], "claim")["owner"],
+                resumed_owner,
+            )
+
+    def test_bound_snapshot_removal_fails_closed_when_identity_is_not_owned(self) -> None:
+        with tempfile.TemporaryDirectory(dir="C:/") as temporary:
+            path = Path(temporary) / "claim.json"
+            path.write_bytes(b"{}\n")
+            snapshot = authority.read_single_link_snapshot(path, "claim")
+            with mock.patch.object(
+                continuation.atomic_publish,
+                "rollback_owned_output",
+                return_value=False,
+            ):
+                with self.assertRaisesRegex(
+                    continuation.TargetLoadContinuationError,
+                    "ownership changed before removal",
+                ):
+                    continuation._unlink_bound_snapshot(snapshot, "claim")
+            self.assertTrue(path.is_file())
+
+    def test_recovery_lock_is_bound_immediately_after_publication(self) -> None:
+        with tempfile.TemporaryDirectory(dir="C:/") as temporary:
+            root = Path(temporary)
+            contract_path = root / "contract.json"
+            contract_path.write_bytes(b"{}\n")
+            context = SimpleNamespace(
+                path=contract_path,
+                snapshot=authority.read_single_link_snapshot(contract_path, "contract"),
+                contract_sha256="8" * 64,
+                paths={
+                    "decision": root / "decision.json",
+                    "claim": root / "decision.json.claim",
+                    "recovery": root / "decision.json.claim.recover",
+                },
+            )
+            old_owner = {
+                "hostname": continuation.socket.gethostname(),
+                "pid": 999_941,
+                "invocation_id": "old",
+                "mode": "execute",
+                "started_at_utc": "2026-07-13T00:00:00+00:00",
+            }
+            new_owner = {**old_owner, "pid": 999_942, "invocation_id": "new"}
+            continuation._publish_no_replace_json(
+                context.paths["claim"],
+                continuation._claim_payload(context, old_owner, old_owner),
+                "claim",
+            )
+            exact_publish = continuation._publish_no_replace_json
+
+            def replace_recovery_after_publish(path, value, label):
+                result = exact_publish(path, value, label)
+                if label == "claim recovery lock":
+                    path.write_bytes(authority.canonical_json_bytes({"foreign": True}))
+                return result
+
+            with mock.patch.object(
+                continuation, "_pid_is_running", return_value=False
+            ), mock.patch.object(
+                continuation,
+                "_publish_no_replace_json",
+                side_effect=replace_recovery_after_publish,
+            ):
+                with self.assertRaisesRegex(
+                    continuation.TargetLoadContinuationError,
+                    "recovery lock changed after publication",
+                ):
+                    continuation._acquire_claim(context, new_owner)
+            claim = continuation._read_claim(context.paths["claim"], "claim")
+            self.assertEqual(claim["owner"], old_owner)
+
     def test_double_interrupted_recovery_adopts_dead_replacement_claim(self) -> None:
         with tempfile.TemporaryDirectory(dir="C:/") as temporary:
             root = Path(temporary)
@@ -364,6 +500,8 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
         ), mock.patch.object(
             continuation, "_prepare_workspace", return_value=("client", {})
         ), mock.patch.object(
+            continuation, "_assert_authority_unchanged"
+        ), mock.patch.object(
             continuation.coordinator,
             "advance_workspace_once",
             return_value={"status": "complete"},
@@ -431,6 +569,84 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
             self.assertTrue(context.paths["measured_front_manifest"].is_file())
             self.assertFalse(context.paths["completion"].exists())
 
+    def test_front_mutation_before_completion_is_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory(dir="C:/") as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            contract_path = root / "contract.json"
+            contract_path.write_bytes(b"{}\n")
+            context = SimpleNamespace(
+                path=contract_path,
+                snapshot=authority.read_single_link_snapshot(contract_path, "contract"),
+                contract_sha256="3" * 64,
+                paths={
+                    "measured_front_csv": workspace / "front.csv",
+                    "measured_front_manifest": workspace / "front.manifest.json",
+                    "completion": workspace / "completion.json",
+                },
+            )
+            state = SimpleNamespace(
+                root={"identity": {"candidate_order": ["c1"]}},
+                summaries={"c1": _summary("c1", 1.0, 0.9, "c1")},
+            )
+            original_assert = authority.assert_snapshot_unchanged
+            changed = False
+
+            def mutate_front(snapshot, label):
+                nonlocal changed
+                if label == "measured target-load front" and not changed:
+                    changed = True
+                    snapshot.path.write_bytes(b"tampered\n")
+                return original_assert(snapshot, label)
+
+            with mock.patch.object(
+                continuation, "_assert_authority_unchanged"
+            ), mock.patch.object(
+                continuation, "_claim_owned", return_value=True
+            ), mock.patch.object(
+                continuation.authority,
+                "assert_snapshot_unchanged",
+                side_effect=mutate_front,
+            ):
+                with self.assertRaises(authority.TargetLoadAuthorityError):
+                    continuation._publish_final_outputs(
+                        context,
+                        state,
+                        {"root_manifest_sha256": "4" * 64},
+                        owner={"owner": "test"},
+                    )
+            self.assertTrue(changed)
+            self.assertFalse(context.paths["completion"].exists())
+
+    def test_authority_recheck_includes_retained_source_snapshots(self) -> None:
+        with tempfile.TemporaryDirectory(dir="C:/") as temporary:
+            root = Path(temporary)
+            contract_path = root / "contract.json"
+            source_path = root / "source.py"
+            contract_path.write_bytes(b"{}\n")
+            source_path.write_bytes(b"# source\n")
+            contract_snapshot = authority.read_single_link_snapshot(contract_path, "contract")
+            source_snapshot = authority.read_single_link_snapshot(source_path, "source")
+            context = SimpleNamespace(
+                snapshot=contract_snapshot,
+                source_pins={"source": source_snapshot},
+                runner_executable=contract_snapshot,
+                runner_source=contract_snapshot,
+                authority_context=SimpleNamespace(contract=contract_snapshot),
+                authorization="exact-receipt",
+            )
+            source_path.write_bytes(b"# changed\n")
+            with mock.patch.object(
+                continuation.authority, "assert_context_unchanged"
+            ), mock.patch.object(
+                continuation.authority,
+                "audit_authorization_receipt",
+                return_value="exact-receipt",
+            ):
+                with self.assertRaises(continuation.TargetLoadContinuationError):
+                    continuation._assert_authority_unchanged(context)
+
     def test_parent_identity_change_blocks_no_replace_publication(self) -> None:
         with tempfile.TemporaryDirectory(dir="C:/") as temporary:
             output = Path(temporary) / "artifact.json"
@@ -462,6 +678,35 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
             )
             self.assertEqual(output.read_bytes(), payload)
             self.assertFalse(staged.exists())
+
+    def test_stage_cleanup_preserves_same_bytes_replacement_inode(self) -> None:
+        with tempfile.TemporaryDirectory(dir="C:/") as temporary:
+            root = Path(temporary)
+            output = root / "artifact.json"
+            payload = b"exact payload with foreign replacement\n"
+            token = hashlib.sha256(payload).hexdigest()
+            staged = output.with_name(f".{output.name}.{token}.tmp")
+
+            def replace_original_stage(source: Path, destination: Path) -> None:
+                replacement = root / "foreign-stage.tmp"
+                replacement.write_bytes(payload)
+                destination.write_bytes(payload)
+                source.unlink()
+                replacement.rename(source)
+
+            with mock.patch.object(
+                continuation.atomic_publish,
+                "_windows_rename_no_replace",
+                side_effect=replace_original_stage,
+            ):
+                self.assertTrue(
+                    continuation._publish_no_replace_bytes(
+                        output, payload, "test artifact"
+                    )
+                )
+            self.assertEqual(output.read_bytes(), payload)
+            self.assertTrue(staged.is_file())
+            self.assertEqual(staged.read_bytes(), payload)
 
     def test_final_live_state_rejects_changed_closing_replay(self) -> None:
         workspace = Path("C:/workspace")
@@ -545,11 +790,48 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
             continuation.coordinator,
             "replay_workspace",
             return_value=SimpleNamespace(root=root),
+        ), mock.patch.object(
+            continuation, "_assert_authority_unchanged"
+        ), mock.patch.object(
+            continuation, "_assert_upstream_snapshots_unchanged"
+        ), mock.patch.object(
+            continuation, "_validate_built_root_authority"
         ), mock.patch.object(continuation, "_client", return_value="client"):
             client, built = continuation._prepare_workspace(context)
         self.assertEqual(events, ["strict_replay", "build_root"])
         self.assertEqual(client, "client")
         self.assertIs(built, root)
+
+    def test_built_root_must_retain_exact_human_authorized_pyaedt_source(self) -> None:
+        binding = {"optimization_contract_sha256": "1" * 64}
+        seed_plan = b"case_id,candidate_id\ncase-1,candidate-1\n"
+        context = SimpleNamespace(
+            authority_context=SimpleNamespace(
+                target_load={
+                    "upstream_authority": {
+                        "upstream_binding_sha256": authority.canonical_sha256(binding),
+                        "filtered_plan_sha256": hashlib.sha256(seed_plan).hexdigest(),
+                    }
+                },
+                pyaedt_core_snapshot=SimpleNamespace(sha256="2" * 64),
+            )
+        )
+        upstream = SimpleNamespace(candidate_ids=("candidate-1",))
+        root = {
+            "identity": {
+                "upstream_pareto_binding": binding,
+                "source_documents_base64": {
+                    "seed_fea_plan_csv": base64.b64encode(seed_plan).decode("ascii")
+                },
+                "source_hashes": {"pyaedt_core_source_sha256": "3" * 64},
+                "candidate_order": ["candidate-1"],
+            }
+        }
+        with mock.patch.object(continuation.workflow, "validate_root_manifest"):
+            with self.assertRaisesRegex(
+                continuation.TargetLoadContinuationError, "PyAEDT source SHA256"
+            ):
+                continuation._validate_built_root_authority(context, upstream, root)
 
 
 if __name__ == "__main__":
