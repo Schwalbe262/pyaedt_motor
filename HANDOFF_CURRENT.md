@@ -307,5 +307,5 @@
 - RaiDrive 2025.9.0 logged repeated cross-project SFTP index failures, then crashed/restarted at07:03; official motor execution remains C-native and current RaiDrive log has no post-restart errors.
 - Commits `4d85363`/`7a76748` require explicit pyaedt bytes and add the v4r6 authority builder with strict upstream replay, live artifact/per-case manifests, protected C-local inputs, and no-replace publication; pyaedt tests39 pass/1 privilege skip.
 - 2026-07-13 09:17 KST: Stage2 plan-qualified progress is299/300 with one healthy n114 task, no missing/retry/audit-pending rows, and matching live decision/claim owner PID94544; historical27 failures are replaced attempts.
-- Dashboard source now uses available claim-bound runner progress for the Stage2/3 hero/current-stage gauge when it leads local final collection, while keeping the authoritative local collection card separate; dashboard tests120/120 pass, not yet deployed.
+- Dashboard commit `23260be` is live from LF325 (app SHA `084d8511...68f06`): Stage2/3 hero uses claim-bound runner progress when it leads local final collection, while the authoritative local collection card remains separate; tests120/120 pass.
 - Next: monitor result/refill/infra retries through all 129 eligible cases, publish the 1000-row combined gate, and enter residual-adaptive Stage3 if R2 remains below0.95.
