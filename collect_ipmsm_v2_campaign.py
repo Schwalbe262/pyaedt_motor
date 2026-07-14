@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import math
@@ -13,7 +14,7 @@ import shutil
 import sys
 import tempfile
 import time
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from inspect_ipmsm_scheduler_job import fetch_task_remote_file
 from merge_ipmsm_v2_results import merge_complete_results, write_csv
@@ -29,6 +30,13 @@ DEFAULT_WAIT_TIMEOUT_SECONDS = 43_200.0
 WAIT_STATUS_PREVIEW = 5
 DEFAULT_MERGED_OUTPUT = Path("merged_results.csv")
 SELECTED_PLAN_NAME = "selected_cases.csv"
+SUCCESSFUL_PLAN_NAME = "successful_cases.csv"
+CAMPAIGN_SUMMARY_NAME = "campaign_summary.json"
+CAMPAIGN_DECISION_NAME = "campaign_decision.json"
+FAILED_RESULTS_DIR_NAME = "failed_results"
+CAMPAIGN_SUMMARY_SCHEMA_VERSION = "ipmsm_v2_campaign_summary_v1"
+CAMPAIGN_DECISION_SCHEMA_VERSION = "ipmsm_v2_campaign_decision_v1"
+DEFAULT_TERMINAL_RETRY_LIMIT = 1
 REQUIRED_FINGERPRINT_COLUMNS = (
     "input_quality_profile",
     "input_setup_fingerprint",
@@ -69,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wait-timeout-seconds", type=float, default=DEFAULT_WAIT_TIMEOUT_SECONDS)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--merged-output", type=Path, default=DEFAULT_MERGED_OUTPUT)
+    parser.add_argument(
+        "--terminal-retry-limit",
+        type=int,
+        default=DEFAULT_TERMINAL_RETRY_LIMIT,
+    )
     return parser
 
 
@@ -85,12 +98,21 @@ def validate_args(args: argparse.Namespace) -> None:
         raise RuntimeError("--poll-interval-seconds must be finite and > 0")
     if not math.isfinite(args.wait_timeout_seconds) or args.wait_timeout_seconds <= 0.0:
         raise RuntimeError("--wait-timeout-seconds must be finite and > 0")
+    if args.terminal_retry_limit < 0:
+        raise RuntimeError("--terminal-retry-limit must be >= 0")
     if args.output_dir.exists():
         raise RuntimeError(f"--output-dir must not already exist: {args.output_dir}")
     if args.merged_output.is_absolute() or ".." in args.merged_output.parts:
         raise RuntimeError("--merged-output must be a relative path within --output-dir")
-    if args.merged_output == Path(SELECTED_PLAN_NAME) or (
-        args.merged_output.parts and args.merged_output.parts[0] == "results"
+    reserved_files = {
+        Path(SELECTED_PLAN_NAME),
+        Path(SUCCESSFUL_PLAN_NAME),
+        Path(CAMPAIGN_SUMMARY_NAME),
+        Path(CAMPAIGN_DECISION_NAME),
+    }
+    reserved_directories = {"results", FAILED_RESULTS_DIR_NAME}
+    if args.merged_output in reserved_files or (
+        args.merged_output.parts and args.merged_output.parts[0] in reserved_directories
     ):
         raise RuntimeError("--merged-output conflicts with reserved collector paths")
 
@@ -206,6 +228,81 @@ def inspect_history_task_states(
     return resolved, active_records
 
 
+def inspect_history_attempt_states(
+    tasks: Iterable[submit_campaign.CampaignTask],
+    lineages: Mapping[str, tuple[submit_campaign.CampaignTask, ...]],
+    history: Iterable[dict[str, Any]],
+    project: str,
+) -> tuple[list[tuple[submit_campaign.CampaignTask, dict[str, Any]]], list[dict[str, Any]]]:
+    """Resolve one case across its base and deterministic retry identities."""
+
+    by_dedupe: dict[str, list[dict[str, Any]]] = {}
+    for history_task in history:
+        if not submit_campaign.task_belongs_to_project(history_task, project):
+            continue
+        dedupe_key = str(history_task.get("dedupe_key") or "").strip()
+        if dedupe_key:
+            by_dedupe.setdefault(dedupe_key, []).append(history_task)
+
+    resolved: list[tuple[submit_campaign.CampaignTask, dict[str, Any]]] = []
+    active_records: list[dict[str, Any]] = []
+    known_terminal = {"completed", "failed", "cancelled"} | ACTIVE_STATUSES
+    for base_task in tasks:
+        attempts = lineages.get(base_task.dedupe_key, (base_task,))
+        matches = [
+            (attempt, item)
+            for attempt in attempts
+            for item in by_dedupe.get(attempt.dedupe_key, [])
+        ]
+        if not matches:
+            raise RuntimeError(f"missing scheduler task for case_id={base_task.case_id!r}")
+        unknown = [
+            item
+            for _, item in matches
+            if str(item.get("status") or "").strip().lower() not in known_terminal
+        ]
+        if unknown:
+            statuses = sorted(
+                {str(item.get("status") or "").strip().lower() or "<blank>" for item in unknown}
+            )
+            raise RuntimeError(
+                f"ambiguous scheduler status for case_id={base_task.case_id!r}: {statuses}"
+            )
+        active = [
+            (attempt, item)
+            for attempt, item in matches
+            if str(item.get("status") or "").strip().lower() in ACTIVE_STATUSES
+        ]
+        if active:
+            attempt, latest = max(active, key=lambda pair: _task_id(pair[1]) or -1)
+            active_records.append(
+                {
+                    "case_id": base_task.case_id,
+                    "retry_index": attempt.retry_index,
+                    "status": str(latest.get("status") or "").strip().lower(),
+                    "task_id": _task_id(latest),
+                }
+            )
+            continue
+        successful = [
+            (attempt, item)
+            for attempt, item in matches
+            if str(item.get("status") or "").strip().lower() == "completed"
+            and _exit_code(item) == 0
+            and _task_id(item) is not None
+        ]
+        if not successful:
+            raise RuntimeError(f"no successful completed task for case_id={base_task.case_id!r}")
+        latest_id = max(_task_id(item) or -1 for _, item in successful)
+        latest = [(attempt, item) for attempt, item in successful if _task_id(item) == latest_id]
+        if len(latest) != 1:
+            raise RuntimeError(
+                f"ambiguous latest successful task for case_id={base_task.case_id!r}"
+            )
+        resolved.append(latest[0])
+    return resolved, active_records
+
+
 def resolve_successful_history_tasks(
     tasks: Iterable[submit_campaign.CampaignTask],
     history: Iterable[dict[str, Any]],
@@ -222,7 +319,13 @@ def _false_like(value: object) -> bool:
     return str(value or "").strip().lower() in {"0", "false", "no", "off"}
 
 
-def _one_remote_result(text: str, expected_case_id: str, expected_design_hash: str) -> tuple[list[str], dict[str, str]]:
+def _one_remote_result(
+    text: str,
+    expected_case_id: str,
+    expected_design_hash: str,
+    *,
+    allow_failed: bool = False,
+) -> tuple[list[str], dict[str, str]]:
     stream = io.StringIO(text.lstrip("\ufeff"))
     reader = csv.DictReader(stream)
     if not reader.fieldnames:
@@ -236,9 +339,13 @@ def _one_remote_result(text: str, expected_case_id: str, expected_design_hash: s
     failures: list[str] = []
     if str(row.get("case_id") or "").strip() != expected_case_id:
         failures.append(f"case_id={row.get('case_id')!r}")
-    if str(row.get("status") or "").strip().lower() != "ok":
+    status = str(row.get("status") or "").strip().lower()
+    allowed_statuses = {"ok", "failed"} if allow_failed else {"ok"}
+    if status not in allowed_statuses:
         failures.append(f"status={row.get('status')!r}")
-    if "missing_required_outputs" not in row or str(row.get("missing_required_outputs") or "").strip():
+    if "missing_required_outputs" not in row or (
+        status == "ok" and str(row.get("missing_required_outputs") or "").strip()
+    ):
         failures.append("missing_required_outputs")
     if str(row.get("input_dataset_schema_version") or "").strip() != SCHEMA_VERSION:
         failures.append("input_dataset_schema_version")
@@ -315,13 +422,33 @@ def validate_homogeneous_fingerprints(rows: Iterable[dict[str, str]]) -> None:
             raise RuntimeError(f"collected results mix or omit {column}: {sorted(values)!r}")
 
 
-def _write_plan(path: Path, rows: list[dict[str, Any]]) -> None:
+def _plan_fieldnames(rows: Iterable[dict[str, Any]]) -> list[str]:
     fieldnames: list[str] = []
     for row in rows:
         for column in row:
             if column not in fieldnames:
                 fieldnames.append(column)
+    return fieldnames
+
+
+def _write_plan(
+    path: Path,
+    rows: list[dict[str, Any]],
+    *,
+    fieldnames: list[str] | None = None,
+) -> None:
+    if fieldnames is None:
+        fieldnames = _plan_fieldnames(rows)
     write_csv(path, fieldnames, rows)
+
+
+def _canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
 
 
 def _stage_and_commit(
@@ -329,30 +456,160 @@ def _stage_and_commit(
     merged_output: Path,
     selected_rows: list[dict[str, Any]],
     collected: list[tuple[submit_campaign.CampaignTask, str]],
-) -> tuple[Path, Path, list[Path]]:
+    successful_cases: list[dict[str, Any]],
+    permanent_failures: list[dict[str, Any]],
+    summary_fields: Mapping[str, Any],
+) -> dict[str, Any]:
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     stage_dir = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.staging-", dir=output_dir.parent))
     try:
         plan_path = stage_dir / SELECTED_PLAN_NAME
+        successful_plan_path = stage_dir / SUCCESSFUL_PLAN_NAME
         results_dir = stage_dir / "results"
         results_dir.mkdir(parents=True, exist_ok=True)
-        _write_plan(plan_path, selected_rows)
+        selected_fieldnames = _plan_fieldnames(selected_rows)
+        _write_plan(plan_path, selected_rows, fieldnames=selected_fieldnames)
+        successful_case_ids = {task.case_id for task, _ in collected}
+        successful_rows = [
+            row
+            for row in selected_rows
+            if str(row.get("case_id") or "").strip() in successful_case_ids
+        ]
+        _write_plan(
+            successful_plan_path,
+            successful_rows,
+            fieldnames=selected_fieldnames,
+        )
         result_paths: list[Path] = []
         for task, text in collected:
             result_path = results_dir / f"{task.safe_case_id}.csv"
             result_path.write_text(text.lstrip("\ufeff"), encoding="utf-8")
             result_paths.append(result_path)
-        headers, rows = merge_complete_results(plan_path, result_paths)
         staged_merged = stage_dir / merged_output
-        write_csv(staged_merged, headers, rows)
+        if result_paths:
+            headers, rows = merge_complete_results(successful_plan_path, result_paths)
+            write_csv(staged_merged, headers, rows)
+        else:
+            write_csv(staged_merged, ["case_id", "status"], [])
+
+        def materialize_evidence(
+            case_id: str,
+            evidence_items: Iterable[Mapping[str, Any]],
+        ) -> list[dict[str, Any]]:
+            public_evidence: list[dict[str, Any]] = []
+            for evidence in evidence_items:
+                public_item = {
+                    key: value
+                    for key, value in evidence.items()
+                    if key != "_raw_result_text"
+                }
+                raw_result = evidence.get("_raw_result_text")
+                if isinstance(raw_result, str):
+                    failed_dir = stage_dir / FAILED_RESULTS_DIR_NAME
+                    failed_dir.mkdir(parents=True, exist_ok=True)
+                    safe_case_id = submit_campaign.sanitize_case_id(case_id)
+                    retry_index = int(evidence["retry_index"])
+                    name = f"{safe_case_id}_attempt_{retry_index:02d}.csv"
+                    payload = raw_result.encode("utf-8")
+                    (failed_dir / name).write_bytes(payload)
+                    public_item["local_result"] = str(
+                        output_dir / FAILED_RESULTS_DIR_NAME / name
+                    )
+                    public_item["local_result_sha256"] = hashlib.sha256(payload).hexdigest()
+                public_evidence.append(public_item)
+            return public_evidence
+
+        public_successful_cases: list[dict[str, Any]] = []
+        for successful_case in successful_cases:
+            public_case = {
+                key: value
+                for key, value in successful_case.items()
+                if key != "attempt_evidence"
+            }
+            public_case["attempt_evidence"] = materialize_evidence(
+                str(successful_case["case_id"]),
+                successful_case.get("attempt_evidence", []),
+            )
+            public_successful_cases.append(public_case)
+
+        public_failures: list[dict[str, Any]] = []
+        for failure in permanent_failures:
+            public_failure = {
+                key: value
+                for key, value in failure.items()
+                if key != "failure_evidence"
+            }
+            public_failure["failure_evidence"] = materialize_evidence(
+                str(failure["case_id"]),
+                failure.get("failure_evidence", []),
+            )
+            public_failures.append(public_failure)
+
+        status = "complete" if not public_failures else "completed_with_permanent_failures"
+        final_plan = output_dir / SELECTED_PLAN_NAME
+        final_successful_plan = output_dir / SUCCESSFUL_PLAN_NAME
+        final_merged = output_dir / merged_output
+        final_summary = output_dir / CAMPAIGN_SUMMARY_NAME
+        final_decision = output_dir / CAMPAIGN_DECISION_NAME
+        case_records = [*public_successful_cases]
+        case_records.extend(
+            {
+                "case_id": failure["case_id"],
+                "outcome": "permanent_failure",
+                "attempts": failure["attempts"],
+                "failure_evidence": failure["failure_evidence"],
+            }
+            for failure in public_failures
+        )
+        order = {
+            str(row.get("case_id") or "").strip(): index
+            for index, row in enumerate(selected_rows)
+        }
+        case_records.sort(key=lambda record: order[str(record["case_id"])])
+        summary = {
+            "schema_version": CAMPAIGN_SUMMARY_SCHEMA_VERSION,
+            "status": status,
+            **dict(summary_fields),
+            "selected_cases": len(selected_rows),
+            "successful_cases": len(collected),
+            "permanently_failed_cases": len(public_failures),
+            "selected_plan": str(final_plan),
+            "successful_plan": str(final_successful_plan),
+            "merged_output": str(final_merged),
+            "output_dir": str(output_dir),
+            "cases": case_records,
+            "permanent_failures": public_failures,
+        }
+        summary_payload = _canonical_json_bytes(summary)
+        (stage_dir / CAMPAIGN_SUMMARY_NAME).write_bytes(summary_payload)
+        decision = {
+            "schema_version": CAMPAIGN_DECISION_SCHEMA_VERSION,
+            "status": status,
+            "selected_cases": len(selected_rows),
+            "successful_cases": len(collected),
+            "permanently_failed_cases": len(public_failures),
+            "summary": {
+                "path": str(final_summary),
+                "sha256": hashlib.sha256(summary_payload).hexdigest(),
+            },
+            "permanent_failures": public_failures,
+        }
+        (stage_dir / CAMPAIGN_DECISION_NAME).write_bytes(_canonical_json_bytes(decision))
         os.replace(stage_dir, output_dir)
     except Exception:
         shutil.rmtree(stage_dir, ignore_errors=True)
         raise
-    final_plan = output_dir / SELECTED_PLAN_NAME
-    final_merged = output_dir / merged_output
     final_results = [output_dir / "results" / f"{task.safe_case_id}.csv" for task, _ in collected]
-    return final_plan, final_merged, final_results
+    return {
+        "status": status,
+        "selected_plan": final_plan,
+        "successful_plan": final_successful_plan,
+        "merged_output": final_merged,
+        "summary": final_summary,
+        "decision": final_decision,
+        "result_paths": final_results,
+        "permanent_failures": public_failures,
+    }
 
 
 def read_history_snapshot(
@@ -395,6 +652,7 @@ def read_history_snapshot(
 def wait_for_successful_tasks(
     args: argparse.Namespace,
     campaign_tasks: list[submit_campaign.CampaignTask],
+    lineages: Mapping[str, tuple[submit_campaign.CampaignTask, ...]] | None = None,
 ) -> tuple[
     list[tuple[submit_campaign.CampaignTask, dict[str, Any]]],
     list[dict[str, Any]],
@@ -405,7 +663,15 @@ def wait_for_successful_tasks(
     polls = 0
     while True:
         history, campaign_history_tasks = read_history_snapshot(args)
-        resolved, active = inspect_history_task_states(campaign_tasks, history, args.project)
+        if lineages is None:
+            resolved, active = inspect_history_task_states(campaign_tasks, history, args.project)
+        else:
+            resolved, active = inspect_history_attempt_states(
+                campaign_tasks,
+                lineages,
+                history,
+                args.project,
+            )
         if not active:
             return resolved, history, campaign_history_tasks
         if not args.wait:
@@ -438,29 +704,22 @@ def wait_for_successful_tasks(
         time.sleep(min(args.poll_interval_seconds, remaining))
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    validate_args(args)
-    identity_args = build_identity_args(args)
-    validated_rows = submit_campaign.load_and_validate_cases(args.cases, args.max_plan_cases, False)
-    selected_rows = submit_campaign.select_case_rows(
-        validated_rows,
-        args.case_start_index,
-        args.case_limit,
-    )
-    campaign_tasks = submit_campaign.build_campaign_tasks(
-        identity_args,
-        selected_rows,
-        first_row_number=args.case_start_index,
-    )
-
-    resolved, history, campaign_history_tasks = wait_for_successful_tasks(
-        args,
-        campaign_tasks,
-    )
+def collect_resolved_campaign(
+    args: argparse.Namespace,
+    selected_rows: list[dict[str, Any]],
+    resolved: list[tuple[submit_campaign.CampaignTask, dict[str, Any]]],
+    *,
+    history_rows: int,
+    campaign_history_tasks: int,
+    permanent_failures: list[dict[str, Any]] | None = None,
+    successful_prior_evidence: Mapping[str, list[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    permanent_failures = list(permanent_failures or [])
+    successful_prior_evidence = successful_prior_evidence or {}
     collected: list[tuple[submit_campaign.CampaignTask, str]] = []
     collected_rows: list[dict[str, str]] = []
     summaries: list[dict[str, Any]] = []
+    successful_cases: list[dict[str, Any]] = []
     for task, history_task in resolved:
         task_id = _task_id(history_task)
         assert task_id is not None
@@ -477,35 +736,111 @@ def main(argv: list[str] | None = None) -> int:
         validate_result_matches_plan(plan_row, result_row)
         collected_rows.append(result_row)
         collected.append((task, text))
-        summaries.append(
+        task_summary = {
+            "case_id": task.case_id,
+            "retry_index": task.retry_index,
+            "task_id": task_id,
+            "task_status": str(history_task.get("status") or "").strip().lower(),
+            "dedupe_key": task.dedupe_key,
+            "remote_result": task.result_csv,
+            "local_result": str(args.output_dir / "results" / f"{task.safe_case_id}.csv"),
+        }
+        summaries.append(task_summary)
+        prior_evidence = [
+            {key: value for key, value in item.items() if key != "_raw_result_text"}
+            for item in successful_prior_evidence.get(task.case_id, [])
+        ]
+        successful_cases.append(
             {
                 "case_id": task.case_id,
-                "task_id": task_id,
-                "task_status": str(history_task.get("status") or "").strip().lower(),
-                "remote_result": task.result_csv,
-                "local_result": str(args.output_dir / "results" / f"{task.safe_case_id}.csv"),
+                "outcome": "success",
+                "attempts": len(prior_evidence) + 1,
+                "attempt_evidence": [
+                    *prior_evidence,
+                    {
+                        "kind": "result",
+                        "retry_index": task.retry_index,
+                        "task_id": task_id,
+                        "dedupe_key": task.dedupe_key,
+                        "scheduler_status": task_summary["task_status"],
+                        "result_status": "ok",
+                        "remote_result": task.result_csv,
+                        "local_result": task_summary["local_result"],
+                    }
+                ],
             }
         )
 
-    validate_homogeneous_fingerprints(collected_rows)
-    plan_path, merged_path, result_paths = _stage_and_commit(
+    if collected_rows:
+        validate_homogeneous_fingerprints(collected_rows)
+    artifacts = _stage_and_commit(
         args.output_dir,
         args.merged_output,
         selected_rows,
         collected,
+        successful_cases,
+        permanent_failures,
+        {
+            "project": args.project,
+            "history_rows": history_rows,
+            "history_campaign_tasks": campaign_history_tasks,
+        },
     )
-    output = {
+    return {
+        "status": artifacts["status"],
         "project": args.project,
-        "selected_cases": len(campaign_tasks),
+        "selected_cases": len(selected_rows),
         "successful_tasks": len(resolved),
-        "collected_results": len(result_paths),
-        "history_rows": len(history),
+        "successful_cases": len(resolved),
+        "permanently_failed_cases": len(artifacts["permanent_failures"]),
+        "permanent_failures": artifacts["permanent_failures"],
+        "collected_results": len(artifacts["result_paths"]),
+        "history_rows": history_rows,
         "history_campaign_tasks": campaign_history_tasks,
-        "selected_plan": str(plan_path),
-        "merged_output": str(merged_path),
+        "selected_plan": str(artifacts["selected_plan"]),
+        "successful_plan": str(artifacts["successful_plan"]),
+        "merged_output": str(artifacts["merged_output"]),
         "output_dir": str(args.output_dir),
+        "summary": str(artifacts["summary"]),
+        "decision": str(artifacts["decision"]),
         "tasks": summaries,
     }
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    validate_args(args)
+    identity_args = build_identity_args(args)
+    validated_rows = submit_campaign.load_and_validate_cases(args.cases, args.max_plan_cases, False)
+    selected_rows = submit_campaign.select_case_rows(
+        validated_rows,
+        args.case_start_index,
+        args.case_limit,
+    )
+    campaign_tasks = submit_campaign.build_campaign_tasks(
+        identity_args,
+        selected_rows,
+        first_row_number=args.case_start_index,
+    )
+    lineages = submit_campaign.build_campaign_task_lineages(
+        identity_args,
+        selected_rows,
+        first_row_number=args.case_start_index,
+        terminal_retry_limit=args.terminal_retry_limit,
+    )
+
+    resolved, history, campaign_history_tasks = wait_for_successful_tasks(
+        args,
+        campaign_tasks,
+        lineages,
+    )
+    output = collect_resolved_campaign(
+        args,
+        selected_rows,
+        resolved,
+        history_rows=len(history),
+        campaign_history_tasks=campaign_history_tasks,
+    )
     print(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

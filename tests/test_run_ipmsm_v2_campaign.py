@@ -76,8 +76,9 @@ def fake_result_audit(
     selected_rows,
     history,
     validated_task_ids,
+    result_failures,
 ):
-    del args, selected_rows, history
+    del args, selected_rows, history, result_failures
     for task in completed_tasks:
         validated_task_ids[task.dedupe_key] = task.row_number
     return ()
@@ -137,6 +138,33 @@ def foundation_row(summary: dict, case_id: str) -> dict[str, str]:
         "beta_dq_deg": str(summary["best_beta_dq_deg"]),
         "operation": "sin_current",
     }
+
+
+def remote_result(row: dict[str, str], status: str, *, error: str = "") -> str:
+    result = {
+        "case_id": row["case_id"],
+        "status": status,
+        "error": error,
+        "missing_required_outputs": "" if status == "ok" else "output_torque_avg_nm",
+        "input_dataset_schema_version": "ipmsm_v2",
+        "input_model_extent": "full_360",
+        "input_symmetry_factor": "1",
+        "input_use_periodic_boundary": "False",
+        "input_beta_convention": "dq_current_advance_v2",
+        "input_quality_profile": row.get("quality_profile", "reference_ultra"),
+        "input_setup_fingerprint": "setup-v2",
+        "input_material_fingerprint": "material-v2",
+        "input_aedt_version": "2025.2",
+        "input_electrical_zero_deg": row.get("electrical_zero_deg", ""),
+        "input_beta_dq_deg": row.get("beta_dq_deg", ""),
+        "input_operation": row.get("operation", ""),
+        "design_hash": row["design_hash"],
+    }
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=list(result))
+    writer.writeheader()
+    writer.writerow(result)
+    return stream.getvalue()
 
 
 class RunIpmsmV2CampaignTests(unittest.TestCase):
@@ -368,6 +396,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     "planned_submissions",
                     "project",
                     "project_active",
+                    "permanently_failed_cases",
                     "retryable_cases",
                     "selected_cases",
                     "successful_cases",
@@ -552,36 +581,232 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
 
             self.assertEqual(validated, {task.dedupe_key: 17})
             fetch.assert_called_once()
-            parse.assert_called_once_with("one-row-result", "case-001", "design-a")
+            parse.assert_called_once_with(
+                "one-row-result",
+                "case-001",
+                "design-a",
+                allow_failed=True,
+            )
             validate.assert_called_once_with(rows[0], result_row)
 
-    def test_completed_result_audit_rejects_structured_failed_row(self) -> None:
+    def test_completed_result_audit_records_structured_failed_row_for_retry(self) -> None:
         rows = [{"case_id": "case-001", "design_hash": "design-a"}]
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp) / "out"
             args = runner.build_parser().parse_args(cli(output_dir))
             task = campaign_tasks(output_dir, rows)[0]
             history = [history_task(task, 17, "completed", exit_code=0)]
-            with (
-                mock.patch.object(
-                    runner.collector,
-                    "fetch_task_remote_file",
-                    return_value="failed-row",
-                ),
-                mock.patch.object(
-                    runner.collector,
-                    "_one_remote_result",
-                    side_effect=RuntimeError("status='failed'"),
-                ),
+            result_failures: dict[str, runner.ResultLevelFailure] = {}
+            failed_text = remote_result(rows[0], "failed", error="analysis=False")
+            with mock.patch.object(
+                runner.collector,
+                "fetch_task_remote_file",
+                return_value=failed_text,
             ):
-                with self.assertRaisesRegex(RuntimeError, "status='failed'"):
-                    runner.audit_completed_result_rows(
-                        args,
-                        [task],
-                        rows,
-                        history,
-                        {},
+                pending = runner.audit_completed_result_rows(
+                    args,
+                    [task],
+                    rows,
+                    history,
+                    {},
+                    result_failures,
+                )
+
+            self.assertEqual(pending, ())
+            failure = result_failures[task.dedupe_key]
+            self.assertEqual(failure.task_id, 17)
+            self.assertEqual(failure.remote_result, task.result_csv)
+            self.assertEqual(failure.raw_result_text, failed_text)
+
+    def test_result_level_failure_is_retryable_once_with_fresh_lineage(self) -> None:
+        rows = [{"case_id": "case-001", "design_hash": "design-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            args = runner.build_parser().parse_args(cli(output_dir))
+            base = campaign_tasks(output_dir, rows)[0]
+            lineages = runner.submit_campaign.build_campaign_task_lineages(
+                args,
+                rows,
+                first_row_number=1,
+                terminal_retry_limit=1,
+            )
+            failure = runner.ResultLevelFailure(
+                case_id=base.case_id,
+                retry_index=0,
+                task_id=17,
+                dedupe_key=base.dedupe_key,
+                remote_result=base.result_csv,
+                raw_result_text="failed-base-row",
+                result_error="analysis=False",
+            )
+
+            state = runner.classify_campaign_state(
+                [base],
+                [history_task(base, 17, "completed", exit_code=0)],
+                "pyaedt_motor",
+                {},
+                1,
+                lineages=lineages,
+                result_failures={base.dedupe_key: failure},
+            )
+
+            retry = lineages[base.dedupe_key][1]
+            self.assertEqual(state.retryable, (retry,))
+            self.assertEqual(retry.dedupe_key, base.dedupe_key + "-retry-01")
+            self.assertNotEqual(retry.result_csv, base.result_csv)
+            self.assertEqual(state.permanently_failed, ())
+
+    def test_result_level_retry_exhaustion_is_permanent_and_bounded(self) -> None:
+        rows = [{"case_id": "case-001", "design_hash": "design-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            args = runner.build_parser().parse_args(cli(output_dir))
+            base = campaign_tasks(output_dir, rows)[0]
+            lineages = runner.submit_campaign.build_campaign_task_lineages(
+                args,
+                rows,
+                first_row_number=1,
+                terminal_retry_limit=1,
+            )
+            retry = lineages[base.dedupe_key][1]
+            failures = {
+                task.dedupe_key: runner.ResultLevelFailure(
+                    case_id=task.case_id,
+                    retry_index=task.retry_index,
+                    task_id=task_id,
+                    dedupe_key=task.dedupe_key,
+                    remote_result=task.result_csv,
+                    raw_result_text=f"failed-row-{task.retry_index}",
+                    result_error="analysis=False",
+                )
+                for task, task_id in ((base, 17), (retry, 18))
+            }
+            history = [
+                history_task(base, 17, "completed", exit_code=0),
+                history_task(retry, 18, "completed", exit_code=0),
+            ]
+
+            state = runner.classify_campaign_state(
+                [base],
+                history,
+                "pyaedt_motor",
+                {},
+                1,
+                lineages=lineages,
+                result_failures=failures,
+            )
+
+            self.assertEqual(state.candidates, ())
+            self.assertEqual(len(state.permanently_failed), 1)
+            self.assertEqual(state.permanently_failed[0]["attempts"], 2)
+
+    def test_campaign_continues_other_cases_after_result_retry_exhaustion(self) -> None:
+        rows = [
+            {"case_id": "case-001", "design_hash": "design-a"},
+            {"case_id": "case-002", "design_hash": "design-b"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            args = runner.build_parser().parse_args(cli(output_dir))
+            bases = campaign_tasks(output_dir, rows)
+            lineages = runner.submit_campaign.build_campaign_task_lineages(
+                args,
+                rows,
+                first_row_number=1,
+                terminal_retry_limit=1,
+            )
+            retry = lineages[bases[0].dedupe_key][1]
+            history = [
+                history_task(bases[0], 17, "completed", exit_code=0),
+                history_task(retry, 18, "completed", exit_code=0),
+            ]
+            failures = {
+                task.dedupe_key: runner.ResultLevelFailure(
+                    case_id=task.case_id,
+                    retry_index=task.retry_index,
+                    task_id=task_id,
+                    dedupe_key=task.dedupe_key,
+                    remote_result=task.result_csv,
+                    raw_result_text="failed-row",
+                    result_error="analysis=False",
+                )
+                for task, task_id in ((bases[0], 17), (retry, 18))
+            }
+
+            state = runner.classify_campaign_state(
+                bases,
+                history,
+                "pyaedt_motor",
+                {},
+                1,
+                lineages=lineages,
+                result_failures=failures,
+            )
+
+            self.assertEqual(state.missing, (bases[1],))
+            self.assertEqual(state.candidates, (bases[1],))
+            self.assertEqual(state.permanently_failed[0]["case_id"], "case-001")
+
+    def test_failed_result_evidence_is_atomically_preserved_in_terminal_artifacts(self) -> None:
+        rows = [{"case_id": "case-001", "design_hash": "design-a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "out"
+            args = runner.build_parser().parse_args(cli(output_dir))
+            base = campaign_tasks(output_dir, rows)[0]
+            retry = runner.submit_campaign.build_campaign_task(
+                args,
+                rows[0],
+                row_number=1,
+                retry_index=1,
+            )
+            permanent = {
+                "case_id": "case-001",
+                "attempts": 2,
+                "failure_evidence": [
+                    runner.ResultLevelFailure(
+                        case_id="case-001",
+                        retry_index=task.retry_index,
+                        task_id=task_id,
+                        dedupe_key=task.dedupe_key,
+                        remote_result=task.result_csv,
+                        raw_result_text=payload,
+                        result_error="analysis=False",
+                    ).evidence()
+                    for task, task_id, payload in (
+                        (base, 17, "base-failed-row\n"),
+                        (retry, 18, "retry-failed-row\n"),
                     )
+                ],
+            }
+            collector_args = runner.collector.build_parser().parse_args(
+                runner._collector_argv(args)
+            )
+
+            output = runner.collector.collect_resolved_campaign(
+                collector_args,
+                rows,
+                [],
+                history_rows=2,
+                campaign_history_tasks=2,
+                permanent_failures=[permanent],
+            )
+
+            self.assertEqual(output["status"], "completed_with_permanent_failures")
+            self.assertEqual(
+                (output_dir / "failed_results" / "case-001_attempt_00.csv").read_text(
+                    encoding="utf-8"
+                ),
+                "base-failed-row\n",
+            )
+            self.assertEqual(
+                (output_dir / "failed_results" / "case-001_attempt_01.csv").read_text(
+                    encoding="utf-8"
+                ),
+                "retry-failed-row\n",
+            )
+            decision = json.loads((output_dir / "campaign_decision.json").read_text(encoding="utf-8"))
+            self.assertEqual(decision["permanently_failed_cases"], 1)
+            self.assertEqual(len(decision["permanent_failures"][0]["failure_evidence"]), 2)
 
     def test_completed_result_audit_waits_for_remote_file_visibility(self) -> None:
         rows = [{"case_id": "case-001", "design_hash": "design-a"}]
@@ -729,10 +954,16 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
             summary, beta_args = beta_gate_files(root)
             rows = [foundation_row(summary, "case-001")]
             task = campaign_tasks(output_dir, rows)[0]
+            retry_task = runner.submit_campaign.build_campaign_task(
+                runner.build_parser().parse_args(cli(output_dir)),
+                rows[0],
+                row_number=1,
+                retry_index=1,
+            )
             failed = [history_task(task, 1, "failed")]
             completed = [
                 *failed,
-                history_task(task, 2, "completed", exit_code=0),
+                history_task(retry_task, 2, "completed", exit_code=0),
             ]
             with ExitStack() as stack:
                 stack.enter_context(
@@ -774,6 +1005,22 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                 stack.enter_context(
                     mock.patch.object(
                         runner,
+                        "collect_terminal_campaign",
+                        return_value={
+                            "status": "complete",
+                            "collected_results": 1,
+                            "merged_output": str(output_dir / "merged_results.csv"),
+                            "output_dir": str(output_dir),
+                            "summary": str(output_dir / "campaign_summary.json"),
+                            "decision": str(output_dir / "campaign_decision.json"),
+                            "permanently_failed_cases": 0,
+                            "permanent_failures": [],
+                        },
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        runner,
                         "audit_completed_result_rows",
                         side_effect=fake_result_audit,
                     )
@@ -783,8 +1030,9 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     runner.main(cli(output_dir, "--submit", *beta_args))
 
             post.assert_called_once()
+            self.assertEqual(post.call_args.args[1]["dedupe_key"], retry_task.dedupe_key)
 
-    def test_retry_limit_exceeded_fails_before_post_and_writes_nothing(self) -> None:
+    def test_retry_limit_exhaustion_is_persisted_without_another_post(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             output_dir = root / "out"
@@ -795,6 +1043,7 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                 history_task(task, 1, "failed"),
                 history_task(task, 2, "cancelled"),
             ]
+            stdout = io.StringIO()
             with ExitStack() as stack:
                 stack.enter_context(
                     mock.patch.object(runner.submit_campaign, "load_and_validate_cases", return_value=rows)
@@ -816,12 +1065,18 @@ class RunIpmsmV2CampaignTests(unittest.TestCase):
                     mock.patch.object(runner.submit_campaign, "post_scheduler_task")
                 )
                 collect = stack.enter_context(mock.patch.object(runner.collector, "main"))
-                with self.assertRaisesRegex(RuntimeError, "terminal retry limit exceeded"):
-                    runner.main(cli(output_dir, "--submit", *beta_args))
+                with contextlib.redirect_stdout(stdout):
+                    result = runner.main(cli(output_dir, "--submit", *beta_args))
 
+            output = json.loads(stdout.getvalue())
+            self.assertEqual(result, 0)
+            self.assertEqual(output["status"], "completed_with_permanent_failures")
+            self.assertEqual(output["permanently_failed_cases"], 1)
+            self.assertEqual(output["permanent_failures"][0]["attempts"], 2)
             post.assert_not_called()
             collect.assert_not_called()
-            self.assertFalse(output_dir.exists())
+            self.assertTrue((output_dir / "campaign_summary.json").is_file())
+            self.assertTrue((output_dir / "campaign_decision.json").is_file())
 
     def test_all_success_invokes_existing_collector_with_same_identity_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -164,6 +164,24 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         self.assertEqual(len({task.task_name for task in first}), 2)
         self.assertNotEqual(first[0].dedupe_key, first[1].dedupe_key)
 
+    def test_retry_identity_preserves_base_result_and_uses_fresh_paths(self) -> None:
+        args = parsed_args()
+        row = {"case_id": "case-001", "beta_dq_deg": "0"}
+
+        base = campaign.build_campaign_task(args, row, row_number=1)
+        retry = campaign.build_campaign_task(args, row, row_number=1, retry_index=1)
+
+        self.assertEqual(retry.dedupe_key, base.dedupe_key + "-retry-01")
+        self.assertTrue(retry.task_name.endswith("-retry-01"))
+        self.assertTrue(retry.result_csv.endswith("case-001_retry_01.csv"))
+        self.assertTrue(retry.simulation_dir.endswith("case-001_retry_01"))
+        self.assertNotEqual(retry.remote_cases, base.remote_cases)
+        self.assertNotIn(f"rm -f -- {base.result_csv} {base.result_csv}.lock", retry.payload["env_setup"])
+        self.assertIn(
+            f"rm -f -- {retry.result_csv} {retry.result_csv}.lock",
+            retry.payload["env_setup"],
+        )
+
     def test_sanitized_case_id_collision_is_rejected(self) -> None:
         args = parsed_args()
 

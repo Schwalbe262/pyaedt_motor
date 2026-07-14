@@ -57,6 +57,7 @@ class CampaignTask:
     task_name: str
     dedupe_key: str
     payload: dict[str, Any]
+    retry_index: int = 0
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -152,16 +153,25 @@ def build_campaign_task(
     row: dict[str, Any],
     *,
     row_number: int,
+    retry_index: int = 0,
 ) -> CampaignTask:
+    if isinstance(retry_index, bool) or not isinstance(retry_index, int) or retry_index < 0:
+        raise RuntimeError("retry_index must be an integer >= 0")
     case_id = str(row.get("case_id") or "").strip()
     if not case_id:
         raise RuntimeError(f"selected row {row_number} has a blank case_id")
     safe_case_id = sanitize_case_id(case_id)
-    remote_cases = _remote_path(args.remote_cases_dir, f"{safe_case_id}.csv")
-    result_csv = _remote_path(args.result_dir, f"{safe_case_id}.csv")
-    simulation_dir = _remote_path(args.simulation_dir, safe_case_id)
-    task_name = f"{safe_dedupe_part(args.task_prefix) or 'ipmsm-v2'}-{safe_case_id}"
-    dedupe_key = campaign_dedupe_key(args, row, safe_case_id)
+    retry_path_suffix = "" if retry_index == 0 else f"_retry_{retry_index:02d}"
+    retry_identity_suffix = "" if retry_index == 0 else f"-retry-{retry_index:02d}"
+    attempt_safe_case_id = f"{safe_case_id}{retry_path_suffix}"
+    remote_cases = _remote_path(args.remote_cases_dir, f"{attempt_safe_case_id}.csv")
+    result_csv = _remote_path(args.result_dir, f"{attempt_safe_case_id}.csv")
+    simulation_dir = _remote_path(args.simulation_dir, attempt_safe_case_id)
+    task_name = (
+        f"{safe_dedupe_part(args.task_prefix) or 'ipmsm-v2'}-{safe_case_id}"
+        f"{retry_identity_suffix}"
+    )
+    dedupe_key = campaign_dedupe_key(args, row, safe_case_id) + retry_identity_suffix
     bootstrap = build_remote_cases_bootstrap(
         remote_cases,
         [row],
@@ -182,7 +192,7 @@ def build_campaign_task(
         simulation_dir=simulation_dir,
         result_csv=result_csv,
         log_dir=args.log_dir,
-        log_prefix=f"{safe_case_id}_",
+        log_prefix=f"{attempt_safe_case_id}_",
         analyze=True,
         periodic_boundary=False,
         keep_projects=args.keep_projects,
@@ -218,6 +228,7 @@ def build_campaign_task(
         task_name=task_name,
         dedupe_key=dedupe_key,
         payload=payload,
+        retry_index=retry_index,
     )
 
 
@@ -248,6 +259,45 @@ def build_campaign_tasks(
     if duplicates:
         raise RuntimeError("campaign task identities are not unique: " + ", ".join(duplicates))
     return tasks
+
+
+def build_campaign_task_lineages(
+    args: argparse.Namespace,
+    rows: Iterable[dict[str, Any]],
+    *,
+    first_row_number: int,
+    terminal_retry_limit: int,
+) -> dict[str, tuple[CampaignTask, ...]]:
+    """Build the base task and each deterministic retry identity for every case."""
+
+    if (
+        isinstance(terminal_retry_limit, bool)
+        or not isinstance(terminal_retry_limit, int)
+        or terminal_retry_limit < 0
+    ):
+        raise RuntimeError("terminal_retry_limit must be an integer >= 0")
+    row_list = list(rows)
+    base_tasks = build_campaign_tasks(args, row_list, first_row_number=first_row_number)
+    lineages: dict[str, tuple[CampaignTask, ...]] = {}
+    all_attempts: list[CampaignTask] = []
+    for row, base_task in zip(row_list, base_tasks, strict=True):
+        attempts = [base_task]
+        attempts.extend(
+            build_campaign_task(
+                args,
+                row,
+                row_number=base_task.row_number,
+                retry_index=retry_index,
+            )
+            for retry_index in range(1, terminal_retry_limit + 1)
+        )
+        lineages[base_task.dedupe_key] = tuple(attempts)
+        all_attempts.extend(attempts)
+    for attribute in ("remote_cases", "result_csv", "task_name", "dedupe_key"):
+        values = [getattr(task, attribute) for task in all_attempts]
+        if len(values) != len(set(values)):
+            raise RuntimeError(f"campaign retry {attribute} identities are not unique")
+    return lineages
 
 
 def get_scheduler_task_history(

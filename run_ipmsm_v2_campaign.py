@@ -44,12 +44,38 @@ class PendingSubmission:
 
 
 @dataclass(frozen=True)
+class ResultLevelFailure:
+    case_id: str
+    retry_index: int
+    task_id: int
+    dedupe_key: str
+    remote_result: str
+    raw_result_text: str
+    result_error: str
+
+    def evidence(self) -> dict[str, Any]:
+        return {
+            "kind": "result_level_terminal",
+            "retry_index": self.retry_index,
+            "task_id": self.task_id,
+            "dedupe_key": self.dedupe_key,
+            "scheduler_status": "completed",
+            "result_status": "failed",
+            "remote_result": self.remote_result,
+            "result_error": self.result_error,
+            "_raw_result_text": self.raw_result_text,
+        }
+
+
+@dataclass(frozen=True)
 class CampaignState:
     successful: tuple[submit_campaign.CampaignTask, ...]
     active: tuple[submit_campaign.CampaignTask, ...]
     missing: tuple[submit_campaign.CampaignTask, ...]
     retryable: tuple[submit_campaign.CampaignTask, ...]
     pending: tuple[submit_campaign.CampaignTask, ...]
+    permanently_failed: tuple[dict[str, Any], ...] = ()
+    recovered_failures: tuple[dict[str, Any], ...] = ()
 
     @property
     def candidates(self) -> tuple[submit_campaign.CampaignTask, ...]:
@@ -140,6 +166,8 @@ def _collector_argv(args: argparse.Namespace) -> list[str]:
         str(args.history_limit),
         "--scheduler-timeout",
         str(args.timeout),
+        "--terminal-retry-limit",
+        str(args.terminal_retry_limit),
         "--output-dir",
         str(args.output_dir),
         "--merged-output",
@@ -407,66 +435,146 @@ def classify_campaign_state(
     project: str,
     pending: dict[str, PendingSubmission],
     terminal_retry_limit: int,
+    *,
+    lineages: Mapping[str, tuple[submit_campaign.CampaignTask, ...]] | None = None,
+    result_failures: Mapping[str, ResultLevelFailure] | None = None,
 ) -> CampaignState:
     by_dedupe = _history_by_dedupe(history, project)
     reconcile_pending_submissions(pending, by_dedupe)
+    result_failures = result_failures or {}
     successful: list[submit_campaign.CampaignTask] = []
     active: list[submit_campaign.CampaignTask] = []
     missing: list[submit_campaign.CampaignTask] = []
     retryable: list[submit_campaign.CampaignTask] = []
     locally_pending: list[submit_campaign.CampaignTask] = []
+    permanently_failed: list[dict[str, Any]] = []
+    recovered_failures: list[dict[str, Any]] = []
 
-    for task in tasks:
-        matches = by_dedupe.get(task.dedupe_key, [])
+    for base_task in tasks:
+        attempts = (
+            lineages.get(base_task.dedupe_key, (base_task,))
+            if lineages is not None
+            else (base_task,)
+        )
+        matches = [
+            (attempt, item)
+            for attempt in attempts
+            for item in by_dedupe.get(attempt.dedupe_key, [])
+        ]
         statuses = {
             str(item.get("status") or "").strip().lower() or "<blank>"
-            for item in matches
+            for _, item in matches
         }
         unknown = sorted(statuses - KNOWN_STATUSES)
         if unknown:
             raise RuntimeError(
-                f"ambiguous scheduler history status for case_id={task.case_id!r}: {unknown}"
+                f"ambiguous scheduler history status for case_id={base_task.case_id!r}: {unknown}"
             )
-        if any(
-            str(item.get("status") or "").strip().lower() in ACTIVE_STATUSES
-            for item in matches
-        ):
-            active.append(task)
-            continue
         completed = [
-            item
-            for item in matches
+            (attempt, item)
+            for attempt, item in matches
             if str(item.get("status") or "").strip().lower() == "completed"
         ]
-        completed_success = [
-            item
-            for item in completed
+        completed_success_all = [
+            (attempt, item)
+            for attempt, item in completed
             if _exit_code(item) == 0 and _task_id(item) is not None
         ]
-        if completed_success:
-            successful.append(task)
-            continue
-        if completed:
+        if completed and not completed_success_all:
             raise RuntimeError(
-                f"completed scheduler task is not a valid success for case_id={task.case_id!r}"
+                f"completed scheduler task is not a valid success for case_id={base_task.case_id!r}"
             )
-        terminal = [
-            item
-            for item in matches
+        completed_success: list[tuple[submit_campaign.CampaignTask, dict[str, Any]]] = []
+        for attempt in attempts:
+            lineage_successes = [
+                (candidate, item)
+                for candidate, item in completed_success_all
+                if candidate.dedupe_key == attempt.dedupe_key
+            ]
+            if lineage_successes:
+                completed_success.append(
+                    max(lineage_successes, key=lambda pair: _task_id(pair[1]) or -1)
+                )
+        result_terminal = [
+            (attempt, item, failure)
+            for attempt, item in completed_success
+            for failure in (result_failures.get(attempt.dedupe_key),)
+            if failure is not None and failure.task_id == _task_id(item)
+        ]
+        result_terminal_ids = {_task_id(item) for _, item, _ in result_terminal}
+        usable_completed = [
+            (attempt, item)
+            for attempt, item in completed_success
+            if _task_id(item) not in result_terminal_ids
+        ]
+        scheduler_terminal = [
+            (attempt, item)
+            for attempt, item in matches
             if str(item.get("status") or "").strip().lower() in TERMINAL_RETRY_STATUSES
         ]
-        retry_count = len(terminal)
-        if retry_count > terminal_retry_limit:
-            raise RuntimeError(
-                "terminal retry limit exceeded for "
-                f"case_id={task.case_id!r}: failures={retry_count} limit={terminal_retry_limit}"
+        failure_evidence = [
+            {
+                "kind": "scheduler_terminal",
+                "retry_index": attempt.retry_index,
+                "task_id": _task_id(item),
+                "dedupe_key": attempt.dedupe_key,
+                "scheduler_status": str(item.get("status") or "").strip().lower(),
+                "result_status": None,
+                "remote_result": attempt.result_csv,
+            }
+            for attempt, item in scheduler_terminal
+        ]
+        failure_evidence.extend(failure.evidence() for _, _, failure in result_terminal)
+        failure_evidence.sort(
+            key=lambda item: (
+                int(item["task_id"]) if isinstance(item.get("task_id"), int) else -1,
+                int(item["retry_index"]),
             )
-        if task.dedupe_key in pending:
-            locally_pending.append(task)
-        elif terminal:
-            retryable.append(task)
+        )
+        retry_count = len(failure_evidence)
+
+        active_matches = [
+            (attempt, item)
+            for attempt, item in matches
+            if str(item.get("status") or "").strip().lower() in ACTIVE_STATUSES
+        ]
+        if active_matches:
+            if retry_count > terminal_retry_limit:
+                raise RuntimeError(
+                    "active scheduler attempt exists after terminal retry exhaustion for "
+                    f"case_id={base_task.case_id!r}"
+                )
+            current, _ = max(active_matches, key=lambda pair: _task_id(pair[1]) or -1)
+            active.append(current)
+            continue
+        if usable_completed:
+            current, _ = max(usable_completed, key=lambda pair: _task_id(pair[1]) or -1)
+            successful.append(current)
+            if failure_evidence:
+                recovered_failures.append(
+                    {
+                        "case_id": base_task.case_id,
+                        "failure_evidence": failure_evidence,
+                    }
+                )
+            continue
+        if retry_count > terminal_retry_limit:
+            permanently_failed.append(
+                {
+                    "case_id": base_task.case_id,
+                    "attempts": retry_count,
+                    "failure_evidence": failure_evidence,
+                }
+            )
+            continue
+
+        candidate = attempts[retry_count] if retry_count < len(attempts) else base_task
+        if candidate.dedupe_key in pending:
+            locally_pending.append(candidate)
+        elif retry_count:
+            retryable.append(candidate)
         else:
-            missing.append(task)
+            missing.append(candidate)
 
     return CampaignState(
         successful=tuple(successful),
@@ -474,6 +582,8 @@ def classify_campaign_state(
         missing=tuple(missing),
         retryable=tuple(retryable),
         pending=tuple(locally_pending),
+        permanently_failed=tuple(permanently_failed),
+        recovered_failures=tuple(recovered_failures),
     )
 
 
@@ -483,6 +593,7 @@ def audit_completed_result_rows(
     selected_rows: list[dict[str, Any]],
     history: Iterable[dict[str, Any]],
     validated_task_ids: dict[str, int],
+    result_failures: dict[str, ResultLevelFailure] | None = None,
 ) -> tuple[str, ...]:
     """Validate each newly completed scheduler task's one-row result immediately.
 
@@ -492,6 +603,8 @@ def audit_completed_result_rows(
     """
 
     history_by_dedupe = _history_by_dedupe(history, args.project)
+    if result_failures is None:
+        result_failures = {}
     pending: list[str] = []
     for task in completed_tasks:
         successful = [
@@ -502,16 +615,17 @@ def audit_completed_result_rows(
             and isinstance(_task_id(item), int)
         ]
         if not successful:
-            raise RuntimeError(
-                f"completed result audit cannot resolve a successful task for case_id={task.case_id!r}"
-            )
+            continue
         latest_id = max(int(_task_id(item)) for item in successful)
         latest = [item for item in successful if _task_id(item) == latest_id]
         if len(latest) != 1:
             raise RuntimeError(
                 f"completed result audit found an ambiguous latest task for case_id={task.case_id!r}"
             )
-        if validated_task_ids.get(task.dedupe_key) == latest_id:
+        known_failure = result_failures.get(task.dedupe_key)
+        if validated_task_ids.get(task.dedupe_key) == latest_id or (
+            known_failure is not None and known_failure.task_id == latest_id
+        ):
             continue
         finished_raw = str(latest[0].get("finished_at") or "").strip()
         if not finished_raw:
@@ -559,9 +673,24 @@ def audit_completed_result_rows(
             text,
             task.case_id,
             expected_design_hash,
+            allow_failed=True,
         )
         collector.validate_result_matches_plan(plan_row, result_row)
-        validated_task_ids[task.dedupe_key] = latest_id
+        result_status = str(result_row.get("status") or "").strip().lower()
+        if result_status == "failed":
+            validated_task_ids.pop(task.dedupe_key, None)
+            result_failures[task.dedupe_key] = ResultLevelFailure(
+                case_id=task.case_id,
+                retry_index=task.retry_index,
+                task_id=latest_id,
+                dedupe_key=task.dedupe_key,
+                remote_result=task.result_csv,
+                raw_result_text=text,
+                result_error=str(result_row.get("error") or "").strip()[:500],
+            )
+        else:
+            result_failures.pop(task.dedupe_key, None)
+            validated_task_ids[task.dedupe_key] = latest_id
     return tuple(pending)
 
 
@@ -658,6 +787,7 @@ def _status_signature(
         len(state.pending),
         len(state.missing),
         len(state.retryable),
+        len(state.permanently_failed),
         snapshot.project_active_count,
         submitted,
     )
@@ -675,7 +805,8 @@ def _emit_status(
         f"scheduler_ok={len(state.successful)} result_ok={validated_results} "
         f"active={len(state.active)} "
         f"pending={len(state.pending)} missing={len(state.missing)} "
-        f"retry={len(state.retryable)} project_active={snapshot.project_active_count} "
+        f"retry={len(state.retryable)} permanent={len(state.permanently_failed)} "
+        f"project_active={snapshot.project_active_count} "
         f"submitted={submitted} elapsed_s={elapsed:.1f}",
         file=sys.stderr,
     )
@@ -683,9 +814,18 @@ def _emit_status(
 
 def _compact_collector_result(result: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     return {
+        "status": str(result.get("status") or "complete"),
         "collected_results": int(result.get("collected_results", 0)),
         "merged_output": str(result.get("merged_output") or (args.output_dir / args.merged_output)),
         "output_dir": str(result.get("output_dir") or args.output_dir),
+        "summary": str(
+            result.get("summary") or (args.output_dir / collector.CAMPAIGN_SUMMARY_NAME)
+        ),
+        "decision": str(
+            result.get("decision") or (args.output_dir / collector.CAMPAIGN_DECISION_NAME)
+        ),
+        "permanently_failed_cases": int(result.get("permanently_failed_cases", 0)),
+        "permanent_failures": list(result.get("permanent_failures") or []),
     }
 
 
@@ -701,6 +841,44 @@ def collect_completed_campaign(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("collector did not return valid JSON") from exc
     if not isinstance(result, dict):
         raise RuntimeError("collector did not return a JSON object")
+    return _compact_collector_result(result, args)
+
+
+def collect_terminal_campaign(
+    args: argparse.Namespace,
+    selected_rows: list[dict[str, Any]],
+    state: CampaignState,
+    snapshot: SchedulerSnapshot,
+    validated_task_ids: Mapping[str, int],
+) -> dict[str, Any]:
+    history_by_dedupe = _history_by_dedupe(snapshot.history, args.project)
+    resolved: list[tuple[submit_campaign.CampaignTask, dict[str, Any]]] = []
+    for task in state.successful:
+        task_id = validated_task_ids.get(task.dedupe_key)
+        matches = [
+            item
+            for item in history_by_dedupe.get(task.dedupe_key, [])
+            if _task_id(item) == task_id
+        ]
+        if task_id is None or len(matches) != 1:
+            raise RuntimeError(
+                f"cannot resolve validated result task for case_id={task.case_id!r}"
+            )
+        resolved.append((task, matches[0]))
+    collector_args = collector.build_parser().parse_args(_collector_argv(args))
+    collector.validate_args(collector_args)
+    result = collector.collect_resolved_campaign(
+        collector_args,
+        selected_rows,
+        resolved,
+        history_rows=len(snapshot.history),
+        campaign_history_tasks=snapshot.campaign_history_tasks,
+        permanent_failures=[dict(item) for item in state.permanently_failed],
+        successful_prior_evidence={
+            str(item["case_id"]): [dict(evidence) for evidence in item["failure_evidence"]]
+            for item in state.recovered_failures
+        },
+    )
     return _compact_collector_result(result, args)
 
 
@@ -723,6 +901,7 @@ def _dry_run_output(
         "planned_submissions": len(planned),
         "project": args.project,
         "project_active": snapshot.project_active_count,
+        "permanently_failed_cases": len(state.permanently_failed),
         "retryable_cases": len(state.retryable),
         "selected_cases": len(tasks),
         "successful_cases": len(state.successful),
@@ -750,8 +929,20 @@ def main(argv: list[str] | None = None) -> int:
         selected_rows,
         first_row_number=args.case_start_index,
     )
+    lineages = submit_campaign.build_campaign_task_lineages(
+        args,
+        selected_rows,
+        first_row_number=args.case_start_index,
+        terminal_retry_limit=args.terminal_retry_limit,
+    )
+    attempt_tasks = [
+        attempt
+        for task in tasks
+        for attempt in lineages[task.dedupe_key]
+    ]
     pending: dict[str, PendingSubmission] = {}
     validated_task_ids: dict[str, int] = {}
+    result_failures: dict[str, ResultLevelFailure] = {}
     submitted = 0
 
     if not args.submit:
@@ -762,6 +953,8 @@ def main(argv: list[str] | None = None) -> int:
             args.project,
             pending,
             args.terminal_retry_limit,
+            lineages=lineages,
+            result_failures=result_failures,
         )
         print(
             json.dumps(
@@ -779,24 +972,33 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         snapshot = read_scheduler_snapshot(args)
         history_by_dedupe = _history_by_dedupe(snapshot.history, args.project)
+        result_audit_pending = audit_completed_result_rows(
+            args,
+            attempt_tasks,
+            selected_rows,
+            snapshot.history,
+            validated_task_ids,
+            result_failures,
+        )
         state = classify_campaign_state(
             tasks,
             snapshot.history,
             args.project,
             pending,
             args.terminal_retry_limit,
+            lineages=lineages,
+            result_failures=result_failures,
         )
-        result_audit_pending = audit_completed_result_rows(
-            args,
-            state.successful,
-            selected_rows,
-            snapshot.history,
-            validated_task_ids,
-        )
-        if not result_audit_pending and len(validated_task_ids) != len(state.successful):
+        validated_successes = {
+            task.dedupe_key
+            for task in state.successful
+            if task.dedupe_key in validated_task_ids
+        }
+        if not result_audit_pending and len(validated_successes) != len(state.successful):
             raise RuntimeError(
                 "completed result audit coverage mismatch: "
-                f"scheduler_completed={len(state.successful)} result_validated={len(validated_task_ids)}"
+                f"scheduler_completed={len(state.successful)} "
+                f"result_validated={len(validated_successes)}"
             )
         if result_audit_pending:
             elapsed = time.monotonic() - started
@@ -812,8 +1014,22 @@ def main(argv: list[str] | None = None) -> int:
                 f"wait_ipmsm_v2_result_audit pending={len(result_audit_pending)} {preview}",
                 file=sys.stderr,
             )
-        if len(state.successful) == len(tasks) and not result_audit_pending:
-            collected = collect_completed_campaign(args)
+        terminal_cases = len(state.successful) + len(state.permanently_failed)
+        if terminal_cases == len(tasks) and not result_audit_pending:
+            if (
+                state.permanently_failed
+                or state.recovered_failures
+                or any(task.retry_index > 0 for task in state.successful)
+            ):
+                collected = collect_terminal_campaign(
+                    args,
+                    selected_rows,
+                    state,
+                    snapshot,
+                    validated_task_ids,
+                )
+            else:
+                collected = collect_completed_campaign(args)
             output = {
                 **collected,
                 "beta_gate": _beta_gate_output(beta_summary),
@@ -822,6 +1038,7 @@ def main(argv: list[str] | None = None) -> int:
                 "selected_cases": len(tasks),
                 "submitted": submitted,
                 "successful_cases": len(state.successful),
+                "permanently_failed_cases": len(state.permanently_failed),
             }
             print(
                 json.dumps(
@@ -837,7 +1054,8 @@ def main(argv: list[str] | None = None) -> int:
         if elapsed >= args.overall_timeout_seconds:
             raise RuntimeError(
                 f"campaign timeout after {elapsed:.3f}s: "
-                f"successful={len(state.successful)} selected={len(tasks)}; "
+                f"successful={len(state.successful)} permanent={len(state.permanently_failed)} "
+                f"selected={len(tasks)}; "
                 "no output files were written"
             )
 
