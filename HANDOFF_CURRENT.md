@@ -321,4 +321,9 @@
 - Shared scheduler still serializes full history with ~2 allocation queries/task; runner polls may exceed60s, but timeout is pre-POST and the15m Task resumes without duplicates/cap breach.
 - Stage3 remains50 running/0 terminal under cap50 on11 nodes, task IDs30487-30536,4 CPUs/FEA; first runtime comparison awaits the first completion.
 - Commit `cd2251e` adds the production target-load continuation contract builder and hardens its consumer; related pyaedt tests72 pass/1 skip and final review found no P0/P1, but no live target-load artifact exists.
-- Next: complete/refill Stage3 and evaluate the1300-row gate; only a pass may open optimization authority, current×beta NSGA-II/Pareto FEA, then the separate human-authorized measured target-load continuation.
+
+## 2026-07-14 - Stage3 acquisition v4r8 local rebuild
+- Local commit `0d8467b` makes scheduler-success/result-failed rows share the bounded terminal retry lineage and preserves failed-row evidence; exhaustion is terminal but nonfatal to the campaign.
+- v4r8 builder/driver seal project cap100, standalone/pooled backend choice, current pooled runtime closure, and the deployed v4r7 authority chain; no live files, tasks, submissions, or pushes were changed.
+- Validation: touched-file compile passed; focused campaign/v4r8 tests77/77; full Anaconda suite1346 run/9 skipped with the expected54 Y-checkout authority incompatibilities plus2 frozen-v4r7 seal failures.
+- Next: create the LF325 v4r8 build config/source copy, dry-run the selected backend, and obtain separate authority before any publication or execution.

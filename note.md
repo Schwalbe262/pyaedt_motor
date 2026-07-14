@@ -3987,3 +3987,6 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 
 ## 2026-07-13 12:12:00 +09:00 - Production target-load continuation builder closed
 - Actions/result: committed/pushed `cd2251e`; builder requires completed Stage3/optimization replay, exact human receipt, candidate order, PyAEDT/source closure, cap50 and fresh C-local outputs. Consumer fences submit/final publications and claim/recovery inode races. Related pyaedt tests72 pass/1 skip, final review P0/P1 none; no live contract/FEA was created.
+
+## 2026-07-14 23:10:54 +09:00 - Stage3 acquisition v4r8 contract rebuilt locally
+- Part/goal/hypothesis: repair zero-exit failed-row deadlock and reseal cap100/backend authority; treating result failure as the existing bounded terminal lineage should preserve fail-closed progress. Actions/options: added generic retry/evidence handling plus v4r8 standalone/pooled builder, driver, and focused tests; no live/deployment/scheduler/push action. Metrics/result: compile pass, focused77/77, full1346 with9 skipped and56 known legacy failures (54 Y-path,2 frozen v4r7 seals); token sample unavailable because the local Codex SQLite DB was absent. Failure/next: none in changed modules; publish only after an authorized LF325 build-config dry run.
