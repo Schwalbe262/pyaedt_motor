@@ -104,6 +104,31 @@ class SubmitIpmsmSchedulerJobTests(unittest.TestCase):
         self.assertEqual(payload["account_name"], "")
         self.assertIn("--setup-only", payload["arguments"])
 
+    def test_build_git_task_payload_omits_backend_and_profile_by_default(self) -> None:
+        payload = scheduler_job.build_git_task_payload(scheduler_args())
+
+        self.assertNotIn("aedt_backend", payload)
+        self.assertNotIn("scheduling_profile", payload)
+
+    def test_build_git_task_payload_includes_pooled_backend_and_profile(self) -> None:
+        args = scheduler_args(aedt_backend="pooled", scheduling_profile="fea_bursty")
+
+        payload = scheduler_job.build_git_task_payload(args)
+
+        self.assertEqual(payload["aedt_backend"], "pooled")
+        self.assertEqual(payload["scheduling_profile"], "fea_bursty")
+
+    def test_build_git_task_payload_omits_explicit_standalone_backend(self) -> None:
+        payload = scheduler_job.build_git_task_payload(scheduler_args(aedt_backend="standalone"))
+
+        self.assertNotIn("aedt_backend", payload)
+
+    def test_build_git_task_payload_rejects_unknown_backend_and_profile(self) -> None:
+        with self.assertRaises(RuntimeError):
+            scheduler_job.build_git_task_payload(scheduler_args(aedt_backend="shared"))
+        with self.assertRaises(RuntimeError):
+            scheduler_job.build_git_task_payload(scheduler_args(scheduling_profile="fea"))
+
     def test_build_job_payload_supports_packed_srun_remote_path(self) -> None:
         args = scheduler_args(
             job_mode="packed_srun",

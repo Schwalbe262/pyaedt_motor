@@ -218,7 +218,7 @@ def build_job_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def build_git_task_payload(args: argparse.Namespace) -> dict[str, Any]:
-    return {
+    payload = {
         "job_name": args.job_name,
         "repo_url": args.repo_url,
         "git_ref": args.git_ref,
@@ -236,6 +236,17 @@ def build_git_task_payload(args: argparse.Namespace) -> dict[str, Any]:
         "node_name": args.node_name,
         "exclusive_node": args.exclusive_node,
     }
+    scheduling_profile = str(getattr(args, "scheduling_profile", "") or "").strip().lower()
+    if scheduling_profile not in {"", "standard", "fea_bursty"}:
+        raise RuntimeError("scheduling_profile must be standard or fea_bursty")
+    if scheduling_profile:
+        payload["scheduling_profile"] = scheduling_profile
+    aedt_backend = str(getattr(args, "aedt_backend", "") or "").strip().lower()
+    if aedt_backend not in {"", "standalone", "pooled"}:
+        raise RuntimeError("aedt_backend must be standalone or pooled")
+    if aedt_backend == "pooled":
+        payload["aedt_backend"] = aedt_backend
+    return payload
 
 
 def scheduler_endpoint(args: argparse.Namespace) -> str:
@@ -532,6 +543,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--remote-path", default="", help="Scheduler-accessible working directory for packed scheduler modes.")
     parser.add_argument("--entrypoint", default="subprocess_run.py")
     parser.add_argument("--job-name", default="ipmsm-replay-setup")
+    parser.add_argument(
+        "--scheduling-profile",
+        choices=("standard", "fea_bursty"),
+        default="",
+        help="Optional scheduling profile form field for /tasks/git submissions.",
+    )
+    parser.add_argument(
+        "--aedt-backend",
+        choices=("standalone", "pooled"),
+        default="standalone",
+        help="AEDT desktop backend; pooled adds the aedt_backend form field for session-pool attach.",
+    )
     parser.add_argument("--processes", type=int, default=1)
     parser.add_argument("--cores-per-process", type=int, default=4)
     parser.add_argument("--max-cases", type=int, default=DEFAULT_MAX_CASES)
