@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import math
 import unittest
+from unittest import mock
+
+import module.ipmsm_ppt_setup as ppt_setup
 
 from module.ipmsm_ppt_setup import (
     BETA_CONVENTION_DQ_CURRENT_ADVANCE_V2,
@@ -17,6 +21,39 @@ from module.ipmsm_ppt_setup import (
 
 
 class IPMSMPPTSetupContractTests(unittest.TestCase):
+    @contextlib.contextmanager
+    def patched_configure_helpers(self, m2d: object):
+        simple_helpers = (
+            "validate_ppt_spec_contract",
+            "apply_ppt_design_variables",
+            "set_operation_current",
+            "clear_previous_ppt_setup",
+            "resolve_geometry_overlaps",
+            "ensure_ppt_materials",
+            "assign_ppt_materials",
+            "assign_magnet_coordinate_systems",
+            "assign_boundaries_and_motion",
+            "assign_three_phase_windings",
+            "assign_losses",
+            "assign_mesh",
+            "enable_ppt_transient_inductance",
+            "create_ppt_transient_setup",
+        )
+        with contextlib.ExitStack() as stack:
+            patched = {
+                name: stack.enter_context(mock.patch.object(ppt_setup, name, return_value="ok"))
+                for name in simple_helpers
+            }
+            patched["ensure_region_and_band"] = stack.enter_context(
+                mock.patch.object(
+                    ppt_setup,
+                    "ensure_region_and_band",
+                    return_value={"region": object(), "band": object()},
+                )
+            )
+            stack.enter_context(mock.patch.object(ppt_setup, "_m2d", return_value=m2d))
+            yield patched
+
     def test_new_spec_defaults_to_full_model_and_canonical_beta(self) -> None:
         spec = IPMSMPPTSpec()
 
@@ -71,6 +108,51 @@ class IPMSMPPTSetupContractTests(unittest.TestCase):
     def test_v2_phase_voltage_report_preserves_sign(self) -> None:
         expressions = PPT_REPORT_DEFS["PPT_Phase_Voltages"]
         self.assertTrue(all("mag(" not in expression for expression in expressions))
+
+    def test_analysis_error_callback_only_wraps_solver_call(self) -> None:
+        callback = mock.Mock()
+
+        class FakeM2D:
+            def validate_simple(self) -> bool:
+                return True
+
+            def analyze(self, **_kwargs: object) -> bool:
+                raise TimeoutError("solver timed out")
+
+        with self.patched_configure_helpers(FakeM2D()):
+            with self.assertRaisesRegex(TimeoutError, "solver timed out"):
+                ppt_setup.configure_ipmsm_from_ppt(
+                    object(),
+                    spec=IPMSMPPTSpec(),
+                    create_reports=False,
+                    analyze=True,
+                    analysis_error_callback=callback,
+                )
+
+        callback.assert_called_once_with()
+
+    def test_pre_solve_error_does_not_call_analysis_error_callback(self) -> None:
+        callback = mock.Mock()
+
+        class FakeM2D:
+            def validate_simple(self) -> bool:
+                return True
+
+            def analyze(self, **_kwargs: object) -> bool:
+                return True
+
+        with self.patched_configure_helpers(FakeM2D()) as patched:
+            patched["apply_ppt_design_variables"].side_effect = RuntimeError("setup failed")
+            with self.assertRaisesRegex(RuntimeError, "setup failed"):
+                ppt_setup.configure_ipmsm_from_ppt(
+                    object(),
+                    spec=IPMSMPPTSpec(),
+                    create_reports=False,
+                    analyze=True,
+                    analysis_error_callback=callback,
+                )
+
+        callback.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -59,6 +59,12 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         self.assertEqual(args.env_setup, "module load ansys-electronics/v252")
         self.assertEqual(args.timeout, 60.0)
         self.assertEqual(args.timeout_seconds, 43200)
+        self.assertEqual(args.aedt_backend, "standalone")
+        self.assertEqual(args.aedt_pool_url, "http://172.16.10.37:18790")
+        self.assertEqual(
+            args.aedt_pool_bootstrap_token_file,
+            "~/slurm_scheduler/aedt_pool_bootstrap",
+        )
 
     def test_campaign_policy_cannot_exceed_cap_or_change_fea_environment(self) -> None:
         invalid = (
@@ -103,6 +109,29 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         self.assertIn("--cases remote/ipmsm_v2_campaign_cases/beta-zero---001.csv", task.payload["command"])
         self.assertIn("--max-cases 1", task.payload["command"])
         self.assertIn("--analyze", task.payload["command"])
+        self.assertNotIn("aedt_backend", task.payload)
+
+    def test_pooled_backend_is_in_payload_and_dedupe_identity(self) -> None:
+        row = {"case_id": "case-001", "beta_dq_deg": "0"}
+        standalone = campaign.build_campaign_task(parsed_args(), row, row_number=1)
+        pooled = campaign.build_campaign_task(
+            parsed_args("--aedt-backend", "pooled"),
+            row,
+            row_number=1,
+        )
+
+        self.assertEqual(pooled.payload["aedt_backend"], "pooled")
+        self.assertNotIn("aedt_backend", standalone.payload)
+        self.assertNotEqual(pooled.dedupe_key, standalone.dedupe_key)
+        self.assertIn(
+            "export MFT_AEDT_SCHEDULER_URL=http://172.16.10.37:18790",
+            pooled.payload["env_setup"],
+        )
+        self.assertIn(
+            'export SLURM_AEDT_POOL_BOOTSTRAP_TOKEN_FILE="$HOME"/slurm_scheduler/aedt_pool_bootstrap',
+            pooled.payload["env_setup"],
+        )
+        self.assertNotIn("MFT_AEDT_SCHEDULER_URL", standalone.payload["env_setup"])
 
     def test_remote_campaign_paths_must_stay_relative(self) -> None:
         for option, value in (

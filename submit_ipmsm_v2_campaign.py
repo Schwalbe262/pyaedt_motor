@@ -39,6 +39,8 @@ MAX_HISTORY_LIMIT = 10_000
 DEFAULT_SCHEDULER_TIMEOUT_SECONDS = 60.0
 DEFAULT_TASK_TIMEOUT_SECONDS = 43_200
 MIN_TASK_TIMEOUT_SECONDS = 43_200
+DEFAULT_AEDT_POOL_URL = "http://172.16.10.37:18790"
+DEFAULT_AEDT_POOL_BOOTSTRAP_TOKEN_FILE = "~/slurm_scheduler/aedt_pool_bootstrap"
 STDOUT_TASK_PREVIEW = 10
 SKIP_EXISTING_STATUSES = frozenset({"queued", "attaching", "running", "completed"})
 RETRYABLE_TERMINAL_STATUSES = frozenset({"failed", "cancelled"})
@@ -86,16 +88,17 @@ def sanitize_case_id(case_id: object) -> str:
 
 def campaign_dedupe_key(args: argparse.Namespace, row: dict[str, Any], safe_case_id: str) -> str:
     canonical_row = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    identity = "|".join(
-        (
-            args.project,
-            args.task_prefix,
-            safe_case_id,
-            args.remote_cases_dir,
-            args.result_dir,
-            canonical_row,
-        )
-    )
+    identity_parts = [
+        args.project,
+        args.task_prefix,
+        safe_case_id,
+        args.remote_cases_dir,
+        args.result_dir,
+        canonical_row,
+    ]
+    if str(getattr(args, "aedt_backend", "") or "").strip().lower() == "pooled":
+        identity_parts.append("aedt_backend=pooled")
+    identity = "|".join(identity_parts)
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
     prefix = safe_dedupe_part(args.task_prefix) or "ipmsm-v2"
     return f"{prefix}-{safe_case_id}-{digest}"
@@ -115,6 +118,32 @@ def result_cleanup_command(result_csv: str) -> str:
     """Remove only this case's stale append-only result before a retry."""
     return "rm -f -- " + " ".join(
         shlex.quote(path) for path in (result_csv, result_csv + ".lock")
+    )
+
+
+def shell_expandable_home_path(path: str) -> str:
+    normalized = str(path or "").strip().replace("\\", "/")
+    if normalized == "~" or normalized == "$HOME":
+        return '"$HOME"'
+    for prefix in ("~/", "$HOME/"):
+        if normalized.startswith(prefix):
+            return '"$HOME"/' + shlex.quote(normalized[len(prefix) :])
+    return shlex.quote(normalized)
+
+
+def pooled_aedt_env_setup(args: argparse.Namespace) -> str:
+    scheduler_url = str(args.aedt_pool_url or "").strip()
+    token_file = str(args.aedt_pool_bootstrap_token_file or "").strip()
+    if not scheduler_url:
+        raise RuntimeError("--aedt-pool-url must not be blank for pooled AEDT")
+    if not token_file:
+        raise RuntimeError("--aedt-pool-bootstrap-token-file must not be blank for pooled AEDT")
+    return "\n".join(
+        (
+            f"export MFT_AEDT_SCHEDULER_URL={shlex.quote(scheduler_url)}",
+            "export SLURM_AEDT_POOL_BOOTSTRAP_TOKEN_FILE="
+            + shell_expandable_home_path(token_file),
+        )
     )
 
 
@@ -140,6 +169,8 @@ def build_campaign_task(
     )
     env_setup = append_env_setup(args.env_setup, bootstrap)
     env_setup = append_env_setup(env_setup, result_cleanup_command(result_csv))
+    if str(getattr(args, "aedt_backend", "standalone") or "").strip().lower() == "pooled":
+        env_setup = append_env_setup(env_setup, pooled_aedt_env_setup(args))
     task_args = SimpleNamespace(
         entrypoint=args.entrypoint,
         remote_cases=remote_cases,
@@ -174,6 +205,7 @@ def build_campaign_task(
         dedupe_key=dedupe_key,
         gpus=0,
         gpu_model="",
+        aedt_backend=getattr(args, "aedt_backend", "standalone"),
     )
     payload = build_task_payload(task_args)
     return CampaignTask(
@@ -370,6 +402,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise RuntimeError("IPMSM v2 FEA campaigns require --required-capability conda:pyaedt2026v1")
     if args.env_profile != "pyaedt2026v1":
         raise RuntimeError("IPMSM v2 FEA campaigns require --env-profile pyaedt2026v1")
+    if args.aedt_backend == "pooled":
+        pooled_aedt_env_setup(args)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -405,6 +439,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TASK_TIMEOUT_SECONDS)
     parser.add_argument("--bootstrap-max-bytes", type=int, default=DEFAULT_BOOTSTRAP_MAX_BYTES)
     parser.add_argument("--keep-projects", action="store_true")
+    parser.add_argument("--aedt-backend", choices=("standalone", "pooled"), default="standalone")
+    parser.add_argument("--aedt-pool-url", default=DEFAULT_AEDT_POOL_URL)
+    parser.add_argument(
+        "--aedt-pool-bootstrap-token-file",
+        default=DEFAULT_AEDT_POOL_BOOTSTRAP_TOKEN_FILE,
+    )
     parser.add_argument("--timeout", type=float, default=DEFAULT_SCHEDULER_TIMEOUT_SECONDS)
     parser.add_argument("--write-manifest", type=Path)
     parser.add_argument("--submit", action="store_true")

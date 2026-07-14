@@ -40,18 +40,19 @@ def safe_dedupe_part(value: object) -> str:
 
 
 def default_dedupe_key(args: argparse.Namespace, command: str) -> str:
-    digest_text = "|".join(
-        [
-            str(getattr(args, "project", "") or ""),
-            str(getattr(args, "remote_cwd", "") or ""),
-            str(getattr(args, "task_name", "") or ""),
-            str(getattr(args, "remote_cases", "") or ""),
-            str(getattr(args, "result_csv", "") or ""),
-            str(getattr(args, "case_start_index", "") or ""),
-            str(getattr(args, "case_limit", "") or ""),
-            command,
-        ]
-    )
+    digest_parts = [
+        str(getattr(args, "project", "") or ""),
+        str(getattr(args, "remote_cwd", "") or ""),
+        str(getattr(args, "task_name", "") or ""),
+        str(getattr(args, "remote_cases", "") or ""),
+        str(getattr(args, "result_csv", "") or ""),
+        str(getattr(args, "case_start_index", "") or ""),
+        str(getattr(args, "case_limit", "") or ""),
+        command,
+    ]
+    if str(getattr(args, "aedt_backend", "") or "").strip().lower() == "pooled":
+        digest_parts.append("aedt_backend=pooled")
+    digest_text = "|".join(digest_parts)
     digest = hashlib.sha256(digest_text.encode("utf-8")).hexdigest()[:12]
     prefix = safe_dedupe_part(args.task_name) or "ipmsm-task"
     return f"{prefix}-{digest}"
@@ -59,7 +60,7 @@ def default_dedupe_key(args: argparse.Namespace, command: str) -> str:
 
 def build_task_payload(args: argparse.Namespace) -> dict[str, Any]:
     command = build_task_command(args)
-    return {
+    payload = {
         "name": args.task_name,
         "remote_cwd": str(args.remote_cwd or ""),
         "command": command,
@@ -82,6 +83,12 @@ def build_task_payload(args: argparse.Namespace) -> dict[str, Any]:
         "gpus": args.gpus,
         "gpu_model": args.gpu_model,
     }
+    aedt_backend = str(getattr(args, "aedt_backend", "") or "").strip().lower()
+    if aedt_backend not in {"", "standalone", "pooled"}:
+        raise ValueError("aedt_backend must be standalone or pooled")
+    if aedt_backend == "pooled":
+        payload["aedt_backend"] = aedt_backend
+    return payload
 
 
 def validate_task_request(args: argparse.Namespace) -> None:

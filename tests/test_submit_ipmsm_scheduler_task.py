@@ -103,6 +103,21 @@ class SubmitIpmsmSchedulerTaskTests(unittest.TestCase):
         self.assertEqual(payload["scheduling_profile"], "fea_bursty")
         self.assertEqual(payload["max_workers_per_node"], 200)
 
+    def test_build_task_payload_only_emits_nondefault_aedt_backend(self) -> None:
+        legacy_args = task_args()
+        legacy = scheduler_task.build_task_payload(legacy_args)
+        self.assertNotIn("aedt_backend", legacy)
+        self.assertNotIn(
+            "aedt_backend",
+            scheduler_task.build_task_payload(task_args(aedt_backend="standalone")),
+        )
+        pooled = scheduler_task.build_task_payload(task_args(aedt_backend="pooled"))
+        self.assertEqual(pooled["aedt_backend"], "pooled")
+        self.assertNotEqual(pooled["dedupe_key"], legacy["dedupe_key"])
+
+        with self.assertRaisesRegex(ValueError, "standalone or pooled"):
+            scheduler_task.build_task_payload(task_args(aedt_backend="shared"))
+
     def test_post_scheduler_task_defaults_to_json_api(self) -> None:
         captured = {}
 

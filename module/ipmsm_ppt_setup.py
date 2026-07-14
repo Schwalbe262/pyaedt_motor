@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 import math
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Callable
 
 
 DEFAULT_CORE_MATERIAL_NAME = "27PNF1500_CustomCoreLoss"
@@ -1314,6 +1314,7 @@ def configure_ipmsm_from_ppt(
     clear_existing: bool = True,
     analyze: bool = False,
     cores: int = 4,
+    analysis_error_callback: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Run the full post-modeling setup flow from the practice deck."""
     spec = spec or IPMSMPPTSpec()
@@ -1363,6 +1364,21 @@ def configure_ipmsm_from_ppt(
         result["reports"] = create_ppt_reports(design, spec.setup_name)
 
     if analyze:
-        result["analysis"] = m2d.analyze(setup=spec.setup_name, cores=cores, use_auto_settings=False)
+        if analysis_error_callback is None:
+            result["analysis"] = m2d.analyze(
+                setup=spec.setup_name,
+                cores=cores,
+                use_auto_settings=False,
+            )
+        else:
+            try:
+                result["analysis"] = m2d.analyze(
+                    setup=spec.setup_name,
+                    cores=cores,
+                    use_auto_settings=False,
+                )
+            except Exception:
+                analysis_error_callback()
+                raise
 
     return result

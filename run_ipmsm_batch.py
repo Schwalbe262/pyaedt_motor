@@ -41,6 +41,61 @@ DEFAULT_MAX_CASES = 200
 DATASET_SCHEMA_VERSION = "ipmsm_v2"
 DEFAULT_MODEL_EXTENT = "full_360"
 DEFAULT_BETA_CONVENTION = "dq_current_advance_v2"
+DEFAULT_AEDT_BACKEND = "standalone"
+AEDT_BACKENDS = (DEFAULT_AEDT_BACKEND, "pooled")
+AEDT_BACKEND_ENV = "MFT_AEDT_BACKEND"
+AEDT_POOL_URL_ENV = "MFT_AEDT_SCHEDULER_URL"
+AEDT_LEASE_WAIT_ENV = "MFT_AEDT_LEASE_WAIT_SECONDS"
+AEDT_RELEASE_WAIT_ENV = "MFT_AEDT_RELEASE_WAIT_SECONDS"
+DEFAULT_AEDT_LEASE_WAIT_SECONDS = 1800
+DEFAULT_AEDT_RELEASE_WAIT_SECONDS = 300
+
+
+class PooledLeaseUnavailableError(RuntimeError):
+    """A pooled run could not obtain a project lease and must not fall back."""
+
+
+class PooledLeaseReleaseError(RuntimeError):
+    """A pooled lease did not return the validated project-close ACK."""
+
+
+def resolve_aedt_backend(
+    cli_backend: str | None,
+    environ: dict[str, str] | None = None,
+) -> str:
+    """Resolve CLI-over-env backend selection with standalone as the default."""
+    environment = os.environ if environ is None else environ
+    candidate = cli_backend if cli_backend is not None else environment.get(AEDT_BACKEND_ENV, "")
+    backend = str(candidate or "").strip().lower() or DEFAULT_AEDT_BACKEND
+    if backend not in AEDT_BACKENDS:
+        raise ValueError(f"{AEDT_BACKEND_ENV} / --aedt-backend must be standalone or pooled")
+    return backend
+
+
+def positive_env_seconds(environ: dict[str, str], name: str, default: int) -> int:
+    raw = str(environ.get(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def nonnegative_env_int(environ: dict[str, str], name: str) -> int:
+    raw = str(environ.get(name, "") or "").strip()
+    if not raw:
+        return 0
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a non-negative integer") from exc
+    if value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
 
 
 def safe_path_exists(path: Path) -> bool:
@@ -308,6 +363,7 @@ class RunnerOptions:
     model_extent: str = DEFAULT_MODEL_EXTENT
     beta_convention: str = DEFAULT_BETA_CONVENTION
     electrical_zero_deg: float = 0.0
+    aedt_backend: str = DEFAULT_AEDT_BACKEND
 
 
 class Simulation:
@@ -349,6 +405,19 @@ class Simulation:
         project_path.mkdir(parents=True, exist_ok=True)
         self.project = self.desktop.create_project(path=str(project_path), name=self.PROJECT_NAME)
         return self.project
+
+    def close_project(self) -> None:
+        if self.project is None:
+            return
+        close = getattr(self.project, "close", None)
+        if callable(close):
+            close()
+            return
+        odesktop = getattr(self.desktop, "odesktop", None)
+        close_project = getattr(odesktop, "CloseProject", None)
+        if not callable(close_project):
+            raise RuntimeError(f"Cannot close pooled AEDT project {self.PROJECT_NAME!r}")
+        close_project(self.PROJECT_NAME)
 
     def set_variable(self, design: Any) -> Any:
         from module.variable import set_variable
@@ -1911,6 +1980,47 @@ def safe_release_desktop(desktop: Any) -> None:
         logging.exception("Desktop release failed")
 
 
+def safe_close_pooled_project(simulation: Simulation | None) -> None:
+    if simulation is None or simulation.project is None:
+        return
+    try:
+        simulation.close_project()
+    except Exception:
+        logging.exception("Pooled project close failed for %s", simulation.PROJECT_NAME)
+
+
+def safe_release_pooled_lease(
+    lease: Any,
+    wait_seconds: int,
+    *,
+    require_released: bool,
+) -> str:
+    if lease is None:
+        return ""
+    try:
+        status = lease.release(wait_seconds=wait_seconds)
+    except Exception as exc:
+        logging.exception("Pooled AEDT lease release failed")
+        return f"{type(exc).__name__}: {exc}"
+    if not require_released:
+        return ""
+    if not isinstance(status, dict):
+        return f"invalid release response: {status!r}"
+    state = str(status.get("state") or getattr(lease, "state", "") or "").strip().lower()
+    if state != "released":
+        return f"expected released close ACK, got {state or '<blank>'}"
+    return ""
+
+
+def safe_report_pooled_solver_fault(lease: Any) -> None:
+    if lease is None:
+        return
+    try:
+        lease.report_fault("solver_timeout")
+    except Exception:
+        logging.exception("Pooled AEDT solver fault report failed")
+
+
 def cleanup_project_folder(project_path: Path, cleanup_linux: bool, success: bool) -> None:
     if os.name == "nt" or not cleanup_linux or not success:
         return
@@ -1933,8 +2043,14 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     start_dt = datetime.now()
     start = time.time()
     desktop = None
+    sim = None
+    lease = None
+    lease_granted = False
+    lease_release_wait_seconds = DEFAULT_AEDT_RELEASE_WAIT_SECONDS
     project_path = None
     success = False
+    aedt_backend = str(options.aedt_backend or "").strip().lower()
+    pooled_backend = aedt_backend == "pooled"
 
     row: dict[str, Any] = {
         "case_id": case_id,
@@ -1958,6 +2074,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         )
 
     try:
+        if aedt_backend not in AEDT_BACKENDS:
+            raise ValueError("aedt_backend must be standalone or pooled")
         spec = build_spec(
             case,
             default_symmetry_factor=options.symmetry_factor,
@@ -2043,43 +2161,101 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         except Exception:
             pass
 
-        try:
-            desktop = pyDesktop(
-                version=None,
-                non_graphical=options.non_graphical,
-                close_on_exit=True,
-                new_desktop=True,
-            )
-            row["input_aedt_version"] = detected_aedt_version(desktop, aedt_version)
-        except AttributeError as exc:
-            if "EnableAutoSave" in str(exc):
-                raise RuntimeError(
-                    "AEDT desktop startup failed before project creation; "
-                    "pyDesktop did not expose a usable desktop instance."
+        if pooled_backend:
+            sim = Simulation(desktop=None, cores=options.cores)
+            sim.fixed_geometry = fixed_geometry
+            sim.create_simulation_name(simulation_dir)
+            try:
+                scheduler_url = str(os.environ.get(AEDT_POOL_URL_ENV, "") or "").strip()
+                if not scheduler_url:
+                    raise ValueError(f"{AEDT_POOL_URL_ENV} is required for pooled AEDT")
+                lease_wait_seconds = positive_env_seconds(
+                    os.environ,
+                    AEDT_LEASE_WAIT_ENV,
+                    DEFAULT_AEDT_LEASE_WAIT_SECONDS,
+                )
+                lease_release_wait_seconds = positive_env_seconds(
+                    os.environ,
+                    AEDT_RELEASE_WAIT_ENV,
+                    DEFAULT_AEDT_RELEASE_WAIT_SECONDS,
+                )
+                task_id = nonnegative_env_int(os.environ, "SLURM_SCHED_TASK_ID")
+                node_name = str(
+                    os.environ.get("SLURMD_NODENAME")
+                    or os.environ.get("HOSTNAME")
+                    or os.environ.get("COMPUTERNAME")
+                    or ""
+                ).strip().split(".", 1)[0]
+                from module.aedt_attach_client import acquire_project_lease
+
+                lease = acquire_project_lease(
+                    scheduler_url,
+                    sim.PROJECT_NAME,
+                    # The validated client generates a unique key when blank.
+                    # The live task script exports no pool allocation database ID;
+                    # SLURM_JOB_ID is a different identifier, so leave placement
+                    # unconstrained instead of pinning the lease incorrectly.
+                    request_key="",
+                    task_id=task_id,
+                    allocation_id=0,
+                    node_name=node_name,
+                )
+                lease.wait_until_leased(timeout_seconds=lease_wait_seconds)
+                lease_granted = True
+            except Exception as exc:
+                raise PooledLeaseUnavailableError(
+                    f"pooled AEDT lease unavailable: {type(exc).__name__}: {exc}"
                 ) from exc
-            raise
-        sim = Simulation(desktop=desktop, cores=options.cores)
-        sim.fixed_geometry = fixed_geometry
-        sim.create_simulation_name(simulation_dir)
+            desktop = lease.connect_desktop(
+                non_graphical=options.non_graphical,
+                desktop_factory=pyDesktop,
+            )
+            sim.desktop = desktop
+            row["input_aedt_version"] = detected_aedt_version(desktop, aedt_version)
+        else:
+            try:
+                desktop = pyDesktop(
+                    version=None,
+                    non_graphical=options.non_graphical,
+                    close_on_exit=True,
+                    new_desktop=True,
+                )
+                row["input_aedt_version"] = detected_aedt_version(desktop, aedt_version)
+            except AttributeError as exc:
+                if "EnableAutoSave" in str(exc):
+                    raise RuntimeError(
+                        "AEDT desktop startup failed before project creation; "
+                        "pyDesktop did not expose a usable desktop instance."
+                    ) from exc
+                raise
+            sim = Simulation(desktop=desktop, cores=options.cores)
+            sim.fixed_geometry = fixed_geometry
+            sim.create_simulation_name(simulation_dir)
         project = sim.create_project(simulation_dir)
         project_path = Path(project.path)
+        if pooled_backend:
+            lease.bind_project_name(sim.PROJECT_NAME)
 
         design, input_df, object_groups = create_ipmsm_design(project, sim)
         row.update(prefixed_row(dataframe_first_row(input_df), "input_"))
 
-        setup_result = configure_ipmsm_from_ppt(
-            design,
-            object_groups=object_groups,
-            spec=spec,
-            operation=operation,
-            use_periodic_boundary=use_periodic_boundary,
-            create_missing_region=True,
-            create_missing_band=True,
-            create_reports=options.analyze,
-            clear_existing=True,
-            analyze=options.analyze,
-            cores=options.cores,
-        )
+        configure_kwargs: dict[str, Any] = {
+            "object_groups": object_groups,
+            "spec": spec,
+            "operation": operation,
+            "use_periodic_boundary": use_periodic_boundary,
+            "create_missing_region": True,
+            "create_missing_band": True,
+            "create_reports": options.analyze,
+            "clear_existing": True,
+            "analyze": options.analyze,
+            "cores": options.cores,
+        }
+        if pooled_backend and lease_granted and options.analyze:
+            configure_kwargs["analysis_error_callback"] = lambda: safe_report_pooled_solver_fault(
+                lease
+            )
+        setup_result = configure_ipmsm_from_ppt(design, **configure_kwargs)
         analysis_returned_false = options.analyze and setup_result.get("analysis") is False
         row.update(
             {
@@ -2097,6 +2273,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             logging.exception("Project save failed for %s", sim.PROJECT_NAME)
 
         if analysis_returned_false:
+            if pooled_backend and lease_granted:
+                safe_report_pooled_solver_fault(lease)
             raise RuntimeError(
                 f"AEDT analysis returned False; validation={setup_result.get('validation')}"
             )
@@ -2142,8 +2320,31 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
             }
         )
+        if isinstance(exc, PooledLeaseUnavailableError):
+            row["error_class"] = "pooled_lease_unavailable"
     finally:
-        safe_release_desktop(desktop)
+        if pooled_backend:
+            if lease_granted:
+                safe_close_pooled_project(sim)
+            release_error = safe_release_pooled_lease(
+                lease,
+                lease_release_wait_seconds,
+                require_released=lease_granted,
+            )
+            if release_error:
+                row["pooled_release_error"] = release_error
+                if row.get("status") == "ok":
+                    success = False
+                    row.update(
+                        {
+                            "status": "failed",
+                            "error": repr(PooledLeaseReleaseError(release_error)),
+                            "error_class": "pooled_release_failed",
+                            "finished_at": datetime.now().isoformat(timespec="seconds"),
+                        }
+                    )
+        else:
+            safe_release_desktop(desktop)
         if project_path is not None:
             cleanup_project_folder(project_path, options.cleanup_linux, success)
         append_result_row(result_csv, row)
@@ -2182,6 +2383,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--graphical", dest="non_graphical", action="store_false", help="Launch AEDT with GUI.")
     parser.add_argument("--cleanup-linux", action="store_true", default=(os.name != "nt"), help="Delete successful project folders on Linux.")
     parser.add_argument("--keep-projects", dest="cleanup_linux", action="store_false", help="Keep project folders even on Linux.")
+    parser.add_argument(
+        "--aedt-backend",
+        choices=AEDT_BACKENDS,
+        default=None,
+        help=f"AEDT lifecycle backend; defaults to ${AEDT_BACKEND_ENV} then standalone.",
+    )
     return parser.parse_args()
 
 
@@ -2191,6 +2398,7 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(processName)s %(message)s",
     )
     args = parse_args()
+    aedt_backend = resolve_aedt_backend(args.aedt_backend)
     cases = load_cases(args.cases, args.count)
     validate_case_plan(
         cases,
@@ -2215,12 +2423,13 @@ def main() -> int:
         model_extent=args.model_extent,
         beta_convention=args.beta_convention,
         electrical_zero_deg=args.electrical_zero_deg,
+        aedt_backend=aedt_backend,
     )
     payloads = [(case, asdict(options)) for case in cases]
 
     logging.info(
         "Starting %d case(s), workers=%d, analyze=%s, model_extent=%s, symmetry_factor=%s, "
-        "periodic_boundary=%s, beta_convention=%s",
+        "periodic_boundary=%s, beta_convention=%s, aedt_backend=%s",
         len(payloads),
         args.workers,
         args.analyze,
@@ -2228,6 +2437,7 @@ def main() -> int:
         args.symmetry_factor,
         args.periodic_boundary,
         args.beta_convention,
+        aedt_backend,
     )
     if args.workers <= 1:
         for payload in payloads:
