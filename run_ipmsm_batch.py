@@ -1339,7 +1339,15 @@ def read_report_csv(path: str) -> Any:
 
     with open(path, "r", encoding="utf-8-sig", errors="ignore") as fp:
         header = fp.readline()
-    delimiter = ";" if header.count(";") > header.count(",") else ","
+        first_data_row = next((line for line in fp if line.strip()), "")
+
+    # AEDT inductance headers contain expressions such as
+    # ``L(PhaseA,PhaseB)``.  Counting only the header can therefore tie the
+    # number of embedded commas with the real semicolon delimiters and parse
+    # every matrix column incorrectly.  Numeric data rows do not contain those
+    # expression commas, so prefer the first non-empty data row as the probe.
+    probe = first_data_row or header
+    delimiter = ";" if probe.count(";") > probe.count(",") else ","
     return pd.read_csv(path, sep=delimiter)
 
 
