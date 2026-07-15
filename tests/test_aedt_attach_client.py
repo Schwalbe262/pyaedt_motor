@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from module.aedt_attach_client import AedtProjectLease
 
@@ -15,7 +17,7 @@ class AedtAttachClientTests(unittest.TestCase):
 
         self.assertEqual(
             hashlib.sha256(source_body.encode("utf-8")).hexdigest(),
-            "e570b9b3037d2fdfafb0f1559c4a467295eeea029aa013db24dc1755728e7c82",
+            "66bb46101358b1daf8c2440ff8e4240eec5c6cbb5f7b969cad9fba25dbb63e4d",
         )
 
     def test_connect_desktop_uses_nonowning_remote_connection(self) -> None:
@@ -24,25 +26,42 @@ class AedtAttachClientTests(unittest.TestCase):
         class FakeHttp:
             def request(self, method, path, payload=None, **_kwargs):
                 calls.append(("http", (method, path, payload)))
-                return {"state": "active", "endpoint": "n114:50051"}
+                return {
+                    "state": "attaching",
+                    "endpoint": "n114:50051",
+                    "session_key": "session-7",
+                    "session_process_id": "7001",
+                    "expected_aedt_version": "2025.2",
+                }
 
         def desktop_factory(**kwargs):
             calls.append(("desktop", kwargs))
-            return object()
+            return SimpleNamespace(
+                port=50051,
+                aedt_process_id="7001",
+                odesktop=SimpleNamespace(GetVersion=lambda: "2025.2.0"),
+            )
 
         lease = AedtProjectLease(
             http=FakeHttp(),
             lease_id=7,
             client_token="token",
             project_name="simulation7",
-            state="leased",
+            state="attaching",
             endpoint="n114:50051",
+            protocol_version=2,
         )
+        lease.start_heartbeat = lambda **_kwargs: None
         try:
-            desktop = lease.connect_desktop(
-                non_graphical=False,
-                desktop_factory=desktop_factory,
-            )
+            with patch.object(
+                AedtProjectLease,
+                "_enable_pyaedt_multi_desktop",
+            ):
+                desktop = lease.connect_desktop(
+                    non_graphical=False,
+                    desktop_factory=desktop_factory,
+                    endpoint_probe=lambda _machine, _port: True,
+                )
         finally:
             lease.stop_heartbeat()
 
@@ -56,6 +75,7 @@ class AedtAttachClientTests(unittest.TestCase):
                 "close_on_exit": False,
                 "machine": "n114",
                 "port": 50051,
+                "version": "2025.2",
             },
         )
 

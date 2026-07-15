@@ -62,8 +62,8 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         self.assertEqual(args.aedt_backend, "standalone")
         self.assertEqual(args.aedt_pool_url, "http://172.16.10.37:18790")
         self.assertEqual(
-            args.aedt_pool_bootstrap_token_file,
-            "~/slurm_scheduler/aedt_pool_bootstrap",
+            args.aedt_pool_client_token_file,
+            "~/slurm_scheduler/aedt_pool_client",
         )
 
     def test_campaign_policy_cannot_exceed_cap_or_change_fea_environment(self) -> None:
@@ -129,7 +129,21 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
             pooled.payload["env_setup"],
         )
         self.assertIn(
-            'export SLURM_AEDT_POOL_BOOTSTRAP_TOKEN_FILE="$HOME"/slurm_scheduler/aedt_pool_bootstrap',
+            'export SLURM_AEDT_POOL_CLIENT_TOKEN_FILE="$HOME"/slurm_scheduler/aedt_pool_client',
+            pooled.payload["env_setup"],
+        )
+        self.assertNotIn(
+            "SLURM_AEDT_POOL_BOOTSTRAP_TOKEN_FILE",
+            pooled.payload["env_setup"],
+        )
+        self.assertIn(
+            'export MFT_AEDT_WORKSPACE_PATH="/gpfs/tmp_cpu2/mft_pool/'
+            'ipmsm-${SLURM_SCHED_TASK_ID}"',
+            pooled.payload["env_setup"],
+        )
+        self.assertIn(
+            "export MFT_AEDT_SESSION_PROFILE="
+            + campaign.shlex.quote(campaign.AEDT_SESSION_PROFILE_JSON),
             pooled.payload["env_setup"],
         )
         self.assertNotIn("MFT_AEDT_SCHEDULER_URL", standalone.payload["env_setup"])

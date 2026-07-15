@@ -1313,7 +1313,7 @@ def configure_ipmsm_from_ppt(
     create_reports: bool = True,
     clear_existing: bool = True,
     analyze: bool = False,
-    cores: int = 4,
+    cores: int | None = 4,
     analysis_error_callback: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Run the full post-modeling setup flow from the practice deck."""

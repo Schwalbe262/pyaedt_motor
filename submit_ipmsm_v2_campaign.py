@@ -40,7 +40,26 @@ DEFAULT_SCHEDULER_TIMEOUT_SECONDS = 60.0
 DEFAULT_TASK_TIMEOUT_SECONDS = 43_200
 MIN_TASK_TIMEOUT_SECONDS = 43_200
 DEFAULT_AEDT_POOL_URL = "http://172.16.10.37:18790"
-DEFAULT_AEDT_POOL_BOOTSTRAP_TOKEN_FILE = "~/slurm_scheduler/aedt_pool_bootstrap"
+DEFAULT_AEDT_POOL_CLIENT_TOKEN_FILE = "~/slurm_scheduler/aedt_pool_client"
+AEDT_SESSION_PROFILE_JSON = json.dumps(
+    {
+        "profile_version": 2,
+        "aedt_version": "2025.2",
+        "python_environment": "pyaedt2026v1",
+        "pyaedt_version": "0.22.0",
+        "filesystem": "gpfs-shared-v1",
+        "desktop_dso": {
+            "config_name": "pyaedt_config",
+            "designs": {
+                "Icepak": {"cores": 4, "tasks": 1, "gpus": 0, "use_auto_settings": False},
+                "Maxwell 2D": {"cores": 4, "tasks": 1, "gpus": 0, "use_auto_settings": True},
+                "Maxwell 3D": {"cores": 4, "tasks": 1, "gpus": 0, "use_auto_settings": True},
+            },
+        },
+    },
+    sort_keys=True,
+    separators=(",", ":"),
+)
 STDOUT_TASK_PREVIEW = 10
 SKIP_EXISTING_STATUSES = frozenset({"queued", "attaching", "running", "completed"})
 RETRYABLE_TERMINAL_STATUSES = frozenset({"failed", "cancelled"})
@@ -134,16 +153,37 @@ def shell_expandable_home_path(path: str) -> str:
 
 def pooled_aedt_env_setup(args: argparse.Namespace) -> str:
     scheduler_url = str(args.aedt_pool_url or "").strip()
-    token_file = str(args.aedt_pool_bootstrap_token_file or "").strip()
+    token_file = str(args.aedt_pool_client_token_file or "").strip()
     if not scheduler_url:
         raise RuntimeError("--aedt-pool-url must not be blank for pooled AEDT")
     if not token_file:
-        raise RuntimeError("--aedt-pool-bootstrap-token-file must not be blank for pooled AEDT")
+        raise RuntimeError(
+            "--aedt-pool-client-token-file must not be blank for pooled AEDT"
+        )
+    isolation_policy = str(
+        getattr(args, "aedt_isolation_policy", "family") or ""
+    ).strip().lower()
+    if isolation_policy not in {"family", "shared_if_compatible"}:
+        raise RuntimeError(
+            "--aedt-isolation-policy must be family or shared_if_compatible"
+        )
     return "\n".join(
         (
+            # Project files are created by a session host that can run under
+            # another cluster account. Keep every task-created path traversable
+            # and writable by that host account.
+            "umask 000",
             f"export MFT_AEDT_SCHEDULER_URL={shlex.quote(scheduler_url)}",
-            "export SLURM_AEDT_POOL_BOOTSTRAP_TOKEN_FILE="
+            "export SLURM_AEDT_POOL_CLIENT_TOKEN_FILE="
             + shell_expandable_home_path(token_file),
+            "export MFT_AEDT_POOL_WORKSPACE_ROOT=/gpfs/tmp_cpu2/mft_pool",
+            'export MFT_AEDT_WORKSPACE_PATH="/gpfs/tmp_cpu2/mft_pool/'
+            'ipmsm-${SLURM_SCHED_TASK_ID}"',
+            "export MFT_AEDT_SESSION_VERSION=2025.2",
+            "export MFT_AEDT_SESSION_PROFILE="
+            + shlex.quote(AEDT_SESSION_PROFILE_JSON),
+            "export MFT_AEDT_ISOLATION_POLICY="
+            + shlex.quote(isolation_policy),
         )
     )
 
@@ -492,8 +532,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--aedt-backend", choices=("standalone", "pooled"), default="standalone")
     parser.add_argument("--aedt-pool-url", default=DEFAULT_AEDT_POOL_URL)
     parser.add_argument(
+        "--aedt-pool-client-token-file",
         "--aedt-pool-bootstrap-token-file",
-        default=DEFAULT_AEDT_POOL_BOOTSTRAP_TOKEN_FILE,
+        dest="aedt_pool_client_token_file",
+        default=DEFAULT_AEDT_POOL_CLIENT_TOKEN_FILE,
+        help=(
+            "path to the lease-create-only credential; the bootstrap option "
+            "name is retained as a deprecated alias"
+        ),
+    )
+    parser.add_argument(
+        "--aedt-isolation-policy",
+        choices=("family", "shared_if_compatible"),
+        default="family",
     )
     parser.add_argument("--timeout", type=float, default=DEFAULT_SCHEDULER_TIMEOUT_SECONDS)
     parser.add_argument("--write-manifest", type=Path)

@@ -34,6 +34,7 @@ import shutil
 import sys
 import time
 from typing import Any
+import uuid
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -47,8 +48,15 @@ AEDT_BACKEND_ENV = "MFT_AEDT_BACKEND"
 AEDT_POOL_URL_ENV = "MFT_AEDT_SCHEDULER_URL"
 AEDT_LEASE_WAIT_ENV = "MFT_AEDT_LEASE_WAIT_SECONDS"
 AEDT_RELEASE_WAIT_ENV = "MFT_AEDT_RELEASE_WAIT_SECONDS"
+AEDT_POOL_WORKSPACE_ROOT_ENV = "MFT_AEDT_POOL_WORKSPACE_ROOT"
+AEDT_POOL_WORKSPACE_PATH_ENV = "MFT_AEDT_WORKSPACE_PATH"
+AEDT_POOL_ISOLATION_POLICY_ENV = "MFT_AEDT_ISOLATION_POLICY"
+AEDT_POOL_SESSION_VERSION_ENV = "MFT_AEDT_SESSION_VERSION"
 DEFAULT_AEDT_LEASE_WAIT_SECONDS = 1800
 DEFAULT_AEDT_RELEASE_WAIT_SECONDS = 300
+DEFAULT_AEDT_POOL_WORKSPACE_ROOT = "/gpfs/tmp_cpu2/mft_pool"
+DEFAULT_AEDT_POOL_SESSION_VERSION = "2025.2"
+AEDT_POOL_HPC_CORES = 4
 
 
 class PooledLeaseUnavailableError(RuntimeError):
@@ -96,6 +104,108 @@ def nonnegative_env_int(environ: dict[str, str], name: str) -> int:
     if value < 0:
         raise ValueError(f"{name} must be a non-negative integer")
     return value
+
+
+def pooled_isolation_policy(environ: dict[str, str]) -> str:
+    policy = str(environ.get(AEDT_POOL_ISOLATION_POLICY_ENV, "") or "").strip().lower()
+    policy = policy or "family"
+    if policy not in {"family", "shared_if_compatible"}:
+        raise ValueError(
+            f"{AEDT_POOL_ISOLATION_POLICY_ENV} must be family or shared_if_compatible"
+        )
+    return policy
+
+
+def pooled_session_profile(environ: dict[str, str]) -> dict[str, Any]:
+    """Return the Desktop-global contract shared by MFT and IPMSM clients."""
+    version = str(
+        environ.get(AEDT_POOL_SESSION_VERSION_ENV, "")
+        or DEFAULT_AEDT_POOL_SESSION_VERSION
+    ).strip()
+    if not version:
+        raise ValueError(f"{AEDT_POOL_SESSION_VERSION_ENV} must not be blank")
+    return {
+        "profile_version": 2,
+        "aedt_version": version,
+        "python_environment": "pyaedt2026v1",
+        "pyaedt_version": "0.22.0",
+        "filesystem": "gpfs-shared-v1",
+        "desktop_dso": {
+            "config_name": "pyaedt_config",
+            # Keep this byte-for-byte compatible with the MFT client. Icepak
+            # is unused by IPMSM itself but is host-owned for mixed sessions.
+            "designs": {
+                "Icepak": {
+                    "cores": AEDT_POOL_HPC_CORES,
+                    "tasks": 1,
+                    "gpus": 0,
+                    "use_auto_settings": False,
+                },
+                "Maxwell 2D": {
+                    "cores": AEDT_POOL_HPC_CORES,
+                    "tasks": 1,
+                    "gpus": 0,
+                    "use_auto_settings": True,
+                },
+                "Maxwell 3D": {
+                    "cores": AEDT_POOL_HPC_CORES,
+                    "tasks": 1,
+                    "gpus": 0,
+                    "use_auto_settings": True,
+                },
+            },
+        },
+    }
+
+
+def prepare_pooled_workspace(
+    simulation_dir: Path,
+    *,
+    task_id: int,
+    case_id: str,
+    environ: dict[str, str],
+) -> Path:
+    """Create a deterministic cross-account directory for the AEDT host."""
+    configured_path = str(
+        environ.get(AEDT_POOL_WORKSPACE_PATH_ENV, "") or ""
+    ).strip()
+    if configured_path:
+        workspace = Path(configured_path).expanduser()
+        if not workspace.is_absolute():
+            raise ValueError(
+                f"{AEDT_POOL_WORKSPACE_PATH_ENV} must be an absolute path"
+            )
+        workspace = workspace.resolve()
+        workspace.mkdir(parents=True, exist_ok=True, mode=0o777)
+        try:
+            workspace.chmod(0o777)
+        except OSError as exc:
+            raise RuntimeError(
+                f"pooled AEDT workspace is not cross-account writable: {workspace}"
+            ) from exc
+        return workspace
+    configured_root = str(environ.get(AEDT_POOL_WORKSPACE_ROOT_ENV, "") or "").strip()
+    if configured_root:
+        root = Path(configured_root).expanduser()
+    elif os.name == "nt":
+        # Local tests/development have no GPFS mount.
+        root = simulation_dir.expanduser().resolve()
+    else:
+        root = Path(DEFAULT_AEDT_POOL_WORKSPACE_ROOT)
+    case_digest = hashlib.sha256(case_id.encode("utf-8")).hexdigest()[:16]
+    leaf = f"ipmsm-{task_id or os.getpid()}-{case_digest}"
+    workspace = (root / leaf).resolve()
+    root_resolved = root.resolve()
+    if workspace.parent != root_resolved:
+        raise ValueError("pooled AEDT workspace escaped its configured root")
+    workspace.mkdir(parents=True, exist_ok=True, mode=0o777)
+    try:
+        workspace.chmod(0o777)
+    except OSError as exc:
+        raise RuntimeError(
+            f"pooled AEDT workspace is not cross-account writable: {workspace}"
+        ) from exc
+    return workspace
 
 
 def safe_path_exists(path: Path) -> bool:
@@ -396,6 +506,27 @@ class Simulation:
             file.write(str(current + 1))
             file.flush()
             os.fsync(file.fileno())
+
+    def create_pooled_pending_name(self, task_id: int) -> None:
+        """Create a globally namespaced placeholder without a local counter.
+
+        ``simulation_num.txt`` is scoped to one deployed repository/account and
+        therefore cannot provide uniqueness inside a cross-account AEDT pool.
+        The final name is rebound after the scheduler returns the lease id.
+        """
+        owner = int(task_id) if int(task_id) > 0 else os.getpid()
+        self.PROJECT_NAME = f"ipmsm-pending-{owner}-{uuid.uuid4().hex[:12]}"
+
+    def bind_pooled_lease_identity(self, task_id: int, lease_id: int) -> str:
+        """Bind the project to one session-safe, globally unique lease name."""
+        owner = int(task_id) if int(task_id) > 0 else os.getpid()
+        lease_value = int(lease_id)
+        if lease_value <= 0:
+            raise ValueError("pooled AEDT lease id must be positive")
+        self.PROJECT_NAME = (
+            f"ipmsm-{owner}-{lease_value}-{uuid.uuid4().hex[:12]}"
+        )
+        return self.PROJECT_NAME
 
     def create_project(self, simulation_dir: Path) -> Any:
         if self.desktop is None:
@@ -2019,6 +2150,20 @@ def safe_report_pooled_solver_fault(lease: Any) -> None:
         lease.report_fault("solver_timeout")
     except Exception:
         logging.exception("Pooled AEDT solver fault report failed")
+    finally:
+        # Fault settlement is now host-owned. Stop client keepalives without
+        # sending a normal close/release that could race a native solve whose
+        # state is unknown.
+        for method_name in ("stop_heartbeat", "stop_process_keepalive"):
+            method = getattr(lease, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:
+                    logging.exception(
+                        "Pooled AEDT lease %s failed after solver fault",
+                        method_name,
+                    )
 
 
 def cleanup_project_folder(project_path: Path, cleanup_linux: bool, success: bool) -> None:
@@ -2046,6 +2191,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     sim = None
     lease = None
     lease_granted = False
+    pooled_solver_uncertain = False
     lease_release_wait_seconds = DEFAULT_AEDT_RELEASE_WAIT_SECONDS
     project_path = None
     success = False
@@ -2164,8 +2310,14 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         if pooled_backend:
             sim = Simulation(desktop=None, cores=options.cores)
             sim.fixed_geometry = fixed_geometry
-            sim.create_simulation_name(simulation_dir)
+            task_id = nonnegative_env_int(os.environ, "SLURM_SCHED_TASK_ID")
+            sim.create_pooled_pending_name(task_id)
             try:
+                if int(options.cores) != AEDT_POOL_HPC_CORES:
+                    raise ValueError(
+                        "pooled AEDT requires exactly "
+                        f"{AEDT_POOL_HPC_CORES} cores to match the host DSO profile"
+                    )
                 scheduler_url = str(os.environ.get(AEDT_POOL_URL_ENV, "") or "").strip()
                 if not scheduler_url:
                     raise ValueError(f"{AEDT_POOL_URL_ENV} is required for pooled AEDT")
@@ -2179,29 +2331,57 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                     AEDT_RELEASE_WAIT_ENV,
                     DEFAULT_AEDT_RELEASE_WAIT_SECONDS,
                 )
-                task_id = nonnegative_env_int(os.environ, "SLURM_SCHED_TASK_ID")
-                node_name = str(
-                    os.environ.get("SLURMD_NODENAME")
-                    or os.environ.get("HOSTNAME")
-                    or os.environ.get("COMPUTERNAME")
-                    or ""
-                ).strip().split(".", 1)[0]
                 from module.aedt_attach_client import acquire_project_lease
+
+                requested_workspace = prepare_pooled_workspace(
+                    Path(options.simulation_dir),
+                    task_id=task_id,
+                    case_id=case_id,
+                    environ=os.environ,
+                )
 
                 lease = acquire_project_lease(
                     scheduler_url,
                     sim.PROJECT_NAME,
-                    # The validated client generates a unique key when blank.
-                    # The live task script exports no pool allocation database ID;
-                    # SLURM_JOB_ID is a different identifier, so leave placement
-                    # unconstrained instead of pinning the lease incorrectly.
-                    request_key="",
+                    # Stable for this simulation intent.  Transport retries must
+                    # not create independent queued leases that can be granted
+                    # after this worker has already abandoned them.
+                    request_key=(
+                        f"ipmsm:{task_id or os.getpid()}:"
+                        f"{hashlib.sha256(case_id.encode('utf-8')).hexdigest()[:16]}"
+                    ),
                     task_id=task_id,
                     allocation_id=0,
-                    node_name=node_name,
+                    # The central pool owns dedicated host allocations.  A
+                    # normal simulation task's node is provenance, not an
+                    # affinity constraint for its pooled Desktop.
+                    node_name="",
+                    workload_family="ipmsm",
+                    session_profile=pooled_session_profile(os.environ),
+                    project_namespace="pyaedt_motor",
+                    isolation_policy=pooled_isolation_policy(os.environ),
+                    workspace_path=str(requested_workspace),
+                    protocol_version=2,
+                    admission_timeout_seconds=lease_wait_seconds,
                 )
                 lease.wait_until_leased(timeout_seconds=lease_wait_seconds)
                 lease_granted = True
+                leased_workspace = str(
+                    getattr(lease, "workspace_path", "") or ""
+                ).strip()
+                if not leased_workspace:
+                    raise RuntimeError("pooled AEDT lease did not preserve workspace_path")
+                if Path(leased_workspace).resolve() != requested_workspace:
+                    raise RuntimeError(
+                        "pooled AEDT lease workspace readback mismatch: "
+                        f"requested={requested_workspace}, actual={leased_workspace}"
+                    )
+                simulation_dir = requested_workspace
+                sim.bind_pooled_lease_identity(
+                    task_id,
+                    int(getattr(lease, "lease_id", 0) or 0),
+                )
+                lease.bind_project_name(sim.PROJECT_NAME)
             except Exception as exc:
                 raise PooledLeaseUnavailableError(
                     f"pooled AEDT lease unavailable: {type(exc).__name__}: {exc}"
@@ -2234,7 +2414,12 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         project = sim.create_project(simulation_dir)
         project_path = Path(project.path)
         if pooled_backend:
-            lease.bind_project_name(sim.PROJECT_NAME)
+            activation = lease.activate(project_name=sim.PROJECT_NAME)
+            if str(activation.get("state") or "") != "active":
+                raise RuntimeError(
+                    "pooled AEDT lease activation was not acknowledged: "
+                    f"state={activation.get('state')!r}"
+                )
 
         design, input_df, object_groups = create_ipmsm_design(project, sim)
         row.update(prefixed_row(dataframe_first_row(input_df), "input_"))
@@ -2249,11 +2434,19 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             "create_reports": options.analyze,
             "clear_existing": True,
             "analyze": options.analyze,
-            "cores": options.cores,
+            # Passing ``cores=`` asks PyAEDT to mutate and later restore a
+            # Desktop-global DSO registry entry. The pooled session host owns
+            # the immutable profile, so None deliberately reuses that default.
+            "cores": None if pooled_backend else options.cores,
         }
         if pooled_backend and lease_granted and options.analyze:
-            configure_kwargs["analysis_error_callback"] = lambda: safe_report_pooled_solver_fault(
-                lease
+            def report_uncertain_pooled_solver() -> None:
+                nonlocal pooled_solver_uncertain
+                pooled_solver_uncertain = True
+                safe_report_pooled_solver_fault(lease)
+
+            configure_kwargs["analysis_error_callback"] = (
+                report_uncertain_pooled_solver
             )
         setup_result = configure_ipmsm_from_ppt(design, **configure_kwargs)
         analysis_returned_false = options.analyze and setup_result.get("analysis") is False
@@ -2274,7 +2467,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
 
         if analysis_returned_false:
             if pooled_backend and lease_granted:
-                safe_report_pooled_solver_fault(lease)
+                report_uncertain_pooled_solver()
             raise RuntimeError(
                 f"AEDT analysis returned False; validation={setup_result.get('validation')}"
             )
@@ -2324,13 +2517,17 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             row["error_class"] = "pooled_lease_unavailable"
     finally:
         if pooled_backend:
-            if lease_granted:
-                safe_close_pooled_project(sim)
-            release_error = safe_release_pooled_lease(
-                lease,
-                lease_release_wait_seconds,
-                require_released=lease_granted,
-            )
+            release_error = ""
+            if pooled_solver_uncertain:
+                row["pooled_release_suppressed"] = "solver_state_uncertain"
+            else:
+                if lease_granted:
+                    safe_close_pooled_project(sim)
+                release_error = safe_release_pooled_lease(
+                    lease,
+                    lease_release_wait_seconds,
+                    require_released=lease_granted,
+                )
             if release_error:
                 row["pooled_release_error"] = release_error
                 if row.get("status") == "ok":

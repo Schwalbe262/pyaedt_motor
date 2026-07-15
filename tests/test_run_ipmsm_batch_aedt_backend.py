@@ -48,9 +48,11 @@ class FakeLease:
         release_error: Exception | None = None,
     ) -> None:
         self.events = events
+        self.lease_id = 987
         self.wait_error = wait_error
         self.release_state = release_state
         self.release_error = release_error
+        self.workspace_path = ""
 
     def wait_until_leased(self, *, timeout_seconds: int) -> dict[str, object]:
         self.events.append(("wait", timeout_seconds))
@@ -70,7 +72,11 @@ class FakeLease:
 
     def bind_project_name(self, project_name: str) -> dict[str, object]:
         self.events.append(("bind", project_name))
-        return {"state": "active"}
+        return {"state": "attaching", "project_name": project_name}
+
+    def activate(self, *, project_name: str = "") -> dict[str, object]:
+        self.events.append(("activate", project_name))
+        return {"state": "active", "project_name": project_name}
 
     def report_fault(self, fault_kind: str) -> dict[str, object]:
         self.events.append(("fault", fault_kind))
@@ -118,6 +124,20 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
             "pooled",
         )
 
+    def test_explicit_scheduler_workspace_contract_is_used_exactly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = (Path(tmp) / "ipmsm-321").resolve()
+            actual = runner.prepare_pooled_workspace(
+                Path(tmp) / "fallback",
+                task_id=321,
+                case_id="case-001",
+                environ={
+                    runner.AEDT_POOL_WORKSPACE_PATH_ENV: str(expected),
+                },
+            )
+            self.assertEqual(actual, expected)
+            self.assertTrue(actual.is_dir())
+
     def _run_case(
         self,
         *,
@@ -151,7 +171,7 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
             return object(), None, {}
 
         def configure(*_args: object, **_kwargs: object) -> dict[str, object]:
-            events.append(("configure", None))
+            events.append(("configure", _kwargs))
             if configure_error is not None:
                 callback = _kwargs.get("analysis_error_callback")
                 if configure_error_is_solver and callable(callback):
@@ -171,7 +191,7 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
                 cleanup_linux=False,
                 symmetry_factor=1,
                 use_periodic_boundary=False,
-                cores=1,
+                cores=4,
                 aedt_backend=backend,
             )
             environment = {
@@ -188,6 +208,7 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
                     raise acquire_error
                 if lease is None:
                     raise AssertionError("pooled acquire was not expected")
+                lease.workspace_path = str(kwargs.get("workspace_path") or "")
                 return lease
 
             with mock.patch.object(runner, "BASE_DIR", base_dir), mock.patch.dict(
@@ -237,21 +258,39 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
         self.assertEqual(row["status"], "ok")
         acquire_args, acquire_kwargs = next(value for name, value in events if name == "acquire")
         self.assertEqual(acquire_args[0], "http://172.16.10.37:18790")
-        self.assertEqual(acquire_kwargs["request_key"], "")
+        self.assertRegex(
+            acquire_kwargs["request_key"],
+            r"^ipmsm:321:[0-9a-f]{16}$",
+        )
         self.assertEqual(acquire_kwargs["task_id"], 321)
         self.assertEqual(acquire_kwargs["allocation_id"], 0)
-        self.assertEqual(acquire_kwargs["node_name"], "n114")
-        project_name = acquire_args[1]
-        self.assertEqual(next(value for name, value in events if name == "bind"), project_name)
+        self.assertEqual(acquire_kwargs["node_name"], "")
+        self.assertEqual(acquire_kwargs["workload_family"], "ipmsm")
+        self.assertEqual(acquire_kwargs["project_namespace"], "pyaedt_motor")
+        self.assertEqual(acquire_kwargs["isolation_policy"], "family")
+        self.assertEqual(acquire_kwargs["protocol_version"], 2)
+        self.assertEqual(acquire_kwargs["admission_timeout_seconds"], 41)
+        self.assertEqual(
+            acquire_kwargs["session_profile"],
+            runner.pooled_session_profile(os.environ),
+        )
+        self.assertTrue(Path(acquire_kwargs["workspace_path"]).is_absolute())
+        pending_name = acquire_args[1]
+        self.assertRegex(pending_name, r"^ipmsm-pending-321-[0-9a-f]{12}$")
+        project_name = next(value for name, value in events if name == "bind")
+        self.assertRegex(project_name, r"^ipmsm-321-987-[0-9a-f]{12}$")
         names = [name for name, _value in events]
-        self.assertLess(names.index("wait"), names.index("connect"))
+        self.assertLess(names.index("wait"), names.index("bind"))
+        self.assertLess(names.index("bind"), names.index("connect"))
         self.assertLess(names.index("connect"), names.index("create_project"))
-        self.assertLess(names.index("create_project"), names.index("bind"))
-        self.assertLess(names.index("bind"), names.index("close_project"))
+        self.assertLess(names.index("create_project"), names.index("activate"))
+        self.assertLess(names.index("activate"), names.index("close_project"))
         self.assertLess(names.index("close_project"), names.index("release"))
-        for name in ("bind", "close_project", "release"):
+        for name in ("bind", "activate", "close_project", "release"):
             self.assertEqual(names.count(name), 1)
         self.assertNotIn("release_desktop", names)
+        configure_kwargs = next(value for name, value in events if name == "configure")
+        self.assertIsNone(configure_kwargs["cores"])
         desktop_kwargs = next(value for name, value in events if name == "desktop")
         self.assertEqual(
             desktop_kwargs,
@@ -264,7 +303,7 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
             },
         )
 
-    def test_pooled_solve_failure_reports_fault_before_release(self) -> None:
+    def test_pooled_solve_failure_reports_fault_without_unsafe_release(self) -> None:
         events: list[tuple[str, object]] = []
         lease = FakeLease(events)
 
@@ -280,8 +319,9 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
         self.assertIn("solver timed out", row["error"])
         names = [name for name, _value in events]
         self.assertEqual(next(value for name, value in events if name == "fault"), "solver_timeout")
-        self.assertLess(names.index("fault"), names.index("close_project"))
-        self.assertLess(names.index("close_project"), names.index("release"))
+        self.assertEqual(row["pooled_release_suppressed"], "solver_state_uncertain")
+        self.assertNotIn("close_project", names)
+        self.assertNotIn("release", names)
         self.assertNotIn("release_desktop", names)
 
     def test_pooled_pre_solve_failure_does_not_quarantine_session(self) -> None:
@@ -319,8 +359,9 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
         self.assertIn("AEDT analysis returned False", row["error"])
         self.assertEqual(next(value for name, value in events if name == "fault"), "solver_timeout")
         names = [name for name, _value in events]
-        self.assertLess(names.index("fault"), names.index("close_project"))
-        self.assertLess(names.index("close_project"), names.index("release"))
+        self.assertEqual(row["pooled_release_suppressed"], "solver_state_uncertain")
+        self.assertNotIn("close_project", names)
+        self.assertNotIn("release", names)
 
     def test_pooled_release_requires_close_ack(self) -> None:
         for lease in (
