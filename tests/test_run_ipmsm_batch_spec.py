@@ -39,6 +39,38 @@ def fixed_geometry_result_row(**overrides: str) -> dict[str, str]:
 
 
 class RunIpmsmBatchSpecTests(unittest.TestCase):
+    def test_read_report_csv_disambiguates_inductance_expression_commas(self) -> None:
+        columns = ["Time [ns]"]
+        values = ["0.0"]
+        for _, source, target in run_ipmsm_batch.INDUCTANCE_MATRIX_ENTRIES:
+            columns.extend(
+                [
+                    f"L({source},{target}) (Real) [nH]",
+                    f"L({source},{target}) (Imag) [nH]",
+                ]
+            )
+            values.extend(["3000000.0" if source == target else "0.0", "0.0"])
+        header = ";".join(columns)
+        self.assertEqual(header.count(";"), header.count(","))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_path = Path(tmpdir) / "inductance.csv"
+            report_path.write_text(
+                header + "\n" + ";".join(values) + "\n",
+                encoding="utf-8",
+            )
+            report = run_ipmsm_batch.read_report_csv(str(report_path))
+
+        self.assertEqual(list(report.columns), columns)
+        summary = run_ipmsm_batch.summarize_inductance_matrix(
+            report,
+            types.SimpleNamespace(base_rpm=60.0, pole_number=4, electrical_zero_deg=0.0),
+            period_s=1.0,
+            stop_s=1.0,
+        )
+        self.assertAlmostEqual(summary["output_ld_last_avg_h"], 0.003, places=12)
+        self.assertAlmostEqual(summary["output_lq_last_avg_h"], 0.003, places=12)
+
     def test_millinewton_meter_is_converted_and_unknown_units_fail_closed(self) -> None:
         raw_millinewton_meter = 710.35
         self.assertAlmostEqual(
