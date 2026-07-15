@@ -4,9 +4,10 @@ import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+import urllib.error
 from unittest.mock import patch
 
-from module.aedt_attach_client import AedtProjectLease
+from module.aedt_attach_client import AedtProjectLease, _lease_keepalive_worker
 
 
 class AedtAttachClientTests(unittest.TestCase):
@@ -17,7 +18,7 @@ class AedtAttachClientTests(unittest.TestCase):
 
         self.assertEqual(
             hashlib.sha256(source_body.encode("utf-8")).hexdigest(),
-            "66bb46101358b1daf8c2440ff8e4240eec5c6cbb5f7b969cad9fba25dbb63e4d",
+            "6cfe18d55630077ac7332bb31c08ccde17c0d7ea2954c4da8f230a52a63d3b8c",
         )
 
     def test_connect_desktop_uses_nonowning_remote_connection(self) -> None:
@@ -78,6 +79,48 @@ class AedtAttachClientTests(unittest.TestCase):
                 "version": "2025.2",
             },
         )
+
+    def test_keepalive_worker_retries_after_connection_refusal(self) -> None:
+        class Http:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def request(self, *_args, **_kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    raise urllib.error.URLError(
+                        ConnectionRefusedError(111, "connection refused")
+                    )
+                return {"state": "active"}
+
+        class StopEvent:
+            def __init__(self) -> None:
+                self.wait_calls = 0
+
+            def wait(self, _timeout) -> bool:
+                self.wait_calls += 1
+                return self.wait_calls >= 3
+
+            def is_set(self) -> bool:
+                return False
+
+        http = Http()
+        stop_event = StopEvent()
+        with patch(
+            "module.aedt_attach_client.AedtPoolHttpClient",
+            return_value=http,
+        ):
+            _lease_keepalive_worker(
+                "http://scheduler",
+                "bootstrap",
+                7,
+                "lease-token",
+                5,
+                stop_event,
+            )
+
+        self.assertEqual(http.calls, 2)
+        self.assertEqual(stop_event.wait_calls, 3)
 
 
 if __name__ == "__main__":
