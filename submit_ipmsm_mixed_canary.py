@@ -57,7 +57,7 @@ Q21_SOLVE_GENERATION = 1
 Q21_ALLOCATION_ID = 9063
 RUN_LABEL = "q22-260716"
 CLIENT_ACCOUNT = "dhj02"
-CLIENT_NODE = "n113"
+Q21_CLIENT_NODE = "n113"
 GATE_TIMEOUT_SECONDS = 1800
 LOCK_TIMEOUT_SECONDS = 7200
 BARRIER_TIMEOUT_SECONDS = 7200
@@ -222,7 +222,7 @@ def q21_terminal_evidence(connection: sqlite3.Connection) -> dict[str, Any]:
             and item["exit_code"] is not None
             and int(item["exit_code"]) == 0
             and item["account_name"] == CLIENT_ACCOUNT
-            and item["node_name"] == CLIENT_NODE
+            and item["node_name"] == Q21_CLIENT_NODE
             and int(item["allocation_id"] or 0) == Q21_ALLOCATION_ID
             for item in valid_tasks
         )
@@ -383,6 +383,20 @@ def release_transport_error() -> str:
     return ""
 
 
+def selected_client_location(session: dict[str, Any]) -> tuple[str, str]:
+    """Bind task affinity to the selected session, not the earlier q21 node."""
+
+    account_name = str(session.get("account_name") or "")
+    node_name = str(session.get("node_name") or "")
+    if account_name != CLIENT_ACCOUNT:
+        raise MixedCanaryError(
+            f"selected session account must be {CLIENT_ACCOUNT}: {account_name!r}"
+        )
+    if not node_name:
+        raise MixedCanaryError("selected session node is empty")
+    return account_name, node_name
+
+
 def prepare(
     *,
     requested_session_id: int = 0,
@@ -413,7 +427,7 @@ def prepare(
         blockers.append(f"SSH gate release transport is unavailable: {transport_error}")
     if not q21["ready"]:
         blockers.append("q21b exact 1x3 terminal/native-barrier/release evidence is incomplete")
-    if q21["client_locations"] != [(CLIENT_ACCOUNT, CLIENT_NODE)]:
+    if q21["client_locations"] != [(CLIENT_ACCOUNT, Q21_CLIENT_NODE)]:
         blockers.append(
             "q21 client location differs from the independently verified scheduler package"
         )
@@ -448,14 +462,15 @@ def prepare(
     if selected is not None and re.fullmatch(r"[0-9a-f]{40}", motor_git_ref):
         try:
             session_id = int(selected["id"])
+            account_name, node_name = selected_client_location(selected)
             for ordinal, source in enumerate(mft_sources):
                 payload, token = mft_payload(
                     source,
                     dedupe_key=f"preflight-mft-{ordinal}",
                     ordinal=ordinal,
                     session_id=session_id,
-                    account_name=CLIENT_ACCOUNT,
-                    node_name=CLIENT_NODE,
+                    account_name=account_name,
+                    node_name=node_name,
                     motor_git_ref=motor_git_ref,
                 )
                 payload_preflight.append({
@@ -469,8 +484,8 @@ def prepare(
                 motor_source,
                 dedupe_key="preflight-ipmsm-0",
                 session_id=session_id,
-                account_name=CLIENT_ACCOUNT,
-                node_name=CLIENT_NODE,
+                account_name=account_name,
+                node_name=node_name,
                 motor_git_ref=motor_git_ref,
                 profile_export=canonical_profile_export(mft_sources[0]),
             )
@@ -935,11 +950,11 @@ def execute(preflight: dict[str, Any], motor_git_ref: str) -> dict[str, Any]:
     session = dict(preflight["selected_session"])
     session_id = int(session["id"])
     q21_locations = list(preflight["q21"].get("client_locations") or [])
-    if q21_locations != [(CLIENT_ACCOUNT, CLIENT_NODE)]:
+    if q21_locations != [(CLIENT_ACCOUNT, Q21_CLIENT_NODE)]:
         raise MixedCanaryError(
             "q21 client account/node does not match the verified scheduler package"
         )
-    account_name, node_name = CLIENT_ACCOUNT, CLIENT_NODE
+    account_name, node_name = selected_client_location(session)
     admission = request_json(
         "/api/aedt-pool/mixed-canary-admissions",
         {

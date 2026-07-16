@@ -191,7 +191,7 @@ class SubmitMixedCanaryTests(unittest.TestCase):
                     "completed",
                     0,
                     mixed.CLIENT_ACCOUNT,
-                    mixed.CLIENT_NODE,
+                    mixed.Q21_CLIENT_NODE,
                     mixed.Q21_ALLOCATION_ID,
                     payload,
                 ),
@@ -223,6 +223,18 @@ class SubmitMixedCanaryTests(unittest.TestCase):
             (mixed.Q21_TASK_IDS[0],),
         )
         self.assertFalse(mixed.q21_terminal_evidence(connection)["ready"])
+
+    def test_selected_client_location_uses_candidate_session_node(self) -> None:
+        self.assertEqual(
+            mixed.selected_client_location(
+                {"account_name": mixed.CLIENT_ACCOUNT, "node_name": "n111"}
+            ),
+            (mixed.CLIENT_ACCOUNT, "n111"),
+        )
+        with self.assertRaisesRegex(mixed.MixedCanaryError, "account"):
+            mixed.selected_client_location(
+                {"account_name": "unexpected", "node_name": "n111"}
+            )
 
     def test_runbook_forbids_exact_reservation_and_port_8000(self) -> None:
         text = (Path(__file__).resolve().parents[1] / "MIXED_AEDT_CANARY_RUNBOOK.md").read_text(
