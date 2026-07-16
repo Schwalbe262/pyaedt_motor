@@ -334,3 +334,10 @@
 - Scheduler/MFT reference contracts are `9150e7fa`/`937b812b`; focused attach/PPT/runner/spec validation is70/70 and touched production files compile.
 - Deployment must copy/pin new `module/aedt_automation_lock.py` and reseal the runtime source closure; the frozen v4r8 authority intentionally still rejects changed runtime hashes.
 - Full `tests` collection previously exceeded300s without a result; next is review/cherry-pick, then an authorized `shared_if_compatible` MFT2+motor1 canary before scale-up.
+
+## 2026-07-16 - Mixed canary deploy authority prepared
+- Vendored attach/lock sources now exactly match scheduler client `9150e7fa`; normalized SHAs are `c277e485...4801` and `027f4aea...6aca`.
+- New authority `mixed_aedt_canary_authority_v1.json` seals the nine-file runtime closure, canonical profile `cb95ebf2...91f`, and authority seal `62ab5f31...86f3` without modifying frozen v4r8 authority.
+- `submit_ipmsm_mixed_canary.py` is dry-run by default and requires q21 9/9 terminal-native evidence before one scheduler mixed admission creates exactly MFT2+IPMSM1; exact session reservations are intentionally forbidden.
+- Focused validation is75/75; expanded63 pass/14 baseline-identical failures. No mixed admission/task/session mutation was made.
+- After q21 closes, run the sealed tool with the exact committed motor ref; review terminal solve/barrier evidence before any scale-up.

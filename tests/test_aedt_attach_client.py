@@ -19,7 +19,7 @@ class AedtAttachClientTests(unittest.TestCase):
 
         self.assertEqual(
             hashlib.sha256(source_body.encode("utf-8")).hexdigest(),
-            "d440a1dfb78235082c403ec10963bb8e8cee028c6d37acf31902bc62555ff4c0",
+            "c277e48595762827e86f282fe895971a16d711a77cc19395dfcfb79b94d14801",
         )
 
     def test_connect_desktop_uses_nonowning_remote_connection(self) -> None:
@@ -44,28 +44,32 @@ class AedtAttachClientTests(unittest.TestCase):
                 odesktop=SimpleNamespace(GetVersion=lambda: "2025.2.0"),
             )
 
-        lease = AedtProjectLease(
-            http=FakeHttp(),
-            lease_id=7,
-            client_token="token",
-            project_name="simulation7",
-            state="attaching",
-            endpoint="n114:50051",
-            protocol_version=2,
-        )
-        lease.start_heartbeat = lambda **_kwargs: None
-        try:
-            with patch.object(
-                AedtProjectLease,
-                "_enable_pyaedt_multi_desktop",
-            ):
-                desktop = lease.connect_desktop(
-                    non_graphical=False,
-                    desktop_factory=desktop_factory,
-                    endpoint_probe=lambda _machine, _port: True,
-                )
-        finally:
-            lease.stop_heartbeat()
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = Path(tmp) / "desktop-automation.lock"
+            lock_path.write_bytes(b"\0")
+            lease = AedtProjectLease(
+                http=FakeHttp(),
+                lease_id=7,
+                client_token="token",
+                project_name="simulation7",
+                state="attaching",
+                endpoint="n114:50051",
+                protocol_version=2,
+                automation_lock_path=str(lock_path),
+            )
+            lease.start_heartbeat = lambda **_kwargs: None
+            try:
+                with patch.object(
+                    AedtProjectLease,
+                    "_enable_pyaedt_multi_desktop",
+                ):
+                    desktop = lease.connect_desktop(
+                        non_graphical=False,
+                        desktop_factory=desktop_factory,
+                        endpoint_probe=lambda _machine, _port: True,
+                    )
+            finally:
+                lease.stop_heartbeat()
 
         self.assertIsNotNone(desktop)
         desktop_call = next(value for name, value in calls if name == "desktop")

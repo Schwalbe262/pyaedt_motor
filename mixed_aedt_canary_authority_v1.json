@@ -1,0 +1,117 @@
+{
+  "authority_sha256": "62ab5f3138b53fbed347a8d1592b2991663fa36aa7a9fedddcadd32dcd886f3e",
+  "environment_contract": {
+    "AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS": "7200",
+    "AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS": "7200",
+    "MFT_AEDT_BACKEND": "pooled",
+    "MFT_AEDT_ISOLATION_POLICY": "shared_if_compatible",
+    "MFT_AEDT_SESSION_VERSION": "2025.2"
+  },
+  "execution_gate": {
+    "admission_ttl_seconds": 3600,
+    "q21_projects_per_session": 3,
+    "q21_requires_exit_zero": true,
+    "q21_requires_native_pipeline_marker": true,
+    "q21_sessions": 3,
+    "q21_tasks": 9,
+    "remote_release_gate_seconds": 1800
+  },
+  "mft": {
+    "pyaedt_library_commit": "e6b9b9d20a832ff5c3f7ca97218737a0b8650781",
+    "seed_task_ids": [
+      41696,
+      41697
+    ],
+    "solver_commit": "87b5e9209a900f15108f72c2272fe2462aa45216",
+    "stage_profile": {
+      "cap_on": 1,
+      "loss_on": 0,
+      "matrix_on": 1,
+      "thermal_on": 0
+    }
+  },
+  "motor": {
+    "native_barrier_parent_commit": "b624406b20e779d6409dc191c14ff5c214b1e1dc",
+    "pyaedt_library_commit": "e6b9b9d20a832ff5c3f7ca97218737a0b8650781",
+    "seed_case_id": "v2s3_final_audit_0020_rated_power_at_max_speed_03",
+    "seed_task_id": 34762
+  },
+  "motor_runtime_closure": {
+    "material/27PNF1500_core_loss_coefficients_W_m3.csv": "ba37fc4fd0c9f9c4203f2ac10215f2ba0f7001e7d5e01c7b47b4c5fb1e204b7f",
+    "material/30PNF1600_BH.csv": "3ab3094a1f01432f264af9f3024cc6ffd8f206d59f30ccce0f70f60e82b25863",
+    "module/aedt_attach_client.py": "c277e48595762827e86f282fe895971a16d711a77cc19395dfcfb79b94d14801",
+    "module/aedt_automation_lock.py": "027f4aea16f927b5a55ba654d9c692e2196d4efd09f17f28baa67e4b89646aca",
+    "module/ipmsm_geometry.py": "88cc474ceb7be4a1759b69f1891c0085a6c005d2f7ad28c25bcbcafb0c786f23",
+    "module/ipmsm_ppt_setup.py": "0c03d3edd1705b40533b61c61c798119c6f772b654a8d0700070cbb14ef1c7cc",
+    "module/variable.py": "d87359bcef6ee9442db6477ca4d43053c0bf48e3b702404f5b91f795ce52806e",
+    "run_ipmsm_batch.py": "2617df541c968b7e98f41d2f91964cb5744bdd9593817771b696bc6962347bc9",
+    "subprocess_run.py": "b6e59e6c4220a28ff73dbc9be98e5b86f6e87e61e82ace42c3ad631e9201fb8f"
+  },
+  "placement_contract": {
+    "exact_session_reservation_allowed": false,
+    "placement_authority": "mixed-canary-admission",
+    "projects": {
+      "ipmsm": 1,
+      "mft": 2
+    },
+    "protocol_version": 2,
+    "requires_active_host_allocation": true,
+    "requires_empty_ready_unsealed_nondraining_session": true,
+    "session_slots": 3
+  },
+  "purpose": "one AEDT session with two MFT projects and one IPMSM project using the exact native-pipeline barrier",
+  "scheduler": {
+    "aedt_attach_client_sha256": "c277e48595762827e86f282fe895971a16d711a77cc19395dfcfb79b94d14801",
+    "aedt_automation_lock_sha256": "027f4aea16f927b5a55ba654d9c692e2196d4efd09f17f28baa67e4b89646aca",
+    "client_package_commit": "9150e7fa7f72fdf00fb8113e157398b410833c40",
+    "control_plane_commit": "0c366187cac9adb02397436259c9c0e51f97fa79",
+    "local_api_url": "http://127.0.0.1:8001",
+    "mixed_admission_endpoint": "/api/aedt-pool/mixed-canary-admissions",
+    "remote_client_url": "http://172.16.10.37:18790"
+  },
+  "schema_version": "mft-ipmsm-mixed-canary-authority-v1",
+  "sealed_at": "2026-07-16T02:00:00Z",
+  "session_profile": {
+    "canonical_sha256": "cb95ebf25f88487b19bf867aeece5fb39e63b50c470ece518ca11ca22f13c91f",
+    "value": {
+      "aedt_version": "2025.2",
+      "desktop_dso": {
+        "config_name": "pyaedt_config",
+        "designs": {
+          "Icepak": {
+            "cores": 4,
+            "gpus": 0,
+            "tasks": 1,
+            "use_auto_settings": false
+          },
+          "Maxwell 2D": {
+            "cores": 4,
+            "gpus": 0,
+            "tasks": 1,
+            "use_auto_settings": true
+          },
+          "Maxwell 3D": {
+            "cores": 4,
+            "gpus": 0,
+            "tasks": 1,
+            "use_auto_settings": true
+          }
+        }
+      },
+      "filesystem": "gpfs-shared-v1",
+      "profile_version": 2,
+      "pyaedt_version": "0.22.0",
+      "python_environment": "pyaedt2026v1"
+    }
+  },
+  "terminal_gate": {
+    "motor_analysis_returned_false": false,
+    "motor_missing_required_outputs": "",
+    "motor_result_status": "ok",
+    "native_pipeline_completed_count": 3,
+    "native_pipeline_expected_count": 3,
+    "same_session_leases": 3,
+    "same_solve_generation": true,
+    "scheduler_tasks_completed_exit_zero": 3
+  }
+}

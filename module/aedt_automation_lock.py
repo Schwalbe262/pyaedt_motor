@@ -6,12 +6,17 @@ import stat
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-# POSIX record locks are process-associated: closing any descriptor for an
-# inode can release every record lock that process owns on it. Keep one gate
-# per normalized path so two lease objects in one process cannot interfere.
+AUTOMATION_LOCK_FILENAME = "desktop-automation.lock"
+
+
+# POSIX record locks are process-associated: closing *any* descriptor for the
+# inode can release every record lock that process owns on it.  Keep one gate
+# per normalized path so a second SessionAutomationLock in the same process
+# cannot open/close the marker while the first instance owns its record lock.
 _PROCESS_PATH_GATES_GUARD = threading.Lock()
 _PROCESS_PATH_GATES: dict[str, threading.Lock] = {}
 
@@ -26,13 +31,60 @@ def _process_path_gate(path: str) -> threading.Lock:
         return gate
 
 
+def automation_lock_path(artifact_dir: str) -> str:
+    """Return the one cross-account lock file owned by a session host."""
+
+    normalized = str(artifact_dir or "").strip()
+    if not normalized:
+        return ""
+    # The control plane runs on Windows while session artifacts live on the
+    # Linux GPFS filesystem.  ``Path('/gpfs/...')`` would otherwise serialize
+    # the lease contract as ``\\gpfs\\...``, which no Linux client can open.
+    if normalized.startswith("/"):
+        return str(PurePosixPath(normalized) / AUTOMATION_LOCK_FILENAME)
+    return str(Path(normalized) / AUTOMATION_LOCK_FILENAME)
+
+
+def create_automation_lock_file(path: str) -> str:
+    """Create a regular, cross-account writable lock file before admission.
+
+    The session artifact directory is unique to one host generation.  Clients
+    are deliberately not allowed to create this file: only the process that
+    owns the AEDT Desktop establishes the inode all attached workers lock.
+    """
+
+    normalized = str(path or "").strip()
+    if not normalized:
+        raise ValueError("AEDT automation lock path is required")
+    target = Path(normalized)
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(str(target), flags, 0o666)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise RuntimeError("AEDT automation lock must be one regular file")
+        if info.st_size < 1:
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        if os.name != "nt":
+            os.fchmod(descriptor, 0o666)
+    finally:
+        os.close(descriptor)
+    return str(target)
+
+
 class SessionAutomationLock:
-    """Re-entrant cross-process lock for Desktop-global AEDT automation.
+    """Re-entrant process lock for Desktop-global AEDT automation calls.
 
     Linux production takes both a BSD ``flock`` and a POSIX byte-range
-    ``lockf``. GPFS propagates the POSIX record lock across compute nodes,
-    while ``flock`` also excludes distinct descriptors on one node. The
-    Windows branch retains its native one-byte lock for local tests.
+    ``lockf``.  ``flock`` excludes distinct open descriptions on one node;
+    GPFS propagates the POSIX record lock across compute nodes.  A process-wide
+    path gate prevents an unrelated descriptor close from dropping that
+    process's record lock.  All callers take these layers in one order and
+    release them in reverse order.  The Windows branch retains its native
+    one-byte lock for local scheduler tests.
     """
 
     def __init__(
@@ -95,6 +147,10 @@ class SessionAutomationLock:
         import fcntl
 
         try:
+            # GPFS propagates POSIX byte-range locks between compute nodes but
+            # does not propagate ``flock`` consistently.  Keep both: flock
+            # excludes distinct descriptors in this process/node, while
+            # lockf is the cluster-wide exclusion primitive.
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             if SessionAutomationLock._lock_would_block(exc):
@@ -224,7 +280,12 @@ class SessionAutomationLock:
 
     @contextmanager
     def suspended(self):
-        """Release all current-thread nesting while an exact native solve waits."""
+        """Temporarily release all current-thread nesting for a native solve.
+
+        Callers use this only after capturing an exact project/design handle.
+        The blocking ``oDesign.Analyze`` is project scoped, so sibling modeling
+        can proceed while this thread waits for the native solver.
+        """
 
         if self._owner_thread_id != threading.get_ident() or self._depth <= 0:
             raise RuntimeError(

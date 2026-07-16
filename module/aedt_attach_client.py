@@ -619,30 +619,31 @@ class AedtProjectLease:
             resolved_version = self.expected_aedt_version
         if resolved_version:
             kwargs["version"] = resolved_version
-        desktop = desktop_factory(**kwargs)
-        self._desktop_proxy = desktop
-        # Attaching is intentionally distinct from active: the client must
-        # create/open and bind its AEDT project successfully before activation.
-        try:
-            self._attest_attached_desktop(desktop)
-        except Exception as exc:
+        with self.automation_guard():
+            desktop = desktop_factory(**kwargs)
+            self._desktop_proxy = desktop
+            # Attaching is intentionally distinct from active: the client must
+            # create/open and fully model its first design before activation.
             try:
-                self.report_fault(
-                    "attach_failed",
-                    phase="attach",
-                    evidence={
-                        "session_key": self.session_key,
-                        "expected_endpoint": self.endpoint,
-                        "expected_process_id": self.session_process_id,
-                        "expected_aedt_version": self.expected_aedt_version,
-                    },
-                    failure_message=str(exc),
-                )
-            except Exception:
-                pass
-            if self.state in {"released", "failed", "cancelled", "expired"}:
-                self._detach_wrapper_best_effort()
-            raise AedtLeaseError(f"AEDT attach identity check failed: {exc}") from exc
+                self._attest_attached_desktop(desktop)
+            except Exception as exc:
+                try:
+                    self.report_fault(
+                        "attach_failed",
+                        phase="attach",
+                        evidence={
+                            "session_key": self.session_key,
+                            "expected_endpoint": self.endpoint,
+                            "expected_process_id": self.session_process_id,
+                            "expected_aedt_version": self.expected_aedt_version,
+                        },
+                        failure_message=str(exc),
+                    )
+                except Exception:
+                    pass
+                if self.state in {"released", "failed", "cancelled", "expired"}:
+                    self._detach_wrapper_best_effort()
+                raise AedtLeaseError(f"AEDT attach identity check failed: {exc}") from exc
         self.heartbeat()
         if not self._keepalive_process:
             self.start_heartbeat()
@@ -662,6 +663,12 @@ class AedtProjectLease:
             or self._automation_lock.path != self.automation_lock_path
         ):
             raw_timeout = os.environ.get(
+                # One valid MFT thermal field-summary extraction has been
+                # observed at ~1950s.  After the native-pipeline barrier, up
+                # to three such Desktop-global postprocessors serialize, so a
+                # 1800s contender timeout rejects healthy work.  Keep the
+                # configured override but make the bounded maximum the safe
+                # default for 1:3 cohorts.
                 "AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS", "7200"
             ).strip()
             try:
@@ -689,7 +696,7 @@ class AedtProjectLease:
         return self.automation_lock()
 
     def native_solve_window(self):
-        """Suspend a held automation transaction around exact native work."""
+        """Release a held automation transaction around exact native Analyze."""
 
         if self.protocol_version < 2:
             return nullcontext()
@@ -909,18 +916,19 @@ class AedtProjectLease:
         timeout_seconds: float | None = None,
         poll_seconds: float = 2.0,
     ) -> dict[str, Any]:
-        """Mark this exact generation complete and wait for its sealed cohort.
+        """Wait until every sealed cohort member has ended native analysis.
 
-        This method performs no AEDT automation. The runner must invoke it
-        inside ``native_solve_window`` so every outer automation-lock depth is
-        released while slower MFT or motor siblings finish native analysis.
+        This call performs no AEDT operation and must be made while the caller
+        has suspended the Desktop automation transaction.  The first request
+        durably marks this lease complete for its exact session/solve
+        generation; subsequent reads wait for the remaining cohort members.
         """
 
         if self.protocol_version < 2:
             return self.status()
         if self.state != "active" or not self.solve_permit_granted \
                 or self.solve_permit_generation <= 0:
-            self.status()
+            latest = self.status()
             if self.state != "active" or not self.solve_permit_granted \
                     or self.solve_permit_generation <= 0:
                 raise AedtLeaseError(
@@ -947,9 +955,7 @@ class AedtProjectLease:
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("native pipeline barrier timeout must be positive")
         if not math.isfinite(poll) or poll < 0:
-            raise ValueError(
-                "native pipeline barrier poll interval must be non-negative"
-            )
+            raise ValueError("native pipeline barrier poll interval must be non-negative")
 
         generation = int(self.solve_permit_generation)
         latest = self._call_with_retry(
@@ -964,7 +970,8 @@ class AedtProjectLease:
                 return latest
             if self.native_pipeline_barrier_broken:
                 raise AedtLeaseError(
-                    "native pipeline cohort broke before every member completed"
+                    "native pipeline cohort broke before every member "
+                    "completed"
                 )
             if self.state != "active":
                 raise AedtLeaseError(
@@ -1061,6 +1068,7 @@ def acquire_project_lease(
     task_id: int = 0,
     allocation_id: int = 0,
     node_name: str = "",
+    requested_session_id: int = 0,
     exclusive_session: bool = False,
     workload_family: str = "",
     session_profile: Any = "",
@@ -1074,6 +1082,8 @@ def acquire_project_lease(
     """Create a lease request; call `wait_until_leased` before opening a project."""
     if type(exclusive_session) is not bool:
         raise ValueError("exclusive_session must be a boolean")
+    if type(requested_session_id) is not int or requested_session_id < 0:
+        raise ValueError("requested_session_id must be a non-negative integer")
     http = AedtPoolHttpClient(
         scheduler_url,
         bootstrap_token=bootstrap_token,
@@ -1093,6 +1103,7 @@ def acquire_project_lease(
             "task_id": max(0, int(task_id)),
             "allocation_id": max(0, int(allocation_id)),
             "node_name": node_name,
+            "requested_session_id": requested_session_id,
             "exclusive_session": exclusive_session,
             "workload_family": workload_family,
             "session_profile": session_profile,

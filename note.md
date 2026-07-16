@@ -3996,3 +3996,7 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Actions/result: based on `70851849`, added the scheduler-compatible cross-process automation lock, blocking Analyze window, exact-generation completion/wait, and exact project/design/setup re-attestation on both sides of the barrier; no live deploy, q20, or mixed submission.
 - Metrics/next: compile and focused70/70 pass; full tests previously exceeded300s without a result. Reseal the runtime closure with new `module/aedt_automation_lock.py`, review/cherry-pick, then run an authorized `shared_if_compatible` mixed canary and inspect terminal/barrier telemetry before scale-up.
 - Token sample unavailable because the local Codex SQLite DB was absent.
+
+## 2026-07-16 - Mixed MFT2+IPMSM1 canary made deploy-ready
+- Actions/result: aligned motor attach/automation-lock bytes to scheduler `9150e7fa`, sealed a separate nine-file mixed authority, and added a dry-run-first admission runner plus runbook/tests; no scheduler mutation or mixed submission occurred.
+- Metrics/next: focused75/75; expanded63 pass/14 failures exactly reproduce clean `b624406`; authority seal `62ab5f31...86f3`. Commit/push this branch, then execute only after q21 has 9/9 zero-exit released native-terminal evidence.
