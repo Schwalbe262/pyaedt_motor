@@ -1,5 +1,5 @@
 {
-  "authority_sha256": "62ab5f3138b53fbed347a8d1592b2991663fa36aa7a9fedddcadd32dcd886f3e",
+  "authority_sha256": "f1079ba3a6aaacec5df07b06a51e249567d760ecfceb904f355c7440f1e1442d",
   "environment_contract": {
     "AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS": "7200",
     "AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS": "7200",
@@ -64,13 +64,13 @@
     "aedt_attach_client_sha256": "c277e48595762827e86f282fe895971a16d711a77cc19395dfcfb79b94d14801",
     "aedt_automation_lock_sha256": "027f4aea16f927b5a55ba654d9c692e2196d4efd09f17f28baa67e4b89646aca",
     "client_package_commit": "9150e7fa7f72fdf00fb8113e157398b410833c40",
-    "control_plane_commit": "0c366187cac9adb02397436259c9c0e51f97fa79",
+    "control_plane_commit": "9562c6f2f66b75954c6f3276bc30f8e2088b30b3",
     "local_api_url": "http://127.0.0.1:8001",
     "mixed_admission_endpoint": "/api/aedt-pool/mixed-canary-admissions",
     "remote_client_url": "http://172.16.10.37:18790"
   },
   "schema_version": "mft-ipmsm-mixed-canary-authority-v1",
-  "sealed_at": "2026-07-16T02:00:00Z",
+  "sealed_at": "2026-07-16T02:43:29Z",
   "session_profile": {
     "canonical_sha256": "cb95ebf25f88487b19bf867aeece5fb39e63b50c470ece518ca11ca22f13c91f",
     "value": {

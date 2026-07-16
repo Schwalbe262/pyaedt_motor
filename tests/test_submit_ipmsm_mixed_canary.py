@@ -34,6 +34,10 @@ class SubmitMixedCanaryTests(unittest.TestCase):
         self.assertFalse(
             authority["placement_contract"]["exact_session_reservation_allowed"]
         )
+        self.assertEqual(
+            authority["scheduler"]["control_plane_commit"],
+            mixed.SCHEDULER_CONTROL_PLANE_SHA,
+        )
 
     @staticmethod
     def mft_source(row: int = 35433) -> dict[str, object]:

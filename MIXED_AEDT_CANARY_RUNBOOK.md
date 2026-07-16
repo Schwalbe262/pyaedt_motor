@@ -5,7 +5,7 @@ It does not apply to ordinary family-isolated production work.
 
 ## Pinned authority
 
-- Scheduler control plane: `0c366187cac9adb02397436259c9c0e51f97fa79`
+- Scheduler control plane: `9562c6f2f66b75954c6f3276bc30f8e2088b30b3`
 - Scheduler client package: `9150e7fa7f72fdf00fb8113e157398b410833c40`
 - MFT solver: `87b5e9209a900f15108f72c2272fe2462aa45216`
 - PyAEDT library: `e6b9b9d20a832ff5c3f7ca97218737a0b8650781`
