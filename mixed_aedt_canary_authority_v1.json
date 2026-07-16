@@ -1,5 +1,5 @@
 {
-  "authority_sha256": "43175c29178a2c0f1182bdb4d57be69e95cfe87685a7487acbacfc8ec46d0ced",
+  "authority_sha256": "b2b53619dc04e57f3bc34f88e10460b34b70dd4e8a77da8b77ed9d1ba98f8992",
   "environment_contract": {
     "AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS": "7200",
     "AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS": "7200",
@@ -66,7 +66,7 @@
     "module/aedt_attach_client.py": "c277e48595762827e86f282fe895971a16d711a77cc19395dfcfb79b94d14801",
     "module/aedt_automation_lock.py": "027f4aea16f927b5a55ba654d9c692e2196d4efd09f17f28baa67e4b89646aca",
     "module/ipmsm_geometry.py": "88cc474ceb7be4a1759b69f1891c0085a6c005d2f7ad28c25bcbcafb0c786f23",
-    "module/ipmsm_ppt_setup.py": "0c03d3edd1705b40533b61c61c798119c6f772b654a8d0700070cbb14ef1c7cc",
+    "module/ipmsm_ppt_setup.py": "ecf6f6a53cdc6d7f67a2812b4029081bde4390ac98cb69a7f40521b3809437f9",
     "module/variable.py": "d87359bcef6ee9442db6477ca4d43053c0bf48e3b702404f5b91f795ce52806e",
     "run_ipmsm_batch.py": "2617df541c968b7e98f41d2f91964cb5744bdd9593817771b696bc6962347bc9",
     "subprocess_run.py": "b6e59e6c4220a28ff73dbc9be98e5b86f6e87e61e82ace42c3ad631e9201fb8f"
@@ -94,7 +94,7 @@
     "remote_client_url": "http://172.16.10.37:18790"
   },
   "schema_version": "mft-ipmsm-mixed-canary-authority-v1",
-  "sealed_at": "2026-07-16T04:44:43Z",
+  "sealed_at": "2026-07-16T05:00:19Z",
   "session_profile": {
     "canonical_sha256": "cb95ebf25f88487b19bf867aeece5fb39e63b50c470ece518ca11ca22f13c91f",
     "value": {

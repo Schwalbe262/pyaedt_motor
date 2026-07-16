@@ -367,6 +367,22 @@ def health() -> dict[str, Any]:
     return result
 
 
+def release_transport_error() -> str:
+    """Validate the SSH gate-release runtime before creating an admission."""
+
+    try:
+        sys.path.insert(0, str(SCHEDULER_SOURCE))
+        from slurm_scheduler.config import load_accounts
+        from slurm_scheduler.slurm import SSHSession  # noqa: F401
+
+        accounts = load_accounts(ACCOUNTS_PATH)
+        if not any(item.name == CLIENT_ACCOUNT for item in accounts):
+            return f"scheduler account is missing: {CLIENT_ACCOUNT}"
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return ""
+
+
 def prepare(
     *,
     requested_session_id: int = 0,
@@ -392,6 +408,9 @@ def prepare(
     scheduler_health = health()
     if not scheduler_health.get("ok") or not scheduler_health.get("scheduler_ok"):
         blockers.append("scheduler health is not operational")
+    transport_error = release_transport_error()
+    if transport_error:
+        blockers.append(f"SSH gate release transport is unavailable: {transport_error}")
     if not q21["ready"]:
         blockers.append("q21b exact 1x3 terminal/native-barrier/release evidence is incomplete")
     if q21["client_locations"] != [(CLIENT_ACCOUNT, CLIENT_NODE)]:
@@ -487,6 +506,8 @@ def prepare(
             "remote_client_url": REMOTE_SCHEDULER_URL,
             "control_plane_commit": SCHEDULER_CONTROL_PLANE_SHA,
             "client_package_commit": SCHEDULER_CLIENT_SHA,
+            "release_transport_ready": not bool(transport_error),
+            "release_transport_error": transport_error,
             "health": {
                 key: scheduler_health.get(key)
                 for key in ("ok", "scheduler_ok", "scheduler_thread_alive", "scheduler_stalled")

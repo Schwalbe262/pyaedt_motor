@@ -1233,13 +1233,25 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
             result[group_name] = "skipped: no objects"
             continue
         try:
-            result[group_name] = m2d.mesh.assign_length_mesh(
+            # PyAEDT 0.22 documents ``maximum_length=None`` as disabled, but
+            # still serializes it as ``Nonemm`` in ``MaxLength``. AEDT then
+            # rejects the setup even though ``RestrictLength`` is false. Build
+            # the operation with a valid placeholder and disable that limit in
+            # the persisted properties; the element-count contract is unchanged.
+            operation = m2d.mesh.assign_length_mesh(
                 assignment=objects,
                 inside_selection=True,
-                maximum_length=None,
+                maximum_length="1mm",
                 maximum_elements=spec.mesh_elements[group_name],
                 name=f"Mesh_{group_name}",
             )
+            if not operation:
+                raise RuntimeError("length mesh operation was not created")
+            operation.props["RestrictLength"] = False
+            operation.props["MaxLength"] = "1mm"
+            if operation.update() is False:
+                raise RuntimeError("length mesh operation update failed")
+            result[group_name] = operation
         except Exception as exc:
             result[group_name] = f"skipped: {exc}"
     return result

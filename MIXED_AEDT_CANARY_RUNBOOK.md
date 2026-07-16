@@ -37,7 +37,7 @@ lease, exact reservation, or mixed admission before execution.
 Run from the exact motor deployment checkout:
 
 ```powershell
-C:\Users\peets\anaconda3\python.exe submit_ipmsm_mixed_canary.py --motor-git-ref <40-char-final-commit>
+C:\Python314\python.exe submit_ipmsm_mixed_canary.py --motor-git-ref <40-char-final-commit>
 ```
 
 Dry-run is the default and performs no admission, task submission, release-file
@@ -67,7 +67,7 @@ Expected package commit is `9150e7f...`. Never use or restart local port 8000.
 After reviewing the dry-run's selected session and q21 evidence:
 
 ```powershell
-C:\Users\peets\anaconda3\python.exe submit_ipmsm_mixed_canary.py --execute --motor-git-ref <40-char-final-commit> --session-id <eligible-session-id>
+C:\Python314\python.exe submit_ipmsm_mixed_canary.py --execute --motor-git-ref <40-char-final-commit> --session-id <eligible-session-id>
 ```
 
 Execution creates the bootstrap admission first, creates and attests exactly

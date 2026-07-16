@@ -109,6 +109,47 @@ class IPMSMPPTSetupContractTests(unittest.TestCase):
         expressions = PPT_REPORT_DEFS["PPT_Phase_Voltages"]
         self.assertTrue(all("mag(" not in expression for expression in expressions))
 
+    def test_mesh_disables_length_with_valid_placeholder_instead_of_nonemm(self) -> None:
+        operations = []
+
+        class FakeOperation:
+            def __init__(self) -> None:
+                self.props = {"RestrictLength": True, "MaxLength": "1mm"}
+                self.updated = False
+
+            def update(self) -> bool:
+                self.updated = True
+                return True
+
+        class FakeMesh:
+            def assign_length_mesh(self, **kwargs: object) -> FakeOperation:
+                self.kwargs = kwargs
+                operation = FakeOperation()
+                operations.append(operation)
+                return operation
+
+        names = ["magnet1", "rotor", "stator", "winding1", "Band"]
+        m2d = mock.Mock()
+        m2d.modeler.object_names = names
+        m2d.mesh = FakeMesh()
+        groups = {
+            "magnets": ["magnet1"],
+            "rotor": ["rotor"],
+            "stator": ["stator"],
+            "windings": ["winding1"],
+            "band": ["Band"],
+        }
+
+        with mock.patch.object(ppt_setup, "_m2d", return_value=m2d):
+            result = ppt_setup.assign_mesh(object(), groups, IPMSMPPTSpec())
+
+        self.assertEqual(set(result), {"magnet", "rotor", "stator", "winding", "band"})
+        self.assertEqual(len(operations), 5)
+        self.assertTrue(all(operation.updated for operation in operations))
+        self.assertTrue(all(operation.props["RestrictLength"] is False for operation in operations))
+        self.assertTrue(all(operation.props["MaxLength"] == "1mm" for operation in operations))
+        self.assertEqual(m2d.mesh.kwargs["maximum_length"], "1mm")
+
     def test_analysis_error_callback_only_wraps_solver_call(self) -> None:
         callback = mock.Mock()
 
