@@ -15,9 +15,12 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .aedt_automation_lock import SessionAutomationLock
 
 DEFAULT_CONTROL_PLANE_OUTAGE_SECONDS = 360.0
 CONTROL_PLANE_OUTAGE_ENV = "AEDT_POOL_CONTROL_PLANE_OUTAGE_SECONDS"
@@ -227,6 +230,7 @@ class AedtProjectLease:
     project_namespace: str = ""
     isolation_policy: str = "family"
     workspace_path: str = ""
+    automation_lock_path: str = ""
     session_key: str = ""
     session_process_id: str = ""
     expected_aedt_version: str = ""
@@ -236,6 +240,11 @@ class AedtProjectLease:
     session_active_lease_count: int = 0
     session_live_lease_count: int = 0
     session_slots_total: int = 0
+    native_pipeline_completed: bool = False
+    native_pipeline_expected_count: int = 0
+    native_pipeline_completed_count: int = 0
+    native_pipeline_barrier_granted: bool = False
+    native_pipeline_barrier_broken: bool = False
     control_plane_outage_seconds: float = field(
         default_factory=_control_plane_outage_seconds_from_env
     )
@@ -244,6 +253,9 @@ class AedtProjectLease:
     _keepalive_process: Any = field(default=None, init=False, repr=False)
     _keepalive_stop: Any = field(default=None, init=False, repr=False)
     _desktop_proxy: Any = field(default=None, init=False, repr=False)
+    _automation_lock: SessionAutomationLock | None = field(
+        default=None, init=False, repr=False
+    )
     heartbeat_error: str = field(default="", init=False)
     detach_error: str = field(default="", init=False)
 
@@ -310,6 +322,9 @@ class AedtProjectLease:
     def _apply_status(self, status: dict[str, Any]) -> None:
         self.state = str(status.get("state") or "")
         self.endpoint = str(status.get("endpoint") or "")
+        self.automation_lock_path = str(
+            status.get("automation_lock_path") or self.automation_lock_path
+        )
         self.session_key = str(status.get("session_key") or self.session_key)
         self.session_process_id = str(
             status.get("session_process_id") or self.session_process_id
@@ -335,6 +350,21 @@ class AedtProjectLease:
             status.get("session_live_lease_count") or 0
         )
         self.session_slots_total = int(status.get("session_slots_total") or 0)
+        self.native_pipeline_completed = bool(
+            status.get("native_pipeline_completed", False)
+        )
+        self.native_pipeline_expected_count = int(
+            status.get("native_pipeline_expected_count") or 0
+        )
+        self.native_pipeline_completed_count = int(
+            status.get("native_pipeline_completed_count") or 0
+        )
+        self.native_pipeline_barrier_granted = bool(
+            status.get("native_pipeline_barrier_granted", False)
+        )
+        self.native_pipeline_barrier_broken = bool(
+            status.get("native_pipeline_barrier_broken", False)
+        )
 
     def heartbeat(self) -> dict[str, Any]:
         status = self._call_with_retry("POST", "/heartbeat", {})
@@ -618,6 +648,53 @@ class AedtProjectLease:
             self.start_heartbeat()
         return desktop
 
+    def automation_lock(self) -> SessionAutomationLock:
+        """Return this session's re-entrant Desktop-global automation lock."""
+
+        if not self.automation_lock_path:
+            self.status()
+        if not self.automation_lock_path:
+            raise AedtLeaseError(
+                "authorized AEDT session has no automation lock path"
+            )
+        if (
+            self._automation_lock is None
+            or self._automation_lock.path != self.automation_lock_path
+        ):
+            raw_timeout = os.environ.get(
+                "AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS", "7200"
+            ).strip()
+            try:
+                timeout_seconds = float(raw_timeout)
+            except (TypeError, ValueError) as exc:
+                raise AedtLeaseError(
+                    "AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS must be numeric"
+                ) from exc
+            if not 30 <= timeout_seconds <= 7200:
+                raise AedtLeaseError(
+                    "AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS must be between "
+                    "30 and 7200"
+                )
+            self._automation_lock = SessionAutomationLock(
+                self.automation_lock_path,
+                timeout_seconds=timeout_seconds,
+            )
+        return self._automation_lock
+
+    def automation_guard(self):
+        """Protocol-v1 compatibility; v2 always requires the host lock."""
+
+        if self.protocol_version < 2:
+            return nullcontext()
+        return self.automation_lock()
+
+    def native_solve_window(self):
+        """Suspend a held automation transaction around exact native work."""
+
+        if self.protocol_version < 2:
+            return nullcontext()
+        return self.automation_lock().suspended()
+
     @staticmethod
     def _endpoint_is_listening(machine: str, port: int) -> bool:
         try:
@@ -657,11 +734,12 @@ class AedtProjectLease:
         if desktop is None:
             return
         try:
-            desktop.release_desktop(
-                close_projects=False,
-                close_on_exit=False,
-            )
-            self.detach_error = ""
+            with self.automation_guard():
+                desktop.release_desktop(
+                    close_projects=False,
+                    close_on_exit=False,
+                )
+                self.detach_error = ""
         except Exception as exc:
             self.detach_error = str(exc)
         finally:
@@ -768,7 +846,7 @@ class AedtProjectLease:
             return self.status()
         if fill_timeout_seconds is None:
             raw_timeout = os.environ.get(
-                "MFT_AEDT_POOL_FILL_TIMEOUT_SECONDS", "120"
+                "MFT_AEDT_POOL_FILL_TIMEOUT_SECONDS", "900"
             ).strip()
             try:
                 fill_timeout_seconds = float(raw_timeout)
@@ -824,6 +902,88 @@ class AedtProjectLease:
                     "is still incomplete; refusing to start native analyze"
                 )
             time.sleep(min(max(0.1, float(poll_seconds)), remaining))
+
+    def wait_for_native_pipeline_barrier(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+        poll_seconds: float = 2.0,
+    ) -> dict[str, Any]:
+        """Mark this exact generation complete and wait for its sealed cohort.
+
+        This method performs no AEDT automation. The runner must invoke it
+        inside ``native_solve_window`` so every outer automation-lock depth is
+        released while slower MFT or motor siblings finish native analysis.
+        """
+
+        if self.protocol_version < 2:
+            return self.status()
+        if self.state != "active" or not self.solve_permit_granted \
+                or self.solve_permit_generation <= 0:
+            self.status()
+            if self.state != "active" or not self.solve_permit_granted \
+                    or self.solve_permit_generation <= 0:
+                raise AedtLeaseError(
+                    "native pipeline barrier requires an active sealed lease"
+                )
+        if timeout_seconds is None:
+            raw_timeout = os.environ.get(
+                "AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS", "7200"
+            ).strip()
+            try:
+                timeout_seconds = float(raw_timeout)
+            except (TypeError, ValueError) as exc:
+                raise AedtLeaseError(
+                    "AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS must "
+                    "be numeric"
+                ) from exc
+            if not 30 <= timeout_seconds <= 86400:
+                raise AedtLeaseError(
+                    "AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS must "
+                    "be between 30 and 86400"
+                )
+        timeout = float(timeout_seconds)
+        poll = float(poll_seconds)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("native pipeline barrier timeout must be positive")
+        if not math.isfinite(poll) or poll < 0:
+            raise ValueError(
+                "native pipeline barrier poll interval must be non-negative"
+            )
+
+        generation = int(self.solve_permit_generation)
+        latest = self._call_with_retry(
+            "POST",
+            "/native-pipeline-complete",
+            {"solve_permit_generation": generation},
+        )
+        self._apply_status(latest)
+        deadline = time.monotonic() + timeout
+        while True:
+            if self.native_pipeline_barrier_granted:
+                return latest
+            if self.native_pipeline_barrier_broken:
+                raise AedtLeaseError(
+                    "native pipeline cohort broke before every member completed"
+                )
+            if self.state != "active":
+                raise AedtLeaseError(
+                    f"AEDT lease {self.lease_id} became {self.state} while "
+                    "waiting for native pipeline completion"
+                )
+            if int(self.solve_permit_generation) != generation:
+                raise AedtLeaseError(
+                    "native pipeline solve generation changed while waiting"
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    "timed out waiting for sealed AEDT cohort native pipeline "
+                    f"completion ({self.native_pipeline_completed_count}/"
+                    f"{self.native_pipeline_expected_count})"
+                )
+            time.sleep(min(max(0.1, poll), remaining))
+            latest = self.status()
 
     def release(self, *, wait_seconds: int = 300) -> dict[str, Any]:
         status = self._call_with_retry(
@@ -959,6 +1119,7 @@ def acquire_project_lease(
         project_namespace=str(lease.get("project_namespace") or project_namespace),
         isolation_policy=str(lease.get("isolation_policy") or isolation_policy),
         workspace_path=str(lease.get("workspace_path") or workspace_path),
+        automation_lock_path=str(lease.get("automation_lock_path") or ""),
         session_key=str(lease.get("session_key") or ""),
         session_process_id=str(lease.get("session_process_id") or ""),
         expected_aedt_version=str(lease.get("expected_aedt_version") or ""),

@@ -327,3 +327,10 @@
 - v4r8 builder/driver seal project cap100, standalone/pooled backend choice, current pooled runtime closure, and the deployed v4r7 authority chain; no live files, tasks, submissions, or pushes were changed.
 - Validation: touched-file compile passed; focused campaign/v4r8 tests77/77; full Anaconda suite1346 run/9 skipped with the expected54 Y-checkout authority incompatibilities plus2 frozen-v4r7 seal failures.
 - Next: create the LF325 v4r8 build config/source copy, dry-run the selected backend, and obtain separate authority before any publication or execution.
+
+## 2026-07-16 - Mixed AEDT native-pipeline participation
+- Branch `fix/ipmsm-native-pipeline-barrier-260716` is based exactly on delimiter/keepalive commit `70851849`; no live deploy, q20, or mixed submission was performed.
+- Motor now holds the session automation lock for attach/model/postprocess, suspends it for blocking native Analyze, posts the exact solve generation to the scheduler native-pipeline barrier, and re-attests the exact project/design/setup before and after that wait.
+- Scheduler/MFT reference contracts are `9150e7fa`/`937b812b`; focused attach/PPT/runner/spec validation is70/70 and touched production files compile.
+- Deployment must copy/pin new `module/aedt_automation_lock.py` and reseal the runtime source closure; the frozen v4r8 authority intentionally still rejects changed runtime hashes.
+- Full `tests` collection previously exceeded300s without a result; next is review/cherry-pick, then an authorized `shared_if_compatible` MFT2+motor1 canary before scale-up.

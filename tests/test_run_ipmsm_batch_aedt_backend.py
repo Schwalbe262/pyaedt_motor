@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from contextlib import contextmanager, nullcontext
 import os
 from pathlib import Path
 import sys
@@ -14,9 +15,17 @@ import run_ipmsm_batch as runner
 
 
 class FakeProject:
-    def __init__(self, path: str, events: list[tuple[str, object]]) -> None:
+    def __init__(
+        self,
+        path: str,
+        name: str,
+        events: list[tuple[str, object]],
+        desktop: "FakeDesktop",
+    ) -> None:
         self.path = path
+        self.name = name
         self.events = events
+        self.desktop = desktop
 
     def save(self) -> None:
         self.events.append(("save", self.path))
@@ -28,11 +37,17 @@ class FakeProject:
 class FakeDesktop:
     def __init__(self, events: list[tuple[str, object]], kwargs: dict[str, object]) -> None:
         self.events = events
+        self.odesktop = self
+        self.native_projects: dict[str, object] = {}
         self.events.append(("desktop", kwargs))
 
     def create_project(self, path: str, name: str) -> FakeProject:
         self.events.append(("create_project", name))
-        return FakeProject(path, self.events)
+        return FakeProject(path, name, self.events, self)
+
+    def SetActiveProject(self, name: str) -> object:
+        self.events.append(("project_attest", name))
+        return self.native_projects[name]
 
     def release_desktop(self, **kwargs: object) -> None:
         self.events.append(("release_desktop", kwargs))
@@ -53,6 +68,9 @@ class FakeLease:
         self.release_state = release_state
         self.release_error = release_error
         self.workspace_path = ""
+        self.automation_depth = 0
+        self.solve_permit_granted = False
+        self.solve_permit_generation = 0
 
     def wait_until_leased(self, *, timeout_seconds: int) -> dict[str, object]:
         self.events.append(("wait", timeout_seconds))
@@ -75,8 +93,53 @@ class FakeLease:
         return {"state": "attaching", "project_name": project_name}
 
     def activate(self, *, project_name: str = "") -> dict[str, object]:
+        if self.automation_depth != 0:
+            raise AssertionError("activation must not hold Desktop automation")
         self.events.append(("activate", project_name))
-        return {"state": "active", "project_name": project_name}
+        self.solve_permit_granted = True
+        self.solve_permit_generation = 9
+        return {
+            "state": "active",
+            "project_name": project_name,
+            "solve_permit_granted": True,
+            "solve_permit_generation": 9,
+        }
+
+    @contextmanager
+    def automation_guard(self):
+        self.events.append(("automation_enter", self.automation_depth))
+        self.automation_depth += 1
+        try:
+            yield self
+        finally:
+            self.automation_depth -= 1
+            self.events.append(("automation_exit", self.automation_depth))
+
+    @contextmanager
+    def native_solve_window(self):
+        if self.automation_depth <= 0:
+            raise AssertionError("native window requires the outer lock")
+        depth = self.automation_depth
+        self.automation_depth = 0
+        self.events.append(("native_window_enter", depth))
+        try:
+            yield
+        finally:
+            self.events.append(("native_window_exit", depth))
+            self.automation_depth = depth
+
+    def wait_for_native_pipeline_barrier(self) -> dict[str, object]:
+        if self.automation_depth != 0:
+            raise AssertionError("native pipeline wait must not hold automation")
+        if not self.solve_permit_granted or self.solve_permit_generation != 9:
+            raise AssertionError("native pipeline wait requires the exact generation")
+        self.events.append(("native_pipeline_barrier", 9))
+        return {
+            "state": "active",
+            "native_pipeline_barrier_granted": True,
+            "native_pipeline_completed_count": 3,
+            "native_pipeline_expected_count": 3,
+        }
 
     def report_fault(self, fault_kind: str) -> dict[str, object]:
         self.events.append(("fault", fault_kind))
@@ -166,18 +229,64 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
         package_module.core = core_module
         ansys_core_module.settings = settings
 
-        def create_design(_project: object, _sim: object) -> tuple[object, None, dict[str, object]]:
+        class NativeDesign:
+            def GetName(self) -> str:
+                return "IPMSM"
+
+            def GetDesignType(self) -> str:
+                return "Maxwell 2D"
+
+            def GetModule(self, name: str) -> object:
+                if name != "AnalysisSetup":
+                    raise AssertionError(name)
+                return types.SimpleNamespace(GetSetups=lambda: ["PPT_Transient"])
+
+        class NativeProject:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def GetName(self) -> str:
+                return self.name
+
+            def SetActiveDesign(self, name: str) -> NativeDesign:
+                events.append(("terminal_attest", name))
+                return NativeDesign()
+
+        def create_design(
+            target_project: FakeProject, _sim: object
+        ) -> tuple[object, None, dict[str, object]]:
             events.append(("create_design", None))
-            return object(), None, {}
+            native_project = NativeProject(target_project.name)
+            target_project.desktop.native_projects[target_project.name] = native_project
+            solver = types.SimpleNamespace(
+                oproject=native_project,
+                design_name="IPMSM",
+            )
+            return types.SimpleNamespace(solver_instance=solver), None, {}
 
         def configure(*_args: object, **_kwargs: object) -> dict[str, object]:
             events.append(("configure", _kwargs))
-            if configure_error is not None:
-                callback = _kwargs.get("analysis_error_callback")
-                if configure_error_is_solver and callable(callback):
-                    callback()
+            if configure_error is not None and not configure_error_is_solver:
                 raise configure_error
-            analysis = False if analysis_returns_false else (True if analyze else None)
+            analysis = None
+            if analyze:
+                window_factory = _kwargs.get("analysis_context")
+                window = (
+                    window_factory()
+                    if callable(window_factory)
+                    else nullcontext()
+                )
+                with window:
+                    before_analysis = _kwargs.get("before_analysis")
+                    if callable(before_analysis):
+                        before_analysis()
+                    events.append(("native_analyze", None))
+                    if configure_error is not None:
+                        callback = _kwargs.get("analysis_error_callback")
+                        if callable(callback):
+                            callback()
+                        raise configure_error
+                    analysis = False if analysis_returns_false else True
             return {"analysis": analysis, "validation": True}
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -236,6 +345,10 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
                 runner,
                 "output_physics_issues",
                 return_value=[],
+            ), mock.patch.object(
+                runner,
+                "export_ppt_reports",
+                return_value={},
             ), mock.patch(
                 "logging.exception"
             ):
@@ -283,11 +396,12 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
         self.assertLess(names.index("wait"), names.index("bind"))
         self.assertLess(names.index("bind"), names.index("connect"))
         self.assertLess(names.index("connect"), names.index("create_project"))
-        self.assertLess(names.index("create_project"), names.index("activate"))
-        self.assertLess(names.index("activate"), names.index("close_project"))
+        self.assertLess(names.index("create_project"), names.index("close_project"))
         self.assertLess(names.index("close_project"), names.index("release"))
-        for name in ("bind", "activate", "close_project", "release"):
+        for name in ("bind", "close_project", "release"):
             self.assertEqual(names.count(name), 1)
+        self.assertNotIn("activate", names)
+        self.assertNotIn("native_pipeline_barrier", names)
         self.assertNotIn("release_desktop", names)
         configure_kwargs = next(value for name, value in events if name == "configure")
         self.assertIsNone(configure_kwargs["cores"])
@@ -302,6 +416,80 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
                 "port": 50051,
             },
         )
+
+    def test_pooled_solve_marks_exact_native_pipeline_before_postprocess(self) -> None:
+        events: list[tuple[str, object]] = []
+        lease = FakeLease(events)
+
+        row = self._run_case(
+            backend="pooled",
+            analyze=True,
+            events=events,
+            lease=lease,
+        )
+
+        # Empty fake exports fail the later metric gate, but the native solve
+        # and mixed-cohort barrier must already have completed exactly once.
+        self.assertEqual(row["pooled_native_project"], next(
+            value for name, value in events if name == "bind"
+        ))
+        self.assertEqual(row["pooled_native_design"], "IPMSM")
+        self.assertEqual(row["pooled_native_setup"], "PPT_Transient")
+        self.assertEqual(row["pooled_native_pipeline_completed_count"], 3)
+        self.assertEqual(row["pooled_native_pipeline_expected_count"], 3)
+        names = [name for name, _value in events]
+        self.assertLess(names.index("create_design"), names.index("activate"))
+        self.assertLess(names.index("activate"), names.index("native_analyze"))
+        self.assertLess(names.index("native_analyze"), names.index("project_attest"))
+        self.assertLess(names.index("project_attest"), names.index("terminal_attest"))
+        self.assertLess(
+            names.index("terminal_attest"),
+            names.index("native_pipeline_barrier"),
+        )
+        barrier_index = names.index("native_pipeline_barrier")
+        project_attest_indices = [
+            index for index, name in enumerate(names) if name == "project_attest"
+        ]
+        terminal_attest_indices = [
+            index for index, name in enumerate(names) if name == "terminal_attest"
+        ]
+        self.assertLess(barrier_index, project_attest_indices[1])
+        self.assertLess(project_attest_indices[1], terminal_attest_indices[1])
+        self.assertEqual(names.count("activate"), 1)
+        self.assertEqual(names.count("native_analyze"), 1)
+        self.assertEqual(names.count("native_pipeline_barrier"), 1)
+        self.assertEqual(names.count("project_attest"), 2)
+        self.assertEqual(names.count("terminal_attest"), 2)
+
+    def test_post_barrier_identity_failure_quarantines_without_release(self) -> None:
+        events: list[tuple[str, object]] = []
+        lease = FakeLease(events)
+        terminal = {
+            "project_name": "expected-project",
+            "design_name": "IPMSM",
+            "setup_name": "PPT_Transient",
+        }
+
+        with mock.patch.object(
+            runner,
+            "attest_pooled_native_terminal",
+            side_effect=[terminal, RuntimeError("post-barrier identity mismatch")],
+        ):
+            row = self._run_case(
+                backend="pooled",
+                analyze=True,
+                events=events,
+                lease=lease,
+            )
+
+        names = [name for name, _value in events]
+        self.assertEqual(row["status"], "failed")
+        self.assertIn("post-barrier identity mismatch", row["error"])
+        self.assertEqual(names.count("native_pipeline_barrier"), 1)
+        self.assertEqual(names.count("fault"), 1)
+        self.assertEqual(row["pooled_release_suppressed"], "solver_state_uncertain")
+        self.assertNotIn("close_project", names)
+        self.assertNotIn("release", names)
 
     def test_pooled_solve_failure_reports_fault_without_unsafe_release(self) -> None:
         events: list[tuple[str, object]] = []

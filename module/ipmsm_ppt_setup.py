@@ -10,6 +10,7 @@ multi-period transient setup.
 from __future__ import annotations
 
 import csv
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 import math
 from pathlib import Path
@@ -1315,6 +1316,8 @@ def configure_ipmsm_from_ppt(
     analyze: bool = False,
     cores: int | None = 4,
     analysis_error_callback: Callable[[], None] | None = None,
+    before_analysis: Callable[[], Any] | None = None,
+    analysis_context: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Run the full post-modeling setup flow from the practice deck."""
     spec = spec or IPMSMPPTSpec()
@@ -1364,21 +1367,20 @@ def configure_ipmsm_from_ppt(
         result["reports"] = create_ppt_reports(design, spec.setup_name)
 
     if analyze:
-        if analysis_error_callback is None:
-            result["analysis"] = m2d.analyze(
-                setup=spec.setup_name,
-                cores=cores,
-                use_auto_settings=False,
-            )
-        else:
+        window = analysis_context() if callable(analysis_context) else nullcontext()
+        with window:
+            if callable(before_analysis):
+                before_analysis()
             try:
                 result["analysis"] = m2d.analyze(
                     setup=spec.setup_name,
                     cores=cores,
                     use_auto_settings=False,
+                    blocking=True,
                 )
             except Exception:
-                analysis_error_callback()
+                if callable(analysis_error_callback):
+                    analysis_error_callback()
                 raise
 
     return result

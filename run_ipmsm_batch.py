@@ -2174,6 +2174,84 @@ def safe_report_pooled_solver_fault(lease: Any) -> None:
                     )
 
 
+def attest_pooled_native_terminal(
+    simulation: Simulation,
+    design: Any,
+    setup_name: str,
+    analysis_result: Any,
+) -> dict[str, str]:
+    """Re-attest the exact motor project/design/setup after blocking Analyze.
+
+    PyAEDT 0.22's ``analyze(..., blocking=True)`` is the terminal solve
+    boundary. Re-enumerate the native handles under the restored automation
+    lock before this lease marks its native pipeline complete. This prevents a
+    stale wrapper or sibling-active project from satisfying the mixed-cohort
+    barrier for the wrong design.
+    """
+
+    if analysis_result is not True:
+        raise RuntimeError(
+            f"pooled native Analyze did not return True: {analysis_result!r}"
+        )
+    expected_project = str(simulation.PROJECT_NAME or "").strip()
+    if not expected_project:
+        raise RuntimeError("pooled motor project identity is empty")
+    solver = getattr(design, "solver_instance", design)
+    desktop = getattr(simulation, "desktop", None)
+    native_desktop = getattr(desktop, "odesktop", None)
+    set_active_project = getattr(native_desktop, "SetActiveProject", None)
+    if not callable(set_active_project):
+        raise RuntimeError("pooled motor native Desktop handle is unavailable")
+    native_project = set_active_project(expected_project)
+    get_project_name = getattr(native_project, "GetName", None)
+    set_active_design = getattr(native_project, "SetActiveDesign", None)
+    if not callable(get_project_name) or not callable(set_active_design):
+        raise RuntimeError("pooled motor native project handle is unavailable")
+    actual_project = str(get_project_name() or "").strip()
+    if actual_project != expected_project:
+        raise RuntimeError(
+            "pooled motor project identity mismatch: "
+            f"expected={expected_project!r}, actual={actual_project!r}"
+        )
+
+    expected_design = str(
+        getattr(solver, "design_name", "")
+        or getattr(design, "design_name", "")
+        or "IPMSM"
+    ).split(";", 1)[0].strip()
+    native_design = set_active_design(expected_design)
+    get_design_name = getattr(native_design, "GetName", None)
+    get_design_type = getattr(native_design, "GetDesignType", None)
+    get_module = getattr(native_design, "GetModule", None)
+    if not all(callable(item) for item in (
+            get_design_name, get_design_type, get_module)):
+        raise RuntimeError("pooled motor native design handle is unavailable")
+    actual_design = str(get_design_name() or "").split(";", 1)[0].strip()
+    if actual_design != expected_design:
+        raise RuntimeError(
+            "pooled motor design identity mismatch: "
+            f"expected={expected_design!r}, actual={actual_design!r}"
+        )
+    design_type = str(get_design_type() or "").strip()
+    if design_type != "Maxwell 2D":
+        raise RuntimeError(
+            f"pooled motor design type mismatch: {design_type!r}"
+        )
+    analysis_module = get_module("AnalysisSetup")
+    get_setups = getattr(analysis_module, "GetSetups", None)
+    setups = [str(item) for item in get_setups()] if callable(get_setups) else []
+    if str(setup_name) not in setups:
+        raise RuntimeError(
+            "pooled motor setup identity mismatch: "
+            f"expected={setup_name!r}, actual={setups!r}"
+        )
+    return {
+        "project_name": actual_project,
+        "design_name": actual_design,
+        "setup_name": str(setup_name),
+    }
+
+
 def cleanup_project_folder(project_path: Path, cleanup_linux: bool, success: bool) -> None:
     if os.name == "nt" or not cleanup_linux or not success:
         return
@@ -2200,6 +2278,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     lease = None
     lease_granted = False
     pooled_solver_uncertain = False
+    automation_stack = contextlib.ExitStack()
     lease_release_wait_seconds = DEFAULT_AEDT_RELEASE_WAIT_SECONDS
     project_path = None
     success = False
@@ -2394,6 +2473,10 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 raise PooledLeaseUnavailableError(
                     f"pooled AEDT lease unavailable: {type(exc).__name__}: {exc}"
                 ) from exc
+            # One outer transaction covers attach/model/setup/postprocess. The
+            # exact blocking native solve and native-pipeline wait suspend all
+            # nesting through lease.native_solve_window().
+            automation_stack.enter_context(lease.automation_guard())
             desktop = lease.connect_desktop(
                 non_graphical=options.non_graphical,
                 desktop_factory=pyDesktop,
@@ -2421,13 +2504,6 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             sim.create_simulation_name(simulation_dir)
         project = sim.create_project(simulation_dir)
         project_path = Path(project.path)
-        if pooled_backend:
-            activation = lease.activate(project_name=sim.PROJECT_NAME)
-            if str(activation.get("state") or "") != "active":
-                raise RuntimeError(
-                    "pooled AEDT lease activation was not acknowledged: "
-                    f"state={activation.get('state')!r}"
-                )
 
         design, input_df, object_groups = create_ipmsm_design(project, sim)
         row.update(prefixed_row(dataframe_first_row(input_df), "input_"))
@@ -2453,9 +2529,20 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 pooled_solver_uncertain = True
                 safe_report_pooled_solver_fault(lease)
 
+            def activate_pooled_for_analysis() -> dict[str, Any]:
+                activation = lease.activate(project_name=sim.PROJECT_NAME)
+                if str(activation.get("state") or "") != "active":
+                    raise RuntimeError(
+                        "pooled AEDT lease activation was not acknowledged: "
+                        f"state={activation.get('state')!r}"
+                    )
+                return activation
+
             configure_kwargs["analysis_error_callback"] = (
                 report_uncertain_pooled_solver
             )
+            configure_kwargs["before_analysis"] = activate_pooled_for_analysis
+            configure_kwargs["analysis_context"] = lease.native_solve_window
         setup_result = configure_ipmsm_from_ppt(design, **configure_kwargs)
         analysis_returned_false = options.analyze and setup_result.get("analysis") is False
         row.update(
@@ -2468,17 +2555,69 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             }
         )
 
-        try:
-            project.save()
-        except Exception:
-            logging.exception("Project save failed for %s", sim.PROJECT_NAME)
-
         if analysis_returned_false:
             if pooled_backend and lease_granted:
                 report_uncertain_pooled_solver()
             raise RuntimeError(
                 f"AEDT analysis returned False; validation={setup_result.get('validation')}"
             )
+
+        if pooled_backend and lease_granted and options.analyze:
+            try:
+                terminal = attest_pooled_native_terminal(
+                    sim,
+                    design,
+                    spec.setup_name,
+                    setup_result.get("analysis"),
+                )
+            except Exception:
+                report_uncertain_pooled_solver()
+                raise
+            # The terminal attestation above runs under the restored outer
+            # lock. Suspend it again before the exact-generation scheduler
+            # marker/wait so unfinished MFT siblings can launch their final
+            # native solve instead of starving behind motor postprocessing.
+            with lease.native_solve_window():
+                barrier = lease.wait_for_native_pipeline_barrier()
+            if not bool(barrier.get("native_pipeline_barrier_granted", False)):
+                raise RuntimeError(
+                    "scheduler returned without granting the native-pipeline barrier"
+                )
+            # Siblings may have activated a different project/design while this
+            # runner waited outside the automation lock. Match the MFT pooled
+            # contract by reactivating and re-attesting our exact native
+            # identities before any save, report export, or postprocessing.
+            try:
+                post_barrier_terminal = attest_pooled_native_terminal(
+                    sim,
+                    design,
+                    spec.setup_name,
+                    setup_result.get("analysis"),
+                )
+                if post_barrier_terminal != terminal:
+                    raise RuntimeError(
+                        "pooled motor identity changed across "
+                        "native-pipeline barrier"
+                    )
+            except Exception:
+                report_uncertain_pooled_solver()
+                raise
+            row.update({
+                "pooled_native_project": terminal["project_name"],
+                "pooled_native_design": terminal["design_name"],
+                "pooled_native_setup": terminal["setup_name"],
+                "pooled_native_pipeline_completed_count": int(
+                    barrier.get("native_pipeline_completed_count") or 0
+                ),
+                "pooled_native_pipeline_expected_count": int(
+                    barrier.get("native_pipeline_expected_count") or 0
+                ),
+            })
+
+        try:
+            project.save()
+        except Exception:
+            logging.exception("Project save failed for %s", sim.PROJECT_NAME)
 
         exported = export_ppt_reports(design, project_path, case_id, setup_name=spec.setup_name) if options.analyze else {}
         output_summary = summarize_transient_outputs(exported, spec, operation=operation) if options.analyze else {}
@@ -2524,13 +2663,23 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         if isinstance(exc, PooledLeaseUnavailableError):
             row["error_class"] = "pooled_lease_unavailable"
     finally:
+        try:
+            automation_stack.close()
+        except Exception:
+            logging.exception("Pooled AEDT outer automation lock release failed")
         if pooled_backend:
             release_error = ""
             if pooled_solver_uncertain:
                 row["pooled_release_suppressed"] = "solver_state_uncertain"
             else:
                 if lease_granted:
-                    safe_close_pooled_project(sim)
+                    try:
+                        with lease.automation_guard():
+                            safe_close_pooled_project(sim)
+                    except Exception:
+                        logging.exception(
+                            "Pooled project close automation lock failed"
+                        )
                 release_error = safe_release_pooled_lease(
                     lease,
                     lease_release_wait_seconds,

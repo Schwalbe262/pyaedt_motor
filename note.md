@@ -3990,3 +3990,9 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 
 ## 2026-07-14 23:10:54 +09:00 - Stage3 acquisition v4r8 contract rebuilt locally
 - Part/goal/hypothesis: repair zero-exit failed-row deadlock and reseal cap100/backend authority; treating result failure as the existing bounded terminal lineage should preserve fail-closed progress. Actions/options: added generic retry/evidence handling plus v4r8 standalone/pooled builder, driver, and focused tests; no live/deployment/scheduler/push action. Metrics/result: compile pass, focused77/77, full1346 with9 skipped and56 known legacy failures (54 Y-path,2 frozen v4r7 seals); token sample unavailable because the local Codex SQLite DB was absent. Failure/next: none in changed modules; publish only after an authorized LF325 build-config dry run.
+
+## 2026-07-16 10:07:42 +09:00 - Motor joined mixed AEDT native pipeline locally
+- Part/goal/hypothesis: make an IPMSM lease obey scheduler `9150e7fa` and MFT `937b812b` so MFT2+motor1 cannot begin Desktop-global postprocess until every exact-generation native solve is terminal.
+- Actions/result: based on `70851849`, added the scheduler-compatible cross-process automation lock, blocking Analyze window, exact-generation completion/wait, and exact project/design/setup re-attestation on both sides of the barrier; no live deploy, q20, or mixed submission.
+- Metrics/next: compile and focused70/70 pass; full tests previously exceeded300s without a result. Reseal the runtime closure with new `module/aedt_automation_lock.py`, review/cherry-pick, then run an authorized `shared_if_compatible` mixed canary and inspect terminal/barrier telemetry before scale-up.
+- Token sample unavailable because the local Codex SQLite DB was absent.

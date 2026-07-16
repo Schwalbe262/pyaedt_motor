@@ -131,6 +131,46 @@ class IPMSMPPTSetupContractTests(unittest.TestCase):
 
         callback.assert_called_once_with()
 
+    def test_analysis_uses_explicit_blocking_native_window(self) -> None:
+        events: list[object] = []
+
+        class FakeM2D:
+            def validate_simple(self) -> bool:
+                return True
+
+            def analyze(self, **kwargs: object) -> bool:
+                events.append(("analyze", kwargs))
+                return True
+
+        @contextlib.contextmanager
+        def analysis_window():
+            events.append("window_enter")
+            try:
+                yield
+            finally:
+                events.append("window_exit")
+
+        with self.patched_configure_helpers(FakeM2D()):
+            result = ppt_setup.configure_ipmsm_from_ppt(
+                object(),
+                spec=IPMSMPPTSpec(),
+                create_reports=False,
+                analyze=True,
+                before_analysis=lambda: events.append("activate"),
+                analysis_context=analysis_window,
+            )
+
+        self.assertIs(result["analysis"], True)
+        self.assertEqual(
+            [item if isinstance(item, str) else item[0] for item in events],
+            ["window_enter", "activate", "analyze", "window_exit"],
+        )
+        analyze_kwargs = next(
+            item[1] for item in events
+            if isinstance(item, tuple) and item[0] == "analyze"
+        )
+        self.assertIs(analyze_kwargs["blocking"], True)
+
     def test_pre_solve_error_does_not_call_analysis_error_callback(self) -> None:
         callback = mock.Mock()
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
+import tempfile
 import unittest
 import urllib.error
 from unittest.mock import patch
@@ -18,7 +19,7 @@ class AedtAttachClientTests(unittest.TestCase):
 
         self.assertEqual(
             hashlib.sha256(source_body.encode("utf-8")).hexdigest(),
-            "6cfe18d55630077ac7332bb31c08ccde17c0d7ea2954c4da8f230a52a63d3b8c",
+            "d440a1dfb78235082c403ec10963bb8e8cee028c6d37acf31902bc62555ff4c0",
         )
 
     def test_connect_desktop_uses_nonowning_remote_connection(self) -> None:
@@ -121,6 +122,69 @@ class AedtAttachClientTests(unittest.TestCase):
 
         self.assertEqual(http.calls, 2)
         self.assertEqual(stop_event.wait_calls, 3)
+
+    def test_native_pipeline_barrier_posts_exact_solve_generation(self) -> None:
+        calls: list[tuple[str, str, object]] = []
+
+        class Http:
+            def request(self, method, path, payload=None, **_kwargs):
+                calls.append((method, path, payload))
+                return {
+                    "state": "active",
+                    "solve_permit_granted": True,
+                    "solve_permit_generation": 17,
+                    "native_pipeline_completed": True,
+                    "native_pipeline_completed_count": 3,
+                    "native_pipeline_expected_count": 3,
+                    "native_pipeline_barrier_granted": True,
+                    "native_pipeline_barrier_broken": False,
+                }
+
+        lease = AedtProjectLease(
+            http=Http(),
+            lease_id=7,
+            client_token="token",
+            project_name="ipmsm-7",
+            state="active",
+            protocol_version=2,
+            solve_permit_granted=True,
+            solve_permit_generation=17,
+        )
+
+        status = lease.wait_for_native_pipeline_barrier(
+            timeout_seconds=30,
+            poll_seconds=0,
+        )
+
+        self.assertTrue(status["native_pipeline_barrier_granted"])
+        self.assertEqual(calls, [(
+            "POST",
+            "/api/aedt-pool/leases/7/native-pipeline-complete",
+            {"solve_permit_generation": 17},
+        )])
+
+    def test_native_solve_window_suspends_and_restores_outer_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = Path(tmp) / "desktop-automation.lock"
+            lock_path.write_bytes(b"\0")
+            lease = AedtProjectLease(
+                http=SimpleNamespace(),
+                lease_id=7,
+                client_token="token",
+                project_name="ipmsm-7",
+                state="active",
+                protocol_version=2,
+                automation_lock_path=str(lock_path),
+            )
+
+            lock = lease.automation_lock()
+            with lease.automation_guard():
+                with lease.automation_guard():
+                    self.assertEqual(lock._depth, 2)
+                    with lease.native_solve_window():
+                        self.assertEqual(lock._depth, 0)
+                    self.assertEqual(lock._depth, 2)
+            self.assertEqual(lock._depth, 0)
 
 
 if __name__ == "__main__":
