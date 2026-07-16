@@ -37,7 +37,7 @@ BOOTSTRAP_TOKEN_PATH = Path(
 SCHEDULER_SOURCE = Path(r"Y:\git\slurm_scheduler_family_recovery_260715")
 ACCOUNTS_PATH = Path(r"Y:\runtime\slurm_scheduler\config\accounts.yaml")
 
-SCHEDULER_CONTROL_PLANE_SHA = "9562c6f2f66b75954c6f3276bc30f8e2088b30b3"
+SCHEDULER_CONTROL_PLANE_SHA = "9fcbc6fc9878eed42f52d6c1d4fca90264be0e57"
 SCHEDULER_CLIENT_SHA = "9150e7fa7f72fdf00fb8113e157398b410833c40"
 MFT_SOLVER_OLD_SHA = "c609ee52e717c650f70f73c23ee524ad8dec5aa3"
 MFT_SOLVER_SHA = "c7a0c792e2babc74ad1596a6b95b45379a6f903d"
@@ -46,11 +46,18 @@ MOTOR_REPOSITORY = "https://github.com/Schwalbe262/pyaedt_motor.git"
 LIBRARY_REPOSITORY = "https://github.com/Schwalbe262/pyaedt_library.git"
 MFT_SOURCE_TASK_IDS = (41696, 41697)
 MOTOR_SOURCE_TASK_ID = 34762
-Q21_NAME_PREFIX = "mft-3x3-q21-260716a-"
-Q21_CANARY = "mft-9way-q21-exact-three-session-barrier"
+Q21_NAME_PREFIX = "mft-1x3-q21b-260716b-s536-"
+Q21_CANARY = "mft-q21b-release-settlement-1aedt-3project"
+Q21_TASK_IDS = (41796, 41797, 41798)
+Q21_LEASE_BY_TASK = {41796: 13176, 41797: 13175, 41798: 13177}
+Q21_RESERVATION_BY_TASK = {41796: 13, 41797: 14, 41798: 15}
+Q21_SESSION_ID = 536
+Q21_SESSION_GENERATION = 1
+Q21_SOLVE_GENERATION = 1
+Q21_ALLOCATION_ID = 9063
 RUN_LABEL = "q22-260716"
-CLIENT_ACCOUNT = "harry261"
-CLIENT_NODE = "n109"
+CLIENT_ACCOUNT = "dhj02"
+CLIENT_NODE = "n113"
 GATE_TIMEOUT_SECONDS = 1800
 LOCK_TIMEOUT_SECONDS = 7200
 BARRIER_TIMEOUT_SECONDS = 7200
@@ -158,13 +165,14 @@ def source_tasks(connection: sqlite3.Connection) -> tuple[list[dict[str, Any]], 
 
 
 def q21_terminal_evidence(connection: sqlite3.Connection) -> dict[str, Any]:
+    task_marks = ",".join("?" for _ in Q21_TASK_IDS)
     tasks = [dict(row) for row in connection.execute(
-        """
+        f"""
         SELECT id, name, status, exit_code, account_name, node_name,
                allocation_id, payload_json
-        FROM tasks WHERE name LIKE ? ORDER BY id
+        FROM tasks WHERE id IN ({task_marks}) ORDER BY id
         """,
-        (f"{Q21_NAME_PREFIX}%",),
+        Q21_TASK_IDS,
     )]
     valid_tasks: list[dict[str, Any]] = []
     for task in tasks:
@@ -172,7 +180,23 @@ def q21_terminal_evidence(connection: sqlite3.Connection) -> dict[str, Any]:
             payload = json.loads(str(task.get("payload_json") or "{}"))
         except json.JSONDecodeError:
             continue
-        if payload.get("canary") == Q21_CANARY:
+        stage_profile = payload.get("stage_profile")
+        if (
+            payload.get("canary") == Q21_CANARY
+            and str(task.get("name") or "").startswith(Q21_NAME_PREFIX)
+            and payload.get("solver_git_hash") == MFT_SOLVER_SHA
+            and payload.get("library_git_hash") == PYAEDT_LIBRARY_SHA
+            and payload.get("q21b_exact_session_reservation") is True
+            and int(payload.get("q21b_total_projects") or 0) == 3
+            and int(payload.get("q21b_total_sessions") or 0) == 1
+            and int(payload.get("q21b_projects_per_session") or 0) == 3
+            and int(payload.get("session_expected") or 0) == Q21_SESSION_ID
+            and int(payload.get("release_wait_seconds") or 0) == RELEASE_WAIT_SECONDS
+            and isinstance(stage_profile, dict)
+            and all(int(stage_profile.get(key) or 0) == 1 for key in (
+                "matrix_on", "cap_on", "loss_on", "thermal_on"
+            ))
+        ):
             valid_tasks.append({**task, "payload": payload})
     task_ids = [int(item["id"]) for item in valid_tasks]
     leases: list[dict[str, Any]] = []
@@ -180,39 +204,63 @@ def q21_terminal_evidence(connection: sqlite3.Connection) -> dict[str, Any]:
         marks = ",".join("?" for _ in task_ids)
         leases = [dict(row) for row in connection.execute(
             f"""
-            SELECT id, task_id, session_id, state, solve_permit_generation,
-                   native_pipeline_completed_at, failure_message
+            SELECT id, task_id, requested_session_id,
+                   requested_session_generation, exact_session_reservation_id,
+                   session_id, slot_index, state, solve_permit_at,
+                   solve_permit_generation, native_pipeline_completed_at,
+                   native_pipeline_session_id, native_pipeline_generation,
+                   finished_at, failure_message
             FROM aedt_project_leases
             WHERE task_id IN ({marks}) ORDER BY task_id
             """,
             tuple(task_ids),
         )]
     tasks_ok = (
-        len(valid_tasks) == 9
-        and len({int(item["id"]) for item in valid_tasks}) == 9
+        tuple(task_ids) == Q21_TASK_IDS
         and all(
             item["status"] == "completed"
             and item["exit_code"] is not None
             and int(item["exit_code"]) == 0
+            and item["account_name"] == CLIENT_ACCOUNT
+            and item["node_name"] == CLIENT_NODE
+            and int(item["allocation_id"] or 0) == Q21_ALLOCATION_ID
             for item in valid_tasks
         )
     )
     leases_ok = (
-        len(leases) == 9
+        len(leases) == 3
         and {int(item["task_id"]) for item in leases} == set(task_ids)
         and all(
-            item["state"] == "released"
-            and int(item["solve_permit_generation"] or 0) > 0
+            int(item["id"] or 0) == Q21_LEASE_BY_TASK[int(item["task_id"])]
+            and int(item["exact_session_reservation_id"] or 0)
+            == Q21_RESERVATION_BY_TASK[int(item["task_id"])]
+            and int(item["requested_session_id"] or 0) == Q21_SESSION_ID
+            and int(item["requested_session_generation"] or 0)
+            == Q21_SESSION_GENERATION
+            and int(item["session_id"] or 0) == Q21_SESSION_ID
+            and (
+                int(item["slot_index"])
+                if item["slot_index"] is not None
+                else -1
+            ) in {0, 1, 2}
+            and item["state"] == "released"
+            and bool(item["solve_permit_at"])
+            and int(item["solve_permit_generation"] or 0) == Q21_SOLVE_GENERATION
             and bool(item["native_pipeline_completed_at"])
+            and int(item["native_pipeline_session_id"] or 0) == Q21_SESSION_ID
+            and int(item["native_pipeline_generation"] or 0)
+            == Q21_SOLVE_GENERATION
+            and bool(item["finished_at"])
             and not str(item["failure_message"] or "").strip()
             for item in leases
         )
+        and {int(item["slot_index"]) for item in leases} == {0, 1, 2}
     )
     sessions: dict[int, int] = {}
     for item in leases:
         session_id = int(item["session_id"] or 0)
         sessions[session_id] = sessions.get(session_id, 0) + 1
-    cohorts_ok = len(sessions) == 3 and set(sessions.values()) == {3}
+    cohorts_ok = sessions == {Q21_SESSION_ID: 3}
     clients = sorted(
         {
             (str(item["account_name"] or ""), str(item["node_name"] or ""))
@@ -229,6 +277,10 @@ def q21_terminal_evidence(connection: sqlite3.Connection) -> dict[str, Any]:
         },
         "lease_count": len(leases),
         "session_project_counts": sessions,
+        "expected_task_ids": list(Q21_TASK_IDS),
+        "expected_lease_by_task": dict(Q21_LEASE_BY_TASK),
+        "expected_session_generation": Q21_SESSION_GENERATION,
+        "expected_solve_generation": Q21_SOLVE_GENERATION,
         "client_locations": clients,
         "task_ids": task_ids,
     }
@@ -341,7 +393,7 @@ def prepare(
     if not scheduler_health.get("ok") or not scheduler_health.get("scheduler_ok"):
         blockers.append("scheduler health is not operational")
     if not q21["ready"]:
-        blockers.append("q21 3x3 terminal/native-barrier evidence is incomplete")
+        blockers.append("q21b exact 1x3 terminal/native-barrier/release evidence is incomplete")
     if q21["client_locations"] != [(CLIENT_ACCOUNT, CLIENT_NODE)]:
         blockers.append(
             "q21 client location differs from the independently verified scheduler package"

@@ -152,36 +152,76 @@ class SubmitMixedCanaryTests(unittest.TestCase):
                 payload_json TEXT
             );
             CREATE TABLE aedt_project_leases (
-                id INTEGER PRIMARY KEY, task_id INTEGER, session_id INTEGER,
-                state TEXT, solve_permit_generation INTEGER,
-                native_pipeline_completed_at TEXT, failure_message TEXT
+                id INTEGER PRIMARY KEY, task_id INTEGER,
+                requested_session_id INTEGER, requested_session_generation INTEGER,
+                exact_session_reservation_id INTEGER, session_id INTEGER,
+                slot_index INTEGER, state TEXT, solve_permit_at TEXT,
+                solve_permit_generation INTEGER, native_pipeline_completed_at TEXT,
+                native_pipeline_session_id INTEGER,
+                native_pipeline_generation INTEGER, finished_at TEXT,
+                failure_message TEXT
             );
             """
         )
-        for index in range(9):
-            task_id = 50000 + index
-            session_id = 700 + index // 3
-            payload = json.dumps({"canary": mixed.Q21_CANARY})
+        for index, task_id in enumerate(mixed.Q21_TASK_IDS):
+            payload = json.dumps(
+                {
+                    "canary": mixed.Q21_CANARY,
+                    "solver_git_hash": mixed.MFT_SOLVER_SHA,
+                    "library_git_hash": mixed.PYAEDT_LIBRARY_SHA,
+                    "q21b_exact_session_reservation": True,
+                    "q21b_total_projects": 3,
+                    "q21b_total_sessions": 1,
+                    "q21b_projects_per_session": 3,
+                    "session_expected": mixed.Q21_SESSION_ID,
+                    "release_wait_seconds": mixed.RELEASE_WAIT_SECONDS,
+                    "stage_profile": {
+                        "matrix_on": 1,
+                        "cap_on": 1,
+                        "loss_on": 1,
+                        "thermal_on": 1,
+                    },
+                }
+            )
             connection.execute(
                 "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?)",
                 (
                     task_id,
-                    f"{mixed.Q21_NAME_PREFIX}s{session_id}-{index}",
+                    f"{mixed.Q21_NAME_PREFIX}rep{index + 1}",
                     "completed",
                     0,
                     mixed.CLIENT_ACCOUNT,
                     mixed.CLIENT_NODE,
-                    9000,
+                    mixed.Q21_ALLOCATION_ID,
                     payload,
                 ),
             )
             connection.execute(
-                "INSERT INTO aedt_project_leases VALUES (?,?,?,?,?,?,?)",
-                (index + 1, task_id, session_id, "released", 1, "2026-07-16 00:00:00", ""),
+                "INSERT INTO aedt_project_leases VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    mixed.Q21_LEASE_BY_TASK[task_id],
+                    task_id,
+                    mixed.Q21_SESSION_ID,
+                    mixed.Q21_SESSION_GENERATION,
+                    mixed.Q21_RESERVATION_BY_TASK[task_id],
+                    mixed.Q21_SESSION_ID,
+                    index,
+                    "released",
+                    "2026-07-16 00:00:00",
+                    mixed.Q21_SOLVE_GENERATION,
+                    "2026-07-16 01:00:00",
+                    mixed.Q21_SESSION_ID,
+                    mixed.Q21_SOLVE_GENERATION,
+                    "2026-07-16 01:01:00",
+                    "",
+                ),
             )
         self.assertTrue(mixed.q21_terminal_evidence(connection)["ready"])
 
-        connection.execute("UPDATE tasks SET exit_code = 1 WHERE id = 50000")
+        connection.execute(
+            "UPDATE tasks SET exit_code = 1 WHERE id = ?",
+            (mixed.Q21_TASK_IDS[0],),
+        )
         self.assertFalse(mixed.q21_terminal_evidence(connection)["ready"])
 
     def test_runbook_forbids_exact_reservation_and_port_8000(self) -> None:

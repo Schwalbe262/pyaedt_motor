@@ -1,6 +1,7 @@
 # MFT2 + IPMSM1 mixed AEDT canary
 
-This runbook is for the first `shared_if_compatible` validation after q21.
+This runbook is for the first `shared_if_compatible` validation after the
+release-fixed q21b exact 1-AEDT/3-project cohort.
 It does not apply to ordinary family-isolated production work.
 
 ## Pinned authority
@@ -10,8 +11,8 @@ It does not apply to ordinary family-isolated production work.
 - MFT solver: `c7a0c792e2babc74ad1596a6b95b45379a6f903d`
 - PyAEDT library: `e6b9b9d20a832ff5c3f7ca97218737a0b8650781`
 - Motor native-barrier parent: `b624406b20e779d6409dc191c14ff5c214b1e1dc`
-- Runtime authority: `mixed_aedt_canary_authority_v1.json`, seal
-  `ef0874ed3c24430db6776832c55d8632d47635952a43d393cb9c1116f801fbc5`
+- Runtime authority: `mixed_aedt_canary_authority_v1.json` (verify its current
+  `authority_sha256` before execution)
 - Canonical AEDT session profile SHA-256:
   `cb95ebf25f88487b19bf867aeece5fb39e63b50c470ece518ca11ca22f13c91f`
 
@@ -42,15 +43,16 @@ C:\Users\peets\anaconda3\python.exe submit_ipmsm_mixed_canary.py --motor-git-ref
 Dry-run is the default and performs no admission, task submission, release-file
 write, scheduler restart, or session mutation. `execution_ready=true` requires:
 
-1. q21 has 9/9 `completed`, exit code 0 tasks;
-2. all nine q21 leases are released with exact native-pipeline markers in three
-   cohorts of three;
+1. exact q21b tasks `41796`, `41797`, and `41798` are all `completed` with
+   exit code 0 and the sealed solver/library/full-stage metadata;
+2. exact leases `13176`, `13175`, and `13177` are released from session `536`,
+   generation 1, with native-pipeline markers in solve generation 1;
 3. scheduler `8001` is healthy at the pinned control-plane commit;
 4. mixed isolation has not already been recorded as passed;
 5. at least one eligible empty three-slot session exists; and
 6. every sealed motor runtime hash still matches.
 
-Before execution, independently recheck the `harry261` package from its root:
+Before execution, independently recheck the `dhj02` package from its root:
 
 ```bash
 git -C "$HOME/slurm_scheduler/aedt_pool_pkg" rev-parse HEAD

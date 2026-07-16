@@ -1,5 +1,5 @@
 {
-  "authority_sha256": "ef0874ed3c24430db6776832c55d8632d47635952a43d393cb9c1116f801fbc5",
+  "authority_sha256": "43175c29178a2c0f1182bdb4d57be69e95cfe87685a7487acbacfc8ec46d0ced",
   "environment_contract": {
     "AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS": "7200",
     "AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS": "7200",
@@ -10,11 +10,34 @@
   },
   "execution_gate": {
     "admission_ttl_seconds": 3600,
-    "q21_projects_per_session": 3,
-    "q21_requires_exit_zero": true,
-    "q21_requires_native_pipeline_marker": true,
-    "q21_sessions": 3,
-    "q21_tasks": 9,
+    "q21b_allocation_id": 9063,
+    "q21b_canary": "mft-q21b-release-settlement-1aedt-3project",
+    "q21b_client_account": "dhj02",
+    "q21b_client_node": "n113",
+    "q21b_lease_by_task": {
+      "41796": 13176,
+      "41797": 13175,
+      "41798": 13177
+    },
+    "q21b_projects_per_session": 3,
+    "q21b_requires_exit_zero": true,
+    "q21b_requires_native_pipeline_marker": true,
+    "q21b_requires_released_lease": true,
+    "q21b_reservation_by_task": {
+      "41796": 13,
+      "41797": 14,
+      "41798": 15
+    },
+    "q21b_session_generation": 1,
+    "q21b_session_id": 536,
+    "q21b_sessions": 1,
+    "q21b_solve_generation": 1,
+    "q21b_task_ids": [
+      41796,
+      41797,
+      41798
+    ],
+    "q21b_tasks": 3,
     "remote_release_gate_seconds": 1800
   },
   "mft": {
@@ -65,13 +88,13 @@
     "aedt_attach_client_sha256": "c277e48595762827e86f282fe895971a16d711a77cc19395dfcfb79b94d14801",
     "aedt_automation_lock_sha256": "027f4aea16f927b5a55ba654d9c692e2196d4efd09f17f28baa67e4b89646aca",
     "client_package_commit": "9150e7fa7f72fdf00fb8113e157398b410833c40",
-    "control_plane_commit": "9562c6f2f66b75954c6f3276bc30f8e2088b30b3",
+    "control_plane_commit": "9fcbc6fc9878eed42f52d6c1d4fca90264be0e57",
     "local_api_url": "http://127.0.0.1:8001",
     "mixed_admission_endpoint": "/api/aedt-pool/mixed-canary-admissions",
     "remote_client_url": "http://172.16.10.37:18790"
   },
   "schema_version": "mft-ipmsm-mixed-canary-authority-v1",
-  "sealed_at": "2026-07-16T03:42:23Z",
+  "sealed_at": "2026-07-16T04:44:43Z",
   "session_profile": {
     "canonical_sha256": "cb95ebf25f88487b19bf867aeece5fb39e63b50c470ece518ca11ca22f13c91f",
     "value": {
