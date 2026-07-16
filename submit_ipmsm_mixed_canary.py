@@ -40,7 +40,7 @@ ACCOUNTS_PATH = Path(r"Y:\runtime\slurm_scheduler\config\accounts.yaml")
 SCHEDULER_CONTROL_PLANE_SHA = "9562c6f2f66b75954c6f3276bc30f8e2088b30b3"
 SCHEDULER_CLIENT_SHA = "9150e7fa7f72fdf00fb8113e157398b410833c40"
 MFT_SOLVER_OLD_SHA = "c609ee52e717c650f70f73c23ee524ad8dec5aa3"
-MFT_SOLVER_SHA = "87b5e9209a900f15108f72c2272fe2462aa45216"
+MFT_SOLVER_SHA = "c7a0c792e2babc74ad1596a6b95b45379a6f903d"
 PYAEDT_LIBRARY_SHA = "e6b9b9d20a832ff5c3f7ca97218737a0b8650781"
 MOTOR_REPOSITORY = "https://github.com/Schwalbe262/pyaedt_motor.git"
 LIBRARY_REPOSITORY = "https://github.com/Schwalbe262/pyaedt_library.git"
@@ -54,6 +54,7 @@ CLIENT_NODE = "n109"
 GATE_TIMEOUT_SECONDS = 1800
 LOCK_TIMEOUT_SECONDS = 7200
 BARRIER_TIMEOUT_SECONDS = 7200
+RELEASE_WAIT_SECONDS = 7200
 ADMISSION_TTL_SECONDS = 3600
 HEARTBEAT_MAX_AGE_SECONDS = 90.0
 LIVE_LEASE_STATES = (
@@ -528,6 +529,7 @@ def pooled_env_from_mft(source: dict[str, Any]) -> str:
     return pooled.rstrip() + "\n" + "\n".join((
         f'export AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS="{LOCK_TIMEOUT_SECONDS}"',
         f'export AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS="{BARRIER_TIMEOUT_SECONDS}"',
+        f'export MFT_AEDT_RELEASE_WAIT_SECONDS="{RELEASE_WAIT_SECONDS}"',
     ))
 
 
@@ -604,6 +606,7 @@ def mft_payload(
         "exact_session_reservation": False,
         "automation_lock_timeout_seconds": LOCK_TIMEOUT_SECONDS,
         "native_pipeline_barrier_timeout_seconds": BARRIER_TIMEOUT_SECONDS,
+        "release_wait_seconds": RELEASE_WAIT_SECONDS,
     }
     return ({
         "name": f"mft-mixed-{RUN_LABEL}-s{session_id}-{ordinal}-r{row_id}",
@@ -718,6 +721,7 @@ def motor_payload(
         'export MFT_AEDT_SESSION_VERSION="2025.2"',
         f'export AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS="{LOCK_TIMEOUT_SECONDS}"',
         f'export AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS="{BARRIER_TIMEOUT_SECONDS}"',
+        f'export MFT_AEDT_RELEASE_WAIT_SECONDS="{RELEASE_WAIT_SECONDS}"',
         'export SLURM_AEDT_POOL_CLIENT_TOKEN_FILE="$HOME/slurm_scheduler/aedt_pool_client"',
     ))
     metadata = {
@@ -735,6 +739,7 @@ def motor_payload(
         "runtime_authority_sha256": load_authority()["authority_sha256"],
         "automation_lock_timeout_seconds": LOCK_TIMEOUT_SECONDS,
         "native_pipeline_barrier_timeout_seconds": BARRIER_TIMEOUT_SECONDS,
+        "release_wait_seconds": RELEASE_WAIT_SECONDS,
         "result_guard": {
             "status": "ok",
             "analysis_returned_false": False,

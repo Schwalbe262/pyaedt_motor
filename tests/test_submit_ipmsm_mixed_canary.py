@@ -93,6 +93,10 @@ class SubmitMixedCanaryTests(unittest.TestCase):
         self.assertIn(token, payload["command"])
         self.assertIn("AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS", payload["env_setup"])
         self.assertIn("AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS", payload["env_setup"])
+        self.assertIn(
+            'MFT_AEDT_RELEASE_WAIT_SECONDS="7200"', payload["env_setup"]
+        )
+        self.assertEqual(payload["payload_json"]["release_wait_seconds"], 7200)
         self.assertFalse(payload["payload_json"]["exact_session_reservation"])
         self.assertNotIn("requested_session_id", payload)
 
@@ -126,6 +130,10 @@ class SubmitMixedCanaryTests(unittest.TestCase):
         self.assertIn("--verify-runtime-only", payload["command"])
         self.assertIn("pooled_native_pipeline_completed_count", payload["command"])
         self.assertIn('MFT_AEDT_ISOLATION_POLICY="shared_if_compatible"', payload["env_setup"])
+        self.assertIn(
+            'MFT_AEDT_RELEASE_WAIT_SECONDS="7200"', payload["env_setup"]
+        )
+        self.assertEqual(payload["payload_json"]["release_wait_seconds"], 7200)
         self.assertEqual(
             payload["payload_json"]["result_guard"]["native_pipeline_completed_count"],
             3,

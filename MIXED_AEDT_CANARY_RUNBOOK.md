@@ -7,11 +7,11 @@ It does not apply to ordinary family-isolated production work.
 
 - Scheduler control plane: `9562c6f2f66b75954c6f3276bc30f8e2088b30b3`
 - Scheduler client package: `9150e7fa7f72fdf00fb8113e157398b410833c40`
-- MFT solver: `87b5e9209a900f15108f72c2272fe2462aa45216`
+- MFT solver: `c7a0c792e2babc74ad1596a6b95b45379a6f903d`
 - PyAEDT library: `e6b9b9d20a832ff5c3f7ca97218737a0b8650781`
 - Motor native-barrier parent: `b624406b20e779d6409dc191c14ff5c214b1e1dc`
 - Runtime authority: `mixed_aedt_canary_authority_v1.json`, seal
-  `62ab5f3138b53fbed347a8d1592b2991663fa36aa7a9fedddcadd32dcd886f3e`
+  `ef0874ed3c24430db6776832c55d8632d47635952a43d393cb9c1116f801fbc5`
 - Canonical AEDT session profile SHA-256:
   `cb95ebf25f88487b19bf867aeece5fb39e63b50c470ece518ca11ca22f13c91f`
 
@@ -76,8 +76,9 @@ again on the compute node and checks out the exact PyAEDT library commit beside
 the motor repository.
 
 Required environment is `pooled`, `shared_if_compatible`, AEDT 2025.2,
-automation-lock timeout 7200 s, native-pipeline barrier timeout 7200 s, and the
-canonical three-design DSO profile. MFT uses matrix+cap for a shorter mixed
+automation-lock timeout 7200 s, native-pipeline barrier timeout 7200 s,
+release-settlement timeout 7200 s, and the canonical three-design DSO profile.
+MFT uses matrix+cap for a shorter mixed
 isolation canary; IPMSM performs its complete blocking transient solve and
 strict output export.
 

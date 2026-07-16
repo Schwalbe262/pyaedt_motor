@@ -1,10 +1,11 @@
 {
-  "authority_sha256": "f1079ba3a6aaacec5df07b06a51e249567d760ecfceb904f355c7440f1e1442d",
+  "authority_sha256": "ef0874ed3c24430db6776832c55d8632d47635952a43d393cb9c1116f801fbc5",
   "environment_contract": {
     "AEDT_POOL_AUTOMATION_LOCK_TIMEOUT_SECONDS": "7200",
     "AEDT_POOL_NATIVE_PIPELINE_BARRIER_TIMEOUT_SECONDS": "7200",
     "MFT_AEDT_BACKEND": "pooled",
     "MFT_AEDT_ISOLATION_POLICY": "shared_if_compatible",
+    "MFT_AEDT_RELEASE_WAIT_SECONDS": "7200",
     "MFT_AEDT_SESSION_VERSION": "2025.2"
   },
   "execution_gate": {
@@ -22,7 +23,7 @@
       41696,
       41697
     ],
-    "solver_commit": "87b5e9209a900f15108f72c2272fe2462aa45216",
+    "solver_commit": "c7a0c792e2babc74ad1596a6b95b45379a6f903d",
     "stage_profile": {
       "cap_on": 1,
       "loss_on": 0,
@@ -70,7 +71,7 @@
     "remote_client_url": "http://172.16.10.37:18790"
   },
   "schema_version": "mft-ipmsm-mixed-canary-authority-v1",
-  "sealed_at": "2026-07-16T02:43:29Z",
+  "sealed_at": "2026-07-16T03:42:23Z",
   "session_profile": {
     "canonical_sha256": "cb95ebf25f88487b19bf867aeece5fb39e63b50c470ece518ca11ca22f13c91f",
     "value": {

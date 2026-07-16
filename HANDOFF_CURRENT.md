@@ -337,7 +337,7 @@
 
 ## 2026-07-16 - Mixed canary deploy authority prepared
 - Vendored attach/lock sources now exactly match scheduler client `9150e7fa`; normalized SHAs are `c277e485...4801` and `027f4aea...6aca`.
-- New authority `mixed_aedt_canary_authority_v1.json` seals the nine-file runtime closure, canonical profile `cb95ebf2...91f`, and authority seal `f1079ba3...442d` without modifying frozen v4r8 authority; its live scheduler pin is `9562c6f2`.
+- New authority `mixed_aedt_canary_authority_v1.json` seals the nine-file runtime closure, canonical profile `cb95ebf2...91f`, authority seal `ef0874ed...fbc5`, and release-settlement solver `c7a0c792`; its live scheduler pin is `9562c6f2`.
 - `submit_ipmsm_mixed_canary.py` is dry-run by default and requires q21 9/9 terminal-native evidence before one scheduler mixed admission creates exactly MFT2+IPMSM1; exact session reservations are intentionally forbidden.
 - Focused validation is75/75; expanded63 pass/14 baseline-identical failures. No mixed admission/task/session mutation was made.
 - After q21 closes, run the sealed tool with the exact committed motor ref; review terminal solve/barrier evidence before any scale-up.
