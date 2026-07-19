@@ -240,6 +240,16 @@ def completed_fixture(root: Path) -> tuple[SimpleNamespace, runner.Reconciliatio
 
 class Stage3AcquisitionV4r9Tests(unittest.TestCase):
     def test_contract_constants_seal_live_port_cap_and_recovery_bounds(self) -> None:
+        self.assertIn("v4r10", builder.CONTRACT_SCHEMA_VERSION)
+        self.assertIn("v4r10", builder.BUILD_REPORT_SCHEMA_VERSION)
+        self.assertIn("v4r10", runner.RUN_REPORT_SCHEMA_VERSION)
+        self.assertIn("v4r10", runner.COMPLETION_SCHEMA_VERSION)
+        self.assertIn("v4r10", runner.FAILURE_EVIDENCE_SCHEMA_VERSION)
+        self.assertEqual(
+            builder.RELATIVE_ROOT,
+            Path("simul_log_smoke/v4r10_stage3_acquisition"),
+        )
+        self.assertIn("v4r7", builder.EXPECTED_PRIOR_CONTRACT.as_posix())
         self.assertEqual(builder.SCHEDULER_URL, "http://127.0.0.1:8002")
         self.assertEqual(builder.PROJECT_ACTIVE_CAP, 50)
         self.assertEqual(builder.EXPECTED_INITIAL_HISTORY, 303)
@@ -322,6 +332,161 @@ class Stage3AcquisitionV4r9Tests(unittest.TestCase):
                 (executable_path, "v4r9 runner executable"),
             )
             self.assertIs(executable_call.kwargs["require_single_link"], False)
+
+    def test_build_publish_creates_only_fixed_root_after_write_free_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            runtime_root = base / "runtime"
+            source_root = base / "source"
+            (runtime_root / "simul_log_smoke").mkdir(parents=True)
+            source_root.mkdir()
+            recovery_root = runtime_root / builder.RELATIVE_ROOT
+            legacy_root = runtime_root / "simul_log_smoke" / "v4r9_stage3_acquisition"
+            legacy_root.mkdir()
+            legacy_contract = legacy_root / builder.CONTRACT_FILENAME
+            legacy_contract.write_bytes(b"immutable v4r9 authority\n")
+            document = {
+                "schema_version": "fixture",
+                "contract_sha256": "a" * 64,
+                "recovery": {},
+            }
+            payload = builder.contract_bytes(document)
+            expected_hash = builder._sha256(payload)
+            with mock.patch.object(
+                builder,
+                "build_contract_document",
+                return_value=(document, ()),
+            ):
+                dry_report = builder.build_or_publish(
+                    runtime_root,
+                    source_root,
+                    runtime_root / "prior.json",
+                    "f" * 40,
+                    publish=False,
+                    expected_output_raw_sha256=None,
+                )
+                self.assertFalse(recovery_root.exists())
+                self.assertEqual(dry_report["writes_performed"], 0)
+                self.assertEqual(dry_report["contract_writes_performed"], 0)
+                self.assertEqual(dry_report["directory_writes_performed"], 0)
+
+                publish_report = builder.build_or_publish(
+                    runtime_root,
+                    source_root,
+                    runtime_root / "prior.json",
+                    "f" * 40,
+                    publish=True,
+                    expected_output_raw_sha256=expected_hash,
+                )
+                output = recovery_root / builder.CONTRACT_FILENAME
+                self.assertEqual(output.read_bytes(), payload)
+                self.assertEqual(list(recovery_root.iterdir()), [output])
+                self.assertEqual(publish_report["status"], "published")
+                self.assertEqual(publish_report["writes_performed"], 2)
+                self.assertEqual(publish_report["contract_writes_performed"], 1)
+                self.assertEqual(publish_report["directory_writes_performed"], 1)
+
+                retry_report = builder.build_or_publish(
+                    runtime_root,
+                    source_root,
+                    runtime_root / "prior.json",
+                    "f" * 40,
+                    publish=True,
+                    expected_output_raw_sha256=expected_hash,
+                )
+                self.assertEqual(retry_report["status"], "existing_verified")
+                self.assertEqual(retry_report["writes_performed"], 0)
+                self.assertEqual(retry_report["contract_writes_performed"], 0)
+                self.assertEqual(retry_report["directory_writes_performed"], 0)
+                self.assertEqual(list(recovery_root.iterdir()), [output])
+                self.assertEqual(
+                    legacy_contract.read_bytes(),
+                    b"immutable v4r9 authority\n",
+                )
+
+    def test_publish_reuses_safe_existing_recovery_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            runtime_root = base / "runtime"
+            source_root = base / "source"
+            recovery_root = runtime_root / builder.RELATIVE_ROOT
+            recovery_root.mkdir(parents=True)
+            source_root.mkdir()
+            document = {
+                "schema_version": "fixture",
+                "contract_sha256": "a" * 64,
+                "recovery": {},
+            }
+            expected_hash = builder._sha256(builder.contract_bytes(document))
+            with mock.patch.object(
+                builder,
+                "build_contract_document",
+                return_value=(document, ()),
+            ):
+                report = builder.build_or_publish(
+                    runtime_root,
+                    source_root,
+                    runtime_root / "prior.json",
+                    "f" * 40,
+                    publish=True,
+                    expected_output_raw_sha256=expected_hash,
+                )
+            self.assertEqual(report["status"], "published")
+            self.assertEqual(report["writes_performed"], 1)
+            self.assertEqual(report["contract_writes_performed"], 1)
+            self.assertEqual(report["directory_writes_performed"], 0)
+
+    def test_publish_rejects_unsafe_recovery_root_and_accepts_safe_create_race(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime_root = Path(temporary) / "runtime"
+            (runtime_root / "simul_log_smoke").mkdir(parents=True)
+            recovery_root = runtime_root / builder.RELATIVE_ROOT
+            recovery_root.write_text("not a directory\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                builder.Stage3RecoveryBuildError,
+                "existing no-reparse directory",
+            ):
+                builder._ensure_recovery_root(runtime_root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime_root = Path(temporary) / "runtime"
+            recovery_root = runtime_root / builder.RELATIVE_ROOT
+            recovery_root.mkdir(parents=True)
+            target_info = builder.os.lstat(recovery_root)
+            target_identity = builder.authority._stat_identity(target_info)
+            real_identity = builder.authority._stat_identity
+
+            def mark_target_reparse(info: object) -> tuple[int, int, int, int, int, int, int]:
+                identity = real_identity(info)
+                if identity[:2] == target_identity[:2]:
+                    return (*identity[:-1], 1)
+                return identity
+
+            with mock.patch.object(
+                builder.authority,
+                "_stat_identity",
+                side_effect=mark_target_reparse,
+            ):
+                with self.assertRaisesRegex(
+                    builder.Stage3RecoveryBuildError,
+                    "existing no-reparse directory",
+                ):
+                    builder._ensure_recovery_root(runtime_root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime_root = Path(temporary) / "runtime"
+            (runtime_root / "simul_log_smoke").mkdir(parents=True)
+            recovery_root = runtime_root / builder.RELATIVE_ROOT
+            real_mkdir = builder.os.mkdir
+
+            def concurrent_create(path: Path) -> None:
+                real_mkdir(path)
+                raise FileExistsError(str(path))
+
+            with mock.patch.object(builder.os, "mkdir", side_effect=concurrent_create):
+                created = builder._ensure_recovery_root(runtime_root)
+            self.assertFalse(created)
+            self.assertTrue(recovery_root.is_dir())
 
     def test_builder_separates_non_git_runtime_from_exact_source_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -655,6 +820,58 @@ class Stage3AcquisitionV4r9Tests(unittest.TestCase):
         self.assertEqual(report["planned_submissions"], 6)
         self.assertEqual(report["writes_performed"], 0)
         post.assert_not_called()
+
+    def test_process_argv_uses_initial_source_root_after_library_path_prepend(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            runtime_root = base / "runtime"
+            source_root = base / "source"
+            library_root = base / "local-library"
+            wrong_root = base / "wrong-source"
+            for path in (runtime_root, source_root, library_root, wrong_root):
+                path.mkdir()
+            expected = (str(Path(sys.executable)), "-B", "runner.py", "--contract", "c.json")
+            fake_context = SimpleNamespace(
+                runner_dry_argv=expected,
+                runner_execute_argv=(*expected, "--execute"),
+                root=runtime_root,
+                source_root=source_root,
+            )
+            with (
+                mock.patch.object(runner.sys, "orig_argv", list(expected)),
+                mock.patch.object(
+                    runner.sys,
+                    "path",
+                    [str(library_root), str(source_root)],
+                ),
+                mock.patch.object(runner.Path, "cwd", return_value=runtime_root),
+                mock.patch.object(
+                    runner,
+                    "_INITIAL_SCRIPT_SYS_PATH_ENTRY",
+                    str(source_root),
+                ),
+            ):
+                runner._audit_process_argv(fake_context, execute_mode=False)
+
+            with (
+                mock.patch.object(runner.sys, "orig_argv", list(expected)),
+                mock.patch.object(
+                    runner.sys,
+                    "path",
+                    [str(library_root), str(source_root)],
+                ),
+                mock.patch.object(runner.Path, "cwd", return_value=runtime_root),
+                mock.patch.object(
+                    runner,
+                    "_INITIAL_SCRIPT_SYS_PATH_ENTRY",
+                    str(wrong_root),
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    runner.Stage3RecoveryError,
+                    "initial script source root differs",
+                ):
+                    runner._audit_process_argv(fake_context, execute_mode=False)
 
     def test_existing_completion_recurring_verification_reaudits_without_writes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

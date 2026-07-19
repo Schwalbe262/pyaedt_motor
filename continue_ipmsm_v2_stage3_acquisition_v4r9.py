@@ -1,4 +1,6 @@
-"""Reconcile, recover, and collect only the sealed Stage3 v4r9 campaign."""
+"""Reconcile, recover, and collect only the sealed Stage3 v4r10 campaign."""
+
+# ruff: noqa: E402 -- the initial script path must be captured before local imports
 
 from __future__ import annotations
 
@@ -13,6 +15,11 @@ import sys
 import time
 from typing import Any, Mapping, Sequence
 
+# Capture the interpreter's script-directory entry before project imports can
+# prepend optional local library paths.  Loaded project modules are audited
+# separately against the exact committed source closure.
+_INITIAL_SCRIPT_SYS_PATH_ENTRY = sys.path[0] if sys.path else None
+
 import build_ipmsm_v2_stage3_acquisition_v4r9 as contract_builder
 import build_ipmsm_v2_stage3_activation_v4r6 as activation_builder
 import collect_ipmsm_v2_campaign as collector
@@ -23,8 +30,9 @@ import submit_ipmsm_v2_campaign as submit
 import supervise_ipmsm_v2_pipeline as supervisor
 
 
-RUN_REPORT_SCHEMA_VERSION = "ipmsm-v2-stage3-acquisition-v4r9-run-v1"
-COMPLETION_SCHEMA_VERSION = "ipmsm-v2-stage3-acquisition-v4r9-completion-v1"
+RUN_REPORT_SCHEMA_VERSION = "ipmsm-v2-stage3-acquisition-v4r10-run-v1"
+COMPLETION_SCHEMA_VERSION = "ipmsm-v2-stage3-acquisition-v4r10-completion-v1"
+FAILURE_EVIDENCE_SCHEMA_VERSION = "ipmsm-v2-stage3-v4r10-failure-evidence-v1"
 
 
 class Stage3RecoveryError(RuntimeError):
@@ -773,7 +781,7 @@ def _audit_failure_evidence(context: RecoveryContext) -> dict[str, Any]:
     except authority.TargetLoadAuthorityError as exc:
         raise Stage3RecoveryError(str(exc)) from exc
     if (
-        manifest.get("schema_version") != "ipmsm-v2-stage3-v4r9-failure-evidence-v1"
+        manifest.get("schema_version") != FAILURE_EVIDENCE_SCHEMA_VERSION
         or manifest.get("contract") != _contract_record(context)
         or int(manifest.get("failed_geometry_row_count", -1))
         != contract_builder.ROWS_PER_GROUP
@@ -864,7 +872,7 @@ def _publish_failure_evidence(
             }
         )
     manifest = {
-        "schema_version": "ipmsm-v2-stage3-v4r9-failure-evidence-v1",
+        "schema_version": FAILURE_EVIDENCE_SCHEMA_VERSION,
         "contract": _contract_record(context),
         "failed_geometry_group_id": failed_group,
         "failed_geometry_row_count": len(failed_group_case_ids),
@@ -1496,13 +1504,21 @@ def _audit_process_argv(context: RecoveryContext, execute_mode: bool) -> None:
     if not isinstance(observed_raw, list) or not observed_raw:
         observed_raw = [sys.executable, *sys.argv]
     if tuple(str(item) for item in observed_raw) != expected:
-        raise Stage3RecoveryError("live runner argv differs from the sealed v4r9 contract")
+        raise Stage3RecoveryError("live runner argv differs from the sealed v4r10 contract")
     if Path.cwd().resolve(strict=True) != context.root.resolve(strict=True):
-        raise Stage3RecoveryError("v4r9 runner cwd is not the sealed LF325 runtime root")
-    if not sys.path or Path(sys.path[0]).resolve(strict=True) != context.source_root.resolve(
-        strict=True
-    ):
-        raise Stage3RecoveryError("v4r9 source root is not first on sys.path")
+        raise Stage3RecoveryError("v4r10 runner cwd is not the sealed LF325 runtime root")
+    if _INITIAL_SCRIPT_SYS_PATH_ENTRY is None:
+        raise Stage3RecoveryError("v4r10 initial script source root is unavailable")
+    try:
+        initial_source_root = Path(_INITIAL_SCRIPT_SYS_PATH_ENTRY).resolve(strict=True)
+    except OSError as exc:
+        raise Stage3RecoveryError(
+            f"cannot resolve v4r10 initial script source root: {exc}"
+        ) from exc
+    if initial_source_root != context.source_root.resolve(strict=True):
+        raise Stage3RecoveryError(
+            "v4r10 initial script source root differs from the sealed source root"
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -1,6 +1,8 @@
-"""Build the sealed Stage3 v4r9 result-recovery/collection contract.
+"""Build the sealed Stage3 v4r10 result-recovery/collection contract.
 
-v4r9 is deliberately narrower than a campaign launcher.  It binds the
+v4r10 succeeds the immutable, write-free v4r9 authority while retaining the
+reviewed v4r9 implementation filenames.  It is deliberately narrower than a
+campaign launcher.  It binds the
 existing v4r7 Stage3 plan, reconciles the already-created scheduler history,
 permits one fresh result-level retry identity for each failed result, and may
 replace at most one six-row geometry group if those retries also fail.  It
@@ -17,6 +19,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 from typing import Any, Mapping, Sequence
@@ -26,11 +29,11 @@ import build_ipmsm_v2_stage3_activation_v4r6 as activation_builder
 import confirm_ipmsm_v2_target_load_inputs_v4r6 as authority
 
 
-CONTRACT_SCHEMA_VERSION = "ipmsm-v2-stage3-acquisition-v4r9-contract-v1"
-BUILD_REPORT_SCHEMA_VERSION = "ipmsm-v2-stage3-acquisition-v4r9-build-report-v1"
+CONTRACT_SCHEMA_VERSION = "ipmsm-v2-stage3-acquisition-v4r10-contract-v1"
+BUILD_REPORT_SCHEMA_VERSION = "ipmsm-v2-stage3-acquisition-v4r10-build-report-v1"
 BUILDER_FILENAME = Path(__file__).name
 RUNNER_FILENAME = "continue_ipmsm_v2_stage3_acquisition_v4r9.py"
-RELATIVE_ROOT = Path("simul_log_smoke/v4r9_stage3_acquisition")
+RELATIVE_ROOT = Path("simul_log_smoke/v4r10_stage3_acquisition")
 CONTRACT_FILENAME = "contract.json"
 COMPLETION_FILENAME = "completion.json"
 REPLACEMENT_PLAN_FILENAME = "replacement_plan.csv"
@@ -466,6 +469,65 @@ def contract_bytes(document: Mapping[str, Any]) -> bytes:
     return authority.canonical_json_bytes(document)
 
 
+def _audit_recovery_root(runtime_root: Path) -> tuple[Path, bool]:
+    recovery_root = Path(runtime_root).absolute() / RELATIVE_ROOT
+    label = "v4r10 recovery root"
+    try:
+        parent_identity = authority._directory_identity(
+            recovery_root.parent,
+            f"{label} parent",
+        )
+        try:
+            info = os.lstat(recovery_root)
+        except FileNotFoundError:
+            authority.assert_directory_unchanged(
+                recovery_root.parent,
+                parent_identity,
+                f"{label} parent",
+            )
+            return recovery_root, False
+        identity = authority._stat_identity(info)
+        if identity[-1] or not stat.S_ISDIR(info.st_mode):
+            raise Stage3RecoveryBuildError(
+                f"{label} must be an existing no-reparse directory"
+            )
+        authority._directory_identity(recovery_root, label)
+        authority.assert_directory_unchanged(
+            recovery_root.parent,
+            parent_identity,
+            f"{label} parent",
+        )
+        return recovery_root, True
+    except Stage3RecoveryBuildError:
+        raise
+    except (OSError, authority.TargetLoadAuthorityError) as exc:
+        raise Stage3RecoveryBuildError(f"cannot audit {label}: {exc}") from exc
+
+
+def _ensure_recovery_root(runtime_root: Path) -> bool:
+    recovery_root, exists = _audit_recovery_root(runtime_root)
+    if exists:
+        return False
+    created = False
+    try:
+        os.mkdir(recovery_root)
+        created = True
+    except FileExistsError:
+        # A concurrent publisher may have created the same fixed directory.
+        # The exact directory authority is re-audited below before it is used.
+        pass
+    except OSError as exc:
+        raise Stage3RecoveryBuildError(
+            f"cannot create fixed v4r10 recovery root: {exc}"
+        ) from exc
+    audited_root, now_exists = _audit_recovery_root(runtime_root)
+    if audited_root != recovery_root or not now_exists:
+        raise Stage3RecoveryBuildError(
+            "fixed v4r10 recovery root disappeared during creation"
+        )
+    return created
+
+
 def build_or_publish(
     runtime_root: Path,
     source_root: Path,
@@ -485,21 +547,32 @@ def build_or_publish(
     payload = contract_bytes(document)
     raw_sha256 = _sha256(payload)
     if expected_output_raw_sha256 and expected_output_raw_sha256 != raw_sha256:
-        raise Stage3RecoveryBuildError("v4r9 dry-run contract SHA-256 changed")
+        raise Stage3RecoveryBuildError("v4r10 dry-run contract SHA-256 changed")
     output = Path(runtime_root).absolute() / RELATIVE_ROOT / CONTRACT_FILENAME
-    writes = 0
+    contract_writes = 0
+    directory_writes = 0
     status = "validated"
+
+    def validate() -> None:
+        for snapshot in snapshots:
+            authority.assert_snapshot_unchanged(snapshot, snapshot.path.name)
+
+    if publish:
+        try:
+            validate()
+        except authority.TargetLoadAuthorityError as exc:
+            raise Stage3RecoveryBuildError(str(exc)) from exc
+        directory_writes = int(_ensure_recovery_root(runtime_root))
+    else:
+        _audit_recovery_root(runtime_root)
+
     if output.is_file():
-        if _snapshot(output, "existing v4r9 contract").payload != payload:
-            raise Stage3RecoveryBuildError("existing v4r9 contract differs")
+        if _snapshot(output, "existing v4r10 contract").payload != payload:
+            raise Stage3RecoveryBuildError("existing v4r10 contract differs")
         status = "existing_verified"
     elif publish:
-        def validate() -> None:
-            for snapshot in snapshots:
-                authority.assert_snapshot_unchanged(snapshot, snapshot.path.name)
-
         try:
-            writes = int(
+            contract_writes = int(
                 activation_builder._publish_no_replace(
                     output,
                     payload,
@@ -507,8 +580,9 @@ def build_or_publish(
                 )
             )
         except Exception as exc:
-            raise Stage3RecoveryBuildError(f"cannot publish v4r9 contract: {exc}") from exc
-        status = "published" if writes else "existing_verified"
+            raise Stage3RecoveryBuildError(f"cannot publish v4r10 contract: {exc}") from exc
+        status = "published" if contract_writes else "existing_verified"
+    writes = contract_writes + directory_writes
     return {
         "schema_version": BUILD_REPORT_SCHEMA_VERSION,
         "status": status,
@@ -521,6 +595,8 @@ def build_or_publish(
         "output": str(output),
         "output_raw_sha256": raw_sha256,
         "writes_performed": writes,
+        "contract_writes_performed": contract_writes,
+        "directory_writes_performed": directory_writes,
     }
 
 
