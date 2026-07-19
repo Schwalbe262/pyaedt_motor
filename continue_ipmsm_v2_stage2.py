@@ -40,6 +40,7 @@ DEFAULT_COMBINED_GROUPS = 160
 DEFAULT_COMBINED_REPEATS = 40
 DEFAULT_ENSEMBLE_SIZE = 5
 DEFAULT_CONFORMAL_COVERAGE = 0.95
+ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION = "ipmsm_v2_adaptive_enrichment_batch_v1"
 PRIMARY_TARGETS = tuple(trainer.V2_PRIMARY_EVALUATION_OUTPUT_COLUMNS)
 FINGERPRINT_COLUMNS = tuple(trainer.V2_FINGERPRINT_COLUMNS)
 STANDARD_FINGERPRINTS = {
@@ -92,7 +93,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stage1-metadata", type=Path, required=True)
     parser.add_argument("--stage1-r2", type=Path, required=True)
     parser.add_argument("--stage2-case-plan", type=Path, required=True)
+    parser.add_argument(
+        "--stage2-case-manifest",
+        type=Path,
+        help=(
+            "Hash-bound adaptive batch manifest. Required when the training audit "
+            "case plan differs from --stage2-case-plan."
+        ),
+    )
+    parser.add_argument(
+        "--training-audit-case-plan",
+        type=Path,
+        help=(
+            "Fixed case plan whose preassigned test rows remain the audit cohort. "
+            "Defaults to --stage2-case-plan for backward compatibility."
+        ),
+    )
     parser.add_argument("--stage2-output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--precollected-stage2-completion",
+        type=Path,
+        help=(
+            "Verified v4r9 acquisition completion used to adopt an already complete "
+            "Stage2 output without resubmitting its cases."
+        ),
+    )
     parser.add_argument("--combined-output-dir", type=Path, required=True)
     parser.add_argument("--decision-output", type=Path, required=True)
     parser.add_argument("--project", required=True)
@@ -738,6 +763,7 @@ def validate_args(args: argparse.Namespace) -> None:
     for path, label in (
         (args.stage1_case_plan, "Stage1 case plan"),
         (args.stage2_case_plan, "Stage2 case plan"),
+        (_training_audit_case_plan(args), "training audit case plan"),
         (args.beta_summary, "beta summary"),
         (args.beta_case_plan, "beta case plan"),
         (args.beta_results, "beta results"),
@@ -746,6 +772,9 @@ def validate_args(args: argparse.Namespace) -> None:
         if not path.is_file():
             raise ContinuationGateError(f"{label} is missing: {path}")
     _assert_nonoverlapping_case_plans(args.stage1_case_plan, args.stage2_case_plan)
+    _validate_training_audit_coverage(args)
+    _validate_stage2_case_manifest(args)
+    _precollected_stage2_contract(args)
     staging = _combined_staging_dir(args)
     if _paths_overlap(args.stage2_output_dir, args.combined_output_dir):
         raise ContinuationGateError("Stage2 and combined output directories must not overlap")
@@ -774,6 +803,150 @@ def _case_plan_ids(path: Path) -> list[str]:
 
 def _case_plan_count(path: Path) -> int:
     return len(_case_plan_ids(path))
+
+
+def _training_audit_case_plan(args: argparse.Namespace) -> Path:
+    return args.training_audit_case_plan or args.stage2_case_plan
+
+
+def _validate_training_audit_coverage(args: argparse.Namespace) -> None:
+    audit_plan = _training_audit_case_plan(args)
+    fields, rows = _read_csv(audit_plan, "training audit case plan")
+    missing = sorted({"case_id", "doe_split"} - set(fields))
+    if missing:
+        raise ContinuationGateError(
+            f"training audit case plan is missing columns: {missing}"
+        )
+    test_ids = [
+        str(row.get("case_id") or "").strip()
+        for row in rows
+        if str(row.get("doe_split") or "").strip().lower() == "test"
+    ]
+    if not test_ids or "" in test_ids or len(test_ids) != len(set(test_ids)):
+        raise ContinuationGateError(
+            "training audit case plan must contain unique nonblank preassigned test case IDs"
+        )
+    combined_ids = set(
+        _case_plan_ids(args.stage1_case_plan) + _case_plan_ids(args.stage2_case_plan)
+    )
+    missing_ids = sorted(set(test_ids) - combined_ids)
+    if missing_ids:
+        raise ContinuationGateError(
+            "training audit test rows are absent from the combined case plans: "
+            + ", ".join(missing_ids[:3])
+        )
+
+
+def _validate_stage2_case_manifest(args: argparse.Namespace) -> dict[str, str] | None:
+    audit_plan = _training_audit_case_plan(args).resolve(strict=False)
+    stage2_plan = args.stage2_case_plan.resolve(strict=False)
+    manifest_path = args.stage2_case_manifest
+    if manifest_path is None:
+        if audit_plan != stage2_plan:
+            raise ContinuationGateError(
+                "--stage2-case-manifest is required when --training-audit-case-plan "
+                "differs from --stage2-case-plan"
+            )
+        return None
+    if not manifest_path.is_file():
+        raise ContinuationGateError(
+            f"Stage2 adaptive case manifest is missing: {manifest_path}"
+        )
+    initial_manifest_contract = _artifact_contract(manifest_path)
+    manifest = _read_json(manifest_path, "Stage2 adaptive case manifest")
+    failures: list[str] = []
+    if manifest.get("schema_version") != ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION:
+        failures.append("schema_version")
+    if manifest.get("mode") != "write":
+        failures.append("mode")
+    expected_case_plan = _artifact_contract(args.stage2_case_plan)
+    recorded_case_plan = {
+        "path": str(Path(str(manifest.get("case_plan") or "")).resolve(strict=False)),
+        "sha256": str(manifest.get("case_plan_sha256") or ""),
+    }
+    if recorded_case_plan != expected_case_plan:
+        failures.append("case_plan")
+    expected_audit = _artifact_contract(_training_audit_case_plan(args))
+    if manifest.get("fixed_audit_case_plan") != expected_audit:
+        failures.append("fixed_audit_case_plan")
+    execution = manifest.get("execution_contract")
+    if not isinstance(execution, Mapping):
+        failures.append("execution_contract")
+    else:
+        expected_execution_fields = {
+            "batch_index",
+            "case_plan",
+            "failed_decision",
+            "fixed_audit_case_plan",
+            "plateau_policy",
+            "r2_history",
+            "seed_policy",
+        }
+        if set(execution) != expected_execution_fields:
+            failures.append("execution_contract.fields")
+        if manifest.get("execution_contract_sha256") != _contract_sha256(execution):
+            failures.append("execution_contract_sha256")
+        if execution.get("case_plan") != expected_case_plan:
+            failures.append("execution_contract.case_plan")
+        if execution.get("fixed_audit_case_plan") != expected_audit:
+            failures.append("execution_contract.fixed_audit_case_plan")
+        plateau = execution.get("plateau_policy")
+        batch_index = execution.get("batch_index")
+        if (
+            not isinstance(plateau, Mapping)
+            or plateau.get("stop_fea") is not False
+            or plateau.get("action") != "continue_adaptive_fea"
+            or plateau.get("minimum_improvement") != 0.01
+            or plateau.get("consecutive_batches_required") != 2
+            or type(batch_index) is not int
+            or batch_index < 1
+            or plateau.get("completed_batches") != batch_index - 1
+        ):
+            failures.append("execution_contract.plateau_policy")
+        for name in ("failed_decision", "r2_history"):
+            record = execution.get(name)
+            if not isinstance(record, Mapping) or set(record) != {"path", "sha256"}:
+                failures.append(f"execution_contract.{name}")
+                continue
+            artifact_path = Path(str(record.get("path") or ""))
+            if not artifact_path.is_file() or dict(record) != _artifact_contract(artifact_path):
+                failures.append(f"execution_contract.{name}")
+        seed_policy = execution.get("seed_policy")
+        if not isinstance(seed_policy, Mapping) or type(batch_index) is not int:
+            failures.append("execution_contract.seed_policy")
+        else:
+            stride = seed_policy.get("stride")
+            adaptation_base = seed_policy.get("adaptation_seed_base")
+            calibration_base = seed_policy.get("calibration_seed_base")
+            if (
+                stride != 100
+                or seed_policy.get("formula") != "role_seed_base + 100 * batch_index"
+                or type(adaptation_base) is not int
+                or type(calibration_base) is not int
+                or seed_policy.get("adaptation_seed") != adaptation_base + stride * batch_index
+                or seed_policy.get("calibration_seed") != calibration_base + stride * batch_index
+            ):
+                failures.append("execution_contract.seed_policy")
+    summary = manifest.get("summary")
+    if not isinstance(summary, Mapping):
+        failures.append("summary")
+    else:
+        if summary.get("rows") != _case_plan_count(args.stage2_case_plan):
+            failures.append("summary.rows")
+        if summary.get("split_groups") != {"train": 40, "calibration": 10, "test": 0}:
+            failures.append("summary.split_groups")
+        if summary.get("split_rows") != {"train": 240, "calibration": 60, "test": 0}:
+            failures.append("summary.split_rows")
+    if failures:
+        raise ContinuationGateError(
+            "Stage2 adaptive case manifest does not bind execution inputs: "
+            + ", ".join(failures)
+        )
+    if _artifact_contract(manifest_path) != initial_manifest_contract:
+        raise ContinuationGateError(
+            "Stage2 adaptive case manifest changed during validation"
+        )
+    return initial_manifest_contract
 
 
 def _validate_result_coverage(
@@ -1035,7 +1208,7 @@ def _training_argv(
         "--max-removed-output-outlier-rows",
         "0",
         "--v2-audit-case-plan",
-        str(args.stage2_case_plan),
+        str(_training_audit_case_plan(args)),
     ]
     for column in FINGERPRINT_COLUMNS:
         argv.extend(("--expected-fingerprint", f"{column}={fingerprints[column]}"))
@@ -1046,7 +1219,17 @@ def validate_stage2_readiness(args: argparse.Namespace) -> None:
     runner_args = campaign_runner.build_parser().parse_args(
         _stage2_runner_argv(args, submit=True)
     )
-    campaign_runner.validate_args(runner_args)
+    readiness_args = runner_args
+    if args.precollected_stage2_completion is not None:
+        readiness_args = argparse.Namespace(**vars(runner_args))
+        readiness_args.output_dir = args.stage2_output_dir.with_name(
+            args.stage2_output_dir.name + ".precollected-readiness"
+        )
+        _assert_path_fresh(
+            readiness_args.output_dir,
+            "precollected Stage2 readiness output placeholder",
+        )
+    campaign_runner.validate_args(readiness_args)
     beta_summary = campaign_runner.load_beta_prerequisite(runner_args)
     if beta_summary is None:
         raise ContinuationGateError("Stage2 runner has no strict beta prerequisite")
@@ -1107,7 +1290,7 @@ def run_combined_pipeline(
         threshold=args.r2_threshold,
         expected_ensemble_size=args.ensemble_size,
         expected_conformal_coverage=args.conformal_coverage,
-        expected_audit_case_plan=args.stage2_case_plan,
+        expected_audit_case_plan=_training_audit_case_plan(args),
     )
     if (training_code == 0) != combined_gate.passed:
         raise ContinuationGateError("combined training exit code and R2 metadata disagree")
@@ -1187,7 +1370,7 @@ def _load_combined_gate(args: argparse.Namespace, stage1_gate: GateResult) -> Ga
         threshold=args.r2_threshold,
         expected_ensemble_size=args.ensemble_size,
         expected_conformal_coverage=args.conformal_coverage,
-        expected_audit_case_plan=args.stage2_case_plan,
+        expected_audit_case_plan=_training_audit_case_plan(args),
     )
     if gate.fingerprints != stage1_gate.fingerprints:
         raise ContinuationGateError("combined fingerprints do not match Stage1")
@@ -1219,7 +1402,355 @@ def _artifact_contract(path: Path) -> dict[str, str]:
     }
 
 
+def _bound_artifact_record(value: object, label: str) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"path", "sha256"}:
+        raise ContinuationGateError(f"{label} must contain only path and sha256")
+    path = Path(str(value.get("path") or ""))
+    sha256 = str(value.get("sha256") or "")
+    if not path.is_absolute() or len(sha256) != 64:
+        raise ContinuationGateError(f"{label} has an invalid path or sha256")
+    record = _artifact_contract(path)
+    expected = {"path": str(path.resolve(strict=False)), "sha256": sha256}
+    if record != expected:
+        raise ContinuationGateError(f"{label} bytes changed")
+    return record
+
+
+def _quick_validate_precollected_stage2_contract(
+    args: argparse.Namespace,
+    contract: Mapping[str, Any],
+) -> None:
+    completion_path = args.precollected_stage2_completion
+    if completion_path is None:
+        raise ContinuationGateError("precollected Stage2 completion path disappeared")
+    if _artifact_contract(completion_path) != contract.get("completion"):
+        raise ContinuationGateError("precollected Stage2 completion bytes changed")
+    completion = _read_json(completion_path, "precollected Stage2 completion")
+    for key in (
+        "contract",
+        "effective_plan",
+        "replacement_manifest",
+        "repository_revision",
+        "result",
+        "scheduler",
+        "schema_version",
+        "status",
+    ):
+        if completion.get(key) != contract.get(key):
+            raise ContinuationGateError(
+                f"precollected Stage2 completion binding changed: {key}"
+            )
+    scheduler = contract.get("scheduler")
+    if not isinstance(scheduler, Mapping):
+        raise ContinuationGateError(
+            "precollected Stage2 acquisition scheduler binding disappeared"
+        )
+    argument_scheduler = {
+        "project": str(args.project),
+        "project_active_cap": int(args.project_active_cap),
+        "task_prefix": str(args.stage2_task_prefix),
+        "url": str(args.scheduler_url),
+    }
+    bound_scheduler = {
+        key: scheduler.get(key)
+        for key in ("project", "project_active_cap", "task_prefix", "url")
+    }
+    if argument_scheduler != bound_scheduler:
+        raise ContinuationGateError(
+            "continuation scheduler identity differs from precollected acquisition"
+        )
+    runner_source = contract.get("runner_source")
+    if not isinstance(runner_source, Mapping):
+        raise ContinuationGateError(
+            "precollected Stage2 runner source binding disappeared"
+        )
+    import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+
+    source_root = Path(str(runner_source.get("source_root") or ""))
+    current_continuation = Path(__file__).resolve(strict=True)
+    current_acquisition = Path(acquisition.__file__).resolve(strict=True)
+    if (
+        not source_root.is_absolute()
+        or current_continuation != source_root / "continue_ipmsm_v2_stage2.py"
+        or current_acquisition
+        != source_root / "continue_ipmsm_v2_stage3_acquisition_v4r9.py"
+    ):
+        raise ContinuationGateError(
+            "precollected Stage2 runner modules moved outside the authoritative source root"
+        )
+    continuation_record = _bound_artifact_record(
+        runner_source.get("continuation"), "precollected continuation runner"
+    )
+    acquisition_record = _bound_artifact_record(
+        runner_source.get("acquisition"), "precollected acquisition runner"
+    )
+    if (
+        Path(continuation_record["path"]) != current_continuation
+        or Path(acquisition_record["path"]) != current_acquisition
+    ):
+        raise ContinuationGateError(
+            "precollected Stage2 runner module paths changed"
+        )
+    if runner_source.get("repository_revision") != contract.get(
+        "repository_revision"
+    ):
+        raise ContinuationGateError(
+            "precollected Stage2 runner repository revision binding changed"
+        )
+    _bound_artifact_record(completion["contract"], "precollected acquisition contract")
+    effective = completion["effective_plan"]
+    result = completion["result"]
+    _bound_artifact_record(
+        {"path": effective["path"], "sha256": effective["sha256"]},
+        "precollected effective plan",
+    )
+    _bound_artifact_record(
+        {"path": result["path"], "sha256": result["sha256"]},
+        "precollected result",
+    )
+    replacement_record = completion["replacement_manifest"]
+    if replacement_record is not None:
+        _bound_artifact_record(
+            {
+                "path": replacement_record["path"],
+                "sha256": replacement_record["sha256"],
+            },
+            "precollected replacement manifest",
+        )
+        _bound_artifact_record(
+            replacement_record["failure_evidence_manifest"],
+            "precollected replacement failure evidence",
+        )
+
+
+def _precollected_stage2_contract(
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    completion_path = args.precollected_stage2_completion
+    if completion_path is None:
+        return None
+    cached = getattr(args, "_precollected_stage2_contract_cache", None)
+    if cached is not None:
+        _quick_validate_precollected_stage2_contract(args, cached)
+        return dict(cached)
+
+    completion = _read_json(completion_path, "precollected Stage2 completion")
+    try:
+        import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+
+        if (
+            completion.get("schema_version") != acquisition.COMPLETION_SCHEMA_VERSION
+            or completion.get("status") != "acquisition_complete"
+        ):
+            raise ContinuationGateError(
+                "precollected Stage2 completion is not an authoritative v4r9 completion"
+            )
+        contract_record = _bound_artifact_record(
+            completion.get("contract"), "precollected acquisition contract"
+        )
+        context = acquisition.load_contract(contract_record["path"])
+        if (
+            Path(context.outputs["completion"]).resolve(strict=False)
+            != completion_path.resolve(strict=False)
+        ):
+            raise ContinuationGateError(
+                "precollected completion path differs from its acquisition contract"
+            )
+        current_continuation = Path(__file__).resolve(strict=True)
+        current_acquisition = Path(acquisition.__file__).resolve(strict=True)
+        authoritative_source_root = context.source_root.resolve(strict=True)
+        if (
+            current_continuation
+            != authoritative_source_root / "continue_ipmsm_v2_stage2.py"
+            or current_acquisition
+            != authoritative_source_root
+            / "continue_ipmsm_v2_stage3_acquisition_v4r9.py"
+        ):
+            raise ContinuationGateError(
+                "precollected Stage2 runner modules are outside the exact source root"
+            )
+        argument_scheduler = {
+            "project": str(args.project),
+            "project_active_cap": int(args.project_active_cap),
+            "task_prefix": str(args.stage2_task_prefix),
+            "url": str(args.scheduler_url),
+        }
+        authoritative_scheduler = {
+            "project": context.project,
+            "project_active_cap": context.project_active_cap,
+            "task_prefix": context.task_prefix,
+            "url": context.scheduler_url,
+        }
+        if argument_scheduler != authoritative_scheduler:
+            raise ContinuationGateError(
+                "continuation scheduler identity differs from precollected acquisition"
+            )
+        live_report = acquisition._verify_existing_completion(context)
+    except ContinuationGateError:
+        raise
+    except Exception as exc:
+        raise ContinuationGateError(
+            f"precollected Stage2 live verification failed: {exc}"
+        ) from exc
+    if live_report is None:
+        raise ContinuationGateError("precollected Stage2 completion is not complete")
+    expected_live = {
+        "action": "verified_existing_completion",
+        "history_tasks": live_report.get("history_tasks"),
+        "mode": "execute",
+        "plan_kind": live_report.get("plan_kind"),
+        "schema_version": acquisition.RUN_REPORT_SCHEMA_VERSION,
+        "status": "acquisition_complete",
+        "successful_results": 300,
+        "writes_performed": 0,
+    }
+    if live_report != expected_live:
+        raise ContinuationGateError(
+            "precollected Stage2 live verification report changed"
+        )
+
+    verified = _read_json(completion_path, "verified precollected Stage2 completion")
+    if verified != completion:
+        raise ContinuationGateError(
+            "precollected Stage2 completion changed during live verification"
+        )
+    effective = verified.get("effective_plan")
+    result = verified.get("result")
+    replacement_record = verified.get("replacement_manifest")
+    scheduler = verified.get("scheduler")
+    if not isinstance(effective, Mapping) or set(effective) != {
+        "geometry_groups",
+        "kind",
+        "path",
+        "rows",
+        "sha256",
+    }:
+        raise ContinuationGateError("precollected effective-plan record changed")
+    if not isinstance(result, Mapping) or set(result) != {"path", "rows", "sha256"}:
+        raise ContinuationGateError("precollected result record changed")
+    if not isinstance(scheduler, Mapping) or {
+        key: scheduler.get(key)
+        for key in ("project", "project_active_cap", "task_prefix", "url")
+    } != authoritative_scheduler:
+        raise ContinuationGateError(
+            "precollected completion scheduler identity changed"
+        )
+    if (
+        effective.get("rows") != 300
+        or effective.get("geometry_groups") != 50
+        or effective.get("kind") not in {"original", "replacement"}
+        or result.get("rows") != 300
+        or live_report.get("plan_kind") != effective.get("kind")
+    ):
+        raise ContinuationGateError("precollected Stage2 300-row/50-group scope changed")
+    effective_plan = _bound_artifact_record(
+        {"path": effective["path"], "sha256": effective["sha256"]},
+        "precollected effective plan",
+    )
+    result_record = _bound_artifact_record(
+        {"path": result["path"], "sha256": result["sha256"]},
+        "precollected result",
+    )
+    expected_result = args.stage2_output_dir / "merged_results.csv"
+    if Path(effective_plan["path"]) != args.stage2_case_plan.resolve(strict=False):
+        raise ContinuationGateError(
+            "--stage2-case-plan is not the precollected effective plan"
+        )
+    if Path(result_record["path"]) != expected_result.resolve(strict=False):
+        raise ContinuationGateError(
+            "--stage2-output-dir does not contain the precollected result"
+        )
+    fields, plan_rows = _read_csv(args.stage2_case_plan, "precollected effective plan")
+    if "geometry_group_id" not in fields or len(plan_rows) != 300:
+        raise ContinuationGateError("precollected effective plan shape changed")
+    plan_groups = {str(row.get("geometry_group_id") or "").strip() for row in plan_rows}
+    if "" in plan_groups or len(plan_groups) != 50:
+        raise ContinuationGateError("precollected effective plan group coverage changed")
+    result_fields, result_rows = _validate_result_coverage(
+        args.stage2_case_plan,
+        expected_result,
+        "precollected Stage2 result",
+    )
+    if "geometry_group_id" not in result_fields or len(result_rows) != 300:
+        raise ContinuationGateError("precollected Stage2 result shape changed")
+    result_groups = {
+        str(row.get("geometry_group_id") or "").strip() for row in result_rows
+    }
+    if "" in result_groups or len(result_groups) != 50:
+        raise ContinuationGateError("precollected Stage2 result group coverage changed")
+    identity_fields = (
+        "geometry_group_id",
+        "design_hash",
+        "operating_point_id",
+        "doe_split",
+        "repeat_of_case_id",
+        "beta_calibration_id",
+    )
+    missing_plan_identity = sorted(set(identity_fields) - set(fields))
+    missing_result_identity = sorted(set(identity_fields) - set(result_fields))
+    if missing_plan_identity or missing_result_identity:
+        raise ContinuationGateError(
+            "precollected Stage2 identity columns changed: "
+            f"plan_missing={missing_plan_identity} result_missing={missing_result_identity}"
+        )
+    identity_drift = [
+        str(plan_row.get("case_id") or "").strip()
+        for plan_row, result_row in zip(plan_rows, result_rows)
+        if any(
+            str(plan_row.get(column) or "").strip()
+            != str(result_row.get(column) or "").strip()
+            for column in identity_fields
+        )
+    ]
+    if identity_drift:
+        raise ContinuationGateError(
+            "precollected Stage2 result differs from its effective-plan identity: "
+            + str(identity_drift[:3])
+        )
+    if effective.get("kind") == "original" and replacement_record is not None:
+        raise ContinuationGateError("original completion unexpectedly binds a replacement")
+    if effective.get("kind") == "replacement" and not isinstance(
+        replacement_record, Mapping
+    ):
+        raise ContinuationGateError("replacement completion lacks replacement evidence")
+
+    bound: dict[str, Any] = {
+        "completion": _artifact_contract(completion_path),
+        "contract": dict(verified["contract"]),
+        "effective_plan": dict(effective),
+        "live_verification": expected_live,
+        "replacement_manifest": (
+            dict(replacement_record) if isinstance(replacement_record, Mapping) else None
+        ),
+        "repository_revision": verified.get("repository_revision"),
+        "result": dict(result),
+        "runner_source": {
+            "acquisition": _artifact_contract(current_acquisition),
+            "continuation": _artifact_contract(current_continuation),
+            "repository_revision": context.repository_revision,
+            "source_root": str(authoritative_source_root),
+        },
+        "scheduler": dict(scheduler),
+        "schema_version": verified.get("schema_version"),
+        "status": verified.get("status"),
+    }
+    setattr(args, "_precollected_stage2_contract_cache", bound)
+    _quick_validate_precollected_stage2_contract(args, bound)
+    return dict(bound)
+
+
 def _execution_contract(args: argparse.Namespace, gate: GateResult) -> dict[str, Any]:
+    case_manifest = _validate_stage2_case_manifest(args)
+    precollected = _precollected_stage2_contract(args)
+    stage2_contract: dict[str, Any] = {
+        "case_plan": _artifact_contract(args.stage2_case_plan),
+        "output_dir": str(args.stage2_output_dir.resolve(strict=False)),
+        "runner_argv": _stage2_runner_argv(args, submit=True),
+    }
+    if case_manifest is not None:
+        stage2_contract["case_manifest"] = case_manifest
+    if precollected is not None:
+        stage2_contract["precollected_completion"] = precollected
     return {
         "beta": {
             "calibration_manifest": _artifact_contract(args.beta_calibration_manifest),
@@ -1245,13 +1776,9 @@ def _execution_contract(args: argparse.Namespace, gate: GateResult) -> dict[str,
             "result": _artifact_contract(args.stage1_result),
             "validation": _artifact_contract(args.stage1_validation),
         },
-        "stage2": {
-            "case_plan": _artifact_contract(args.stage2_case_plan),
-            "output_dir": str(args.stage2_output_dir.resolve(strict=False)),
-            "runner_argv": _stage2_runner_argv(args, submit=True),
-        },
+        "stage2": stage2_contract,
         "training": {
-            "audit_case_plan": _artifact_contract(args.stage2_case_plan),
+            "audit_case_plan": _artifact_contract(_training_audit_case_plan(args)),
             "conformal_coverage": args.conformal_coverage,
             "ensemble_size": args.ensemble_size,
             "r2_threshold": args.r2_threshold,
@@ -1273,6 +1800,22 @@ def _contract_sha256(contract: Mapping[str, Any]) -> str:
 
 def _base_payload(args: argparse.Namespace, gate: GateResult) -> dict[str, Any]:
     contract = _execution_contract(args, gate)
+    stage2_payload: dict[str, Any] = {
+        "beta": contract["beta"],
+        "case_plan": str(args.stage2_case_plan),
+        "case_plan_sha256": _sha256(args.stage2_case_plan),
+        "output_dir": str(args.stage2_output_dir),
+        "runner_argv": _stage2_runner_argv(args, submit=True),
+    }
+    if args.stage2_case_manifest is not None:
+        stage2_payload["case_manifest"] = str(args.stage2_case_manifest)
+        stage2_payload["case_manifest_sha256"] = _sha256(
+            args.stage2_case_manifest
+        )
+    if args.precollected_stage2_completion is not None:
+        stage2_payload["precollected_completion"] = contract["stage2"][
+            "precollected_completion"
+        ]
     return {
         "schema_version": SCHEMA_VERSION,
         "contract_sha256": _contract_sha256(contract),
@@ -1292,13 +1835,7 @@ def _base_payload(args: argparse.Namespace, gate: GateResult) -> dict[str, Any]:
             "validation_path": str(args.stage1_validation),
             "validation_sha256": _sha256(args.stage1_validation),
         },
-        "stage2": {
-            "beta": contract["beta"],
-            "case_plan": str(args.stage2_case_plan),
-            "case_plan_sha256": _sha256(args.stage2_case_plan),
-            "output_dir": str(args.stage2_output_dir),
-            "runner_argv": _stage2_runner_argv(args, submit=True),
-        },
+        "stage2": stage2_payload,
     }
 
 
@@ -1578,10 +2115,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.resume and gate.decision != "run_stage2":
         raise ContinuationGateError("--resume is valid only while the exact gate still requires Stage2")
+    if args.precollected_stage2_completion is not None and gate.decision != "run_stage2":
+        raise ContinuationGateError(
+            "--precollected-stage2-completion is valid only when the gate requires Stage2"
+        )
 
     if gate.decision == "run_stage2":
         if not args.resume:
-            _assert_path_fresh(args.stage2_output_dir, "Stage2 output directory")
+            if args.precollected_stage2_completion is None:
+                _assert_path_fresh(args.stage2_output_dir, "Stage2 output directory")
+            else:
+                _stage2_output_state(args)
             _assert_path_fresh(args.combined_output_dir, "combined output directory")
             _assert_path_fresh(_combined_staging_dir(args), "combined staging directory")
         validate_stage2_readiness(args)
@@ -1639,6 +2183,10 @@ def main(argv: list[str] | None = None) -> int:
         _assert_contract_unchanged(args, gate, contract)
         stage2_state = _stage2_output_state(args)
         if stage2_state == "absent":
+            if args.precollected_stage2_completion is not None:
+                raise ContinuationGateError(
+                    "precollected Stage2 output disappeared; resubmission is forbidden"
+                )
             runner_code = campaign_runner.main(list(contract["stage2"]["runner_argv"]))
             if runner_code != 0:
                 raise ContinuationGateError(f"Stage2 runner returned nonzero code {runner_code}")

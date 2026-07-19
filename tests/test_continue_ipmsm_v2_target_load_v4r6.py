@@ -4,7 +4,6 @@ import base64
 import csv
 import hashlib
 import io
-import json
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -24,6 +23,126 @@ def _summary(candidate_id: str, volume: float, efficiency: float, token: str) ->
         "objective_one_minus_cycle_efficiency": 1.0 - efficiency,
     }
     return {**unsigned, "summary_sha256": hashlib.sha256(token.encode()).hexdigest()}
+
+
+def _publication_state(
+    candidates: list[tuple[str, float, float, str]],
+) -> SimpleNamespace:
+    summaries: dict[str, dict] = {}
+    journals: list[SimpleNamespace] = []
+    point_inputs = (
+        ("rated_torque", 1200.0, "torque_nm", 65.1, 65.0, 8168.0, 210.0),
+        ("high_speed_power", 5000.0, "power_w", 7500.0, 14.4, 7540.0, 260.0),
+    )
+    for candidate_index, (candidate_id, volume, efficiency, token) in enumerate(candidates):
+        points: list[dict] = []
+        radius = 120.0 + candidate_index
+        stack = 80.0 + candidate_index
+        for point_index, (
+            point_id,
+            speed,
+            target_kind,
+            target_value,
+            torque,
+            power,
+            loss,
+        ) in enumerate(point_inputs):
+            evidence = {
+                "case_id": f"{candidate_id}-{point_id}-case",
+                "attempt_id": f"{candidate_id}-{point_id}-attempt",
+                "attempt_manifest_sha256": hashlib.sha256(
+                    f"{token}-{point_id}-attempt".encode()
+                ).hexdigest(),
+                "result_sha256": hashlib.sha256(
+                    f"{token}-{point_id}-result".encode()
+                ).hexdigest(),
+                "result_row_sha256": hashlib.sha256(
+                    f"{token}-{point_id}-row".encode()
+                ).hexdigest(),
+            }
+            current = 100.0 + point_index
+            target_load_efficiency = (7500.0 / (7500.0 + loss)) * 100.0
+            points.append(
+                {
+                    "operating_point_id": point_id,
+                    "required_power_w": 7500.0,
+                    "duty_weight": 0.5,
+                    "matched_center_loss_w": loss,
+                    "matched_current_by_beta_role_a": {
+                        "selected_center": current,
+                        "local_lower": current + 1.0,
+                        "local_upper": current + 2.0,
+                    },
+                    "matched_evidence_by_beta_role": {
+                        "selected_center": evidence,
+                    },
+                    "target_load_efficiency_pct": target_load_efficiency,
+                    "diagnostic_actual_power_w": power,
+                    "diagnostic_actual_efficiency_pct": 90.0,
+                }
+            )
+            observation = {
+                **evidence,
+                "target_kind": target_kind,
+                "target_value": target_value,
+                "relative_error": 0.001,
+                "current_peak_a": current,
+                "actual_torque_nm": torque,
+                "actual_power_w": power,
+                "actual_total_loss_w": loss,
+                "actual_efficiency_pct": 90.0,
+                "actual_voltage_peak_v": 180.0,
+            }
+            journals.append(
+                SimpleNamespace(
+                    probe={
+                        "candidate_id": candidate_id,
+                        "operating_point_id": point_id,
+                        "beta_validation_role": "selected_center",
+                        "beta_dq_deg": 25.0,
+                        "base_row": {
+                            "geometry_group_id": f"geometry-{candidate_id}",
+                            "design_hash": f"design-{candidate_id}",
+                            "slot_num": "12",
+                            "pole_num": "8",
+                            "stator_outer_radius": str(radius),
+                            "stack_length_mm": str(stack),
+                            "base_rpm": str(speed),
+                        },
+                    },
+                    decision={
+                        "terminal_status": "matched",
+                        "matched_observation": observation,
+                    },
+                )
+            )
+        base = _summary(candidate_id, volume, efficiency, token)
+        summaries[candidate_id] = {
+            **base,
+            "efficiency_basis": "required_mechanical_power_plus_matched_measured_loss",
+            "diagnostic_weighted_actual_power_w": 7854.0,
+            "operating_points": points,
+        }
+    candidate_order = [candidate[0] for candidate in candidates]
+    return SimpleNamespace(
+        root={
+            "identity_sha256": "d" * 64,
+            "match_run_id": "target-load-match-fixture",
+            "identity": {
+                "candidate_order": candidate_order,
+                "design_variable_names": [
+                    "stator_outer_radius",
+                    "stack_length_mm",
+                ],
+                "operating_point_order": [
+                    "rated_torque",
+                    "high_speed_power",
+                ],
+            },
+        },
+        probes=tuple(journals),
+        summaries=summaries,
+    )
 
 
 class TargetLoadContinuationAdapterTests(unittest.TestCase):
@@ -85,6 +204,89 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
         self.assertEqual(tuple(reader.fieldnames or ()), continuation.FRONT_FIELDS)
         self.assertEqual([row["candidate_id"] for row in reader], ["candidate"])
 
+    def test_balanced_representative_uses_requested_tie_breakers(self) -> None:
+        front = continuation.measured_nondominated_front(
+            [
+                _summary("large-efficient", 2.0, 0.9, "large"),
+                _summary("small-less-efficient", 1.0, 0.8, "small"),
+            ]
+        )
+        selection = continuation.select_balanced_measured_representative(
+            list(reversed(front))
+        )
+        self.assertEqual(selection["selected"]["candidate_id"], "small-less-efficient")
+        self.assertEqual(
+            selection["tie_breakers"],
+            list(continuation.REPRESENTATIVE_TIE_BREAKERS),
+        )
+        self.assertAlmostEqual(
+            selection["selected"]["equal_weight_distance_to_ideal"],
+            2.0**-0.5,
+        )
+
+        identical = continuation.select_balanced_measured_representative(
+            [
+                _summary("z", 1.0, 0.9, "z"),
+                _summary("a", 1.0, 0.9, "a"),
+            ]
+        )
+        self.assertEqual(identical["selected"]["candidate_id"], "a")
+        self.assertEqual(identical["selected"]["normalized_active_volume"], 0.0)
+        self.assertEqual(
+            identical["selected"]["normalized_one_minus_cycle_efficiency"], 0.0
+        )
+        self.assertEqual(identical["selected"]["equal_weight_distance_to_ideal"], 0.0)
+
+    def test_final_representative_contains_geometry_points_and_provenance(self) -> None:
+        state = _publication_state(
+            [
+                ("small", 0.8, 0.85, "small"),
+                ("efficient", 1.0, 0.95, "efficient"),
+            ]
+        )
+        front = continuation.measured_nondominated_front(
+            [state.summaries[candidate] for candidate in ("small", "efficient")]
+        )
+        representative = continuation.build_final_measured_representative(
+            state,
+            front,
+            contract={
+                "path": "C:/authority/contract.json",
+                "raw_sha256": "a" * 64,
+                "contract_sha256": "b" * 64,
+            },
+            root_manifest_sha256="c" * 64,
+            measured_front_path=Path("C:/results/front.csv"),
+            measured_front_sha256="e" * 64,
+        )
+        self.assertEqual(representative["candidate_id"], "small")
+        self.assertEqual(
+            representative["geometry"]["design_variable_order"],
+            ["stator_outer_radius", "stack_length_mm"],
+        )
+        self.assertEqual(
+            [point["operating_point_id"] for point in representative["operating_points"]],
+            ["rated_torque", "high_speed_power"],
+        )
+        self.assertEqual(representative["operating_points"][0]["actual_torque_nm"], 65.0)
+        self.assertEqual(representative["operating_points"][1]["actual_power_w"], 7540.0)
+        csv_rows = list(
+            csv.DictReader(
+                io.StringIO(
+                    continuation._representative_csv(representative).decode("utf-8"),
+                    newline="",
+                )
+            )
+        )
+        self.assertEqual([row["operating_point_id"] for row in csv_rows], [
+            "rated_torque",
+            "high_speed_power",
+        ])
+        markdown = continuation._representative_markdown(representative).decode("utf-8")
+        self.assertIn("rated_torque", markdown)
+        self.assertIn("high_speed_power", markdown)
+        self.assertIn(representative["provenance"]["source_summary_sha256"], markdown)
+
     def test_final_publication_is_idempotent_and_completion_is_last(self) -> None:
         with tempfile.TemporaryDirectory(dir="C:/") as temporary:
             root = Path(temporary)
@@ -108,12 +310,11 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
                 contract_sha256="a" * 64,
                 paths=paths,
             )
-            state = SimpleNamespace(
-                root={"identity": {"candidate_order": ["c2", "c1"]}},
-                summaries={
-                    "c1": _summary("c1", 1.0, 0.95, "c1"),
-                    "c2": _summary("c2", 0.8, 0.85, "c2"),
-                },
+            state = _publication_state(
+                [
+                    ("c2", 0.8, 0.85, "c2"),
+                    ("c1", 1.0, 0.95, "c1"),
+                ]
             )
             progress = {"root_manifest_sha256": "b" * 64}
             calls: list[str] = []
@@ -150,6 +351,14 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
             self.assertEqual(second, first)
             self.assertEqual(
                 {name: path.read_bytes() for name, path in paths.items()}, first_bytes
+            )
+            representative_paths = continuation._representative_output_paths(paths)
+            self.assertEqual(
+                set(representative_paths), {"json", "csv", "markdown"}
+            )
+            self.assertTrue(all(path.is_file() for path in representative_paths.values()))
+            self.assertEqual(
+                first["final_representative"]["candidate_id"], "c2"
             )
 
     def test_claim_adoption_preserves_original_owner_and_decision(self) -> None:
@@ -544,10 +753,7 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
                     "completion": workspace / "completion.json",
                 },
             )
-            state = SimpleNamespace(
-                root={"identity": {"candidate_order": ["c1"]}},
-                summaries={"c1": _summary("c1", 1.0, 0.9, "c1")},
-            )
+            state = _publication_state([("c1", 1.0, 0.9, "c1")])
             with mock.patch.object(
                 continuation,
                 "_assert_authority_unchanged",
@@ -586,10 +792,7 @@ class TargetLoadContinuationAdapterTests(unittest.TestCase):
                     "completion": workspace / "completion.json",
                 },
             )
-            state = SimpleNamespace(
-                root={"identity": {"candidate_order": ["c1"]}},
-                summaries={"c1": _summary("c1", 1.0, 0.9, "c1")},
-            )
+            state = _publication_state([("c1", 1.0, 0.9, "c1")])
             original_assert = authority.assert_snapshot_unchanged
             changed = False
 

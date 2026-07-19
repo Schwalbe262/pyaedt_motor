@@ -43,8 +43,25 @@ DECISION_SCHEMA_VERSION = "ipmsm-v2-target-load-continuation-decision-v1"
 CLAIM_SCHEMA_VERSION = "ipmsm-v2-target-load-continuation-claim-v1"
 RECOVERY_SCHEMA_VERSION = "ipmsm-v2-target-load-continuation-recovery-v1"
 FRONT_SCHEMA_VERSION = "ipmsm-v2-measured-target-load-pareto-front-v1"
-FRONT_MANIFEST_SCHEMA_VERSION = "ipmsm-v2-measured-target-load-pareto-manifest-v1"
-COMPLETION_SCHEMA_VERSION = "ipmsm-v2-target-load-continuation-completion-v1"
+FRONT_MANIFEST_SCHEMA_VERSION = "ipmsm-v2-measured-target-load-pareto-manifest-v2"
+COMPLETION_SCHEMA_VERSION = "ipmsm-v2-target-load-continuation-completion-v2"
+REPRESENTATIVE_SCHEMA_VERSION = "ipmsm-v2-final-measured-representative-v1"
+REPRESENTATIVE_SELECTION_SCHEMA_VERSION = (
+    "ipmsm-v2-balanced-measured-pareto-selection-v1"
+)
+REPRESENTATIVE_JSON_FILENAME = "final_measured_representative.json"
+REPRESENTATIVE_CSV_FILENAME = "final_measured_representative.csv"
+REPRESENTATIVE_MARKDOWN_FILENAME = "final_measured_representative.md"
+REPRESENTATIVE_SELECTION_METHOD = "equal_weight_minmax_euclidean_to_ideal"
+REPRESENTATIVE_OBJECTIVE_WEIGHTS = {
+    "objective_active_volume_m3": 0.5,
+    "objective_one_minus_cycle_efficiency": 0.5,
+}
+REPRESENTATIVE_TIE_BREAKERS = (
+    "objective_active_volume_m3_ascending",
+    "objective_cycle_efficiency_descending",
+    "candidate_id_ascending",
+)
 FRONT_TOLERANCE = 1.0e-12
 FRONT_FIELDS = (
     "candidate_id",
@@ -296,8 +313,18 @@ def _validate_paths(value: Any) -> dict[str, Path]:
             raise TargetLoadContinuationError(f"{name} must be inside the coordinator workspace")
         if paths[name].parent != paths["workspace"]:
             raise TargetLoadContinuationError(f"{name} must be an immediate workspace child")
-    path_keys = {str(path).casefold() for name, path in paths.items() if name != "workspace"}
-    if len(path_keys) != len(paths) - 1:
+    derived_outputs = {
+        paths["workspace"] / REPRESENTATIVE_JSON_FILENAME,
+        paths["workspace"] / REPRESENTATIVE_CSV_FILENAME,
+        paths["workspace"] / REPRESENTATIVE_MARKDOWN_FILENAME,
+    }
+    contracted_outputs = {
+        path for name, path in paths.items() if name != "workspace"
+    }
+    path_keys = {
+        str(path).casefold() for path in contracted_outputs | derived_outputs
+    }
+    if len(path_keys) != (len(paths) - 1) + len(derived_outputs):
         raise TargetLoadContinuationError("continuation output paths must be distinct")
     return paths
 
@@ -1357,6 +1384,611 @@ def _front_csv(rows: Sequence[Mapping[str, Any]]) -> bytes:
     return stream.getvalue().encode("utf-8")
 
 
+def select_balanced_measured_representative(
+    front: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Select the deterministic equal-weight knee of a measured Pareto front."""
+
+    if not front:
+        raise TargetLoadContinuationError("measured Pareto front is empty")
+    normalized_front = measured_nondominated_front(front)
+    supplied_ids = [_nonblank(row.get("candidate_id"), "front candidate_id") for row in front]
+    if len(normalized_front) != len(front) or set(supplied_ids) != {
+        row["candidate_id"] for row in normalized_front
+    }:
+        raise TargetLoadContinuationError(
+            "representative selection input is not an exact nondominated front"
+        )
+
+    volume_values = [float(row["objective_active_volume_m3"]) for row in normalized_front]
+    loss_values = [
+        float(row["objective_one_minus_cycle_efficiency"]) for row in normalized_front
+    ]
+    volume_min, volume_max = min(volume_values), max(volume_values)
+    loss_min, loss_max = min(loss_values), max(loss_values)
+    volume_range = volume_max - volume_min
+    loss_range = loss_max - loss_min
+
+    scored: list[dict[str, Any]] = []
+    for row in normalized_front:
+        normalized_volume = (
+            0.0
+            if volume_range == 0.0
+            else (float(row["objective_active_volume_m3"]) - volume_min) / volume_range
+        )
+        normalized_loss = (
+            0.0
+            if loss_range == 0.0
+            else (float(row["objective_one_minus_cycle_efficiency"]) - loss_min)
+            / loss_range
+        )
+        distance = math.sqrt(
+            REPRESENTATIVE_OBJECTIVE_WEIGHTS["objective_active_volume_m3"]
+            * normalized_volume**2
+            + REPRESENTATIVE_OBJECTIVE_WEIGHTS[
+                "objective_one_minus_cycle_efficiency"
+            ]
+            * normalized_loss**2
+        )
+        scored.append(
+            {
+                **row,
+                "normalized_active_volume": normalized_volume,
+                "normalized_one_minus_cycle_efficiency": normalized_loss,
+                "equal_weight_distance_to_ideal": distance,
+            }
+        )
+
+    selected = min(
+        scored,
+        key=lambda row: (
+            float(row["equal_weight_distance_to_ideal"]),
+            float(row["objective_active_volume_m3"]),
+            -float(row["objective_cycle_efficiency"]),
+            str(row["candidate_id"]),
+        ),
+    )
+    return {
+        "schema_version": REPRESENTATIVE_SELECTION_SCHEMA_VERSION,
+        "method": REPRESENTATIVE_SELECTION_METHOD,
+        "objective_weights": dict(REPRESENTATIVE_OBJECTIVE_WEIGHTS),
+        "normalization": {
+            "method": "front_min_max",
+            "zero_range_component": 0.0,
+            "objective_active_volume_m3": {
+                "minimum": volume_min,
+                "maximum": volume_max,
+                "range": volume_range,
+            },
+            "objective_one_minus_cycle_efficiency": {
+                "minimum": loss_min,
+                "maximum": loss_max,
+                "range": loss_range,
+            },
+        },
+        "ideal_point": {
+            "normalized_active_volume": 0.0,
+            "normalized_one_minus_cycle_efficiency": 0.0,
+        },
+        "tie_breakers": list(REPRESENTATIVE_TIE_BREAKERS),
+        "front_candidate_count": len(normalized_front),
+        "selected": selected,
+    }
+
+
+def _representative_output_paths(paths: Mapping[str, Path]) -> dict[str, Path]:
+    workspace = paths["measured_front_csv"].parent
+    return {
+        "json": workspace / REPRESENTATIVE_JSON_FILENAME,
+        "csv": workspace / REPRESENTATIVE_CSV_FILENAME,
+        "markdown": workspace / REPRESENTATIVE_MARKDOWN_FILENAME,
+    }
+
+
+def _integer_row_value(row: Mapping[str, Any], field: str) -> int:
+    value = _finite(row.get(field), f"selected geometry {field}", positive=True)
+    if not value.is_integer():
+        raise TargetLoadContinuationError(f"selected geometry {field} must be an integer")
+    return int(value)
+
+
+def _selected_geometry(
+    state: coordinator.ReplayState,
+    candidate_id: str,
+) -> tuple[dict[str, Any], list[Any]]:
+    identity = _mapping(state.root.get("identity"), "target-load root identity")
+    raw_names = identity.get("design_variable_names")
+    if not isinstance(raw_names, list) or not raw_names:
+        raise TargetLoadContinuationError("target-load design variable names are missing")
+    names = [
+        _nonblank(value, f"design variable name {index}")
+        for index, value in enumerate(raw_names, start=1)
+    ]
+    if len(set(names)) != len(names):
+        raise TargetLoadContinuationError("target-load design variable names contain duplicates")
+    journals = [
+        journal
+        for journal in state.probes
+        if journal.probe.get("candidate_id") == candidate_id
+    ]
+    if not journals:
+        raise TargetLoadContinuationError("selected candidate has no replayed probes")
+    rows = [
+        _mapping(journal.probe.get("base_row"), "selected candidate base row")
+        for journal in journals
+    ]
+    first = rows[0]
+    values = {
+        name: _finite(first.get(name), f"selected geometry {name}") for name in names
+    }
+    geometry_group_id = _nonblank(
+        first.get("geometry_group_id"), "selected geometry_group_id"
+    )
+    design_hash = _nonblank(first.get("design_hash"), "selected design_hash")
+    slot_number = _integer_row_value(first, "slot_num")
+    pole_number = _integer_row_value(first, "pole_num")
+    for row in rows[1:]:
+        if (
+            _nonblank(row.get("geometry_group_id"), "selected geometry_group_id")
+            != geometry_group_id
+            or _nonblank(row.get("design_hash"), "selected design_hash") != design_hash
+            or _integer_row_value(row, "slot_num") != slot_number
+            or _integer_row_value(row, "pole_num") != pole_number
+            or any(
+                workflow.canonical_float(
+                    _finite(row.get(name), f"selected geometry {name}")
+                )
+                != workflow.canonical_float(values[name])
+                for name in names
+            )
+        ):
+            raise TargetLoadContinuationError(
+                "selected candidate probes do not share one exact geometry"
+            )
+    geometry = {
+        "geometry_group_id": geometry_group_id,
+        "design_hash": design_hash,
+        "slot_number": slot_number,
+        "pole_number": pole_number,
+        "design_variable_order": names,
+        "design_variables": values,
+    }
+    geometry["geometry_sha256"] = workflow.canonical_json_sha256(geometry)
+    return geometry, journals
+
+
+def _selected_operating_points(
+    state: coordinator.ReplayState,
+    candidate_id: str,
+    summary: Mapping[str, Any],
+    journals: Sequence[Any],
+) -> list[dict[str, Any]]:
+    if any(journal.probe.get("candidate_id") != candidate_id for journal in journals):
+        raise TargetLoadContinuationError(
+            "selected operating-point journals contain another candidate"
+        )
+    identity = _mapping(state.root.get("identity"), "target-load root identity")
+    raw_order = identity.get("operating_point_order")
+    if not isinstance(raw_order, list) or not raw_order:
+        raise TargetLoadContinuationError("target-load operating-point order is missing")
+    point_order = [
+        _nonblank(value, f"operating point name {index}")
+        for index, value in enumerate(raw_order, start=1)
+    ]
+    raw_summaries = summary.get("operating_points")
+    if not isinstance(raw_summaries, list) or any(
+        not isinstance(value, Mapping) for value in raw_summaries
+    ):
+        raise TargetLoadContinuationError("selected candidate operating-point summaries are missing")
+    if [value.get("operating_point_id") for value in raw_summaries] != point_order:
+        raise TargetLoadContinuationError(
+            "selected candidate operating-point summary order differs from the root"
+        )
+
+    output: list[dict[str, Any]] = []
+    for point_id, raw_summary in zip(point_order, raw_summaries):
+        point_summary = dict(raw_summary)
+        center_journals = [
+            journal
+            for journal in journals
+            if journal.probe.get("operating_point_id") == point_id
+            and journal.probe.get("beta_validation_role")
+            == workflow.BETA_VALIDATION_ROLE_CENTER
+        ]
+        if len(center_journals) != 1:
+            raise TargetLoadContinuationError(
+                "selected candidate has missing or duplicate matched beta center"
+            )
+        journal = center_journals[0]
+        decision = _mapping(journal.decision, "selected beta-center decision")
+        if decision.get("terminal_status") != "matched":
+            raise TargetLoadContinuationError("selected beta-center decision is not matched")
+        observation = _mapping(
+            decision.get("matched_observation"), "selected beta-center observation"
+        )
+        evidence_by_role = _mapping(
+            point_summary.get("matched_evidence_by_beta_role"),
+            "selected matched evidence by beta role",
+        )
+        evidence = _mapping(
+            evidence_by_role.get(workflow.BETA_VALIDATION_ROLE_CENTER),
+            "selected beta-center evidence",
+        )
+        for field in (
+            "case_id",
+            "attempt_id",
+            "attempt_manifest_sha256",
+            "result_sha256",
+            "result_row_sha256",
+        ):
+            if evidence.get(field) != observation.get(field):
+                raise TargetLoadContinuationError(
+                    f"selected beta-center {field} differs from candidate summary"
+                )
+        current_by_role = _mapping(
+            point_summary.get("matched_current_by_beta_role_a"),
+            "selected matched current by beta role",
+        )
+        normalized_currents = {
+            _nonblank(role, "selected beta role"): _finite(
+                current, f"selected {role} current", positive=True
+            )
+            for role, current in current_by_role.items()
+        }
+        center_loss = _finite(
+            point_summary.get("matched_center_loss_w"), "selected matched center loss"
+        )
+        if center_loss < 0.0:
+            raise TargetLoadContinuationError("selected matched center loss must be nonnegative")
+        if not math.isclose(
+            center_loss,
+            _finite(observation.get("actual_total_loss_w"), "selected actual loss"),
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        ):
+            raise TargetLoadContinuationError(
+                "selected matched center loss differs from the measured observation"
+            )
+        base_row = _mapping(journal.probe.get("base_row"), "selected beta-center base row")
+        output.append(
+            {
+                "operating_point_id": point_id,
+                "speed_rpm": _finite(
+                    base_row.get("base_rpm"), "selected operating-point speed", positive=True
+                ),
+                "target_kind": _nonblank(
+                    observation.get("target_kind"), "selected target kind"
+                ),
+                "target_value": _finite(
+                    observation.get("target_value"), "selected target value", positive=True
+                ),
+                "relative_error": _finite(
+                    observation.get("relative_error"), "selected relative error"
+                ),
+                "required_power_w": _finite(
+                    point_summary.get("required_power_w"), "selected required power", positive=True
+                ),
+                "duty_weight": _finite(
+                    point_summary.get("duty_weight"), "selected duty weight", positive=True
+                ),
+                "beta_dq_deg": _finite(
+                    journal.probe.get("beta_dq_deg"), "selected beta center"
+                ),
+                "current_peak_a": _finite(
+                    observation.get("current_peak_a"), "selected current", positive=True
+                ),
+                "actual_torque_nm": _finite(
+                    observation.get("actual_torque_nm"), "selected measured torque"
+                ),
+                "actual_power_w": _finite(
+                    observation.get("actual_power_w"), "selected measured power"
+                ),
+                "actual_total_loss_w": center_loss,
+                "actual_efficiency_pct": _finite(
+                    observation.get("actual_efficiency_pct"), "selected measured efficiency"
+                ),
+                "target_load_efficiency_pct": _finite(
+                    point_summary.get("target_load_efficiency_pct"),
+                    "selected target-load efficiency",
+                ),
+                "actual_voltage_peak_v": _finite(
+                    observation.get("actual_voltage_peak_v"), "selected measured voltage"
+                ),
+                "matched_current_by_beta_role_a": normalized_currents,
+                "evidence": {
+                    "case_id": _nonblank(evidence.get("case_id"), "selected case_id"),
+                    "attempt_id": _nonblank(
+                        evidence.get("attempt_id"), "selected attempt_id"
+                    ),
+                    "attempt_manifest_sha256": _sha256(
+                        evidence.get("attempt_manifest_sha256"),
+                        "selected attempt manifest SHA256",
+                    ),
+                    "result_sha256": _sha256(
+                        evidence.get("result_sha256"), "selected result SHA256"
+                    ),
+                    "result_row_sha256": _sha256(
+                        evidence.get("result_row_sha256"),
+                        "selected result row SHA256",
+                    ),
+                },
+            }
+        )
+    return output
+
+
+def build_final_measured_representative(
+    state: coordinator.ReplayState,
+    front: Sequence[Mapping[str, Any]],
+    *,
+    contract: Mapping[str, str],
+    root_manifest_sha256: str,
+    measured_front_path: Path,
+    measured_front_sha256: str,
+) -> dict[str, Any]:
+    """Build the selected geometry, measured point results, and exact provenance."""
+
+    root_sha = _sha256(root_manifest_sha256, "root manifest SHA256")
+    replayed_root_sha = getattr(state, "root_manifest_sha256", root_sha)
+    if replayed_root_sha != root_sha:
+        raise TargetLoadContinuationError("selected representative root manifest differs")
+    selection = select_balanced_measured_representative(front)
+    selected = selection["selected"]
+    candidate_id = selected["candidate_id"]
+    summary = _mapping(
+        state.summaries.get(candidate_id), "selected candidate target-load summary"
+    )
+    if summary.get("summary_sha256") != selected["summary_sha256"]:
+        raise TargetLoadContinuationError(
+            "selected candidate summary differs from the measured front"
+        )
+    geometry, journals = _selected_geometry(state, candidate_id)
+    operating_points = _selected_operating_points(
+        state, candidate_id, summary, journals
+    )
+    root_identity_sha256 = _sha256(
+        state.root.get("identity_sha256"), "target-load root identity SHA256"
+    )
+    match_run_id = _nonblank(state.root.get("match_run_id"), "target-load match_run_id")
+    return {
+        "schema_version": REPRESENTATIVE_SCHEMA_VERSION,
+        "candidate_id": candidate_id,
+        "selection": selection,
+        "objectives": {
+            "objective_active_volume_m3": selected["objective_active_volume_m3"],
+            "objective_cycle_efficiency": selected["objective_cycle_efficiency"],
+            "objective_one_minus_cycle_efficiency": selected[
+                "objective_one_minus_cycle_efficiency"
+            ],
+            "efficiency_basis": _nonblank(
+                summary.get("efficiency_basis"), "selected efficiency basis"
+            ),
+            "diagnostic_weighted_actual_power_w": _finite(
+                summary.get("diagnostic_weighted_actual_power_w"),
+                "selected weighted actual power",
+            ),
+        },
+        "geometry": geometry,
+        "operating_points": operating_points,
+        "provenance": {
+            "contract": dict(contract),
+            "root_manifest_sha256": root_sha,
+            "root_identity_sha256": root_identity_sha256,
+            "match_run_id": match_run_id,
+            "source_summary_sha256": selected["summary_sha256"],
+            "measured_front": {
+                "schema_version": FRONT_SCHEMA_VERSION,
+                "path": str(measured_front_path),
+                "sha256": _sha256(
+                    measured_front_sha256, "measured front CSV SHA256"
+                ),
+            },
+            "source_candidate_order": list(
+                state.root["identity"]["candidate_order"]
+            ),
+        },
+    }
+
+
+def _representative_csv(representative: Mapping[str, Any]) -> bytes:
+    geometry = representative["geometry"]
+    design_names = list(geometry["design_variable_order"])
+    fields = [
+        "candidate_id",
+        "objective_active_volume_m3",
+        "objective_cycle_efficiency",
+        "objective_one_minus_cycle_efficiency",
+        "normalized_active_volume",
+        "normalized_one_minus_cycle_efficiency",
+        "equal_weight_distance_to_ideal",
+        "geometry_group_id",
+        "design_hash",
+        "geometry_sha256",
+        "slot_number",
+        "pole_number",
+        *design_names,
+        "operating_point_id",
+        "speed_rpm",
+        "target_kind",
+        "target_value",
+        "relative_error",
+        "required_power_w",
+        "duty_weight",
+        "beta_dq_deg",
+        "current_peak_a",
+        "actual_torque_nm",
+        "actual_power_w",
+        "actual_total_loss_w",
+        "actual_efficiency_pct",
+        "target_load_efficiency_pct",
+        "actual_voltage_peak_v",
+        "matched_current_by_beta_role_a_json",
+        "case_id",
+        "attempt_id",
+        "attempt_manifest_sha256",
+        "result_sha256",
+        "result_row_sha256",
+        "source_summary_sha256",
+        "root_manifest_sha256",
+        "measured_front_sha256",
+    ]
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=fields, lineterminator="\n")
+    writer.writeheader()
+    selected = representative["selection"]["selected"]
+    objectives = representative["objectives"]
+    provenance = representative["provenance"]
+    for point in representative["operating_points"]:
+        evidence = point["evidence"]
+        row = {
+            "candidate_id": representative["candidate_id"],
+            "objective_active_volume_m3": objectives["objective_active_volume_m3"],
+            "objective_cycle_efficiency": objectives["objective_cycle_efficiency"],
+            "objective_one_minus_cycle_efficiency": objectives[
+                "objective_one_minus_cycle_efficiency"
+            ],
+            "normalized_active_volume": selected["normalized_active_volume"],
+            "normalized_one_minus_cycle_efficiency": selected[
+                "normalized_one_minus_cycle_efficiency"
+            ],
+            "equal_weight_distance_to_ideal": selected[
+                "equal_weight_distance_to_ideal"
+            ],
+            "geometry_group_id": geometry["geometry_group_id"],
+            "design_hash": geometry["design_hash"],
+            "geometry_sha256": geometry["geometry_sha256"],
+            "slot_number": geometry["slot_number"],
+            "pole_number": geometry["pole_number"],
+            **geometry["design_variables"],
+            **{
+                key: point[key]
+                for key in (
+                    "operating_point_id",
+                    "speed_rpm",
+                    "target_kind",
+                    "target_value",
+                    "relative_error",
+                    "required_power_w",
+                    "duty_weight",
+                    "beta_dq_deg",
+                    "current_peak_a",
+                    "actual_torque_nm",
+                    "actual_power_w",
+                    "actual_total_loss_w",
+                    "actual_efficiency_pct",
+                    "target_load_efficiency_pct",
+                    "actual_voltage_peak_v",
+                )
+            },
+            "matched_current_by_beta_role_a_json": json.dumps(
+                point["matched_current_by_beta_role_a"],
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            **evidence,
+            "source_summary_sha256": provenance["source_summary_sha256"],
+            "root_manifest_sha256": provenance["root_manifest_sha256"],
+            "measured_front_sha256": provenance["measured_front"]["sha256"],
+        }
+        writer.writerow(
+            {
+                key: format(value, ".17g") if isinstance(value, float) else value
+                for key, value in row.items()
+            }
+        )
+    return stream.getvalue().encode("utf-8")
+
+
+def _markdown_cell(value: Any) -> str:
+    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+def _representative_markdown(representative: Mapping[str, Any]) -> bytes:
+    selected = representative["selection"]["selected"]
+    objectives = representative["objectives"]
+    geometry = representative["geometry"]
+    provenance = representative["provenance"]
+    lines = [
+        "# Final measured IPMSM representative",
+        "",
+        f"- Candidate: `{_markdown_cell(representative['candidate_id'])}`",
+        f"- Selection: `{REPRESENTATIVE_SELECTION_METHOD}`",
+        "- Objective weights: active volume 0.5, one-minus cycle efficiency 0.5",
+        "- Tie-breakers: smaller volume, higher efficiency, candidate ID",
+        "",
+        "## Measured objectives",
+        "",
+        "| Active volume (m³) | Cycle efficiency | 1 - efficiency | Normalized volume | Normalized 1 - efficiency | Distance to ideal |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| "
+        + " | ".join(
+            format(float(value), ".17g")
+            for value in (
+                objectives["objective_active_volume_m3"],
+                objectives["objective_cycle_efficiency"],
+                objectives["objective_one_minus_cycle_efficiency"],
+                selected["normalized_active_volume"],
+                selected["normalized_one_minus_cycle_efficiency"],
+                selected["equal_weight_distance_to_ideal"],
+            )
+        )
+        + " |",
+        "",
+        "## Selected geometry",
+        "",
+        f"- Geometry group: `{_markdown_cell(geometry['geometry_group_id'])}`",
+        f"- Design hash: `{_markdown_cell(geometry['design_hash'])}`",
+        f"- Fixed topology: {geometry['slot_number']} slots / {geometry['pole_number']} poles",
+        "",
+        "| Design variable | Value |",
+        "| --- | ---: |",
+    ]
+    lines.extend(
+        f"| {_markdown_cell(name)} | {format(float(geometry['design_variables'][name]), '.17g')} |"
+        for name in geometry["design_variable_order"]
+    )
+    lines.extend(
+        [
+            "",
+            "## Measured operating-point performance",
+            "",
+            "| Point | Speed (rpm) | Target | Current peak (A) | Beta (deg) | Torque (N·m) | Power (W) | Loss (W) | Actual efficiency (%) | Target-load efficiency (%) | Voltage peak (V) |",
+            "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for point in representative["operating_points"]:
+        target = f"{point['target_kind']}={format(float(point['target_value']), '.17g')}"
+        values = (
+            _markdown_cell(point["operating_point_id"]),
+            format(float(point["speed_rpm"]), ".17g"),
+            _markdown_cell(target),
+            format(float(point["current_peak_a"]), ".17g"),
+            format(float(point["beta_dq_deg"]), ".17g"),
+            format(float(point["actual_torque_nm"]), ".17g"),
+            format(float(point["actual_power_w"]), ".17g"),
+            format(float(point["actual_total_loss_w"]), ".17g"),
+            format(float(point["actual_efficiency_pct"]), ".17g"),
+            format(float(point["target_load_efficiency_pct"]), ".17g"),
+            format(float(point["actual_voltage_peak_v"]), ".17g"),
+        )
+        lines.append("| " + " | ".join(values) + " |")
+    lines.extend(
+        [
+            "",
+            "## Provenance",
+            "",
+            f"- Target-load root: `{provenance['root_manifest_sha256']}`",
+            f"- Candidate summary: `{provenance['source_summary_sha256']}`",
+            f"- Measured front: `{provenance['measured_front']['sha256']}`",
+            f"- Geometry receipt: `{geometry['geometry_sha256']}`",
+            "",
+        ]
+    )
+    return ("\n".join(lines)).encode("utf-8")
+
+
 def _final_live_state(
     context: ContinuationContext,
     client: coordinator.SchedulerClient,
@@ -1437,13 +2069,36 @@ def _publish_final_outputs(
     if not front:
         raise TargetLoadContinuationError("measured nondominated front is empty")
     csv_payload = _front_csv(front)
+    csv_sha256 = hashlib.sha256(csv_payload).hexdigest()
+    contract_binding = {
+        "path": str(context.path),
+        "raw_sha256": context.snapshot.sha256,
+        "contract_sha256": context.contract_sha256,
+    }
+    representative = build_final_measured_representative(
+        state,
+        front,
+        contract=contract_binding,
+        root_manifest_sha256=progress["root_manifest_sha256"],
+        measured_front_path=context.paths["measured_front_csv"],
+        measured_front_sha256=csv_sha256,
+    )
+    representative_paths = _representative_output_paths(context.paths)
+    representative_payloads = {
+        "json": authority.canonical_json_bytes(representative),
+        "csv": _representative_csv(representative),
+        "markdown": _representative_markdown(representative),
+    }
+    representative_bindings = {
+        name: {
+            "path": str(representative_paths[name]),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        for name, payload in representative_payloads.items()
+    }
     manifest = {
         "schema_version": FRONT_MANIFEST_SCHEMA_VERSION,
-        "contract": {
-            "path": str(context.path),
-            "raw_sha256": context.snapshot.sha256,
-            "contract_sha256": context.contract_sha256,
-        },
+        "contract": contract_binding,
         "root_manifest_sha256": progress["root_manifest_sha256"],
         "source_candidate_order": list(state.root["identity"]["candidate_order"]),
         "source_summary_sha256": {
@@ -1458,11 +2113,32 @@ def _publish_final_outputs(
             "candidate_ids": [row["candidate_id"] for row in front],
             "candidate_count": len(front),
             "csv_path": str(context.paths["measured_front_csv"]),
-            "csv_sha256": hashlib.sha256(csv_payload).hexdigest(),
+            "csv_sha256": csv_sha256,
+        },
+        "final_representative": {
+            "schema_version": REPRESENTATIVE_SCHEMA_VERSION,
+            "selection_schema_version": REPRESENTATIVE_SELECTION_SCHEMA_VERSION,
+            "candidate_id": representative["candidate_id"],
+            "selection_method": REPRESENTATIVE_SELECTION_METHOD,
+            "tie_breakers": list(REPRESENTATIVE_TIE_BREAKERS),
+            "outputs": representative_bindings,
         },
     }
     _publish_no_replace_bytes(
         context.paths["measured_front_csv"], csv_payload, "measured target-load front"
+    )
+    _publish_no_replace_json(
+        representative_paths["json"], representative, "final measured representative JSON"
+    )
+    _publish_no_replace_bytes(
+        representative_paths["csv"],
+        representative_payloads["csv"],
+        "final measured representative CSV",
+    )
+    _publish_no_replace_bytes(
+        representative_paths["markdown"],
+        representative_payloads["markdown"],
+        "final measured representative Markdown",
     )
     _publish_no_replace_json(
         context.paths["measured_front_manifest"], manifest, "measured target-load front manifest"
@@ -1472,6 +2148,17 @@ def _publish_final_outputs(
     )
     if csv_snapshot.payload != csv_payload:
         raise TargetLoadContinuationError("measured target-load front bytes changed")
+    representative_snapshots = {
+        name: authority.read_single_link_snapshot(
+            representative_paths[name], f"final measured representative {name}"
+        )
+        for name in ("json", "csv", "markdown")
+    }
+    for name, snapshot in representative_snapshots.items():
+        if snapshot.payload != representative_payloads[name]:
+            raise TargetLoadContinuationError(
+                f"final measured representative {name} bytes changed"
+            )
     manifest_snapshot = authority.read_single_link_snapshot(
         context.paths["measured_front_manifest"], "measured front manifest"
     )
@@ -1484,15 +2171,24 @@ def _publish_final_outputs(
         "root_manifest_sha256": progress["root_manifest_sha256"],
         "measured_front_csv": {
             "path": str(context.paths["measured_front_csv"]),
-            "sha256": hashlib.sha256(csv_payload).hexdigest(),
+            "sha256": csv_sha256,
         },
         "measured_front_manifest": {
             "path": str(context.paths["measured_front_manifest"]),
             "sha256": manifest_snapshot.sha256,
         },
+        "final_representative": {
+            "schema_version": REPRESENTATIVE_SCHEMA_VERSION,
+            "candidate_id": representative["candidate_id"],
+            "outputs": representative_bindings,
+        },
     }
     _assert_authority_unchanged(context)
     authority.assert_snapshot_unchanged(csv_snapshot, "measured target-load front")
+    for name, snapshot in representative_snapshots.items():
+        authority.assert_snapshot_unchanged(
+            snapshot, f"final measured representative {name}"
+        )
     authority.assert_snapshot_unchanged(manifest_snapshot, "measured front manifest")
     if not _claim_owned(context, owner):
         raise TargetLoadContinuationError("claim ownership was lost before completion publication")
@@ -1503,6 +2199,10 @@ def _publish_final_outputs(
             raise TargetLoadContinuationError("existing completion differs from live measured front")
         _nonblank(completion["completed_at_utc"], "completion.completed_at_utc")
         authority.assert_snapshot_unchanged(csv_snapshot, "measured target-load front")
+        for name, snapshot in representative_snapshots.items():
+            authority.assert_snapshot_unchanged(
+                snapshot, f"final measured representative {name}"
+            )
         authority.assert_snapshot_unchanged(manifest_snapshot, "measured front manifest")
         _assert_authority_unchanged(context)
         if not _claim_owned(context, owner):
@@ -1522,6 +2222,10 @@ def _publish_final_outputs(
     if committed_completion != completion:
         raise TargetLoadContinuationError("committed completion bytes changed")
     authority.assert_snapshot_unchanged(csv_snapshot, "measured target-load front")
+    for name, snapshot in representative_snapshots.items():
+        authority.assert_snapshot_unchanged(
+            snapshot, f"final measured representative {name}"
+        )
     authority.assert_snapshot_unchanged(manifest_snapshot, "measured front manifest")
     authority.assert_snapshot_unchanged(completion_snapshot, "target-load completion")
     _assert_authority_unchanged(context)

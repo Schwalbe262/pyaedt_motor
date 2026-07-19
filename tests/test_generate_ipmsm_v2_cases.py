@@ -1028,6 +1028,24 @@ class GenerateIpmsmV2CasesTests(unittest.TestCase):
             proof = generator.validate_stage2_failed_decision(decision_path, exclusions)
             self.assertEqual(set(proof["combined_artifacts"]), {"merged", "validation", "metadata", "r2"})
 
+            fixed_audit = root / "fixed_audit.csv"
+            fixed_audit.write_bytes(Path(exclusions[1]["path"]).read_bytes())
+            contract["training"]["audit_case_plan"] = {
+                "path": str(fixed_audit),
+                "sha256": generator._file_sha256(fixed_audit),
+            }
+            decision["execution_contract"] = contract
+            decision["contract_sha256"] = generator._canonical_sha256(contract)
+            decision_path.write_text(json.dumps(decision), encoding="utf-8")
+            explicit_proof = generator.validate_stage2_failed_decision(
+                decision_path,
+                exclusions,
+            )
+            self.assertEqual(
+                explicit_proof["fixed_audit_case_plan"]["path"],
+                str(fixed_audit.resolve(strict=False)),
+            )
+
             Path(combined_records["merged"]["path"]).write_text("tampered", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "hash mismatch"):
                 generator.validate_stage2_failed_decision(decision_path, exclusions)

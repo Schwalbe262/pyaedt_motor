@@ -32,6 +32,89 @@ def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+def write_adaptive_case_plan(path: Path) -> None:
+    rows: list[dict[str, object]] = []
+    for geometry_index in range(1, 51):
+        split = "train" if geometry_index <= 40 else "calibration"
+        for row_index in range(1, 7):
+            rows.append(
+                {
+                    "case_id": f"adaptive-{geometry_index:04d}-{row_index:02d}",
+                    "design_hash": f"adaptive-hash-{geometry_index:04d}",
+                    "geometry_group_id": f"adaptive-group-{geometry_index:04d}",
+                    "doe_split": split,
+                }
+            )
+    write_csv(path, rows)
+
+
+def write_adaptive_case_manifest(
+    path: Path,
+    *,
+    case_plan: Path,
+    fixed_audit: Path,
+) -> None:
+    case_record = {
+        "path": str(case_plan.resolve(strict=False)),
+        "sha256": continuation._sha256(case_plan),
+    }
+    audit_record = {
+        "path": str(fixed_audit.resolve(strict=False)),
+        "sha256": continuation._sha256(fixed_audit),
+    }
+    failed_decision = path.with_name("adaptive-failed-decision.json")
+    r2_history = path.with_name("adaptive-r2-history.json")
+    write_json(failed_decision, {"status": "combined_r2_failed"})
+    write_json(r2_history, {"records": []})
+    execution = {
+        "batch_index": 1,
+        "case_plan": case_record,
+        "failed_decision": {
+            "path": str(failed_decision.resolve(strict=False)),
+            "sha256": continuation._sha256(failed_decision),
+        },
+        "fixed_audit_case_plan": audit_record,
+        "plateau_policy": {
+            "action": "continue_adaptive_fea",
+            "completed_batches": 0,
+            "consecutive_batches_required": 2,
+            "improvements": [],
+            "minimum_improvement": 0.01,
+            "stop_fea": False,
+            "trailing_below_threshold": 0,
+        },
+        "r2_history": {
+            "path": str(r2_history.resolve(strict=False)),
+            "sha256": continuation._sha256(r2_history),
+        },
+        "seed_policy": {
+            "adaptation_seed": 730131,
+            "adaptation_seed_base": 730031,
+            "calibration_seed": 730133,
+            "calibration_seed_base": 730033,
+            "formula": "role_seed_base + 100 * batch_index",
+            "stride": 100,
+        },
+    }
+    write_json(
+        path,
+        {
+            "schema_version": continuation.ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION,
+            "mode": "write",
+            "case_plan": case_record["path"],
+            "case_plan_sha256": case_record["sha256"],
+            "fixed_audit_case_plan": audit_record,
+            "execution_contract": execution,
+            "execution_contract_sha256": continuation._contract_sha256(execution),
+            "summary": {
+                "rows": 300,
+                "split_groups": {"train": 40, "calibration": 10, "test": 0},
+                "split_rows": {"train": 240, "calibration": 60, "test": 0},
+            },
+        },
+    )
+
+
 def valid_metadata(
     rows: int,
     *,
@@ -550,6 +633,473 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
             self.assertFalse(paths["decision"].exists())
             self.assertFalse(paths["stage2_output"].exists())
             readiness.assert_called_once()
+            runner.assert_not_called()
+
+    def test_precollected_completion_reuses_v4r9_live_verification_and_binds_bytes(self) -> None:
+        import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp), primary_r2=0.90)
+            plan_rows: list[dict[str, object]] = []
+            result_rows: list[dict[str, object]] = []
+            for group_index in range(50):
+                group_id = f"stage3-group-{group_index:04d}"
+                split = "test" if group_index < 10 else "calibration" if group_index < 20 else "train"
+                for row_index in range(6):
+                    case_id = f"stage3-{group_index:04d}-{row_index}"
+                    plan_rows.append(
+                        {
+                            "case_id": case_id,
+                            "beta_calibration_id": "beta-zero",
+                            "design_hash": f"hash-{group_index:04d}",
+                            "doe_split": split,
+                            "geometry_group_id": group_id,
+                            "operating_point_id": f"op-{row_index}",
+                            "repeat_of_case_id": "",
+                        }
+                    )
+                    result_rows.append(
+                        {
+                            "case_id": case_id,
+                            "beta_calibration_id": "beta-zero",
+                            "design_hash": f"hash-{group_index:04d}",
+                            "doe_split": split,
+                            "geometry_group_id": group_id,
+                            "operating_point_id": f"op-{row_index}",
+                            "repeat_of_case_id": "",
+                            "status": "ok",
+                        }
+                    )
+            write_csv(paths["stage2_plan"], plan_rows)
+            paths["stage2_output"].mkdir()
+            result_path = paths["stage2_output"] / "merged_results.csv"
+            write_csv(result_path, result_rows)
+            acquisition_contract = Path(tmp) / "acquisition-contract.json"
+            write_json(acquisition_contract, {"fixture": True})
+            completion_path = Path(tmp) / "acquisition-completion.json"
+            scheduler = {
+                "url": continuation.campaign_runner.submit_campaign.DEFAULT_SCHEDULER_URL,
+                "project": "PYAEDT_MOTOR_IPMSM_V2",
+                "task_prefix": "ipmsm-v2-foundation-s2",
+                "history_tasks": 309,
+                "project_active_cap": 50,
+            }
+            completion = {
+                "schema_version": acquisition.COMPLETION_SCHEMA_VERSION,
+                "status": "acquisition_complete",
+                "contract": continuation._artifact_contract(acquisition_contract),
+                "repository_revision": "a" * 40,
+                "scheduler": scheduler,
+                "effective_plan": {
+                    **continuation._artifact_contract(paths["stage2_plan"]),
+                    "kind": "original",
+                    "rows": 300,
+                    "geometry_groups": 50,
+                },
+                "replacement_manifest": None,
+                "result": {
+                    **continuation._artifact_contract(result_path),
+                    "rows": 300,
+                },
+            }
+            write_json(completion_path, completion)
+            args = continuation.build_parser().parse_args(
+                cli(
+                    paths,
+                    "--precollected-stage2-completion",
+                    str(completion_path),
+                )
+            )
+            context = mock.Mock(
+                outputs={"completion": completion_path},
+                project=scheduler["project"],
+                project_active_cap=scheduler["project_active_cap"],
+                repository_revision="a" * 40,
+                scheduler_url=scheduler["url"],
+                source_root=Path(continuation.__file__).resolve().parent,
+                task_prefix=scheduler["task_prefix"],
+            )
+            live_report = {
+                "action": "verified_existing_completion",
+                "history_tasks": 309,
+                "mode": "execute",
+                "plan_kind": "original",
+                "schema_version": acquisition.RUN_REPORT_SCHEMA_VERSION,
+                "status": "acquisition_complete",
+                "successful_results": 300,
+                "writes_performed": 0,
+            }
+            with mock.patch.object(acquisition, "load_contract", return_value=context):
+                with mock.patch.object(
+                    acquisition,
+                    "_verify_existing_completion",
+                    return_value=live_report,
+                ) as verify:
+                    first = continuation._precollected_stage2_contract(args)
+                    second = continuation._precollected_stage2_contract(args)
+
+            self.assertEqual(first, second)
+            self.assertEqual(first["effective_plan"]["kind"], "original")
+            self.assertEqual(first["live_verification"], live_report)
+            self.assertEqual(first["scheduler"], scheduler)
+            self.assertEqual(
+                first["runner_source"]["source_root"],
+                str(Path(continuation.__file__).resolve().parent),
+            )
+            self.assertEqual(first["runner_source"]["repository_revision"], "a" * 40)
+            verify.assert_called_once_with(context)
+            mismatches = (
+                ("project", "OTHER_PROJECT"),
+                ("project_active_cap", 49),
+                ("scheduler_url", "http://127.0.0.1:9999"),
+                ("stage2_task_prefix", "other-prefix"),
+            )
+            for attribute, changed in mismatches:
+                original = getattr(args, attribute)
+                setattr(args, attribute, changed)
+                with self.assertRaisesRegex(
+                    continuation.ContinuationGateError,
+                    "scheduler identity differs",
+                ):
+                    continuation._precollected_stage2_contract(args)
+                setattr(args, attribute, original)
+            uncached_args = continuation.build_parser().parse_args(
+                cli(
+                    paths,
+                    "--precollected-stage2-completion",
+                    str(completion_path),
+                )
+            )
+            conflicting_context = mock.Mock(
+                outputs={"completion": completion_path},
+                project=scheduler["project"],
+                project_active_cap=scheduler["project_active_cap"],
+                repository_revision="a" * 40,
+                scheduler_url=scheduler["url"],
+                source_root=Path(continuation.__file__).resolve().parent,
+                task_prefix="conflicting-prefix",
+            )
+            with mock.patch.object(
+                acquisition, "load_contract", return_value=conflicting_context
+            ):
+                with mock.patch.object(
+                    acquisition, "_verify_existing_completion"
+                ) as conflicting_verify:
+                    with self.assertRaisesRegex(
+                        continuation.ContinuationGateError,
+                        "scheduler identity differs",
+                    ):
+                        continuation._precollected_stage2_contract(uncached_args)
+            conflicting_verify.assert_not_called()
+            foreign_source = Path(tmp) / "foreign-source"
+            foreign_source.mkdir()
+            source_mismatch_context = mock.Mock(
+                outputs={"completion": completion_path},
+                project=scheduler["project"],
+                project_active_cap=scheduler["project_active_cap"],
+                repository_revision="a" * 40,
+                scheduler_url=scheduler["url"],
+                source_root=foreign_source,
+                task_prefix=scheduler["task_prefix"],
+            )
+            with mock.patch.object(
+                acquisition, "load_contract", return_value=source_mismatch_context
+            ):
+                with mock.patch.object(
+                    acquisition, "_verify_existing_completion"
+                ) as source_verify:
+                    with self.assertRaisesRegex(
+                        continuation.ContinuationGateError,
+                        "outside the exact source root",
+                    ):
+                        continuation._precollected_stage2_contract(uncached_args)
+            source_verify.assert_not_called()
+
+            foreign_acquisition = foreign_source / Path(acquisition.__file__).name
+            foreign_acquisition.write_text("# fixture\n", encoding="utf-8")
+            with mock.patch.object(acquisition, "load_contract", return_value=context):
+                with mock.patch.object(acquisition, "__file__", str(foreign_acquisition)):
+                    with mock.patch.object(
+                        acquisition, "_verify_existing_completion"
+                    ) as module_verify:
+                        with self.assertRaisesRegex(
+                            continuation.ContinuationGateError,
+                            "outside the exact source root",
+                        ):
+                            continuation._precollected_stage2_contract(uncached_args)
+            module_verify.assert_not_called()
+            result_path.write_text("tampered", encoding="utf-8")
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError,
+                "precollected result bytes changed",
+            ):
+                continuation._precollected_stage2_contract(args)
+            drift_rows = [dict(row) for row in result_rows]
+            drift_rows[0]["geometry_group_id"] = drift_rows[6]["geometry_group_id"]
+            write_csv(result_path, drift_rows)
+            completion["result"] = {
+                **continuation._artifact_contract(result_path),
+                "rows": 300,
+            }
+            write_json(completion_path, completion)
+            drift_args = continuation.build_parser().parse_args(
+                cli(
+                    paths,
+                    "--precollected-stage2-completion",
+                    str(completion_path),
+                )
+            )
+            with mock.patch.object(acquisition, "load_contract", return_value=context):
+                with mock.patch.object(
+                    acquisition,
+                    "_verify_existing_completion",
+                    return_value=live_report,
+                ):
+                    with self.assertRaisesRegex(
+                        continuation.ContinuationGateError,
+                        "differs from its effective-plan identity",
+                    ):
+                        continuation._precollected_stage2_contract(drift_args)
+
+    def test_precollected_replacement_binds_manifest_and_failure_evidence(self) -> None:
+        import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp), primary_r2=0.90)
+            plan_rows = []
+            result_rows = []
+            for group_index in range(50):
+                group_id = f"replacement-group-{group_index:04d}"
+                for row_index in range(6):
+                    case_id = f"replacement-{group_index:04d}-{row_index}"
+                    row = {
+                        "case_id": case_id,
+                        "beta_calibration_id": "beta-zero",
+                        "design_hash": f"replacement-hash-{group_index:04d}",
+                        "doe_split": "test" if group_index < 10 else "train",
+                        "geometry_group_id": group_id,
+                        "operating_point_id": f"op-{row_index}",
+                        "repeat_of_case_id": "",
+                    }
+                    plan_rows.append(row)
+                    result_rows.append({**row, "status": "ok"})
+            write_csv(paths["stage2_plan"], plan_rows)
+            paths["stage2_output"].mkdir()
+            result_path = paths["stage2_output"] / "merged_results.csv"
+            write_csv(result_path, result_rows)
+            acquisition_contract = Path(tmp) / "contract.json"
+            replacement_manifest = Path(tmp) / "replacement.json"
+            failure_evidence = Path(tmp) / "failure-evidence.json"
+            write_json(acquisition_contract, {"fixture": True})
+            write_json(replacement_manifest, {"mapping": True})
+            write_json(failure_evidence, {"failures": 6})
+            completion_path = Path(tmp) / "completion.json"
+            scheduler = {
+                "url": continuation.campaign_runner.submit_campaign.DEFAULT_SCHEDULER_URL,
+                "project": "PYAEDT_MOTOR_IPMSM_V2",
+                "task_prefix": "ipmsm-v2-foundation-s2",
+                "history_tasks": 315,
+                "project_active_cap": 50,
+            }
+            completion = {
+                "schema_version": acquisition.COMPLETION_SCHEMA_VERSION,
+                "status": "acquisition_complete",
+                "contract": continuation._artifact_contract(acquisition_contract),
+                "repository_revision": "b" * 40,
+                "scheduler": scheduler,
+                "effective_plan": {
+                    **continuation._artifact_contract(paths["stage2_plan"]),
+                    "kind": "replacement",
+                    "rows": 300,
+                    "geometry_groups": 50,
+                },
+                "replacement_manifest": {
+                    **continuation._artifact_contract(replacement_manifest),
+                    "failed_geometry_group_id": "old-group",
+                    "replacement_geometry_group_id": "new-group",
+                    "failure_evidence_manifest": continuation._artifact_contract(
+                        failure_evidence
+                    ),
+                },
+                "result": {
+                    **continuation._artifact_contract(result_path),
+                    "rows": 300,
+                },
+            }
+            write_json(completion_path, completion)
+            args = continuation.build_parser().parse_args(
+                cli(paths, "--precollected-stage2-completion", str(completion_path))
+            )
+            context = mock.Mock(
+                outputs={"completion": completion_path},
+                project=scheduler["project"],
+                project_active_cap=scheduler["project_active_cap"],
+                repository_revision="b" * 40,
+                scheduler_url=scheduler["url"],
+                source_root=Path(continuation.__file__).resolve().parent,
+                task_prefix=scheduler["task_prefix"],
+            )
+            live_report = {
+                "action": "verified_existing_completion",
+                "history_tasks": 315,
+                "mode": "execute",
+                "plan_kind": "replacement",
+                "schema_version": acquisition.RUN_REPORT_SCHEMA_VERSION,
+                "status": "acquisition_complete",
+                "successful_results": 300,
+                "writes_performed": 0,
+            }
+            with mock.patch.object(acquisition, "load_contract", return_value=context):
+                with mock.patch.object(
+                    acquisition, "_verify_existing_completion", return_value=live_report
+                ):
+                    bound = continuation._precollected_stage2_contract(args)
+            self.assertEqual(bound["replacement_manifest"]["failed_geometry_group_id"], "old-group")
+            failure_evidence.write_text("tampered", encoding="utf-8")
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError,
+                "replacement failure evidence bytes changed",
+            ):
+                continuation._precollected_stage2_contract(args)
+
+    def test_fresh_precollected_execution_skips_only_stage2_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp), primary_r2=0.90)
+            paths["stage2_output"].mkdir()
+            write_csv(
+                paths["stage2_output"] / "merged_results.csv",
+                [{"case_id": "s2-a", "status": "ok"}],
+            )
+            completion_path = Path(tmp) / "completion.json"
+            write_json(completion_path, {"fixture": True})
+            binding = {
+                "completion": continuation._artifact_contract(completion_path),
+                "effective_plan": {"kind": "replacement"},
+                "live_verification": {"status": "acquisition_complete"},
+            }
+            combined = passing_combined_gate(paths)
+            argv = cli(
+                paths,
+                "--precollected-stage2-completion",
+                str(completion_path),
+                "--execute",
+            )
+            with mock.patch.object(continuation, "pid_is_running", return_value=False):
+                with mock.patch.object(continuation, "validate_stage2_readiness"):
+                    with mock.patch.object(
+                        continuation,
+                        "_precollected_stage2_contract",
+                        return_value=binding,
+                    ):
+                        with mock.patch.object(continuation.campaign_runner, "main") as runner:
+                            with mock.patch.object(
+                                continuation,
+                                "run_combined_pipeline",
+                                side_effect=lambda *_args: (
+                                    write_mock_combined_artifacts(paths, combined, _args[2])
+                                    or combined
+                                ),
+                            ) as combined_run:
+                                with mock.patch.object(
+                                    continuation, "_load_combined_gate", return_value=combined
+                                ):
+                                    with contextlib.redirect_stdout(io.StringIO()):
+                                        result = continuation.main(argv)
+
+            decision = json.loads(paths["decision"].read_text(encoding="utf-8"))
+            self.assertEqual(result, 0)
+            runner.assert_not_called()
+            combined_run.assert_called_once()
+            self.assertEqual(
+                decision["stage2"]["precollected_completion"], binding
+            )
+            self.assertEqual(
+                decision["execution_contract"]["stage2"]["precollected_completion"],
+                binding,
+            )
+
+    def test_precollected_readiness_validates_runner_without_requiring_fresh_result_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp), primary_r2=0.90)
+            paths["stage2_output"].mkdir()
+            completion_path = Path(tmp) / "completion.json"
+            write_json(completion_path, {"fixture": True})
+            args = continuation.build_parser().parse_args(
+                cli(paths, "--precollected-stage2-completion", str(completion_path))
+            )
+            selected = [{"case_id": "s2-a"}]
+            with mock.patch.object(
+                continuation.campaign_runner,
+                "validate_args",
+                wraps=continuation.campaign_runner.validate_args,
+            ) as validate:
+                with mock.patch.object(
+                    continuation.campaign_runner,
+                    "load_beta_prerequisite",
+                    return_value={"status": "pass"},
+                ):
+                    with mock.patch.object(
+                        continuation.campaign_runner.submit_campaign,
+                        "load_and_validate_cases",
+                        return_value=selected,
+                    ):
+                        with mock.patch.object(
+                            continuation.campaign_runner.submit_campaign,
+                            "select_case_rows",
+                            return_value=selected,
+                        ):
+                            with mock.patch.object(
+                                continuation.campaign_runner,
+                                "validate_foundation_rows",
+                            ):
+                                continuation.validate_stage2_readiness(args)
+
+            readiness_args = validate.call_args.args[0]
+            self.assertNotEqual(readiness_args.output_dir, paths["stage2_output"])
+            self.assertFalse(readiness_args.output_dir.exists())
+            self.assertTrue(paths["stage2_output"].exists())
+
+    def test_precollected_output_disappearance_never_falls_back_to_submission(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp), primary_r2=0.90)
+            paths["stage2_output"].mkdir()
+            write_csv(
+                paths["stage2_output"] / "merged_results.csv",
+                [{"case_id": "s2-a", "status": "ok"}],
+            )
+            completion_path = Path(tmp) / "completion.json"
+            write_json(completion_path, {"fixture": True})
+            binding = {
+                "completion": continuation._artifact_contract(completion_path),
+                "live_verification": {"status": "acquisition_complete"},
+            }
+            argv = cli(
+                paths,
+                "--precollected-stage2-completion",
+                str(completion_path),
+                "--execute",
+            )
+            with mock.patch.object(continuation, "pid_is_running", return_value=False):
+                with mock.patch.object(continuation, "validate_stage2_readiness"):
+                    with mock.patch.object(
+                        continuation,
+                        "_precollected_stage2_contract",
+                        return_value=binding,
+                    ):
+                        with mock.patch.object(
+                            continuation,
+                            "_stage2_output_state",
+                            side_effect=["complete", "absent"],
+                        ):
+                            with mock.patch.object(
+                                continuation.campaign_runner, "main"
+                            ) as runner:
+                                with self.assertRaisesRegex(
+                                    continuation.ContinuationGateError,
+                                    "resubmission is forbidden",
+                                ):
+                                    continuation.main(argv)
+
             runner.assert_not_called()
 
     def test_execute_skip_writes_fresh_atomic_decision_without_runner(self) -> None:
@@ -1292,6 +1842,127 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
                 training_args[training_args.index("--v2-audit-case-plan") + 1],
                 str(paths["stage2_plan"]),
             )
+
+    def test_combined_pipeline_can_reuse_explicit_fixed_audit_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp), primary_r2=0.90)
+            fixed_audit = Path(tmp) / "sealed_stage3_audit.csv"
+            write_csv(
+                fixed_audit,
+                [
+                    {
+                        "case_id": "s1-c",
+                        "design_hash": "hash-group-c",
+                        "geometry_group_id": "group-c",
+                        "doe_split": "test",
+                    }
+                ],
+            )
+            write_adaptive_case_plan(paths["stage2_plan"])
+            case_manifest = Path(tmp) / "adaptive.manifest.json"
+            write_adaptive_case_manifest(
+                case_manifest,
+                case_plan=paths["stage2_plan"],
+                fixed_audit=fixed_audit,
+            )
+            args = continuation.build_parser().parse_args(
+                cli(
+                    paths,
+                    "--training-audit-case-plan",
+                    str(fixed_audit),
+                    "--stage2-case-manifest",
+                    str(case_manifest),
+                    "--expected-combined-rows",
+                    "304",
+                    "--expected-combined-groups",
+                    "53",
+                )
+            )
+            continuation.validate_args(args)
+            gate = continuation.GateResult(
+                decision="run_stage2",
+                validation={"rows": 4, "status": "pass"},
+                primary_test_r2={target: 0.90 for target in continuation.PRIMARY_TARGETS},
+                primary_failures=continuation.PRIMARY_TARGETS,
+                voltage_test_r2=0.90,
+                voltage_failed=True,
+                fingerprints=paths["metadata_value"]["fingerprints"],
+            )
+
+            training_args = continuation._training_argv(
+                args,
+                Path(tmp) / "merged.csv",
+                Path(tmp) / "models",
+                Path(tmp) / "r2.csv",
+                gate.fingerprints,
+            )
+            self.assertEqual(
+                training_args[training_args.index("--v2-audit-case-plan") + 1],
+                str(fixed_audit),
+            )
+            contract = continuation._execution_contract(args, gate)
+            self.assertEqual(
+                contract["training"]["audit_case_plan"]["path"],
+                str(fixed_audit.resolve(strict=False)),
+            )
+            self.assertEqual(
+                contract["stage2"]["case_manifest"],
+                continuation._artifact_contract(case_manifest),
+            )
+            changed_manifest = json.loads(case_manifest.read_text(encoding="utf-8"))
+            changed_manifest["fixed_audit_case_plan"]["sha256"] = "0" * 64
+            write_json(case_manifest, changed_manifest)
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError,
+                "fixed_audit_case_plan",
+            ):
+                continuation.validate_args(args)
+
+    def test_explicit_fixed_audit_requires_hash_bound_adaptive_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp))
+            fixed_audit = Path(tmp) / "sealed_stage3_audit.csv"
+            write_csv(
+                fixed_audit,
+                [
+                    {
+                        "case_id": "s1-c",
+                        "geometry_group_id": "group-c",
+                        "doe_split": "test",
+                    }
+                ],
+            )
+            args = continuation.build_parser().parse_args(
+                cli(paths, "--training-audit-case-plan", str(fixed_audit))
+            )
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError,
+                "stage2-case-manifest is required",
+            ):
+                continuation.validate_args(args)
+
+    def test_fixed_audit_test_rows_must_exist_in_combined_plans(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp))
+            fixed_audit = Path(tmp) / "sealed_stage3_audit.csv"
+            write_csv(
+                fixed_audit,
+                [
+                    {
+                        "case_id": "missing-test-row",
+                        "geometry_group_id": "fixed-test-group",
+                        "doe_split": "test",
+                    }
+                ],
+            )
+            args = continuation.build_parser().parse_args(
+                cli(paths, "--training-audit-case-plan", str(fixed_audit))
+            )
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError,
+                "absent from the combined case plans",
+            ):
+                continuation.validate_args(args)
 
 
 if __name__ == "__main__":

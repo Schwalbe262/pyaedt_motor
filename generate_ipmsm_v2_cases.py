@@ -28,9 +28,8 @@ import continue_ipmsm_v2_stage2 as stage2_continuation
 from generate_ipmsm_quality_cases import MESH_ELEMENT_KEYS, QUALITY_PROFILES
 from ipmsm_optimization import (
     OptimizationSpec,
-    current_density_a_per_mm2,
     geometry_metrics,
-    load_optimization_spec,
+    load_optimization_spec as load_optimization_spec,
     optimization_spec_from_mapping,
     phase_resistance_100c_ohm,
 )
@@ -861,13 +860,15 @@ def validate_stage2_failed_decision(path: Path, exclusion_artifacts: list[dict[s
     training = contract.get("training")
     if not isinstance(training, dict) or training.get("test_evaluation_scope") != "audit_case_plan_test":
         mismatches.append("isolated Stage2 audit scope")
-    stage2_contract = contract.get("stage2")
-    stage2_case_plan = stage2_contract.get("case_plan") if isinstance(stage2_contract, dict) else None
     audit_case_plan = training.get("audit_case_plan") if isinstance(training, dict) else None
-    if not isinstance(stage2_case_plan, dict) or audit_case_plan != stage2_case_plan:
-        mismatches.append("Stage2 audit case-plan contract")
+    if not isinstance(audit_case_plan, dict):
+        mismatches.append("fixed audit case-plan contract")
     if mismatches:
         raise ValueError("Stage3 write requires exact failed Stage2 evidence: " + ", ".join(mismatches))
+    _, _, fixed_audit_case_plan = _verified_artifact(
+        audit_case_plan,
+        "fixed audit case plan",
+    )
 
     combined_artifacts = combined.get("artifacts") if isinstance(combined, dict) else None
     required_artifacts = {"merged", "validation", "metadata", "r2"}
@@ -894,6 +895,7 @@ def validate_stage2_failed_decision(path: Path, exclusion_artifacts: list[dict[s
         "path": str(path.resolve(strict=False)),
         "sha256": _bytes_sha256(decision_bytes),
         "contract_sha256": expected_contract_hash,
+        "fixed_audit_case_plan": fixed_audit_case_plan,
         "combined_artifacts": verified,
         "stage2_result": stage2_result,
     }
@@ -1705,10 +1707,13 @@ def select_stage3_adaptive_train_rows(
     adaptation_seed: int,
     candidate_pool_geometries: int,
     case_prefix: str,
+    train_geometries: int = STAGE3_TRAIN_GEOMETRIES,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if candidate_pool_geometries < STAGE3_TRAIN_GEOMETRIES:
+    if train_geometries < 1:
+        raise ValueError("Stage3 adaptive selection requires at least one train geometry")
+    if candidate_pool_geometries < train_geometries:
         raise ValueError(
-            f"Stage3 adaptive candidate pool requires at least {STAGE3_TRAIN_GEOMETRIES} geometries"
+            f"Stage3 adaptive candidate pool requires at least {train_geometries} geometries"
         )
     pool_rows = generate_foundation_rows(
         spec,
@@ -1805,12 +1810,12 @@ def select_stage3_adaptive_train_rows(
     required_invalid_derived = min(
         STAGE3_MIN_INVALID_DERIVED_GEOMETRIES,
         len(invalid_derived_candidates),
-        STAGE3_TRAIN_GEOMETRIES,
+        train_geometries,
     )
-    while len(selected) < STAGE3_TRAIN_GEOMETRIES:
+    while len(selected) < train_geometries:
         selected_invalid_derived = len(invalid_derived_candidates.intersection(selected))
         remaining_invalid_required = required_invalid_derived - selected_invalid_derived
-        remaining_slots = STAGE3_TRAIN_GEOMETRIES - len(selected)
+        remaining_slots = train_geometries - len(selected)
         require_invalid_derived = remaining_invalid_required >= remaining_slots
         scored: list[tuple[float, float, str, float]] = []
         for design_hash, candidate in candidates.items():
@@ -1900,7 +1905,7 @@ def select_stage3_adaptive_train_rows(
         },
         "design_hashes": selected,
         "evidence": adaptive_evidence["proof"],
-        "geometry_count": STAGE3_TRAIN_GEOMETRIES,
+        "geometry_count": train_geometries,
         "mode": STAGE3_ADAPTIVE_SELECTION_VERSION,
         "scoring": {
             "diversity_weight": STAGE3_DIVERSITY_WEIGHT,
@@ -1920,7 +1925,7 @@ def select_stage3_adaptive_train_rows(
         },
         "seed": adaptation_seed,
         "selected": selected_records,
-        "split_groups": {"train": STAGE3_TRAIN_GEOMETRIES},
+        "split_groups": {"train": train_geometries},
     }
 
 
@@ -1929,11 +1934,19 @@ def publish_stage3_pair(
     manifest_output: Path,
     plan_bytes: bytes,
     manifest: dict[str, Any],
+    *,
+    schema_version: str = STAGE3_SCHEMA_VERSION,
 ) -> None:
     if output.resolve(strict=False) == manifest_output.resolve(strict=False):
         raise ValueError("Stage3 plan and manifest paths must be distinct")
     if output.is_file() and manifest_output.is_file():
-        audit_existing_stage3_pair(output, manifest_output, plan_bytes, manifest)
+        audit_existing_stage3_pair(
+            output,
+            manifest_output,
+            plan_bytes,
+            manifest,
+            schema_version=schema_version,
+        )
         return
     if output.exists() or manifest_output.exists():
         raise ValueError("Stage3 plan/manifest pair is partial or changed")
@@ -2038,6 +2051,8 @@ def audit_existing_stage3_pair(
     manifest_output: Path,
     plan_bytes: bytes,
     manifest: Mapping[str, Any],
+    *,
+    schema_version: str = STAGE3_SCHEMA_VERSION,
 ) -> None:
     """Accept an exact existing commit without overwriting either member."""
 
@@ -2051,7 +2066,7 @@ def audit_existing_stage3_pair(
         raise ValueError(f"cannot audit existing Stage3 pair: {exc}") from exc
     expected_plan_hash = _bytes_sha256(plan_bytes)
     required = (
-        existing_manifest.get("schema_version") == STAGE3_SCHEMA_VERSION
+        existing_manifest.get("schema_version") == schema_version
         and existing_manifest.get("mode") == "write"
         and Path(str(existing_manifest.get("case_plan") or "")).resolve(strict=False)
         == output.resolve(strict=False)
