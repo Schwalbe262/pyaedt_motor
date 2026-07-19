@@ -956,6 +956,305 @@ class CoordinateIpmsmV2AdaptiveCampaignTests(unittest.TestCase):
             self.assertEqual(state["status"], "waiting")
             self.assertEqual(state["current_batch"], 1)
 
+    def test_recovery_paths_and_continuation_reuse_scheduler_identity_without_retry(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = make_args(root, execute=True)
+            original = coordinator._batch_paths(args, 1)
+            recovery = coordinator._recovery_batch_paths(original)
+            predecessor = decision_info(
+                args.initial_failed_decision, "combined_r2_failed"
+            )
+            publisher = coordinator._recovery_argv(
+                args, original, recovery, "3" * 64
+            )
+            original_continuation = coordinator._continuation_argv(
+                args, original, predecessor, resume=False
+            )
+            recovery_continuation = coordinator._continuation_argv(
+                args,
+                recovery,
+                predecessor,
+                resume=False,
+                recovery=True,
+            )
+
+            self.assertEqual(
+                recovery.adaptive_plan.name,
+                "ipmsm_v2_adaptive_batch_0001_300_recovery_cases.csv",
+            )
+            self.assertEqual(
+                recovery.adaptive_manifest.name,
+                "ipmsm_v2_adaptive_batch_0001_300_recovery_manifest.json",
+            )
+            self.assertEqual(
+                recovery.decision.name,
+                "foundation_adaptive_batch_0001_recovery_decision.json",
+            )
+            self.assertEqual(
+                recovery.stage2_output.name,
+                "ipmsm_v2_adaptive_batch_0001_300_recovery",
+            )
+            self.assertEqual(
+                recovery.combined_output.name,
+                "ipmsm_v2_foundation_through_adaptive_batch_0001_1600_recovery",
+            )
+            self.assertEqual(
+                publisher[publisher.index("--output") + 1],
+                str(recovery.adaptive_plan),
+            )
+            self.assertEqual(
+                publisher[publisher.index("--manifest-output") + 1],
+                str(recovery.adaptive_manifest),
+            )
+            self.assertEqual(
+                publisher[
+                    publisher.index("--expected-replacement-design-hash") + 1
+                ],
+                coordinator.EXPECTED_ADAPTIVE_RECOVERY_DESIGN_HASH,
+            )
+            for flag in (
+                "--project",
+                "--scheduler-url",
+                "--project-active-cap",
+                "--stage2-task-prefix",
+                "--stage2-remote-cases-dir",
+                "--stage2-result-dir",
+                "--stage2-simulation-dir",
+                "--stage2-log-dir",
+            ):
+                self.assertEqual(
+                    recovery_continuation[
+                        recovery_continuation.index(flag) + 1
+                    ],
+                    original_continuation[
+                        original_continuation.index(flag) + 1
+                    ],
+                )
+            self.assertEqual(
+                recovery_continuation[
+                    recovery_continuation.index("--terminal-retry-limit") + 1
+                ],
+                "0",
+            )
+            self.assertEqual(
+                recovery_continuation[
+                    recovery_continuation.index("--stage2-case-plan") + 1
+                ],
+                str(recovery.adaptive_plan),
+            )
+            self.assertNotIn("--resume", recovery_continuation)
+
+    def test_terminal_six_failure_authority_auto_routes_to_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = make_args(root, execute=True)
+            paths = coordinator._batch_paths(args, 1)
+            recovery_paths = coordinator._recovery_batch_paths(paths)
+            paths.root.mkdir(parents=True)
+            for path in (
+                paths.stage1_plan,
+                paths.stage1_manifest,
+                paths.adaptive_plan,
+                paths.adaptive_manifest,
+                paths.history,
+                paths.decision,
+            ):
+                path.write_text("{}", encoding="utf-8")
+            initial = decision_info(
+                args.initial_failed_decision, "combined_r2_failed"
+            )
+            started = decision_info(
+                paths.decision,
+                "stage2_started",
+                case_manifest=paths.adaptive_manifest,
+            )
+            evidence = coordinator.FailedGeometryRecoveryEvidence(
+                failed_design_hash="3" * 64,
+                failed_geometry_group_id="failed-group",
+                failed_case_ids=tuple(f"failed-{index}" for index in range(6)),
+                summary=fake_artifact(paths.stage2_output / "campaign_summary.json"),
+                decision=fake_artifact(paths.stage2_output / "campaign_decision.json"),
+            )
+            expected_state = {"status": "recovery-routed"}
+
+            def load(path: Path, _label: str) -> coordinator.DecisionInfo:
+                return started if path.resolve(strict=False) == paths.decision else initial
+
+            with (
+                mock.patch.object(coordinator, "_validate_path_args"),
+                mock.patch.object(coordinator, "_artifact", side_effect=fake_artifact),
+                mock.patch.object(
+                    coordinator, "_audit_source_lineage", side_effect=lineage_result
+                ),
+                mock.patch.object(
+                    coordinator,
+                    "_audit_merge_pair",
+                    return_value=fake_artifact(paths.stage1_plan),
+                ),
+                mock.patch.object(
+                    coordinator,
+                    "_audit_adaptive_pair",
+                    return_value=fake_artifact(paths.adaptive_plan),
+                ),
+                mock.patch.object(coordinator, "_audit_adaptive_decision_contract"),
+                mock.patch.object(coordinator, "_load_decision", side_effect=load),
+                mock.patch.object(
+                    coordinator,
+                    "_terminal_failed_geometry_recovery_evidence",
+                    return_value=evidence,
+                ),
+                mock.patch.object(
+                    coordinator,
+                    "_run_failed_geometry_recovery",
+                    return_value=expected_state,
+                ) as recover,
+            ):
+                state = coordinator.run(args)
+
+            self.assertIs(state, expected_state)
+            self.assertEqual(recover.call_count, 1)
+            call = recover.call_args
+            self.assertEqual(call.args[1], paths)
+            self.assertEqual(call.args[2], recovery_paths)
+            self.assertIs(call.args[3], initial)
+            self.assertIs(call.args[4], started)
+            self.assertIs(call.args[5], evidence)
+
+    def test_preexisting_forged_recovery_pair_is_replayed_before_any_submission(
+        self,
+    ) -> None:
+        import recover_ipmsm_v2_adaptive_failed_geometry as adaptive_recovery
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = make_args(root, execute=True)
+            original = coordinator._batch_paths(args, 1)
+            recovery = coordinator._recovery_batch_paths(original)
+            write_plan(original.adaptive_plan, "original", 300, 50)
+            original.adaptive_manifest.write_text("{}", encoding="utf-8")
+            original.decision.write_text("{}", encoding="utf-8")
+            write_plan(recovery.adaptive_plan, "forged", 300, 50)
+            replayed_contract = {
+                "replacement": {
+                    "design_hash": coordinator.EXPECTED_ADAPTIVE_RECOVERY_DESIGN_HASH
+                }
+            }
+            replayed_manifest = {
+                "schema_version": coordinator.ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION,
+                "mode": "execute",
+                "status": "created",
+                "contract": replayed_contract,
+                "contract_sha256": coordinator._canonical_sha256(replayed_contract),
+                "checks": {},
+            }
+            forged_manifest = copy.deepcopy(replayed_manifest)
+            forged_manifest["contract"]["replacement"]["design_hash"] = "f" * 64
+            forged_manifest["contract_sha256"] = coordinator._canonical_sha256(
+                forged_manifest["contract"]
+            )
+            recovery.adaptive_manifest.write_text(
+                json.dumps(forged_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            predecessor = decision_info(
+                args.initial_failed_decision, "combined_r2_failed"
+            )
+            original_decision = decision_info(
+                original.decision,
+                "stage2_started",
+                case_manifest=original.adaptive_manifest,
+            )
+            evidence = coordinator.FailedGeometryRecoveryEvidence(
+                failed_design_hash="3" * 64,
+                failed_geometry_group_id="failed-group",
+                failed_case_ids=tuple(f"failed-{index}" for index in range(6)),
+                summary=fake_artifact(original.stage2_output / "campaign_summary.json"),
+                decision=fake_artifact(original.stage2_output / "campaign_decision.json"),
+            )
+            fixed_audit = fake_artifact(args.fixed_audit_case_plan)
+            source_artifacts = (
+                fake_artifact(args.initial_stage1_case_plan),
+                fake_artifact(args.initial_stage2_case_plan),
+            )
+
+            def audit_pair(
+                audit_args: object,
+                selected: coordinator.BatchPaths,
+                sources: object,
+                latest: coordinator.DecisionInfo,
+                fixed: coordinator.Artifact,
+            ) -> coordinator.Artifact:
+                if selected == original:
+                    return fake_artifact(original.adaptive_plan)
+                self.assertEqual(selected, recovery)
+                plan = coordinator._read_plan(
+                    recovery.adaptive_plan, "forged recovery plan"
+                )
+                _, manifest = coordinator._read_json(
+                    recovery.adaptive_manifest, "forged recovery manifest"
+                )
+                return coordinator._audit_recovery_adaptive_pair(
+                    audit_args,
+                    selected,
+                    sources,
+                    latest,
+                    fixed,
+                    plan,
+                    manifest,
+                )
+
+            replay = mock.Mock(
+                output_payload=recovery.adaptive_plan.read_bytes(),
+                manifest=replayed_manifest,
+                snapshots=(),
+            )
+            with (
+                mock.patch.object(
+                    coordinator, "_audit_adaptive_pair", side_effect=audit_pair
+                ),
+                mock.patch.object(
+                    coordinator, "_load_decision", return_value=original_decision
+                ),
+                mock.patch.object(
+                    coordinator,
+                    "_terminal_failed_geometry_recovery_evidence",
+                    return_value=evidence,
+                ),
+                mock.patch.object(
+                    adaptive_recovery, "build_recovery", return_value=replay
+                ) as build,
+                mock.patch.object(coordinator, "_run_subprocess") as run_child,
+            ):
+                with self.assertRaisesRegex(
+                    coordinator.CoordinatorError, "manifest bytes differ"
+                ):
+                    coordinator._run_failed_geometry_recovery(
+                        args,
+                        original,
+                        recovery,
+                        predecessor,
+                        original_decision,
+                        evidence,
+                        source_artifacts,
+                        (
+                            args.initial_stage1_case_plan,
+                            args.initial_stage2_case_plan,
+                        ),
+                        fixed_audit,
+                        expected_rows=1300,
+                        expected_groups=210,
+                    )
+
+            run_child.assert_not_called()
+            self.assertEqual(
+                build.call_args.kwargs["expected_replacement_design_hash"],
+                coordinator.EXPECTED_ADAPTIVE_RECOVERY_DESIGN_HASH,
+            )
+            self.assertEqual(build.call_args.kwargs["mode"], "execute")
+
     def test_plateau_history_is_published_without_new_plan_or_continuation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

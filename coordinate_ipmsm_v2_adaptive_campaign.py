@@ -30,6 +30,12 @@ import continue_ipmsm_v2_stage2 as stage2_continuation
 SCHEMA_VERSION = "ipmsm-v2-adaptive-campaign-coordinator-v1"
 MERGE_SCHEMA_VERSION = "ipmsm-v2-case-plan-merge-v1"
 ADAPTIVE_MANIFEST_SCHEMA_VERSION = "ipmsm_v2_adaptive_enrichment_batch_v1"
+ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION = (
+    "ipmsm_v2_adaptive_failed_geometry_recovery_v1"
+)
+EXPECTED_ADAPTIVE_RECOVERY_DESIGN_HASH = (
+    "3263dc3e81653d767f9bea561f958587f3f31e4740d48afecdeeb003332be55f"
+)
 R2_HISTORY_SCHEMA_VERSION = "ipmsm_v2_adaptive_r2_history_v1"
 DECISION_SCHEMA_VERSION = "ipmsm_v2_stage2_continuation_v1"
 ROWS_PER_BATCH = 300
@@ -108,6 +114,15 @@ class ProgressContext:
     action: str
     latest: DecisionInfo | None
     commands: tuple[tuple[str, ...], ...] = ()
+
+
+@dataclass(frozen=True)
+class FailedGeometryRecoveryEvidence:
+    failed_design_hash: str
+    failed_geometry_group_id: str
+    failed_case_ids: tuple[str, ...]
+    summary: Artifact
+    decision: Artifact
 
 
 def _sha256(payload: bytes) -> str:
@@ -257,6 +272,157 @@ def _read_plan(path: Path, label: str) -> PlanInfo:
         case_ids=frozenset(case_ids),
         design_hashes=frozenset(design_hashes),
         geometry_groups=frozenset(groups),
+    )
+
+
+def _terminal_failed_geometry_recovery_evidence(
+    paths: BatchPaths,
+    continuation_decision: DecisionInfo,
+) -> FailedGeometryRecoveryEvidence | None:
+    """Recognize only the exact bounded 294-ok/6-failed terminal campaign."""
+
+    summary_path = paths.stage2_output / "campaign_summary.json"
+    decision_path = paths.stage2_output / "campaign_decision.json"
+    present = (os.path.lexists(summary_path), os.path.lexists(decision_path))
+    if present == (False, False):
+        return None
+    if present != (True, True):
+        raise CoordinatorError("terminal adaptive campaign evidence pair is partial")
+    if (
+        continuation_decision.status != "stage2_started"
+        or continuation_decision.payload.get("resume_required") is not True
+        or not str(continuation_decision.payload.get("last_error") or "").strip()
+    ):
+        raise CoordinatorError(
+            "failed-geometry recovery requires an exact resumable stage2_started decision"
+        )
+
+    summary_artifact = _artifact(summary_path, "terminal adaptive campaign summary")
+    decision_artifact = _artifact(decision_path, "terminal adaptive campaign decision")
+    _, summary = _read_json(summary_artifact.path, "terminal adaptive campaign summary")
+    _, campaign_decision = _read_json(
+        decision_artifact.path, "terminal adaptive campaign decision"
+    )
+    expected_decision_fields = {
+        "schema_version",
+        "status",
+        "selected_cases",
+        "successful_cases",
+        "permanently_failed_cases",
+        "summary",
+        "permanent_failures",
+    }
+    if (
+        set(campaign_decision) != expected_decision_fields
+        or campaign_decision.get("schema_version") != "ipmsm_v2_campaign_decision_v1"
+        or campaign_decision.get("status") != "completed_with_permanent_failures"
+        or campaign_decision.get("selected_cases") != ROWS_PER_BATCH
+        or campaign_decision.get("successful_cases") != ROWS_PER_BATCH - 6
+        or campaign_decision.get("permanently_failed_cases") != 6
+        or _bound_artifact(
+            campaign_decision.get("summary"), "terminal campaign summary binding"
+        )
+        != summary_artifact
+    ):
+        raise CoordinatorError("terminal adaptive campaign decision scope changed")
+    if (
+        summary.get("schema_version") != "ipmsm_v2_campaign_summary_v1"
+        or summary.get("status") != "completed_with_permanent_failures"
+        or summary.get("selected_cases") != ROWS_PER_BATCH
+        or summary.get("successful_cases") != ROWS_PER_BATCH - 6
+        or summary.get("permanently_failed_cases") != 6
+        or summary.get("permanent_failures")
+        != campaign_decision.get("permanent_failures")
+    ):
+        raise CoordinatorError("terminal adaptive campaign summary scope changed")
+
+    original = _read_plan(paths.adaptive_plan, "failed adaptive source plan")
+    selected = _read_plan(
+        Path(str(summary.get("selected_plan") or "")),
+        "terminal adaptive selected plan",
+    )
+    if original.headers != selected.headers or original.rows != selected.rows:
+        raise CoordinatorError("terminal adaptive selected plan differs from its source plan")
+    failures = campaign_decision.get("permanent_failures")
+    if not isinstance(failures, list) or len(failures) != 6:
+        raise CoordinatorError("terminal adaptive campaign does not contain six failures")
+    rows_by_case = {str(row["case_id"]): row for row in original.rows}
+    failed_case_ids: list[str] = []
+    for failure in failures:
+        if not isinstance(failure, Mapping) or set(failure) != {
+            "case_id",
+            "attempts",
+            "failure_evidence",
+        }:
+            raise CoordinatorError("terminal adaptive permanent-failure fields changed")
+        case_id = str(failure.get("case_id") or "")
+        if case_id not in rows_by_case or failure.get("attempts") != 2:
+            raise CoordinatorError("terminal adaptive failure identity/attempt count changed")
+        evidence = failure.get("failure_evidence")
+        if not isinstance(evidence, list) or len(evidence) != 2:
+            raise CoordinatorError("terminal adaptive failure evidence count changed")
+        retry_indices: set[int] = set()
+        for item in evidence:
+            expected_fields = {
+                "kind",
+                "retry_index",
+                "task_id",
+                "dedupe_key",
+                "scheduler_status",
+                "result_status",
+                "remote_result",
+                "result_error",
+                "local_result",
+                "local_result_sha256",
+            }
+            if not isinstance(item, Mapping) or set(item) != expected_fields:
+                raise CoordinatorError("terminal failed-result evidence fields changed")
+            retry_index = item.get("retry_index")
+            if (
+                item.get("kind") != "result_level_terminal"
+                or item.get("scheduler_status") != "completed"
+                or item.get("result_status") != "failed"
+                or type(retry_index) is not int
+            ):
+                raise CoordinatorError("terminal failed-result evidence semantics changed")
+            retry_indices.add(retry_index)
+            local_result = Path(str(item.get("local_result") or "")).resolve(
+                strict=False
+            )
+            failed_root = (paths.stage2_output / "failed_results").resolve(strict=False)
+            if local_result.parent != failed_root:
+                raise CoordinatorError("failed-result evidence escaped its output directory")
+            evidence_artifact = _artifact(local_result, "terminal failed-result evidence")
+            if evidence_artifact.sha256 != item.get("local_result_sha256"):
+                raise CoordinatorError("terminal failed-result evidence bytes changed")
+        if retry_indices != {0, 1}:
+            raise CoordinatorError("terminal failed-result retry lineage changed")
+        failed_case_ids.append(case_id)
+    if len(set(failed_case_ids)) != 6:
+        raise CoordinatorError("terminal adaptive failure case IDs are not unique")
+    failed_rows = [rows_by_case[case_id] for case_id in failed_case_ids]
+    failed_groups = {
+        str(row.get("geometry_group_id") or "").strip() for row in failed_rows
+    }
+    failed_hashes = {str(row.get("design_hash") or "").strip() for row in failed_rows}
+    if len(failed_groups) != 1 or len(failed_hashes) != 1 or "" in (
+        failed_groups | failed_hashes
+    ):
+        raise CoordinatorError("terminal adaptive failures are not one geometry group")
+    failed_group = next(iter(failed_groups))
+    group_case_ids = tuple(
+        str(row["case_id"])
+        for row in original.rows
+        if str(row.get("geometry_group_id") or "").strip() == failed_group
+    )
+    if len(group_case_ids) != 6 or set(group_case_ids) != set(failed_case_ids):
+        raise CoordinatorError("terminal failure does not cover its full six-row geometry")
+    return FailedGeometryRecoveryEvidence(
+        failed_design_hash=next(iter(failed_hashes)),
+        failed_geometry_group_id=failed_group,
+        failed_case_ids=group_case_ids,
+        summary=summary_artifact,
+        decision=decision_artifact,
     )
 
 
@@ -697,6 +863,10 @@ def _audit_adaptive_pair(
     except Exception as exc:
         raise CoordinatorError(f"cannot import adaptive generator authority: {exc}") from exc
     _, manifest = _read_json(paths.adaptive_manifest, "adaptive batch manifest")
+    if manifest.get("schema_version") == ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION:
+        return _audit_recovery_adaptive_pair(
+            args, paths, sources, latest, fixed_audit, plan, manifest
+        )
     expected_manifest_fields = {
         "case_plan",
         "case_plan_sha256",
@@ -896,6 +1066,171 @@ def _audit_adaptive_pair(
     return plan.artifact
 
 
+def _audit_recovery_adaptive_pair(
+    args: argparse.Namespace,
+    paths: BatchPaths,
+    sources: Sequence[Artifact],
+    latest: DecisionInfo,
+    fixed_audit: Artifact,
+    plan: PlanInfo,
+    manifest: Mapping[str, Any],
+) -> Artifact:
+    original_paths = _batch_paths(args, paths.index)
+    expected_recovery_paths = _recovery_batch_paths(original_paths)
+    if paths != expected_recovery_paths:
+        raise CoordinatorError("adaptive recovery paths are not the canonical fresh successor")
+    original_state = _pair_state(
+        original_paths.adaptive_plan,
+        original_paths.adaptive_manifest,
+        "original adaptive recovery source pair",
+    )
+    if original_state != "complete" or not original_paths.decision.is_file():
+        raise CoordinatorError("adaptive recovery lacks its immutable original authority")
+    original_decision = _load_decision(
+        original_paths.decision, "failed adaptive continuation decision"
+    )
+    evidence = _terminal_failed_geometry_recovery_evidence(
+        original_paths, original_decision
+    )
+    if evidence is None:
+        raise CoordinatorError("adaptive recovery lacks terminal permanent-failure evidence")
+    _audit_adaptive_pair(args, original_paths, sources, latest, fixed_audit)
+    recovery_manifest_artifact = _artifact(
+        paths.adaptive_manifest, "adaptive recovery manifest replay snapshot"
+    )
+    try:
+        import recover_ipmsm_v2_adaptive_failed_geometry as adaptive_recovery
+
+        replay = adaptive_recovery.build_recovery(
+            spec_path=args.spec,
+            original_plan=original_paths.adaptive_plan,
+            original_manifest=original_paths.adaptive_manifest,
+            continuation_decision=original_paths.decision,
+            campaign_summary=evidence.summary.path,
+            campaign_decision=evidence.decision.path,
+            failed_design_hash=evidence.failed_design_hash,
+            expected_replacement_design_hash=(
+                EXPECTED_ADAPTIVE_RECOVERY_DESIGN_HASH
+            ),
+            output=paths.adaptive_plan,
+            manifest_output=paths.adaptive_manifest,
+            mode="execute",
+        )
+        expected_manifest_payload = (
+            json.dumps(
+                dict(replay.manifest),
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        if paths.adaptive_plan.read_bytes() != replay.output_payload:
+            raise CoordinatorError(
+                "adaptive recovery CSV bytes differ from exact publisher replay"
+            )
+        if paths.adaptive_manifest.read_bytes() != expected_manifest_payload:
+            raise CoordinatorError(
+                "adaptive recovery manifest bytes differ from exact publisher replay"
+            )
+        for snapshot in replay.snapshots:
+            adaptive_recovery._assert_snapshot_unchanged(
+                snapshot, "adaptive recovery replay input"
+            )
+    except CoordinatorError:
+        raise
+    except Exception as exc:
+        raise CoordinatorError(
+            f"adaptive recovery publisher replay failed: {exc}"
+        ) from exc
+    _same_artifact(
+        _artifact(paths.adaptive_plan, "adaptive recovery plan replay rehash"),
+        plan.artifact,
+        "adaptive recovery plan replay",
+    )
+    _same_artifact(
+        _artifact(paths.adaptive_manifest, "adaptive recovery manifest replay rehash"),
+        recovery_manifest_artifact,
+        "adaptive recovery manifest replay",
+    )
+    if set(manifest) != {
+        "schema_version",
+        "mode",
+        "status",
+        "contract",
+        "contract_sha256",
+        "checks",
+    }:
+        raise CoordinatorError("adaptive recovery manifest fields changed")
+    contract = manifest.get("contract")
+    original = contract.get("original") if isinstance(contract, Mapping) else None
+    continuation_record = (
+        contract.get("continuation_decision") if isinstance(contract, Mapping) else None
+    )
+    terminal = contract.get("terminal_campaign") if isinstance(contract, Mapping) else None
+    output = contract.get("output") if isinstance(contract, Mapping) else None
+    if not all(isinstance(value, Mapping) for value in (original, terminal, output)):
+        raise CoordinatorError("adaptive recovery contract lineage is incomplete")
+    original_plan = original.get("plan")
+    original_manifest = original.get("manifest")
+    output_plan = output.get("plan")
+    if (
+        not isinstance(original_plan, Mapping)
+        or not isinstance(original_manifest, Mapping)
+        or not isinstance(output_plan, Mapping)
+        or _bound_artifact(
+            {"path": original_plan.get("path"), "sha256": original_plan.get("sha256")},
+            "adaptive recovery original plan",
+        )
+        != _artifact(original_paths.adaptive_plan, "adaptive recovery original plan")
+        or _bound_artifact(
+            {
+                "path": original_manifest.get("path"),
+                "sha256": original_manifest.get("sha256"),
+            },
+            "adaptive recovery original manifest",
+        )
+        != _artifact(
+            original_paths.adaptive_manifest, "adaptive recovery original manifest"
+        )
+        or _bound_artifact(
+            {"path": output_plan.get("path"), "sha256": output_plan.get("sha256")},
+            "adaptive recovery output plan",
+        )
+        != plan.artifact
+        or Path(str(output.get("manifest_path") or "")).resolve(strict=False)
+        != paths.adaptive_manifest.resolve(strict=False)
+        or _bound_artifact(
+            continuation_record, "adaptive recovery continuation decision"
+        )
+        != original_decision.artifact
+    ):
+        raise CoordinatorError("adaptive recovery artifact lineage changed")
+    for name, expected in (
+        ("summary", evidence.summary),
+        ("decision", evidence.decision),
+    ):
+        if _bound_artifact(
+            terminal.get(name), f"adaptive recovery terminal {name}"
+        ) != expected:
+            raise CoordinatorError("adaptive recovery terminal evidence changed")
+    try:
+        continuation = _continuation_argv(
+            args, paths, latest, resume=False, recovery=True
+        )
+        continuation_args = stage2_continuation.build_parser().parse_args(
+            continuation[2:-1]
+        )
+        bound_manifest = stage2_continuation._validate_stage2_case_manifest(
+            continuation_args
+        )
+    except Exception as exc:
+        raise CoordinatorError(f"adaptive recovery manifest validation failed: {exc}") from exc
+    if bound_manifest != _artifact(paths.adaptive_manifest, "adaptive recovery manifest").record():
+        raise CoordinatorError("adaptive recovery manifest binding changed")
+    return plan.artifact
+
+
 def _pair_state(first: Path, second: Path, label: str) -> str:
     present = (os.path.lexists(first), os.path.lexists(second))
     if present == (False, False):
@@ -934,6 +1269,30 @@ def _batch_paths(args: argparse.Namespace, index: int) -> BatchPaths:
         / f"ipmsm_v2_foundation_through_adaptive_batch_{index:04d}_{combined_rows}",
         runner_pid=root / "completed_stage1_runner.pid",
         watcher_pid=root / "completed_stage1_watcher.pid",
+    )
+
+
+def _recovery_batch_paths(paths: BatchPaths) -> BatchPaths:
+    """Return fresh successor paths without changing the failed batch authority."""
+
+    return BatchPaths(
+        index=paths.index,
+        root=paths.root,
+        stage1_plan=paths.stage1_plan,
+        stage1_manifest=paths.stage1_manifest,
+        history=paths.history,
+        adaptive_plan=paths.root
+        / f"ipmsm_v2_adaptive_batch_{paths.index:04d}_300_recovery_cases.csv",
+        adaptive_manifest=paths.root
+        / f"ipmsm_v2_adaptive_batch_{paths.index:04d}_300_recovery_manifest.json",
+        decision=paths.root
+        / f"foundation_adaptive_batch_{paths.index:04d}_recovery_decision.json",
+        stage2_output=paths.stage2_output.with_name(paths.stage2_output.name + "_recovery"),
+        combined_output=paths.combined_output.with_name(
+            paths.combined_output.name + "_recovery"
+        ),
+        runner_pid=paths.runner_pid,
+        watcher_pid=paths.watcher_pid,
     )
 
 
@@ -1018,6 +1377,8 @@ def _validate_batch_paths(args: argparse.Namespace, paths: BatchPaths) -> None:
         paths.root / "logs" / "merge.log",
         paths.root / "logs" / "generator.log",
         paths.root / "logs" / "continuation.log",
+        paths.root / "logs" / "recovery_publisher.log",
+        paths.root / "logs" / "recovery_continuation.log",
     )
     for path in authority_paths:
         _assert_safe_descendant(path, paths.root, "adaptive batch authority/log path")
@@ -1203,6 +1564,39 @@ def _generator_argv(
     return argv
 
 
+def _recovery_argv(
+    args: argparse.Namespace,
+    original: BatchPaths,
+    recovery: BatchPaths,
+    failed_design_hash: str,
+) -> list[str]:
+    return [
+        str(args.python_executable),
+        _script(args, "recover_ipmsm_v2_adaptive_failed_geometry.py"),
+        "--spec",
+        str(args.spec),
+        "--original-plan",
+        str(original.adaptive_plan),
+        "--original-manifest",
+        str(original.adaptive_manifest),
+        "--continuation-decision",
+        str(original.decision),
+        "--campaign-summary",
+        str(original.stage2_output / "campaign_summary.json"),
+        "--campaign-decision",
+        str(original.stage2_output / "campaign_decision.json"),
+        "--failed-design-hash",
+        failed_design_hash,
+        "--expected-replacement-design-hash",
+        EXPECTED_ADAPTIVE_RECOVERY_DESIGN_HASH,
+        "--output",
+        str(recovery.adaptive_plan),
+        "--manifest-output",
+        str(recovery.adaptive_manifest),
+        "--execute",
+    ]
+
+
 def _remote_child(root: str, index: int) -> str:
     return str(PurePosixPath(root) / f"batch_{index:04d}")
 
@@ -1213,6 +1607,7 @@ def _continuation_argv(
     latest: DecisionInfo,
     *,
     resume: bool,
+    recovery: bool = False,
 ) -> list[str]:
     prior_rows = BASELINE_ROWS + ROWS_PER_BATCH * (paths.index - 1)
     prior_groups = BASELINE_GROUPS + GROUPS_PER_BATCH * (paths.index - 1)
@@ -1291,7 +1686,7 @@ def _continuation_argv(
         "--overall-timeout-seconds",
         str(args.overall_timeout_seconds),
         "--terminal-retry-limit",
-        str(args.terminal_retry_limit),
+        "0" if recovery else str(args.terminal_retry_limit),
         "--ensemble-size",
         str(args.ensemble_size),
         "--conformal-coverage",
@@ -1427,6 +1822,7 @@ def _config_identity(args: argparse.Namespace) -> dict[str, Any]:
             "merge_ipmsm_v2_case_plans.py",
             "generate_ipmsm_v2_adaptive_batch.py",
             "continue_ipmsm_v2_stage2.py",
+            "recover_ipmsm_v2_adaptive_failed_geometry.py",
         )
     }
     values: dict[str, Any] = {
@@ -1738,6 +2134,7 @@ def _validate_path_args(args: argparse.Namespace) -> None:
         "merge_ipmsm_v2_case_plans.py",
         "generate_ipmsm_v2_adaptive_batch.py",
         "continue_ipmsm_v2_stage2.py",
+        "recover_ipmsm_v2_adaptive_failed_geometry.py",
     ):
         _artifact(args.source_root / name, f"coordinator dependency {name}")
     dependency_paths = tuple(
@@ -1747,6 +2144,7 @@ def _validate_path_args(args: argparse.Namespace) -> None:
             "merge_ipmsm_v2_case_plans.py",
             "generate_ipmsm_v2_adaptive_batch.py",
             "continue_ipmsm_v2_stage2.py",
+            "recover_ipmsm_v2_adaptive_failed_geometry.py",
         )
     )
     if len(set(dependency_paths)) != len(dependency_paths):
@@ -1872,8 +2270,9 @@ def _audit_adaptive_decision_contract(
     try:
         import continue_ipmsm_v2_stage2 as continuation
 
+        recovery = paths == _recovery_batch_paths(_batch_paths(args, paths.index))
         continuation_argv = _continuation_argv(
-            args, paths, predecessor, resume=False
+            args, paths, predecessor, resume=False, recovery=recovery
         )[2:]
         if continuation_argv[-1] != "--execute":
             raise CoordinatorError("internal continuation command lacks --execute")
@@ -2039,6 +2438,144 @@ def _closing_batch_audit(
     return _rehash_terminal_decision(refreshed, paths)
 
 
+def _run_failed_geometry_recovery(
+    args: argparse.Namespace,
+    original_paths: BatchPaths,
+    recovery_paths: BatchPaths,
+    predecessor: DecisionInfo,
+    original_decision: DecisionInfo,
+    evidence: FailedGeometryRecoveryEvidence,
+    source_artifacts: Sequence[Artifact],
+    source_paths: Sequence[Path],
+    fixed_audit: Artifact,
+    *,
+    expected_rows: int,
+    expected_groups: int,
+) -> dict[str, Any]:
+    recovery_state = _pair_state(
+        recovery_paths.adaptive_plan,
+        recovery_paths.adaptive_manifest,
+        "adaptive failed-geometry recovery pair",
+    )
+    publisher = _recovery_argv(
+        args, original_paths, recovery_paths, evidence.failed_design_hash
+    )
+    continuation = _continuation_argv(
+        args, recovery_paths, predecessor, resume=False, recovery=True
+    )
+    commands = ([publisher] if recovery_state == "absent" else []) + [continuation]
+    _remember_progress(
+        args,
+        current_batch=original_paths.index,
+        action="recover_failed_adaptive_geometry",
+        latest=original_decision,
+        commands=commands,
+    )
+    if not args.execute:
+        return _emit(
+            args,
+            _state(
+                args,
+                status="waiting",
+                current_batch=original_paths.index,
+                action="recover_failed_adaptive_geometry",
+                latest=original_decision,
+                commands=commands,
+            ),
+        )
+    _validate_batch_paths(args, original_paths)
+    _validate_batch_paths(args, recovery_paths)
+    if recovery_state == "absent":
+        _run_subprocess(
+            publisher,
+            "adaptive failed-geometry recovery publisher",
+            {0},
+            original_paths.root / "logs" / "recovery_publisher.log",
+        )
+    if (
+        _pair_state(
+            recovery_paths.adaptive_plan,
+            recovery_paths.adaptive_manifest,
+            "adaptive failed-geometry recovery pair",
+        )
+        != "complete"
+    ):
+        raise CoordinatorError("adaptive recovery publisher did not create a complete pair")
+    _audit_adaptive_pair(
+        args,
+        recovery_paths,
+        source_artifacts,
+        predecessor,
+        fixed_audit,
+    )
+    if recovery_paths.decision.exists():
+        raise CoordinatorError("adaptive recovery decision appeared before its continuation")
+    _ensure_completed_stage1_pid_markers(recovery_paths, predecessor)
+    _atomic_write_state(
+        args.state_output,
+        _state(
+            args,
+            status="running",
+            current_batch=original_paths.index,
+            action="run_failed_geometry_recovery_continuation",
+            latest=original_decision,
+            commands=(continuation,),
+        ),
+    )
+    _validate_batch_paths(args, recovery_paths)
+    continuation_code = _run_subprocess(
+        continuation,
+        "adaptive failed-geometry recovery continuation",
+        {0, 1},
+        original_paths.root / "logs" / "recovery_continuation.log",
+    )
+    final = _load_decision(
+        recovery_paths.decision,
+        f"adaptive batch {original_paths.index} recovery decision",
+    )
+    _audit_batch_decision_manifest(final, recovery_paths)
+    _audit_adaptive_decision_contract(
+        args, recovery_paths, predecessor, final
+    )
+    _audit_source_lineage(
+        final,
+        (recovery_paths.stage1_plan, recovery_paths.adaptive_plan),
+        fixed_audit,
+        expected_rows=expected_rows + ROWS_PER_BATCH,
+        expected_groups=expected_groups + GROUPS_PER_BATCH,
+    )
+    if (continuation_code == 0) != (final.status == "complete"):
+        raise CoordinatorError(
+            "recovery continuation exit code and terminal decision disagree"
+        )
+    if final.status == "complete":
+        final = _closing_batch_audit(
+            args,
+            recovery_paths,
+            predecessor,
+            source_paths,
+            fixed_audit,
+            final,
+            expected_rows=expected_rows,
+            expected_groups=expected_groups,
+        )
+    terminal = _terminal_state(args, final, original_paths.index)
+    if terminal is not None:
+        return _emit(args, terminal)
+    if final.status != "combined_r2_failed":
+        raise CoordinatorError("recovery continuation did not reach a terminal decision")
+    return _emit(
+        args,
+        _state(
+            args,
+            status="waiting",
+            current_batch=original_paths.index,
+            action="prepare_next_adaptive_batch",
+            latest=final,
+        ),
+    )
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     _validate_path_args(args)
     _remember_progress(
@@ -2135,15 +2672,93 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if adaptive_state == "complete":
             _audit_adaptive_pair(args, paths, source_artifacts, latest, fixed_audit)
 
+        recovery_paths = _recovery_batch_paths(paths)
+        recovery_state = _pair_state(
+            recovery_paths.adaptive_plan,
+            recovery_paths.adaptive_manifest,
+            "adaptive failed-geometry recovery pair",
+        )
+        recovery_decision_exists = os.path.lexists(recovery_paths.decision)
+        if recovery_decision_exists and recovery_state != "complete":
+            raise CoordinatorError(
+                "adaptive recovery decision exists without its complete recovery pair"
+            )
+        decision_paths = paths
+        decision_is_recovery = False
         if paths.decision.exists():
             if merge_state != "complete" or adaptive_state != "complete":
+                raise CoordinatorError(
+                    "batch decision exists without complete immutable inputs"
+                )
+            original_decision = _load_decision(
+                paths.decision, f"adaptive batch {batch_index} decision"
+            )
+            recovery_evidence = None
+            if original_decision.status == "stage2_started":
+                recovery_evidence = _terminal_failed_geometry_recovery_evidence(
+                    paths, original_decision
+                )
+            if recovery_evidence is not None:
+                _audit_batch_decision_manifest(original_decision, paths)
+                _audit_adaptive_decision_contract(
+                    args, paths, latest, original_decision
+                )
+                _audit_source_lineage(
+                    original_decision,
+                    (paths.stage1_plan, paths.adaptive_plan),
+                    fixed_audit,
+                    expected_rows=expected_rows + ROWS_PER_BATCH,
+                    expected_groups=expected_groups + GROUPS_PER_BATCH,
+                )
+                if recovery_state == "complete":
+                    _audit_adaptive_pair(
+                        args,
+                        recovery_paths,
+                        source_artifacts,
+                        latest,
+                        fixed_audit,
+                    )
+                if not recovery_decision_exists:
+                    return _run_failed_geometry_recovery(
+                        args,
+                        paths,
+                        recovery_paths,
+                        latest,
+                        original_decision,
+                        recovery_evidence,
+                        source_artifacts,
+                        sources,
+                        fixed_audit,
+                        expected_rows=expected_rows,
+                        expected_groups=expected_groups,
+                    )
+                decision_paths = recovery_paths
+                decision_is_recovery = True
+            elif recovery_state != "absent" or recovery_decision_exists:
+                raise CoordinatorError(
+                    "adaptive recovery artifacts lack exact terminal failure authority"
+                )
+        elif recovery_state != "absent" or recovery_decision_exists:
+            raise CoordinatorError(
+                "adaptive recovery artifacts exist without the original failed decision"
+            )
+
+        if decision_paths.decision.exists():
+            if merge_state != "complete" or adaptive_state != "complete":
                 raise CoordinatorError("batch decision exists without complete immutable inputs")
-            decision = _load_decision(paths.decision, f"adaptive batch {batch_index} decision")
-            _audit_batch_decision_manifest(decision, paths)
-            _audit_adaptive_decision_contract(args, paths, latest, decision)
+            decision = _load_decision(
+                decision_paths.decision,
+                f"adaptive batch {batch_index}"
+                + (" recovery" if decision_is_recovery else "")
+                + " decision",
+            )
+            _audit_batch_decision_manifest(decision, decision_paths)
+            _audit_adaptive_decision_contract(
+                args, decision_paths, latest, decision
+            )
             _audit_source_lineage(
                 decision,
-                (paths.stage1_plan, paths.adaptive_plan),
+                (decision_paths.stage1_plan, decision_paths.adaptive_plan),
                 fixed_audit,
                 expected_rows=expected_rows + ROWS_PER_BATCH,
                 expected_groups=expected_groups + GROUPS_PER_BATCH,
@@ -2157,7 +2772,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 decision = _closing_batch_audit(
                     args,
-                    paths,
+                    decision_paths,
                     latest,
                     sources,
                     fixed_audit,
@@ -2171,12 +2786,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             if decision.status == "combined_r2_failed":
                 latest = decision
                 sources = (
-                    paths.stage1_plan.resolve(strict=False),
-                    paths.adaptive_plan.resolve(strict=False),
+                    decision_paths.stage1_plan.resolve(strict=False),
+                    decision_paths.adaptive_plan.resolve(strict=False),
                 )
                 continue
             continuation = _continuation_argv(
-                args, paths, latest, resume=True
+                args,
+                decision_paths,
+                latest,
+                resume=True,
+                recovery=decision_is_recovery,
             )
             _remember_progress(
                 args,
@@ -2197,8 +2816,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         commands=(continuation,),
                     ),
                 )
-            _validate_batch_paths(args, paths)
-            _ensure_completed_stage1_pid_markers(paths, latest)
+            _validate_batch_paths(args, decision_paths)
+            _ensure_completed_stage1_pid_markers(decision_paths, latest)
             _atomic_write_state(
                 args.state_output,
                 _state(
@@ -2210,19 +2829,36 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     commands=(continuation,),
                 ),
             )
-            _validate_batch_paths(args, paths)
+            _validate_batch_paths(args, decision_paths)
             continuation_code = _run_subprocess(
                 continuation,
-                "adaptive continuation resume",
+                (
+                    "adaptive failed-geometry recovery continuation resume"
+                    if decision_is_recovery
+                    else "adaptive continuation resume"
+                ),
                 {0, 1},
-                paths.root / "logs" / "continuation.log",
+                decision_paths.root
+                / "logs"
+                / (
+                    "recovery_continuation.log"
+                    if decision_is_recovery
+                    else "continuation.log"
+                ),
             )
-            final = _load_decision(paths.decision, f"adaptive batch {batch_index} decision")
-            _audit_batch_decision_manifest(final, paths)
-            _audit_adaptive_decision_contract(args, paths, latest, final)
+            final = _load_decision(
+                decision_paths.decision,
+                f"adaptive batch {batch_index}"
+                + (" recovery" if decision_is_recovery else "")
+                + " decision",
+            )
+            _audit_batch_decision_manifest(final, decision_paths)
+            _audit_adaptive_decision_contract(
+                args, decision_paths, latest, final
+            )
             _audit_source_lineage(
                 final,
-                (paths.stage1_plan, paths.adaptive_plan),
+                (decision_paths.stage1_plan, decision_paths.adaptive_plan),
                 fixed_audit,
                 expected_rows=expected_rows + ROWS_PER_BATCH,
                 expected_groups=expected_groups + GROUPS_PER_BATCH,
@@ -2240,7 +2876,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 final = _closing_batch_audit(
                     args,
-                    paths,
+                    decision_paths,
                     latest,
                     sources,
                     fixed_audit,

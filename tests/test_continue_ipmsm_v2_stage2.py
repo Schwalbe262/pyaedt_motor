@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import contextlib
 import ctypes
 import csv
@@ -437,6 +438,367 @@ def passing_combined_gate(paths: dict) -> continuation.GateResult:
 
 
 class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
+    def test_adaptive_recovery_manifest_binds_terminal_lineage_and_forbids_retry(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_plan = root / "original.csv"
+            original_manifest_path = root / "original_manifest.json"
+            recovery_plan = root / "recovery.csv"
+            recovery_manifest = root / "recovery_manifest.json"
+            fixed_audit = root / "fixed_audit.csv"
+            terminal_output = root / "terminal"
+            failed_results_dir = terminal_output / "failed_results"
+            failed_results_dir.mkdir(parents=True)
+            original_rows: list[dict[str, object]] = []
+            for group_index in range(50):
+                for row_index in range(6):
+                    original_rows.append(
+                        {
+                            "case_id": f"case-{group_index:02d}-{row_index:02d}",
+                            "design_hash": f"{group_index + 1:064x}",
+                            "geometry_group_id": f"group-{group_index:02d}",
+                            "doe_split": (
+                                "train" if group_index < 40 else "calibration"
+                            ),
+                            "operating_point_id": f"op-{row_index:02d}",
+                            "base_rpm": 1000 + row_index,
+                            "beta_dq_deg": 10 + row_index,
+                            "i_peak_a": 100 + row_index,
+                            "rotor_outer_radius_mm": 50 + group_index,
+                        }
+                    )
+            failed_rows = original_rows[24:30]
+            failed_case_ids = [str(row["case_id"]) for row in failed_rows]
+            failed_hash = str(failed_rows[0]["design_hash"])
+            failed_group = str(failed_rows[0]["geometry_group_id"])
+            replacement_hash = "f" * 64
+            replacement_group = "replacement-group"
+            replacement_rows: list[dict[str, object]] = []
+            case_id_map: list[dict[str, str]] = []
+            controls: list[dict[str, object]] = []
+            for row in original_rows:
+                recovered = dict(row)
+                if str(row["case_id"]) in failed_case_ids:
+                    source_id = str(row["case_id"])
+                    replacement_id = f"{source_id}_clean_retry_01"
+                    recovered.update(
+                        {
+                            "case_id": replacement_id,
+                            "design_hash": replacement_hash,
+                            "geometry_group_id": replacement_group,
+                            "base_rpm": float(row["base_rpm"]) + 100.0,
+                            "beta_dq_deg": float(row["beta_dq_deg"]) + 1.0,
+                            "i_peak_a": float(row["i_peak_a"]) + 2.0,
+                            "rotor_outer_radius_mm": 99.0,
+                        }
+                    )
+                    case_id_map.append(
+                        {"source": source_id, "replacement": replacement_id}
+                    )
+                    controls.append(
+                        {
+                            "base_rpm": recovered["base_rpm"],
+                            "beta_dq_deg": recovered["beta_dq_deg"],
+                            "case_id": replacement_id,
+                            "i_peak_a": recovered["i_peak_a"],
+                            "operating_point_id": recovered["operating_point_id"],
+                        }
+                    )
+                replacement_rows.append(recovered)
+            write_csv(original_plan, original_rows)
+            write_csv(recovery_plan, replacement_rows)
+            write_csv(
+                fixed_audit,
+                [{"case_id": "fixed-audit", "design_hash": "fixed", "doe_split": "test"}],
+            )
+            plan_record = continuation._artifact_contract(original_plan)
+            audit_record = continuation._artifact_contract(fixed_audit)
+            selected_hashes = [f"{index + 1:064x}" for index in range(40)]
+            candidate_pool = {"geometry_count": 1024, "pool_sha256": "a" * 64}
+            scoring = {"diversity_weight": 0.2, "residual_weight": 0.5}
+            seed_policy = {"adaptation_seed": 730131, "calibration_seed": 730133}
+            original_execution = {"fixture": "sealed-adaptive-execution"}
+            original_manifest = {
+                "schema_version": continuation.ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION,
+                "case_plan": plan_record["path"],
+                "case_plan_sha256": plan_record["sha256"],
+                "execution_contract": original_execution,
+                "execution_contract_sha256": continuation._contract_sha256(
+                    original_execution
+                ),
+                "fixed_audit_case_plan": audit_record,
+                "selection": {
+                    "seed_policy": seed_policy,
+                    "adaptation": {
+                        "candidate_pool": candidate_pool,
+                        "scoring": scoring,
+                        "selected": [
+                            {"design_hash": design_hash}
+                            for design_hash in selected_hashes
+                        ],
+                    },
+                },
+            }
+            write_json(original_manifest_path, original_manifest)
+            original_manifest_record = continuation._artifact_contract(
+                original_manifest_path
+            )
+            original_decision_path = root / "original_decision.json"
+            runner_argv = [
+                "--cases", str(original_plan.resolve()),
+                "--scheduler-url", "http://127.0.0.1:8002",
+                "--project", "PYAEDT_MOTOR_IPMSM_V2",
+                "--project-active-cap", "300",
+                "--task-prefix", "adaptive-b1",
+                "--remote-cases-dir", "remote/cases/b1",
+                "--result-dir", "results/b1",
+                "--simulation-dir", "simulation/b1",
+                "--log-dir", "logs/b1",
+                "--output-dir", str(terminal_output.resolve()),
+                "--submit",
+            ]
+            decision_execution = {
+                "stage2": {
+                    "case_plan": plan_record,
+                    "case_manifest": original_manifest_record,
+                    "output_dir": str(terminal_output.resolve()),
+                    "runner_argv": runner_argv,
+                }
+            }
+            original_decision = {
+                "schema_version": continuation.SCHEMA_VERSION,
+                "contract_sha256": continuation._contract_sha256(decision_execution),
+                "decision": "run_stage2",
+                "decision_output": str(original_decision_path.resolve()),
+                "execution_contract": decision_execution,
+                "last_error": "six permanent failures",
+                "mode": "execute",
+                "resume_required": True,
+                "status": "stage2_started",
+            }
+            write_json(original_decision_path, original_decision)
+            failure_results: list[dict[str, object]] = []
+            permanent_failures: list[dict[str, object]] = []
+            for case_index, case_id in enumerate(failed_case_ids):
+                evidence: list[dict[str, object]] = []
+                for retry_index in (0, 1):
+                    result_path = failed_results_dir / f"{case_index}-{retry_index}.csv"
+                    write_csv(result_path, [{"case_id": case_id, "status": "failed"}])
+                    result_record = continuation._artifact_contract(result_path)
+                    raw = {
+                        "kind": "result_level_terminal",
+                        "retry_index": retry_index,
+                        "task_id": 1000 + case_index * 2 + retry_index,
+                        "dedupe_key": f"dedupe-{case_index}-{retry_index}",
+                        "scheduler_status": "completed",
+                        "result_status": "failed",
+                        "remote_result": f"remote/{case_id}-{retry_index}.csv",
+                        "result_error": "analysis_returned_false=True",
+                        "local_result": result_record["path"],
+                        "local_result_sha256": result_record["sha256"],
+                    }
+                    evidence.append(raw)
+                    failure_results.append(
+                        {
+                            "case_id": case_id,
+                            "dedupe_key": raw["dedupe_key"],
+                            "kind": raw["kind"],
+                            "local_result": result_record,
+                            "remote_result": raw["remote_result"],
+                            "result_status": raw["result_status"],
+                            "retry_index": retry_index,
+                            "scheduler_status": raw["scheduler_status"],
+                            "task_id": raw["task_id"],
+                        }
+                    )
+                permanent_failures.append(
+                    {"case_id": case_id, "attempts": 2, "failure_evidence": evidence}
+                )
+            selected_plan = terminal_output / "selected_cases.csv"
+            successful_plan = terminal_output / "successful_cases.csv"
+            merged_output = terminal_output / "merged_results.csv"
+            selected_plan.write_bytes(original_plan.read_bytes())
+            successful_rows = [
+                row for row in original_rows if str(row["case_id"]) not in failed_case_ids
+            ]
+            write_csv(successful_plan, successful_rows)
+            write_csv(
+                merged_output,
+                [{"case_id": row["case_id"], "status": "ok"} for row in successful_rows],
+            )
+            summary_path = terminal_output / "campaign_summary.json"
+            summary = {
+                "schema_version": "ipmsm_v2_campaign_summary_v1",
+                "status": "completed_with_permanent_failures",
+                "selected_cases": 300,
+                "successful_cases": 294,
+                "permanently_failed_cases": 6,
+                "selected_plan": str(selected_plan.resolve()),
+                "successful_plan": str(successful_plan.resolve()),
+                "merged_output": str(merged_output.resolve()),
+                "output_dir": str(terminal_output.resolve()),
+                "permanent_failures": permanent_failures,
+            }
+            write_json(summary_path, summary)
+            campaign_decision_path = terminal_output / "campaign_decision.json"
+            campaign_decision = {
+                "schema_version": "ipmsm_v2_campaign_decision_v1",
+                "status": summary["status"],
+                "selected_cases": 300,
+                "successful_cases": 294,
+                "permanently_failed_cases": 6,
+                "summary": continuation._artifact_contract(summary_path),
+                "permanent_failures": permanent_failures,
+            }
+            write_json(campaign_decision_path, campaign_decision)
+            retained_hashes = [item for item in selected_hashes if item != failed_hash]
+            contract = {
+                "original": {
+                    "plan": {**plan_record, "rows": 300, "geometry_groups": 50},
+                    "manifest": {
+                        **original_manifest_record,
+                        "schema_version": continuation.ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION,
+                        "execution_contract_sha256": original_manifest[
+                            "execution_contract_sha256"
+                        ],
+                    },
+                },
+                "continuation_decision": continuation._artifact_contract(
+                    original_decision_path
+                ),
+                "terminal_campaign": {
+                    "summary": continuation._artifact_contract(summary_path),
+                    "decision": continuation._artifact_contract(
+                        campaign_decision_path
+                    ),
+                    "selected_plan": continuation._artifact_contract(selected_plan),
+                    "successful_plan": continuation._artifact_contract(successful_plan),
+                    "merged_output": continuation._artifact_contract(merged_output),
+                    "output_dir": str(terminal_output.resolve()),
+                    "selected_cases": 300,
+                    "successful_cases": 294,
+                    "permanently_failed_cases": 6,
+                    "failure_results": failure_results,
+                },
+                "scheduler_identity": {
+                    "scheduler_url": "http://127.0.0.1:8002",
+                    "project": "PYAEDT_MOTOR_IPMSM_V2",
+                    "project_active_cap": 300,
+                    "task_prefix": "adaptive-b1",
+                    "remote_cases_dir": "remote/cases/b1",
+                    "result_dir": "results/b1",
+                    "simulation_dir": "simulation/b1",
+                    "log_dir": "logs/b1",
+                },
+                "failure": {
+                    "attempts_per_case": 2,
+                    "case_ids": failed_case_ids,
+                    "design_hash": failed_hash,
+                    "geometry_group_id": failed_group,
+                    "rows": 6,
+                },
+                "replacement": {
+                    "acquisition_score": 0.72,
+                    "candidate_pool_ordinal": 578,
+                    "case_id_map": case_id_map,
+                    "case_ids": [item["replacement"] for item in case_id_map],
+                    "design_hash": replacement_hash,
+                    "diversity_score": 0.28,
+                    "final_selection_score": 0.63,
+                    "geometry": {"rotor_outer_radius_mm": 99.0},
+                    "geometry_group_id": replacement_group,
+                    "operating_controls": controls,
+                    "rows": 6,
+                    "selection_constraint": "adaptive_score",
+                    "signals": {"residual_signal": 0.2},
+                },
+                "selection_proof": {
+                    "candidate_pool": candidate_pool,
+                    "failed_selected_rank": selected_hashes.index(failed_hash) + 1,
+                    "original_selected_design_hashes_sha256": (
+                        continuation._canonical_value_sha256(selected_hashes)
+                    ),
+                    "replacement_greedy_rank_after_retained": 1,
+                    "retained_design_hashes_sha256": (
+                        continuation._canonical_value_sha256(retained_hashes)
+                    ),
+                    "retained_geometry_count": 39,
+                    "scoring": scoring,
+                    "seed_policy": seed_policy,
+                    "overlap": {
+                        "calibration": 0,
+                        "current_adaptive": 0,
+                        "prior_or_confirmed": 0,
+                    },
+                },
+                "output": {
+                    "manifest_path": str(recovery_manifest.resolve()),
+                    "plan": {
+                        **continuation._artifact_contract(recovery_plan),
+                        "rows": 300,
+                        "geometry_groups": 50,
+                    },
+                },
+            }
+            manifest = {
+                "schema_version": continuation.ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION,
+                "mode": "execute",
+                "status": "created",
+                "contract": contract,
+                "contract_sha256": continuation._canonical_value_sha256(contract),
+                "checks": {
+                    "candidate_own_controls_preserved": True,
+                    "candidate_pool_proof_reconstructed": True,
+                    "case_id_mapping_is_fresh": True,
+                    "failure_evidence_sha256_bound": True,
+                    "original_adaptive_generator_reproduced": True,
+                    "original_artifacts_immutable": True,
+                    "prior_current_calibration_overlap_zero": True,
+                    "replaced_rows": 6,
+                    "retained_rows_byte_field_identical": 294,
+                    "scheduler_identity_bound": True,
+                    "terminal_campaign_authority_verified": True,
+                },
+            }
+            write_json(recovery_manifest, manifest)
+            args = argparse.Namespace(
+                stage2_case_plan=recovery_plan,
+                stage2_case_manifest=recovery_manifest,
+                training_audit_case_plan=fixed_audit,
+                scheduler_url="http://127.0.0.1:8002",
+                project="PYAEDT_MOTOR_IPMSM_V2",
+                project_active_cap=300,
+                stage2_task_prefix="adaptive-b1",
+                stage2_remote_cases_dir="remote/cases/b1",
+                stage2_result_dir="results/b1",
+                stage2_simulation_dir="simulation/b1",
+                stage2_log_dir="logs/b1",
+                terminal_retry_limit=0,
+            )
+
+            self.assertEqual(
+                continuation._validate_stage2_case_manifest(args),
+                continuation._artifact_contract(recovery_manifest),
+            )
+            args.terminal_retry_limit = 1
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError, "terminal-retry-limit=0"
+            ):
+                continuation._validate_stage2_case_manifest(args)
+            args.terminal_retry_limit = 0
+            manifest["contract"]["replacement"]["candidate_pool_ordinal"] = 579
+            manifest["contract_sha256"] = continuation._canonical_value_sha256(
+                manifest["contract"]
+            )
+            write_json(recovery_manifest, manifest)
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError,
+                "failed/replacement scope",
+            ):
+                continuation._validate_stage2_case_manifest(args)
+
     def test_v4r10_adapter_binds_raw_canonical_and_sealed_no_write_audit(
         self,
     ) -> None:

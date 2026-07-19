@@ -43,6 +43,9 @@ DEFAULT_COMBINED_REPEATS = 40
 DEFAULT_ENSEMBLE_SIZE = 5
 DEFAULT_CONFORMAL_COVERAGE = 0.95
 ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION = "ipmsm_v2_adaptive_enrichment_batch_v1"
+ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION = (
+    "ipmsm_v2_adaptive_failed_geometry_recovery_v1"
+)
 PRIMARY_TARGETS = tuple(trainer.V2_PRIMARY_EVALUATION_OUTPUT_COLUMNS)
 FINGERPRINT_COLUMNS = tuple(trainer.V2_FINGERPRINT_COLUMNS)
 STANDARD_FINGERPRINTS = {
@@ -839,6 +842,621 @@ def _validate_training_audit_coverage(args: argparse.Namespace) -> None:
         )
 
 
+def _exact_mapping(value: object, fields: set[str], label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise ContinuationGateError(f"{label} fields changed")
+    return dict(value)
+
+
+def _canonical_value_sha256(value: object) -> str:
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _bound_extended_artifact(
+    value: object,
+    fields: set[str],
+    label: str,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    mapping = _exact_mapping(value, fields, label)
+    artifact = _bound_artifact_record(
+        {"path": mapping.get("path"), "sha256": mapping.get("sha256")}, label
+    )
+    return mapping, artifact
+
+
+def _runner_flag(argv: object, flag: str, label: str) -> str:
+    if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
+        raise ContinuationGateError(f"{label} runner argv changed")
+    positions = [index for index, item in enumerate(argv) if item == flag]
+    if len(positions) != 1 or positions[0] + 1 >= len(argv):
+        raise ContinuationGateError(f"{label} runner argv lacks exact {flag}")
+    return argv[positions[0] + 1]
+
+
+def _validate_recovery_plan_lineage(
+    original_plan: Path,
+    recovery_plan: Path,
+    failure: Mapping[str, Any],
+    replacement: Mapping[str, Any],
+) -> None:
+    original_fields, original_rows = _read_csv(original_plan, "recovery original plan")
+    recovery_fields, recovery_rows = _read_csv(recovery_plan, "recovery effective plan")
+    if original_fields != recovery_fields or len(original_rows) != 300 or len(recovery_rows) != 300:
+        raise ContinuationGateError("adaptive recovery plan shape/header changed")
+    if len({str(row.get("geometry_group_id") or "") for row in original_rows}) != 50 or len(
+        {str(row.get("geometry_group_id") or "") for row in recovery_rows}
+    ) != 50:
+        raise ContinuationGateError("adaptive recovery geometry-group count changed")
+    failed_ids = failure.get("case_ids")
+    replacement_ids = replacement.get("case_ids")
+    case_id_map = replacement.get("case_id_map")
+    if (
+        not isinstance(failed_ids, list)
+        or not isinstance(replacement_ids, list)
+        or not isinstance(case_id_map, list)
+        or len(failed_ids) != 6
+        or len(replacement_ids) != 6
+        or len(case_id_map) != 6
+        or len(set(map(str, failed_ids))) != 6
+        or len(set(map(str, replacement_ids))) != 6
+    ):
+        raise ContinuationGateError("adaptive recovery six-case mapping changed")
+    expected_map = [
+        {"source": str(source), "replacement": f"{source}_clean_retry_01"}
+        for source in failed_ids
+    ]
+    if case_id_map != expected_map or replacement_ids != [
+        item["replacement"] for item in expected_map
+    ]:
+        raise ContinuationGateError("adaptive recovery case IDs are not exact clean retries")
+    failed_set = set(map(str, failed_ids))
+    replacement_by_source = {
+        item["source"]: item["replacement"] for item in expected_map
+    }
+    changed = 0
+    for original, recovered in zip(original_rows, recovery_rows, strict=True):
+        source_case_id = str(original.get("case_id") or "")
+        if source_case_id not in failed_set:
+            if recovered != original:
+                raise ContinuationGateError("adaptive recovery changed a retained row")
+            continue
+        changed += 1
+        if str(recovered.get("case_id") or "") != replacement_by_source[source_case_id]:
+            raise ContinuationGateError("adaptive recovery changed clean-retry row order")
+        if str(original.get("design_hash") or "") != str(failure.get("design_hash") or ""):
+            raise ContinuationGateError("adaptive recovery failure design hash changed")
+        if str(original.get("geometry_group_id") or "") != str(
+            failure.get("geometry_group_id") or ""
+        ):
+            raise ContinuationGateError("adaptive recovery failure group changed")
+        if str(recovered.get("design_hash") or "") != str(
+            replacement.get("design_hash") or ""
+        ) or str(recovered.get("geometry_group_id") or "") != str(
+            replacement.get("geometry_group_id") or ""
+        ):
+            raise ContinuationGateError("adaptive recovery replacement geometry changed")
+    if changed != 6:
+        raise ContinuationGateError("adaptive recovery did not replace exactly six rows")
+    recovered_by_case = {
+        str(row.get("case_id") or ""): row for row in recovery_rows
+    }
+    geometry = replacement.get("geometry")
+    controls = replacement.get("operating_controls")
+    if not isinstance(geometry, Mapping) or not geometry:
+        raise ContinuationGateError("adaptive recovery replacement geometry is incomplete")
+    if (
+        not isinstance(controls, list)
+        or len(controls) != 6
+        or [item.get("case_id") if isinstance(item, Mapping) else None for item in controls]
+        != replacement_ids
+    ):
+        raise ContinuationGateError("adaptive recovery operating controls changed")
+    for case_id, control in zip(replacement_ids, controls, strict=True):
+        row = recovered_by_case[str(case_id)]
+        if not isinstance(control, Mapping) or set(control) != {
+            "base_rpm",
+            "beta_dq_deg",
+            "case_id",
+            "i_peak_a",
+            "operating_point_id",
+        }:
+            raise ContinuationGateError("adaptive recovery operating-control fields changed")
+        if str(control["operating_point_id"]) != str(row.get("operating_point_id") or ""):
+            raise ContinuationGateError("adaptive recovery operating-point identity changed")
+        for name in ("base_rpm", "beta_dq_deg", "i_peak_a"):
+            if not math.isclose(
+                _finite(control[name], f"adaptive recovery control {name}"),
+                _finite(row.get(name), f"adaptive recovery row {name}"),
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            ):
+                raise ContinuationGateError("adaptive recovery operating controls differ from plan")
+        for name, value in geometry.items():
+            if name not in row or not math.isclose(
+                _finite(value, f"adaptive recovery geometry {name}"),
+                _finite(row.get(name), f"adaptive recovery row geometry {name}"),
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            ):
+                raise ContinuationGateError("adaptive recovery geometry differs from plan")
+    original_ids = {str(row.get("case_id") or "") for row in original_rows}
+    recovered_ids = {str(row.get("case_id") or "") for row in recovery_rows}
+    if recovered_ids != (original_ids - failed_set) | set(map(str, replacement_ids)):
+        raise ContinuationGateError("adaptive recovery case-ID coverage changed")
+    original_hashes = {str(row.get("design_hash") or "") for row in original_rows}
+    recovered_hashes = {str(row.get("design_hash") or "") for row in recovery_rows}
+    if (
+        str(failure.get("design_hash") or "") in recovered_hashes
+        or recovered_hashes
+        != (original_hashes - {str(failure.get("design_hash") or "")})
+        | {str(replacement.get("design_hash") or "")}
+    ):
+        raise ContinuationGateError("adaptive recovery design-hash coverage changed")
+
+
+def _validate_recovery_case_manifest(
+    args: argparse.Namespace,
+    manifest_path: Path,
+    manifest: Mapping[str, Any],
+    initial_manifest_contract: dict[str, str],
+) -> dict[str, str]:
+    top = _exact_mapping(
+        manifest,
+        {"schema_version", "mode", "status", "contract", "contract_sha256", "checks"},
+        "adaptive recovery manifest",
+    )
+    if top["mode"] != "execute" or top["status"] != "created":
+        raise ContinuationGateError("adaptive recovery manifest is not an executed authority")
+    if args.terminal_retry_limit != 0:
+        raise ContinuationGateError(
+            "adaptive recovery continuation requires --terminal-retry-limit=0"
+        )
+    contract = _exact_mapping(
+        top["contract"],
+        {
+            "original",
+            "continuation_decision",
+            "terminal_campaign",
+            "scheduler_identity",
+            "failure",
+            "replacement",
+            "selection_proof",
+            "output",
+        },
+        "adaptive recovery contract",
+    )
+    if top["contract_sha256"] != _contract_sha256(contract):
+        raise ContinuationGateError("adaptive recovery contract SHA-256 changed")
+    expected_checks = {
+        "candidate_own_controls_preserved": True,
+        "candidate_pool_proof_reconstructed": True,
+        "case_id_mapping_is_fresh": True,
+        "failure_evidence_sha256_bound": True,
+        "original_adaptive_generator_reproduced": True,
+        "original_artifacts_immutable": True,
+        "prior_current_calibration_overlap_zero": True,
+        "replaced_rows": 6,
+        "retained_rows_byte_field_identical": 294,
+        "scheduler_identity_bound": True,
+        "terminal_campaign_authority_verified": True,
+    }
+    checks = top["checks"]
+    if not isinstance(checks, Mapping) or dict(checks) != expected_checks:
+        raise ContinuationGateError("adaptive recovery checks are incomplete")
+
+    original = _exact_mapping(
+        contract["original"], {"plan", "manifest"}, "adaptive recovery original"
+    )
+    original_plan_record, original_plan_artifact = _bound_extended_artifact(
+        original["plan"],
+        {"path", "sha256", "rows", "geometry_groups"},
+        "adaptive recovery original plan",
+    )
+    if original_plan_record["rows"] != 300 or original_plan_record["geometry_groups"] != 50:
+        raise ContinuationGateError("adaptive recovery original plan scope changed")
+    original_manifest_record, original_manifest_artifact = _bound_extended_artifact(
+        original["manifest"],
+        {"path", "sha256", "schema_version", "execution_contract_sha256"},
+        "adaptive recovery original manifest",
+    )
+    if original_manifest_record["schema_version"] != ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION:
+        raise ContinuationGateError("adaptive recovery original manifest schema changed")
+    original_manifest = _read_json(
+        Path(original_manifest_artifact["path"]), "adaptive recovery original manifest"
+    )
+    original_execution = original_manifest.get("execution_contract")
+    if (
+        not isinstance(original_execution, Mapping)
+        or original_manifest.get("execution_contract_sha256")
+        != original_manifest_record["execution_contract_sha256"]
+        or original_manifest_record["execution_contract_sha256"]
+        != _contract_sha256(original_execution)
+        or {
+            "path": str(Path(str(original_manifest.get("case_plan") or "")).resolve(strict=False)),
+            "sha256": str(original_manifest.get("case_plan_sha256") or ""),
+        }
+        != original_plan_artifact
+    ):
+        raise ContinuationGateError("adaptive recovery original manifest lineage changed")
+
+    continuation_record = _bound_artifact_record(
+        contract["continuation_decision"], "adaptive recovery continuation decision"
+    )
+    continuation_decision = _read_json(
+        Path(continuation_record["path"]), "adaptive recovery continuation decision"
+    )
+    continuation_execution = continuation_decision.get("execution_contract")
+    continuation_stage2 = (
+        continuation_execution.get("stage2")
+        if isinstance(continuation_execution, Mapping)
+        else None
+    )
+    if (
+        continuation_decision.get("schema_version") != SCHEMA_VERSION
+        or continuation_decision.get("status") != "stage2_started"
+        or continuation_decision.get("resume_required") is not True
+        or not isinstance(continuation_stage2, Mapping)
+        or continuation_stage2.get("case_plan") != original_plan_artifact
+        or continuation_stage2.get("case_manifest") != original_manifest_artifact
+    ):
+        raise ContinuationGateError("adaptive recovery predecessor decision changed")
+
+    scheduler_identity = _exact_mapping(
+        contract["scheduler_identity"],
+        {
+            "scheduler_url",
+            "project",
+            "project_active_cap",
+            "task_prefix",
+            "remote_cases_dir",
+            "result_dir",
+            "simulation_dir",
+            "log_dir",
+        },
+        "adaptive recovery scheduler identity",
+    )
+    runner_argv = continuation_stage2.get("runner_argv")
+    expected_scheduler_identity = {
+        "scheduler_url": args.scheduler_url,
+        "project": args.project,
+        "project_active_cap": args.project_active_cap,
+        "task_prefix": args.stage2_task_prefix,
+        "remote_cases_dir": args.stage2_remote_cases_dir,
+        "result_dir": args.stage2_result_dir,
+        "simulation_dir": args.stage2_simulation_dir,
+        "log_dir": args.stage2_log_dir,
+    }
+    predecessor_scheduler_identity = {
+        "scheduler_url": _runner_flag(runner_argv, "--scheduler-url", "predecessor"),
+        "project": _runner_flag(runner_argv, "--project", "predecessor"),
+        "project_active_cap": int(
+            _runner_flag(runner_argv, "--project-active-cap", "predecessor")
+        ),
+        "task_prefix": _runner_flag(runner_argv, "--task-prefix", "predecessor"),
+        "remote_cases_dir": _runner_flag(runner_argv, "--remote-cases-dir", "predecessor"),
+        "result_dir": _runner_flag(runner_argv, "--result-dir", "predecessor"),
+        "simulation_dir": _runner_flag(runner_argv, "--simulation-dir", "predecessor"),
+        "log_dir": _runner_flag(runner_argv, "--log-dir", "predecessor"),
+    }
+    if scheduler_identity != expected_scheduler_identity or scheduler_identity != predecessor_scheduler_identity:
+        raise ContinuationGateError("adaptive recovery scheduler identity changed")
+
+    terminal = _exact_mapping(
+        contract["terminal_campaign"],
+        {
+            "summary",
+            "decision",
+            "selected_plan",
+            "successful_plan",
+            "merged_output",
+            "output_dir",
+            "selected_cases",
+            "successful_cases",
+            "permanently_failed_cases",
+            "failure_results",
+        },
+        "adaptive recovery terminal campaign",
+    )
+    terminal_artifacts = {
+        name: _bound_artifact_record(
+            terminal[name], f"adaptive recovery terminal {name}"
+        )
+        for name in (
+            "summary",
+            "decision",
+            "selected_plan",
+            "successful_plan",
+            "merged_output",
+        )
+    }
+    failure_results = terminal["failure_results"]
+    if (
+        terminal["selected_cases"] != 300
+        or terminal["successful_cases"] != 294
+        or terminal["permanently_failed_cases"] != 6
+        or not str(terminal["output_dir"] or "").strip()
+        or not isinstance(failure_results, list)
+        or len(failure_results) != 12
+    ):
+        raise ContinuationGateError("adaptive recovery terminal campaign scope changed")
+    terminal_summary = _read_json(
+        Path(terminal_artifacts["summary"]["path"]),
+        "adaptive recovery terminal summary",
+    )
+    terminal_decision = _read_json(
+        Path(terminal_artifacts["decision"]["path"]),
+        "adaptive recovery terminal decision",
+    )
+    if (
+        terminal_summary.get("schema_version") != "ipmsm_v2_campaign_summary_v1"
+        or terminal_summary.get("status") != "completed_with_permanent_failures"
+        or terminal_summary.get("selected_cases") != 300
+        or terminal_summary.get("successful_cases") != 294
+        or terminal_summary.get("permanently_failed_cases") != 6
+        or Path(str(terminal_summary.get("output_dir") or "")).resolve(strict=False)
+        != Path(str(terminal["output_dir"])).resolve(strict=False)
+        or Path(str(terminal_summary.get("selected_plan") or "")).resolve(strict=False)
+        != Path(terminal_artifacts["selected_plan"]["path"])
+        or Path(str(terminal_summary.get("successful_plan") or "")).resolve(strict=False)
+        != Path(terminal_artifacts["successful_plan"]["path"])
+        or Path(str(terminal_summary.get("merged_output") or "")).resolve(strict=False)
+        != Path(terminal_artifacts["merged_output"]["path"])
+    ):
+        raise ContinuationGateError("adaptive recovery terminal summary changed")
+    if (
+        terminal_decision.get("schema_version") != "ipmsm_v2_campaign_decision_v1"
+        or terminal_decision.get("status") != terminal_summary.get("status")
+        or terminal_decision.get("selected_cases") != 300
+        or terminal_decision.get("successful_cases") != 294
+        or terminal_decision.get("permanently_failed_cases") != 6
+        or terminal_decision.get("summary") != terminal_artifacts["summary"]
+        or terminal_decision.get("permanent_failures")
+        != terminal_summary.get("permanent_failures")
+    ):
+        raise ContinuationGateError("adaptive recovery terminal decision changed")
+
+    failure = _exact_mapping(
+        contract["failure"],
+        {"design_hash", "geometry_group_id", "case_ids", "rows", "attempts_per_case"},
+        "adaptive recovery failure",
+    )
+    failed_case_ids = failure.get("case_ids")
+    failed_design_hash = str(failure.get("design_hash") or "")
+    failed_group = str(failure.get("geometry_group_id") or "")
+    if (
+        not isinstance(failed_case_ids, list)
+        or len(failed_case_ids) != 6
+        or len(set(map(str, failed_case_ids))) != 6
+        or len(failed_design_hash) != 64
+        or any(character not in "0123456789abcdef" for character in failed_design_hash)
+        or not failed_group
+    ):
+        raise ContinuationGateError("adaptive recovery failure identity changed")
+    terminal_failures = terminal_summary.get("permanent_failures")
+    if (
+        not isinstance(terminal_failures, list)
+        or len(terminal_failures) != 6
+        or [
+            str(item.get("case_id") or "") if isinstance(item, Mapping) else ""
+            for item in terminal_failures
+        ]
+        != list(map(str, failed_case_ids))
+        or any(
+            not isinstance(item, Mapping) or item.get("attempts") != 2
+            for item in terminal_failures
+        )
+    ):
+        raise ContinuationGateError("adaptive recovery terminal failures changed")
+    original_fields, original_rows = _read_csv(
+        Path(original_plan_artifact["path"]), "adaptive recovery original plan"
+    )
+    selected_fields, selected_rows = _read_csv(
+        Path(terminal_artifacts["selected_plan"]["path"]),
+        "adaptive recovery terminal selected plan",
+    )
+    if selected_fields != original_fields or selected_rows != original_rows:
+        raise ContinuationGateError("adaptive recovery terminal selected plan changed")
+    successful_fields, successful_rows = _read_csv(
+        Path(terminal_artifacts["successful_plan"]["path"]),
+        "adaptive recovery terminal successful plan",
+    )
+    failed_case_set = set(map(str, failed_case_ids))
+    expected_successful_rows = [
+        row
+        for row in original_rows
+        if str(row.get("case_id") or "") not in failed_case_set
+    ]
+    if (
+        successful_fields != original_fields
+        or successful_rows != expected_successful_rows
+    ):
+        raise ContinuationGateError("adaptive recovery successful-plan lineage changed")
+    merged_fields, merged_rows = _read_csv(
+        Path(terminal_artifacts["merged_output"]["path"]),
+        "adaptive recovery terminal merged output",
+    )
+    if "case_id" not in merged_fields or [
+        str(row.get("case_id") or "") for row in merged_rows
+    ] != [str(row.get("case_id") or "") for row in expected_successful_rows]:
+        raise ContinuationGateError("adaptive recovery merged-result coverage changed")
+    evidence_by_case: dict[str, set[int]] = {
+        str(case_id): set() for case_id in failed_case_ids
+    }
+    terminal_output_dir = Path(str(terminal["output_dir"])).resolve(strict=False)
+    predecessor_output_dir = Path(
+        _runner_flag(runner_argv, "--output-dir", "predecessor")
+    ).resolve(strict=False)
+    if terminal_output_dir != predecessor_output_dir:
+        raise ContinuationGateError("adaptive recovery terminal output directory changed")
+    for item in failure_results:
+        record = _exact_mapping(
+            item,
+            {
+                "case_id",
+                "dedupe_key",
+                "kind",
+                "local_result",
+                "remote_result",
+                "result_status",
+                "retry_index",
+                "scheduler_status",
+                "task_id",
+            },
+            "adaptive recovery failure result",
+        )
+        case_id = str(record["case_id"] or "")
+        retry_index = record["retry_index"]
+        task_id = record["task_id"]
+        if (
+            case_id not in evidence_by_case
+            or type(retry_index) is not int
+            or retry_index not in {0, 1}
+            or retry_index in evidence_by_case[case_id]
+            or type(task_id) is not int
+            or task_id < 1
+            or record["kind"] != "result_level_terminal"
+            or record["scheduler_status"] != "completed"
+            or record["result_status"] != "failed"
+            or not str(record["dedupe_key"] or "").strip()
+            or not str(record["remote_result"] or "").strip()
+        ):
+            raise ContinuationGateError("adaptive recovery failure-result semantics changed")
+        local_result = _bound_artifact_record(
+            record["local_result"], "adaptive recovery failed-result artifact"
+        )
+        try:
+            Path(local_result["path"]).resolve(strict=False).relative_to(
+                terminal_output_dir / "failed_results"
+            )
+        except ValueError as exc:
+            raise ContinuationGateError(
+                "adaptive recovery failed-result artifact escaped terminal output"
+            ) from exc
+        evidence_by_case[case_id].add(retry_index)
+    if any(retries != {0, 1} for retries in evidence_by_case.values()):
+        raise ContinuationGateError("adaptive recovery failure-result coverage changed")
+    replacement = _exact_mapping(
+        contract["replacement"],
+        {
+            "design_hash",
+            "geometry_group_id",
+            "case_ids",
+            "case_id_map",
+            "rows",
+            "candidate_pool_ordinal",
+            "acquisition_score",
+            "diversity_score",
+            "final_selection_score",
+            "geometry",
+            "operating_controls",
+            "selection_constraint",
+            "signals",
+        },
+        "adaptive recovery replacement",
+    )
+    if (
+        failure["rows"] != 6
+        or failure["attempts_per_case"] != 2
+        or replacement["rows"] != 6
+        or replacement["candidate_pool_ordinal"] != 578
+        or not str(replacement["selection_constraint"] or "").strip()
+        or not isinstance(replacement["signals"], Mapping)
+        or not replacement["signals"]
+    ):
+        raise ContinuationGateError("adaptive recovery failed/replacement scope changed")
+    for name in ("acquisition_score", "diversity_score", "final_selection_score"):
+        _finite(replacement[name], f"adaptive recovery replacement {name}")
+    for name, value in replacement["signals"].items():
+        if not str(name).strip():
+            raise ContinuationGateError("adaptive recovery replacement signal is blank")
+        _finite(value, f"adaptive recovery replacement signal {name}")
+    selection_proof = _exact_mapping(
+        contract["selection_proof"],
+        {
+            "seed_policy",
+            "candidate_pool",
+            "scoring",
+            "failed_selected_rank",
+            "original_selected_design_hashes_sha256",
+            "replacement_greedy_rank_after_retained",
+            "retained_design_hashes_sha256",
+            "retained_geometry_count",
+            "overlap",
+        },
+        "adaptive recovery selection proof",
+    )
+    original_selection = original_manifest.get("selection")
+    adaptation = (
+        original_selection.get("adaptation")
+        if isinstance(original_selection, Mapping)
+        else None
+    )
+    selected = adaptation.get("selected") if isinstance(adaptation, Mapping) else None
+    if not isinstance(selected, list) or any(not isinstance(item, Mapping) for item in selected):
+        raise ContinuationGateError("adaptive recovery original selection changed")
+    selected_hashes = [str(item.get("design_hash") or "") for item in selected]
+    failed_hash = str(failure.get("design_hash") or "")
+    retained_hashes = [item for item in selected_hashes if item != failed_hash]
+    overlap = _exact_mapping(
+        selection_proof["overlap"],
+        {"calibration", "current_adaptive", "prior_or_confirmed"},
+        "adaptive recovery overlap proof",
+    )
+    if (
+        selection_proof["retained_geometry_count"] != 39
+        or overlap
+        != {"calibration": 0, "current_adaptive": 0, "prior_or_confirmed": 0}
+        or failed_hash not in selected_hashes
+        or selection_proof["failed_selected_rank"]
+        != selected_hashes.index(failed_hash) + 1
+        or selection_proof["replacement_greedy_rank_after_retained"] != 1
+        or selection_proof["original_selected_design_hashes_sha256"]
+        != _canonical_value_sha256(selected_hashes)
+        or selection_proof["retained_design_hashes_sha256"]
+        != _canonical_value_sha256(retained_hashes)
+        or selection_proof["seed_policy"] != original_selection.get("seed_policy")
+        or selection_proof["candidate_pool"] != adaptation.get("candidate_pool")
+        or selection_proof["scoring"] != adaptation.get("scoring")
+    ):
+        raise ContinuationGateError("adaptive recovery selection proof changed")
+    output = _exact_mapping(
+        contract["output"], {"plan", "manifest_path"}, "adaptive recovery output"
+    )
+    output_plan, output_artifact = _bound_extended_artifact(
+        output["plan"],
+        {"path", "sha256", "rows", "geometry_groups"},
+        "adaptive recovery output plan",
+    )
+    if (
+        output_plan["rows"] != 300
+        or output_plan["geometry_groups"] != 50
+        or output_artifact != _artifact_contract(args.stage2_case_plan)
+        or Path(str(output["manifest_path"])).resolve(strict=False)
+        != manifest_path.resolve(strict=False)
+    ):
+        raise ContinuationGateError("adaptive recovery output binding changed")
+    if original_manifest.get("fixed_audit_case_plan") != _artifact_contract(
+        _training_audit_case_plan(args)
+    ):
+        raise ContinuationGateError("adaptive recovery fixed audit changed")
+    _validate_recovery_plan_lineage(
+        Path(original_plan_artifact["path"]),
+        args.stage2_case_plan,
+        failure,
+        replacement,
+    )
+    if _artifact_contract(manifest_path) != initial_manifest_contract:
+        raise ContinuationGateError("adaptive recovery manifest changed during validation")
+    return initial_manifest_contract
+
+
 def _validate_stage2_case_manifest(args: argparse.Namespace) -> dict[str, str] | None:
     audit_plan = _training_audit_case_plan(args).resolve(strict=False)
     stage2_plan = args.stage2_case_plan.resolve(strict=False)
@@ -856,6 +1474,10 @@ def _validate_stage2_case_manifest(args: argparse.Namespace) -> dict[str, str] |
         )
     initial_manifest_contract = _artifact_contract(manifest_path)
     manifest = _read_json(manifest_path, "Stage2 adaptive case manifest")
+    if manifest.get("schema_version") == ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION:
+        return _validate_recovery_case_manifest(
+            args, manifest_path, manifest, initial_manifest_contract
+        )
     failures: list[str] = []
     if manifest.get("schema_version") != ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION:
         failures.append("schema_version")

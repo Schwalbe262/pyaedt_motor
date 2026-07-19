@@ -36,6 +36,7 @@ import confirm_ipmsm_v2_target_load_inputs_v4r6 as publication
 import continue_ipmsm_v2_optimization as legacy_optimization
 import generate_ipmsm_v2_adaptive_batch as adaptive_generator
 import ipmsm_optimization
+import recover_ipmsm_v2_adaptive_failed_geometry as adaptive_recovery
 import submit_ipmsm_v2_campaign as campaign_submitter
 import supervise_ipmsm_v2_pipeline as v3
 import supervise_ipmsm_v2_pipeline_v4 as v4
@@ -68,6 +69,18 @@ DYNAMIC_SOURCE_MODULES = {
         "generate_ipmsm_v2_adaptive_batch",
         Path("generate_ipmsm_v2_adaptive_batch.py"),
     ),
+    "adaptive_recovery": (
+        "recover_ipmsm_v2_adaptive_failed_geometry",
+        Path("recover_ipmsm_v2_adaptive_failed_geometry.py"),
+    ),
+    "adaptive_recovery_plan": (
+        "replace_ipmsm_v2_failed_geometry",
+        Path("replace_ipmsm_v2_failed_geometry.py"),
+    ),
+    "adaptive_recovery_retry": (
+        "revise_ipmsm_v2_clean_retry_plan",
+        Path("revise_ipmsm_v2_clean_retry_plan.py"),
+    ),
     "aedt_attach_client": (
         "module.aedt_attach_client",
         Path("module/aedt_attach_client.py"),
@@ -86,6 +99,9 @@ STAGE3_ACQUISITION_COMPLETION_SCHEMA_VERSION = (
     "ipmsm-v2-stage3-acquisition-v4r10-completion-v1"
 )
 ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION = "ipmsm_v2_adaptive_enrichment_batch_v1"
+ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION = (
+    "ipmsm_v2_adaptive_failed_geometry_recovery_v1"
+)
 ADAPTIVE_R2_HISTORY_SCHEMA_VERSION = "ipmsm_v2_adaptive_r2_history_v1"
 RUNNER_PYCACHE_DIRNAME = "v4r9_runner_pycache"
 CHILD_PYCACHE_DIRNAME = "v4r9_child_pycache"
@@ -1211,6 +1227,171 @@ def _load_lineage_decision(
     return binding, decision
 
 
+def _embedded_artifact(
+    value: Any,
+    label: str,
+    *,
+    runtime_root: Path,
+) -> tuple[FileBinding, dict[str, str]]:
+    record = _mapping(value, label)
+    return _artifact_record(
+        {"path": record.get("path"), "sha256": record.get("sha256")},
+        label,
+        runtime_root=runtime_root,
+    )
+
+
+def _audit_adaptive_recovery_manifest(
+    manifest_binding: FileBinding,
+    manifest_payload: bytes,
+    manifest: Mapping[str, Any],
+    effective_plan: FileBinding,
+    effective_plan_record: Mapping[str, str],
+    *,
+    runtime_root: Path,
+) -> tuple[dict[str, Any], dict[str, str], dict[str, Any]]:
+    if (
+        manifest.get("schema_version") != ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION
+        or manifest.get("mode") != "execute"
+        or manifest.get("status") != "created"
+    ):
+        raise OptimizationActivationBuildError(
+            "adaptive recovery manifest schema/mode/status changed"
+        )
+    contract = _mapping(manifest.get("contract"), "adaptive recovery contract")
+    original = _mapping(contract.get("original"), "adaptive recovery original")
+    original_plan_binding, original_plan_record = _embedded_artifact(
+        original.get("plan"),
+        "adaptive recovery original plan",
+        runtime_root=runtime_root,
+    )
+    original_manifest_binding, _ = _embedded_artifact(
+        original.get("manifest"),
+        "adaptive recovery original manifest",
+        runtime_root=runtime_root,
+    )
+    original_payload, original_manifest = _strict_json(
+        original_manifest_binding.path, "adaptive recovery original manifest"
+    )
+    if not original_payload:
+        raise OptimizationActivationBuildError("adaptive recovery original manifest is empty")
+    spec_binding, _ = _embedded_artifact(
+        original_manifest.get("spec"),
+        "adaptive recovery optimization spec",
+        runtime_root=runtime_root,
+    )
+    continuation_binding, _ = _embedded_artifact(
+        contract.get("continuation_decision"),
+        "adaptive recovery continuation decision",
+        runtime_root=runtime_root,
+    )
+    terminal = _mapping(
+        contract.get("terminal_campaign"), "adaptive recovery terminal campaign"
+    )
+    summary_binding, _ = _embedded_artifact(
+        terminal.get("summary"),
+        "adaptive recovery campaign summary",
+        runtime_root=runtime_root,
+    )
+    decision_binding, _ = _embedded_artifact(
+        terminal.get("decision"),
+        "adaptive recovery campaign decision",
+        runtime_root=runtime_root,
+    )
+    output = _mapping(contract.get("output"), "adaptive recovery output")
+    output_plan_binding, output_plan_record = _embedded_artifact(
+        output.get("plan"),
+        "adaptive recovery output plan",
+        runtime_root=runtime_root,
+    )
+    manifest_output = _c_path(
+        output.get("manifest_path"), "adaptive recovery manifest output"
+    )
+    if (
+        output_plan_binding != effective_plan
+        or output_plan_record != dict(effective_plan_record)
+        or manifest_output != manifest_binding.path
+    ):
+        raise OptimizationActivationBuildError(
+            "adaptive recovery output differs from the completed decision"
+        )
+    failure = _mapping(contract.get("failure"), "adaptive recovery failure")
+    replacement = _mapping(
+        contract.get("replacement"), "adaptive recovery replacement"
+    )
+    failed_design_hash = _text(
+        failure.get("design_hash"), "adaptive recovery failed design_hash"
+    )
+    replacement_design_hash = _text(
+        replacement.get("design_hash"), "adaptive recovery replacement design_hash"
+    )
+    try:
+        rebuilt = adaptive_recovery.build_recovery(
+            spec_path=spec_binding.path,
+            original_plan=original_plan_binding.path,
+            original_manifest=original_manifest_binding.path,
+            continuation_decision=continuation_binding.path,
+            campaign_summary=summary_binding.path,
+            campaign_decision=decision_binding.path,
+            failed_design_hash=failed_design_hash,
+            expected_replacement_design_hash=replacement_design_hash,
+            output=effective_plan.path,
+            manifest_output=manifest_binding.path,
+            mode="execute",
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise OptimizationActivationBuildError(
+            f"adaptive recovery authority replay failed: {exc}"
+        ) from exc
+    expected_manifest_payload = (
+        json.dumps(
+            rebuilt.manifest,
+            allow_nan=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n"
+    ).encode("utf-8")
+    if (
+        rebuilt.manifest != dict(manifest)
+        or rebuilt.output_payload != effective_plan.path.read_bytes()
+        or manifest_payload != expected_manifest_payload
+    ):
+        raise OptimizationActivationBuildError(
+            "adaptive recovery artifacts differ from deterministic replay"
+        )
+    try:
+        for snapshot in rebuilt.snapshots:
+            adaptive_recovery._assert_snapshot_unchanged(
+                snapshot, "optimization activation recovery input"
+            )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise OptimizationActivationBuildError(
+            f"adaptive recovery input changed during replay: {exc}"
+        ) from exc
+    if (
+        _binding(effective_plan.path) != effective_plan
+        or _binding(manifest_binding.path) != manifest_binding
+    ):
+        raise OptimizationActivationBuildError(
+            "adaptive recovery output changed during replay"
+        )
+    recovery_record = {
+        "schema_version": ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION,
+        "manifest": manifest_binding.as_mapping(),
+        "contract_sha256": _text(
+            manifest.get("contract_sha256"),
+            "adaptive recovery contract_sha256",
+        ),
+        "original_manifest": original_manifest_binding.as_mapping(),
+        "original_plan": original_plan_record,
+        "effective_plan": effective_plan.as_mapping(),
+        "failed_design_hash": failed_design_hash,
+        "replacement_design_hash": replacement_design_hash,
+    }
+    return original_manifest, original_plan_record, recovery_record
+
+
 def _adaptive_manifest(
     decision_binding: FileBinding,
     decision: Mapping[str, Any],
@@ -1237,10 +1418,31 @@ def _adaptive_manifest(
         raise OptimizationActivationBuildError(
             "adaptive decision top-level case manifest binding changed"
         )
-    _, manifest = _strict_json(manifest_binding.path, "adaptive case manifest")
-    if manifest.get("schema_version") != ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION or manifest.get(
-        "mode"
-    ) != "write":
+    effective_plan_binding, effective_plan_record = _artifact_record(
+        execution_stage2.get("case_plan"),
+        "adaptive effective case plan",
+        runtime_root=runtime_root,
+    )
+    manifest_payload, manifest = _strict_json(
+        manifest_binding.path, "adaptive case manifest"
+    )
+    recovery_record: dict[str, Any] | None = None
+    recovery_original_plan: dict[str, str] | None = None
+    if manifest.get("schema_version") == ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION:
+        manifest, recovery_original_plan, recovery_record = (
+            _audit_adaptive_recovery_manifest(
+                manifest_binding,
+                manifest_payload,
+                manifest,
+                effective_plan_binding,
+                effective_plan_record,
+                runtime_root=runtime_root,
+            )
+        )
+    elif (
+        manifest.get("schema_version") != ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION
+        or manifest.get("mode") != "write"
+    ):
         raise OptimizationActivationBuildError("adaptive case manifest schema/mode changed")
     execution = _mapping(manifest.get("execution_contract"), "adaptive manifest execution")
     _expect_keys(
@@ -1266,7 +1468,12 @@ def _adaptive_manifest(
     _case_plan_binding, case_plan_record = _artifact_record(
         execution.get("case_plan"), "adaptive case plan", runtime_root=runtime_root
     )
-    if execution_stage2.get("case_plan") != case_plan_record:
+    if recovery_original_plan is not None:
+        if case_plan_record != recovery_original_plan:
+            raise OptimizationActivationBuildError(
+                "adaptive recovery original case-plan lineage changed"
+            )
+    elif execution_stage2.get("case_plan") != case_plan_record:
         raise OptimizationActivationBuildError(
             "adaptive manifest case plan differs from decision contract"
         )
@@ -1350,11 +1557,11 @@ def _adaptive_manifest(
         or any(scoring.get(key) != value for key, value in expected_scoring.items())
     ):
         raise OptimizationActivationBuildError("adaptive selection authority changed")
-    return {
+    result = {
         "batch_index": batch_index,
         "decision": decision_binding.as_mapping(),
         "case_manifest": manifest_record,
-        "case_plan": case_plan_record,
+        "case_plan": effective_plan_record,
         "failed_decision": failed_record,
         "fixed_audit_case_plan": fixed_record,
         "r2_history": history_record,
@@ -1362,6 +1569,9 @@ def _adaptive_manifest(
         "plateau_policy": history["plateau"],
         "seed_policy": dict(seed),
     }
+    if recovery_record is not None:
+        result["recovery"] = recovery_record
+    return result
 
 
 def audit_passed_decision_provenance(

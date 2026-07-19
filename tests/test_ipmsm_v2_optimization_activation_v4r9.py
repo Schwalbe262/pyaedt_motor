@@ -367,6 +367,257 @@ class OptimizationActivationBuilderTests(unittest.TestCase):
                 self.runtime,
             )
 
+    def test_adaptive_recovery_replays_publisher_before_unwrapping_lineage(self) -> None:
+        def artifact(name: str, payload: bytes) -> tuple[Path, dict[str, str]]:
+            path = self.runtime / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+            return path, builder._binding(path).as_mapping()
+
+        spec_path, spec_record = artifact("spec.json", b"{}\n")
+        original_plan, original_plan_record = artifact("original.csv", b"original\n")
+        original_manifest_path = self.runtime / "original-manifest.json"
+        original_manifest = {
+            "schema_version": builder.ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION,
+            "mode": "write",
+            "spec": spec_record,
+        }
+        original_manifest_path.write_text(json.dumps(original_manifest), encoding="utf-8")
+        original_manifest_record = builder._binding(original_manifest_path).as_mapping()
+        continuation, continuation_record = artifact("continuation.json", b"{}\n")
+        summary, summary_record = artifact("campaign/summary.json", b"{}\n")
+        campaign_decision, campaign_decision_record = artifact(
+            "campaign/decision.json", b"{}\n"
+        )
+        effective_plan, effective_plan_record = artifact("effective.csv", b"effective\n")
+        recovery_path = self.runtime / "recovery-manifest.json"
+        contract = {
+            "original": {
+                "plan": {**original_plan_record, "rows": 300, "geometry_groups": 50},
+                "manifest": original_manifest_record,
+            },
+            "continuation_decision": continuation_record,
+            "terminal_campaign": {
+                "summary": summary_record,
+                "decision": campaign_decision_record,
+            },
+            "failure": {"design_hash": "a" * 64},
+            "replacement": {"design_hash": "b" * 64},
+            "output": {
+                "plan": {**effective_plan_record, "rows": 300, "geometry_groups": 50},
+                "manifest_path": str(recovery_path),
+            },
+        }
+        recovery = {
+            "schema_version": builder.ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION,
+            "mode": "execute",
+            "status": "created",
+            "contract": contract,
+            "contract_sha256": "c" * 64,
+            "checks": {"publisher_replayed": True},
+        }
+        recovery_payload = (json.dumps(recovery, indent=2, sort_keys=True) + "\n").encode()
+        recovery_path.write_bytes(recovery_payload)
+        recovery_binding = builder._binding(recovery_path)
+        replay = SimpleNamespace(
+            manifest=recovery,
+            output_payload=effective_plan.read_bytes(),
+            snapshots=(),
+        )
+
+        with mock.patch.object(
+            builder.adaptive_recovery, "build_recovery", return_value=replay
+        ) as rebuild:
+            lineage, lineage_plan, record = builder._audit_adaptive_recovery_manifest(
+                recovery_binding,
+                recovery_payload,
+                recovery,
+                builder._binding(effective_plan),
+                effective_plan_record,
+                runtime_root=self.runtime,
+            )
+
+        self.assertEqual(lineage, original_manifest)
+        self.assertEqual(lineage_plan, original_plan_record)
+        self.assertEqual(record["manifest"], recovery_binding.as_mapping())
+        self.assertEqual(record["effective_plan"], effective_plan_record)
+        rebuild.assert_called_once_with(
+            spec_path=spec_path,
+            original_plan=original_plan,
+            original_manifest=original_manifest_path,
+            continuation_decision=continuation,
+            campaign_summary=summary,
+            campaign_decision=campaign_decision,
+            failed_design_hash="a" * 64,
+            expected_replacement_design_hash="b" * 64,
+            output=effective_plan,
+            manifest_output=recovery_path,
+            mode="execute",
+        )
+        for label, replay_value, payload in (
+            (
+                "plan drift",
+                SimpleNamespace(
+                    manifest=recovery,
+                    output_payload=b"different\n",
+                    snapshots=(),
+                ),
+                recovery_payload,
+            ),
+            (
+                "nonpublisher bytes",
+                replay,
+                recovery_payload + b" ",
+            ),
+        ):
+            with (
+                self.subTest(label=label),
+                mock.patch.object(
+                    builder.adaptive_recovery,
+                    "build_recovery",
+                    return_value=replay_value,
+                ),
+                self.assertRaisesRegex(
+                    builder.OptimizationActivationBuildError,
+                    "differ from deterministic replay",
+                ),
+            ):
+                builder._audit_adaptive_recovery_manifest(
+                    recovery_binding,
+                    payload,
+                    recovery,
+                    builder._binding(effective_plan),
+                    effective_plan_record,
+                    runtime_root=self.runtime,
+                )
+
+    def test_adaptive_manifest_keeps_original_history_but_returns_recovery_plan(self) -> None:
+        def bound(name: str, payload: bytes = b"evidence\n") -> builder.FileBinding:
+            path = self.runtime / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+            return builder._binding(path)
+
+        decision_binding = bound("recovery-decision.json")
+        effective_plan = bound("recovery-plan.csv")
+        original_plan = bound("original-plan.csv")
+        failed = bound("baseline-failed.json")
+        fixed = bound("fixed-audit.csv")
+        history = bound("history.json")
+        recovery_document = {
+            "schema_version": builder.ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION
+        }
+        recovery_payload = json.dumps(recovery_document).encode()
+        recovery_manifest = bound("recovery-manifest.json", recovery_payload)
+        seed = {
+            "stride": 100,
+            "formula": "role_seed_base + 100 * batch_index",
+            "adaptation_seed_base": 1000,
+            "calibration_seed_base": 2000,
+            "adaptation_seed": 1100,
+            "calibration_seed": 2100,
+        }
+        plateau = {
+            "stop_fea": False,
+            "action": "continue_adaptive_fea",
+            "minimum_improvement": 0.01,
+            "consecutive_batches_required": 2,
+            "completed_batches": 0,
+        }
+        execution = {
+            "batch_index": 1,
+            "case_plan": original_plan.as_mapping(),
+            "failed_decision": failed.as_mapping(),
+            "fixed_audit_case_plan": fixed.as_mapping(),
+            "plateau_policy": plateau,
+            "r2_history": history.as_mapping(),
+            "seed_policy": seed,
+        }
+        original_manifest = {
+            "schema_version": builder.ADAPTIVE_CASE_MANIFEST_SCHEMA_VERSION,
+            "mode": "write",
+            "execution_contract": execution,
+            "execution_contract_sha256": v3._canonical_sha256(execution),
+            "summary": {
+                "rows": 300,
+                "split_groups": {"train": 40, "calibration": 10, "test": 0},
+                "split_rows": {"train": 240, "calibration": 60, "test": 0},
+            },
+            "selection": {
+                "batch_index": 1,
+                "candidate_pool_geometries": 1024,
+                "fixed_audit_policy": "reuse_sealed_stage3_test_without_new_test_rows",
+                "seed_policy": seed,
+                "adaptation": {
+                    "geometry_count": 40,
+                    "candidate_pool": {"geometry_count": 1024},
+                    "scoring": {
+                        "residual_weight": 0.5,
+                        "uncertainty_weight": 0.3,
+                        "domain_distance_weight": 0.2,
+                        "diversity_weight": 0.2,
+                    },
+                },
+                "calibration": {"geometry_count": 10},
+            },
+        }
+        recovery_record = {
+            "schema_version": builder.ADAPTIVE_RECOVERY_MANIFEST_SCHEMA_VERSION,
+            "manifest": recovery_manifest.as_mapping(),
+        }
+        decision = {
+            "stage2": {
+                "case_manifest": str(recovery_manifest.path),
+                "case_manifest_sha256": recovery_manifest.sha256,
+            },
+            "execution_contract": {
+                "stage2": {
+                    "case_manifest": recovery_manifest.as_mapping(),
+                    "case_plan": effective_plan.as_mapping(),
+                }
+            },
+        }
+        loaded_history = {
+            "artifact": history.as_mapping(),
+            "plateau": plateau,
+            "records": [{"decision": failed.as_mapping()}],
+        }
+        with (
+            mock.patch.object(
+                builder,
+                "_audit_adaptive_recovery_manifest",
+                return_value=(
+                    original_manifest,
+                    original_plan.as_mapping(),
+                    recovery_record,
+                ),
+            ) as unwrap,
+            mock.patch.object(
+                builder.adaptive_generator,
+                "load_adaptive_r2_history",
+                return_value=loaded_history,
+            ),
+        ):
+            actual = builder._adaptive_manifest(
+                decision_binding,
+                decision,
+                runtime_root=self.runtime,
+            )
+
+        self.assertEqual(actual["case_manifest"], recovery_manifest.as_mapping())
+        self.assertEqual(actual["case_plan"], effective_plan.as_mapping())
+        self.assertEqual(actual["failed_decision"], failed.as_mapping())
+        self.assertEqual(actual["history_records"], loaded_history["records"])
+        self.assertEqual(actual["recovery"], recovery_record)
+        unwrap.assert_called_once_with(
+            recovery_manifest,
+            recovery_payload,
+            recovery_document,
+            effective_plan,
+            effective_plan.as_mapping(),
+            runtime_root=self.runtime,
+        )
+
     def test_absolutize_moves_workdir_but_keeps_sealed_data_paths(self) -> None:
         pipeline = self.pipeline()
         optimization = pipeline["optimization"]
@@ -963,36 +1214,18 @@ class OptimizationActivationRunnerTests(unittest.TestCase):
             runner._audit_speed_hard_disabled(contract, blocker)
 
     def test_dynamic_aedt_source_rejects_foreign_module_and_sha_drift(self) -> None:
-        expected = self.source / "module" / "aedt_attach_client.py"
-        expected.parent.mkdir()
-        expected.write_bytes(b"# exact dynamic source\n")
-        adaptive = self.source / "generate_ipmsm_v2_adaptive_batch.py"
-        adaptive.write_bytes(b"# exact adaptive source\n")
-        binding = {
-            "adaptive_batch": {
-                "path": str(adaptive),
-                "sha256": builder._file_sha256(adaptive),
-            },
-            "aedt_attach_client": {
-                "path": str(expected),
-                "sha256": builder._file_sha256(expected),
-            }
-        }
-        exact = SimpleNamespace(__file__=str(expected))
-        modules = {
-            "generate_ipmsm_v2_adaptive_batch": SimpleNamespace(__file__=str(adaptive)),
-            "module.aedt_attach_client": exact,
-        }
-        source_bindings = {
-            Path("generate_ipmsm_v2_adaptive_batch.py"): builder.FileBinding(
-                adaptive,
-                builder._file_sha256(adaptive),
-            ),
-            Path("module/aedt_attach_client.py"): builder.FileBinding(
-                expected,
-                builder._file_sha256(expected),
-            ),
-        }
+        binding: dict[str, dict[str, str]] = {}
+        modules: dict[str, object] = {}
+        source_bindings: dict[Path, builder.FileBinding] = {}
+        for name, (module_name, relative) in builder.DYNAMIC_SOURCE_MODULES.items():
+            path = self.source / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(f"# exact {name} source\n".encode())
+            source_binding = builder.FileBinding(path, builder._file_sha256(path))
+            binding[name] = source_binding.as_mapping()
+            modules[module_name] = SimpleNamespace(__file__=str(path))
+            source_bindings[relative] = source_binding
+        expected = self.source / builder.DYNAMIC_SOURCE_MODULES["aedt_attach_client"][1]
         with (
             mock.patch.object(
                 builder,
