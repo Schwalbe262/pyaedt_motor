@@ -187,6 +187,23 @@ def _bound_artifact(value: object, label: str) -> Artifact:
     return actual
 
 
+def _bound_stage3_failed_decision_proof(value: object, label: str) -> Artifact:
+    """Verify the artifact projection of the exact enriched Stage3 proof."""
+    expected_fields = {
+        "combined_artifacts",
+        "contract_sha256",
+        "fixed_audit_case_plan",
+        "path",
+        "sha256",
+        "stage2_result",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_fields:
+        raise CoordinatorError(f"{label} fields changed")
+    return _bound_artifact(
+        {"path": value.get("path"), "sha256": value.get("sha256")}, label
+    )
+
+
 def _same_artifact(actual: Artifact, expected: Artifact, label: str) -> None:
     if actual != expected:
         raise CoordinatorError(f"{label} differs from the deterministic campaign lineage")
@@ -733,7 +750,10 @@ def _audit_adaptive_pair(
     failed_gate = manifest.get("failed_gate_evidence")
     if not isinstance(failed_gate, Mapping):
         raise CoordinatorError("adaptive manifest lacks failed-gate evidence")
-    failed_decision = _bound_artifact(
+    # The Stage3 evidence proof embeds the full sealed decision object.  Verify
+    # its artifact projection here; the complete proof is reconstructed and
+    # compared byte-for-byte below before the generated plan is accepted.
+    failed_decision = _bound_stage3_failed_decision_proof(
         failed_gate.get("decision"), "adaptive failed-gate decision"
     )
     failed_audit = _bound_artifact(

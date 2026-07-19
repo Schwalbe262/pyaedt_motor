@@ -278,6 +278,37 @@ def plan_csv_bytes(plan: coordinator.PlanInfo) -> bytes:
 
 
 class CoordinateIpmsmV2AdaptiveCampaignTests(unittest.TestCase):
+    def test_failed_gate_projection_accepts_full_sealed_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = real_artifact(Path(tmp) / "decision.json", b"sealed-decision")
+            full_proof = {
+                "path": str(artifact.path),
+                "sha256": artifact.sha256,
+                "contract_sha256": "b" * 64,
+                "fixed_audit_case_plan": {"path": "C:/audit.csv", "sha256": "c" * 64},
+                "combined_artifacts": {"merged": {"sha256": "d" * 64}},
+                "stage2_result": {"path": "C:/stage2.csv", "sha256": "e" * 64},
+            }
+
+            self.assertEqual(
+                coordinator._bound_stage3_failed_decision_proof(
+                    full_proof, "adaptive failed-gate decision"
+                ),
+                artifact,
+            )
+            with self.assertRaisesRegex(
+                coordinator.CoordinatorError, "only path and sha256"
+            ):
+                coordinator._bound_artifact(
+                    full_proof, "ordinary strict artifact binding"
+                )
+            changed_shape = dict(full_proof)
+            changed_shape["unexpected"] = True
+            with self.assertRaisesRegex(coordinator.CoordinatorError, "fields changed"):
+                coordinator._bound_stage3_failed_decision_proof(
+                    changed_shape, "adaptive failed-gate decision"
+                )
+
     def test_adaptive_row_and_selection_tampering_is_rejected(self) -> None:
         plan, selection = adaptive_plan_and_selection()
         evidence = selection["adaptation"]["evidence"]
