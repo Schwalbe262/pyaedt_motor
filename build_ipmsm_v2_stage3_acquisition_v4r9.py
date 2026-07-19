@@ -111,9 +111,18 @@ def _binding(snapshot: authority.FileSnapshot) -> dict[str, str]:
     return {"path": str(snapshot.path), "sha256": snapshot.sha256}
 
 
-def _snapshot(path: Path, label: str) -> authority.FileSnapshot:
+def _snapshot(
+    path: Path,
+    label: str,
+    *,
+    require_single_link: bool = True,
+) -> authority.FileSnapshot:
     try:
-        return authority.read_single_link_snapshot(path, label)
+        return authority.read_single_link_snapshot(
+            path,
+            label,
+            require_single_link=require_single_link,
+        )
     except authority.TargetLoadAuthorityError as exc:
         raise Stage3RecoveryBuildError(str(exc)) from exc
 
@@ -159,7 +168,11 @@ def _source_provenance(
     snapshots: list[authority.FileSnapshot] = []
     for name, relative in SOURCE_RELATIVE_PATHS.items():
         path = source_root / relative
-        snapshot = _snapshot(path, f"v4r9 source {name}")
+        snapshot = _snapshot(
+            path,
+            f"v4r9 source {name}",
+            require_single_link=True,
+        )
         committed = _git(
             source_root, "show", f"{revision}:{relative.as_posix()}"
         )
@@ -173,7 +186,11 @@ def _source_provenance(
             "git_blob_sha256": _sha256(committed),
         }
         snapshots.append(snapshot)
-    executable = _snapshot(Path(sys.executable).resolve(), "v4r9 runner executable")
+    executable = _snapshot(
+        Path(sys.executable).resolve(strict=True),
+        "v4r9 runner executable",
+        require_single_link=False,
+    )
     records["runner_executable"] = _binding(executable)
     snapshots.append(executable)
     return records, tuple(snapshots)

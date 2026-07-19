@@ -265,6 +265,64 @@ class Stage3AcquisitionV4r9Tests(unittest.TestCase):
         with self.assertRaisesRegex(builder.Stage3RecoveryBuildError, "duplicate"):
             builder._set_flag(("--x", "1", "--x", "2"), "--x", "3")
 
+    def test_source_provenance_requires_single_links_except_for_exact_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source_root = Path(temporary)
+            relative = Path("bound_source.py")
+            source_path = (source_root / relative).resolve()
+            source_payload = b"# bound source\n"
+            source_path.write_bytes(source_payload)
+            revision = "f" * 40
+            executable_path = Path(sys.executable).resolve(strict=True)
+            source_snapshot = SimpleNamespace(
+                path=source_path,
+                payload=source_payload,
+                sha256="a" * 64,
+                require_single_link=True,
+            )
+            executable_snapshot = SimpleNamespace(
+                path=executable_path,
+                payload=b"bound executable",
+                sha256="b" * 64,
+                require_single_link=False,
+            )
+
+            def git_result(_root: Path, *args: str) -> bytes:
+                if args == ("rev-parse", "HEAD"):
+                    return f"{revision}\n".encode("ascii")
+                if args == ("status", "--porcelain", "--untracked-files=no"):
+                    return b""
+                if args == ("show", f"{revision}:{relative.as_posix()}"):
+                    return source_payload
+                self.fail(f"unexpected Git authority query: {args}")
+
+            with (
+                mock.patch.object(builder, "SOURCE_RELATIVE_PATHS", {"runner": relative}),
+                mock.patch.object(builder, "_git", side_effect=git_result),
+                mock.patch.object(
+                    builder.authority,
+                    "read_single_link_snapshot",
+                    side_effect=(source_snapshot, executable_snapshot),
+                ) as read_snapshot,
+            ):
+                records, snapshots = builder._source_provenance(source_root, revision)
+
+            self.assertEqual(records["runner"]["path"], str(source_path))
+            self.assertEqual(
+                records["runner_executable"],
+                {"path": str(executable_path), "sha256": "b" * 64},
+            )
+            self.assertEqual(snapshots, (source_snapshot, executable_snapshot))
+            self.assertEqual(read_snapshot.call_count, 2)
+            source_call, executable_call = read_snapshot.call_args_list
+            self.assertEqual(source_call.args, (source_path, "v4r9 source runner"))
+            self.assertIs(source_call.kwargs["require_single_link"], True)
+            self.assertEqual(
+                executable_call.args,
+                (executable_path, "v4r9 runner executable"),
+            )
+            self.assertIs(executable_call.kwargs["require_single_link"], False)
+
     def test_builder_separates_non_git_runtime_from_exact_source_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
