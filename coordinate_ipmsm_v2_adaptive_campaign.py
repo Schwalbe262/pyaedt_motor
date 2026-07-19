@@ -10,17 +10,21 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import io
 import json
 import math
 import os
 from pathlib import Path, PurePosixPath
+import socket
 import stat
 import subprocess
 import sys
 import tempfile
 from typing import Any, Mapping, Sequence
+
+import continue_ipmsm_v2_stage2 as stage2_continuation
 
 
 SCHEMA_VERSION = "ipmsm-v2-adaptive-campaign-coordinator-v1"
@@ -1050,6 +1054,80 @@ def _validate_batch_paths(args: argparse.Namespace, paths: BatchPaths) -> None:
             _is_reparse_point(path) or not path.is_file()
         ):
             raise CoordinatorError(f"adaptive result artifact is not a regular file: {path}")
+
+
+def _completed_stage1_owner_pid(latest: DecisionInfo) -> int:
+    if latest.status != "combined_r2_failed":
+        raise CoordinatorError("completed Stage1 decision is not a failed terminal gate")
+    resume_owner = latest.payload.get("resume_owner")
+    owner = resume_owner if resume_owner is not None else latest.payload.get("owner")
+    expected_mode = "resume" if resume_owner is not None else "execute"
+    expected_fields = {"hostname", "invocation_id", "mode", "pid", "started_at"}
+    if not isinstance(owner, Mapping) or set(owner) != expected_fields:
+        raise CoordinatorError("completed Stage1 decision owner fields changed")
+    if owner.get("hostname") != socket.gethostname() or owner.get("mode") != expected_mode:
+        raise CoordinatorError("completed Stage1 decision owner identity changed")
+    invocation_id = str(owner.get("invocation_id") or "")
+    if len(invocation_id) != 32 or any(
+        character not in "0123456789abcdef" for character in invocation_id
+    ):
+        raise CoordinatorError("completed Stage1 decision owner invocation ID is invalid")
+    pid = owner.get("pid")
+    if type(pid) is not int or pid <= 0:
+        raise CoordinatorError("completed Stage1 decision owner PID is invalid")
+    try:
+        started_at = datetime.fromisoformat(str(owner.get("started_at") or ""))
+    except ValueError as exc:
+        raise CoordinatorError(
+            "completed Stage1 decision owner timestamp is invalid"
+        ) from exc
+    if started_at.tzinfo is None:
+        raise CoordinatorError("completed Stage1 decision owner timestamp is naive")
+    if stage2_continuation.pid_is_running(pid):
+        raise CoordinatorError(f"completed Stage1 decision owner is still active: pid={pid}")
+    return pid
+
+
+def _audit_pid_marker(path: Path, payload: bytes, label: str) -> None:
+    if _is_reparse_point(path) or not path.is_file():
+        raise CoordinatorError(f"{label} is not a regular file: {path}")
+    try:
+        actual = path.read_bytes()
+    except OSError as exc:
+        raise CoordinatorError(f"cannot read {label} {path}: {exc}") from exc
+    if actual != payload:
+        raise CoordinatorError(f"{label} differs from the completed decision owner")
+
+
+def _publish_pid_marker(path: Path, payload: bytes, label: str) -> None:
+    if os.path.lexists(path):
+        _audit_pid_marker(path, payload, label)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(staged, path)
+        except FileExistsError:
+            _audit_pid_marker(path, payload, label)
+    finally:
+        staged.unlink(missing_ok=True)
+    _audit_pid_marker(path, payload, label)
+
+
+def _ensure_completed_stage1_pid_markers(
+    paths: BatchPaths, latest: DecisionInfo
+) -> None:
+    payload = f"{_completed_stage1_owner_pid(latest)}\n".encode("ascii")
+    _publish_pid_marker(paths.runner_pid, payload, "completed Stage1 runner PID marker")
+    _publish_pid_marker(paths.watcher_pid, payload, "completed Stage1 watcher PID marker")
 
 
 def _script(args: argparse.Namespace, name: str) -> str:
@@ -2119,6 +2197,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         commands=(continuation,),
                     ),
                 )
+            _validate_batch_paths(args, paths)
+            _ensure_completed_stage1_pid_markers(paths, latest)
             _atomic_write_state(
                 args.state_output,
                 _state(
@@ -2276,6 +2356,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             if generator_code != 0:
                 raise CoordinatorError("adaptive generator failed without an exact plateau")
             _audit_adaptive_pair(args, paths, source_artifacts, latest, fixed_audit)
+        _validate_batch_paths(args, paths)
+        _ensure_completed_stage1_pid_markers(paths, latest)
         _atomic_write_state(
             args.state_output,
             _state(

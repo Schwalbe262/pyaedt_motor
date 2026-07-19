@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -81,7 +82,17 @@ def decision_info(
     }
     return coordinator.DecisionInfo(
         artifact=fake_artifact(path),
-        payload={"status": status},
+        payload={
+            "status": status,
+            "owner": {
+                "hostname": socket.gethostname(),
+                "invocation_id": "a" * 32,
+                "mode": "execute",
+                "pid": 2_147_483_647,
+                "started_at": "2026-07-19T00:00:00+00:00",
+            },
+            "resume_owner": None,
+        },
         status=status,
         stage1_plan=fake_artifact(root / "stage1.csv"),
         stage2_plan=fake_artifact(root / "stage2.csv"),
@@ -278,6 +289,105 @@ def plan_csv_bytes(plan: coordinator.PlanInfo) -> bytes:
 
 
 class CoordinateIpmsmV2AdaptiveCampaignTests(unittest.TestCase):
+    def test_completed_stage1_pid_markers_bind_inactive_decision_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = make_args(root, execute=True)
+            paths = coordinator._batch_paths(args, 1)
+            latest = decision_info(
+                args.initial_failed_decision, "combined_r2_failed"
+            )
+            expected = b"2147483647\n"
+
+            with mock.patch.object(
+                coordinator.stage2_continuation,
+                "pid_is_running",
+                return_value=False,
+            ):
+                coordinator._ensure_completed_stage1_pid_markers(paths, latest)
+                coordinator._ensure_completed_stage1_pid_markers(paths, latest)
+
+            self.assertEqual(paths.runner_pid.read_bytes(), expected)
+            self.assertEqual(paths.watcher_pid.read_bytes(), expected)
+
+            paths.runner_pid.write_bytes(b"7\n")
+            with (
+                mock.patch.object(
+                    coordinator.stage2_continuation,
+                    "pid_is_running",
+                    return_value=False,
+                ),
+                self.assertRaisesRegex(coordinator.CoordinatorError, "differs"),
+            ):
+                coordinator._ensure_completed_stage1_pid_markers(paths, latest)
+
+    def test_active_or_foreign_completed_stage1_owner_creates_no_pid_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = make_args(root, execute=True)
+            paths = coordinator._batch_paths(args, 1)
+            latest = decision_info(
+                args.initial_failed_decision, "combined_r2_failed"
+            )
+            with (
+                mock.patch.object(
+                    coordinator.stage2_continuation,
+                    "pid_is_running",
+                    return_value=True,
+                ),
+                self.assertRaisesRegex(coordinator.CoordinatorError, "still active"),
+            ):
+                coordinator._ensure_completed_stage1_pid_markers(paths, latest)
+            self.assertFalse(paths.runner_pid.exists())
+            self.assertFalse(paths.watcher_pid.exists())
+
+            latest.payload["owner"]["hostname"] = "foreign-host"
+            with self.assertRaisesRegex(coordinator.CoordinatorError, "identity changed"):
+                coordinator._ensure_completed_stage1_pid_markers(paths, latest)
+            self.assertFalse(paths.runner_pid.exists())
+            self.assertFalse(paths.watcher_pid.exists())
+
+            complete = decision_info(args.initial_failed_decision, "complete")
+            with self.assertRaisesRegex(coordinator.CoordinatorError, "failed terminal gate"):
+                coordinator._ensure_completed_stage1_pid_markers(paths, complete)
+            self.assertFalse(paths.runner_pid.exists())
+            self.assertFalse(paths.watcher_pid.exists())
+
+    def test_completed_stage1_pid_markers_prefer_exact_resume_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = make_args(root, execute=True)
+            paths = coordinator._batch_paths(args, 1)
+            latest = decision_info(
+                args.initial_failed_decision, "combined_r2_failed"
+            )
+            latest.payload["resume_owner"] = {
+                "hostname": socket.gethostname(),
+                "invocation_id": "b" * 32,
+                "mode": "resume",
+                "pid": 2_147_483_646,
+                "started_at": "2026-07-19T01:00:00+00:00",
+            }
+
+            with mock.patch.object(
+                coordinator.stage2_continuation,
+                "pid_is_running",
+                return_value=False,
+            ):
+                coordinator._ensure_completed_stage1_pid_markers(paths, latest)
+
+            self.assertEqual(paths.runner_pid.read_bytes(), b"2147483646\n")
+            self.assertEqual(paths.watcher_pid.read_bytes(), b"2147483646\n")
+
+            bad_root = root / "bad"
+            bad_root.mkdir()
+            bad_paths = coordinator._batch_paths(make_args(bad_root, execute=True), 1)
+            latest.payload["resume_owner"]["mode"] = "execute"
+            with self.assertRaisesRegex(coordinator.CoordinatorError, "identity changed"):
+                coordinator._ensure_completed_stage1_pid_markers(bad_paths, latest)
+            self.assertFalse(bad_paths.runner_pid.exists())
+            self.assertFalse(bad_paths.watcher_pid.exists())
+
     def test_failed_gate_projection_accepts_full_sealed_decision(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             artifact = real_artifact(Path(tmp) / "decision.json", b"sealed-decision")
@@ -696,6 +806,8 @@ class CoordinateIpmsmV2AdaptiveCampaignTests(unittest.TestCase):
                     paths.adaptive_manifest.write_text("{}", encoding="utf-8")
                     paths.history.write_text("{}", encoding="utf-8")
                 elif script == "continue_ipmsm_v2_stage2.py":
+                    self.assertEqual(paths.runner_pid.read_bytes(), b"2147483647\n")
+                    self.assertEqual(paths.watcher_pid.read_bytes(), b"2147483647\n")
                     paths.decision.write_text("{}", encoding="utf-8")
                 return subprocess.CompletedProcess(argv, 0, "", "")
 
