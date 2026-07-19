@@ -4000,3 +4000,9 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 
 ## 2026-07-19 18:31:00 +09:00 - Adaptive campaign coordinator and cap300 path closed
 - Part/goal/hypothesis: make failed 1300-row gates advance safely and use the user-approved 300-way FEA capacity. Actions/result: sealed deterministic adaptive generation, strict source/history/runtime identity, reparse-safe namespaces, durable child evidence, progress-preserving telemetry, terminal closing audits, and cap300 optimization/target-load continuity while retaining Stage3 cap50 provenance. Metrics/next: coordinator integration102/102, cap300 core146/146, target-load core80/80, compile and focused Ruff pass; two independent reviews found no P0-P2. Replacement tasks63440-63445 remain running; after authoritative completion, set validated/max/desired300 and route the fixed gate to adaptive300 or NSGA-II.
+
+## 2026-07-19 19:38:00 +09:00 - Stage3 completion consumer compatibility closed
+- Part/goal/hypothesis: consume the authoritative v4r10 300-row completion without mutating its old185 source authority; a successor consumer can delegate live verification to the sealed interpreter and bind its own clean Git provenance.
+- Actions/result: added strict modern contract raw/canonical handling, isolated sealed completion verification, completed-output-only freshness adaptation, legacy compatibility, successor ancestry/blob checks, and tamper regressions; runtime/tasks remained unchanged.
+- Metrics: Stage3 completion300/300 and50 groups; live audit history315/success300/writes0 in380.1s; focused43/43 and integrated107/107 pass, Ruff/compile/diff-check pass; post-fix independent review P0=P1=P2=0.
+- Failure/next: the first audit found the old verifier's fresh-output check and the bounded adapter corrected only that check; commit/push, clean-clone dry-run, then execute the1300-row gate at cap50 before cap300 transition.

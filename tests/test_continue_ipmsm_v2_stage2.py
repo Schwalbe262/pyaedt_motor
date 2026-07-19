@@ -437,6 +437,234 @@ def passing_combined_gate(paths: dict) -> continuation.GateResult:
 
 
 class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
+    def test_v4r10_adapter_binds_raw_canonical_and_sealed_no_write_audit(
+        self,
+    ) -> None:
+        import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+
+        frozen_unsigned = {
+            "schema_version": acquisition.contract_builder.CONTRACT_SCHEMA_VERSION,
+            "recovery": {"fixture": "v4r10"},
+        }
+        frozen_logical = acquisition.authority.canonical_sha256(frozen_unsigned)
+        self.assertEqual(
+            frozen_logical,
+            "1609943a6926603ffff98830fa3af0306d2f628805d16d36bd89b45f42cf03f6",
+        )
+        frozen_document = {
+            **frozen_unsigned,
+            "contract_sha256": frozen_logical,
+        }
+        self.assertEqual(
+            continuation.hashlib.sha256(
+                acquisition.authority.canonical_json_bytes(frozen_document)
+            ).hexdigest(),
+            "62af5e4112b457383f3ffc90a55475238cdc695c9827b1528eacfef54e4b3324",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_root = root / "runtime"
+            source_root = root / "sealed-source"
+            runtime_root.mkdir()
+            source_root.mkdir()
+            runner = source_root / "continue_ipmsm_v2_stage3_acquisition_v4r9.py"
+            stage2 = source_root / "continue_ipmsm_v2_stage2.py"
+            runner.write_bytes(b"# sealed runner\n")
+            stage2.write_bytes(b"# sealed stage2\n")
+            completion_path = runtime_root / "completion.json"
+
+            def committed(path: Path, relative: str) -> dict[str, str]:
+                sha256 = continuation._sha256(path)
+                return {
+                    "path": str(path.resolve()),
+                    "sha256": sha256,
+                    "repository_path": relative,
+                    "git_blob_sha256": sha256,
+                }
+
+            executable = Path(continuation.sys.executable).resolve()
+            recovery = {
+                "runtime_root": str(runtime_root.resolve()),
+                "source_root": str(source_root.resolve()),
+                "repository": {
+                    "source_root": str(source_root.resolve()),
+                    "revision": "a" * 40,
+                    "sources": {
+                        "runner": committed(runner, runner.name),
+                        "stage2_continuation": committed(stage2, stage2.name),
+                        "runner_executable": continuation._artifact_contract(
+                            executable
+                        ),
+                    },
+                },
+                "execution": {
+                    "project": "PYAEDT_MOTOR_IPMSM_V2",
+                    "project_active_cap": 50,
+                    "task_prefix": "ipmsm-v2-foundation-s2",
+                    "scheduler_url": "http://127.0.0.1:28080",
+                },
+                "outputs": {"completion": str(completion_path.resolve())},
+            }
+            unsigned = {
+                "schema_version": acquisition.contract_builder.CONTRACT_SCHEMA_VERSION,
+                "recovery": recovery,
+            }
+            logical_sha256 = acquisition.authority.canonical_sha256(unsigned)
+            contract_path = runtime_root / "contract.json"
+            contract_path.write_bytes(
+                acquisition.authority.canonical_json_bytes(
+                    {**unsigned, "contract_sha256": logical_sha256}
+                )
+            )
+            binding = {
+                "path": str(contract_path.resolve()),
+                "raw_sha256": continuation._sha256(contract_path),
+                "contract_sha256": logical_sha256,
+            }
+            adapter = continuation._v4r10_adapter_authority(
+                binding, acquisition
+            )
+            self.assertEqual(adapter["repository_revision"], "a" * 40)
+            self.assertEqual(
+                adapter["repository_sources"]["runner"]["path"],
+                str(runner.resolve()),
+            )
+            self.assertNotIn("executable", adapter)
+            self.assertIsNone(
+                continuation._v4r10_adapter_authority(
+                    continuation._artifact_contract(contract_path), acquisition
+                )
+            )
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError, "bytes changed"
+            ):
+                continuation._v4r10_adapter_authority(
+                    {**binding, "raw_sha256": "0" * 64}, acquisition
+                )
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError, "canonical authority changed"
+            ):
+                continuation._v4r10_adapter_authority(
+                    {**binding, "contract_sha256": "0" * 64}, acquisition
+                )
+
+            report = {
+                "action": "verified_existing_completion",
+                "history_tasks": 315,
+                "mode": "execute",
+                "plan_kind": "replacement",
+                "schema_version": acquisition.RUN_REPORT_SCHEMA_VERSION,
+                "status": "acquisition_complete",
+                "successful_results": 300,
+                "writes_performed": 0,
+            }
+            payload = {
+                "context": {
+                    "completion": str(adapter["completion"]),
+                    "contract_sha256": adapter["contract_sha256"],
+                    "project": adapter["scheduler"]["project"],
+                    "project_active_cap": adapter["scheduler"][
+                        "project_active_cap"
+                    ],
+                    "repository_revision": adapter["repository_revision"],
+                    "scheduler_url": adapter["scheduler"]["url"],
+                    "source_root": str(adapter["source_root"]),
+                    "task_prefix": adapter["scheduler"]["task_prefix"],
+                },
+                "report": report,
+            }
+            completed = continuation.subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=json.dumps(payload, separators=(",", ":")).encode(),
+                stderr=b"",
+            )
+            with mock.patch.object(
+                continuation.subprocess, "run", return_value=completed
+            ) as run:
+                self.assertEqual(
+                    continuation._audit_v4r10_completion(
+                        {
+                            **adapter,
+                            "executable": executable,
+                        }
+                    ),
+                    report,
+                )
+            command = run.call_args.args[0]
+            self.assertEqual(command[1:3], ["-I", "-B"])
+            self.assertIn("_verify_existing_completion(context)", command[4])
+            self.assertNotIn("execute(context)", command[4])
+            self.assertIn("candidate = copy.copy(args)", command[4])
+            self.assertIn("original_validate(candidate)", command[4])
+            self.assertIn(
+                "acquisition.campaign.collector.validate_args = original_validate",
+                command[4],
+            )
+            self.assertIn("if os.path.lexists(sentinel)", command[4])
+
+    def test_successor_source_rejects_unprovable_git_status(self) -> None:
+        import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+
+        revision = continuation.subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=("a" * 40 + "\n").encode(), stderr=b""
+        )
+        failed_status = continuation.subprocess.CompletedProcess(
+            args=[], returncode=128, stdout=b"", stderr=b"git status failed"
+        )
+        with mock.patch.object(
+            continuation.subprocess,
+            "run",
+            side_effect=[revision, failed_status],
+        ):
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError,
+                "Git status cannot be proven",
+            ):
+                continuation._successor_runner_source(acquisition, "a" * 40)
+
+    def test_forged_sealed_source_closure_never_starts_subprocess(self) -> None:
+        import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+
+        forged_authority = {
+            "source_root": Path("C:/forged-sealed-source"),
+            "repository_revision": "a" * 40,
+            "repository_sources": {
+                "runner_executable": {
+                    "path": "C:/forged/python.exe",
+                    "sha256": "b" * 64,
+                }
+            },
+        }
+        successor = {
+            "acquisition": {"path": "C:/trusted/acquisition.py", "sha256": "c" * 64},
+            "continuation": {"path": "C:/trusted/continuation.py", "sha256": "d" * 64},
+            "repository_revision": "e" * 40,
+            "source_root": "C:/trusted",
+        }
+        with mock.patch.object(
+            continuation,
+            "_successor_runner_source",
+            return_value=successor,
+        ):
+            with mock.patch.object(
+                acquisition.contract_builder,
+                "_source_provenance",
+                return_value=({"runner_executable": {"path": "C:/real/python.exe"}}, ()),
+            ):
+                with mock.patch.object(
+                    continuation.subprocess, "run"
+                ) as sealed_process:
+                    with self.assertRaisesRegex(
+                        continuation.ContinuationGateError,
+                        "live source closure differs",
+                    ):
+                        continuation._audit_trusted_v4r10_completion(
+                            acquisition, forged_authority
+                        )
+        sealed_process.assert_not_called()
+
     def test_windows_pid_probe_uses_nondestructive_winapi_for_active_pid(self) -> None:
         kernel32 = mock.Mock()
         kernel32.OpenProcess.return_value = 123

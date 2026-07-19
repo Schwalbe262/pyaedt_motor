@@ -19,6 +19,7 @@ import math
 import os
 from pathlib import Path
 import socket
+import subprocess
 import sys
 import tempfile
 from typing import Any, Iterable, Mapping
@@ -1417,6 +1418,319 @@ def _bound_artifact_record(value: object, label: str) -> dict[str, str]:
     return record
 
 
+def _v4r10_adapter_authority(
+    value: object,
+    acquisition: Any,
+) -> dict[str, Any] | None:
+    if isinstance(value, Mapping) and set(value) == {"path", "sha256"}:
+        _bound_artifact_record(value, "precollected acquisition contract")
+        return None
+    expected_fields = {"path", "raw_sha256", "contract_sha256"}
+    if not isinstance(value, Mapping) or set(value) != expected_fields:
+        raise ContinuationGateError(
+            "precollected acquisition contract fields changed"
+        )
+    path = Path(str(value["path"]))
+    raw_sha256 = str(value["raw_sha256"])
+    contract_sha256 = str(value["contract_sha256"])
+    hex_digits = frozenset("0123456789abcdef")
+    if (
+        not path.is_absolute()
+        or len(raw_sha256) != 64
+        or not set(raw_sha256) <= hex_digits
+        or len(contract_sha256) != 64
+        or not set(contract_sha256) <= hex_digits
+    ):
+        raise ContinuationGateError(
+            "precollected acquisition contract hashes are invalid"
+        )
+    raw_record = _bound_artifact_record(
+        {"path": str(path), "sha256": raw_sha256},
+        "precollected acquisition contract",
+    )
+    try:
+        snapshot, document = acquisition.authority._strict_json_snapshot(
+            raw_record["path"], "precollected acquisition contract"
+        )
+    except Exception as exc:
+        raise ContinuationGateError(
+            f"precollected acquisition contract cannot be inspected: {exc}"
+        ) from exc
+    if (
+        snapshot.sha256 != raw_sha256
+        or set(document) != {"schema_version", "contract_sha256", "recovery"}
+        or document.get("schema_version")
+        != acquisition.contract_builder.CONTRACT_SCHEMA_VERSION
+    ):
+        raise ContinuationGateError(
+            "precollected acquisition contract raw authority changed"
+        )
+    unsigned = {
+        "schema_version": document["schema_version"],
+        "recovery": document["recovery"],
+    }
+    logical_sha256 = acquisition.authority.canonical_sha256(unsigned)
+    if document.get("contract_sha256") != logical_sha256 or logical_sha256 != contract_sha256:
+        raise ContinuationGateError(
+            "precollected acquisition contract canonical authority changed"
+        )
+
+    def required_mapping(parent: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+        item = parent.get(key)
+        if not isinstance(item, Mapping):
+            raise ContinuationGateError(
+                f"precollected acquisition contract {key} binding disappeared"
+            )
+        return item
+
+    recovery = required_mapping(document, "recovery")
+    repository = required_mapping(recovery, "repository")
+    sources = required_mapping(repository, "sources")
+    execution = required_mapping(recovery, "execution")
+    outputs = required_mapping(recovery, "outputs")
+    source_root = Path(str(recovery.get("source_root") or "")).resolve(strict=True)
+    runtime_root = Path(str(recovery.get("runtime_root") or "")).resolve(strict=True)
+    if (
+        source_root == runtime_root
+        or Path(str(repository.get("source_root") or "")).resolve(strict=False)
+        != source_root
+    ):
+        raise ContinuationGateError(
+            "precollected acquisition source authority changed"
+        )
+    revision = str(repository.get("revision") or "")
+    if len(revision) != 40 or not set(revision) <= hex_digits:
+        raise ContinuationGateError(
+            "precollected acquisition repository revision is invalid"
+        )
+
+    return {
+        "contract_path": Path(raw_record["path"]),
+        "contract_sha256": logical_sha256,
+        "runtime_root": runtime_root,
+        "source_root": source_root,
+        "repository_revision": revision,
+        "repository_sources": dict(sources),
+        "completion": Path(str(outputs.get("completion") or "")).resolve(
+            strict=False
+        ),
+        "scheduler": {
+            "project": execution.get("project"),
+            "project_active_cap": execution.get("project_active_cap"),
+            "task_prefix": execution.get("task_prefix"),
+            "url": execution.get("scheduler_url"),
+        },
+    }
+
+
+_SEALED_COMPLETION_AUDIT = """\
+import copy, json, os, sys
+from pathlib import Path
+source = Path(sys.argv[1]).resolve(strict=True)
+sys.path.insert(0, str(source))
+import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+context = acquisition.load_contract(Path(sys.argv[2]))
+sealed_output = context.outputs["campaign_output_dir"].resolve(strict=True)
+original_validate = acquisition.campaign.collector.validate_args
+def validate_completed(args):
+    output = Path(args.output_dir)
+    try:
+        observed = output.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("completed collector output directory is unavailable") from exc
+    if observed != sealed_output or not output.is_dir():
+        raise RuntimeError("completed collector output differs from sealed authority")
+    sentinel = output.parent / (output.name + ".v4r10-completed-validation-sentinel")
+    if os.path.lexists(sentinel):
+        raise RuntimeError("completed collector validation sentinel already exists")
+    candidate = copy.copy(args)
+    candidate.output_dir = sentinel
+    original_validate(candidate)
+    if os.path.lexists(sentinel):
+        raise RuntimeError("collector validation unexpectedly created its sentinel")
+acquisition.campaign.collector.validate_args = validate_completed
+try:
+    report = acquisition._verify_existing_completion(context)
+finally:
+    acquisition.campaign.collector.validate_args = original_validate
+print(json.dumps({"context": {
+    "completion": str(context.outputs["completion"]),
+    "contract_sha256": context.contract_sha256,
+    "project": context.project,
+    "project_active_cap": context.project_active_cap,
+    "repository_revision": context.repository_revision,
+    "scheduler_url": context.scheduler_url,
+    "source_root": str(context.source_root),
+    "task_prefix": context.task_prefix,
+}, "report": report}, sort_keys=True, separators=(",", ":")))
+"""
+
+
+def _audit_v4r10_completion(authority: Mapping[str, Any]) -> dict[str, Any]:
+    command = [
+        str(authority["executable"]),
+        "-I",
+        "-B",
+        "-c",
+        _SEALED_COMPLETION_AUDIT,
+        str(authority["source_root"]),
+        str(authority["contract_path"]),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=authority["runtime_root"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=600.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ContinuationGateError(
+            f"sealed acquisition completion audit could not run: {exc}"
+        ) from exc
+    if completed.returncode != 0 or completed.stderr:
+        detail = (completed.stderr or completed.stdout).decode(
+            "utf-8", errors="replace"
+        )[:400]
+        raise ContinuationGateError(
+            "sealed acquisition completion audit failed: "
+            f"returncode={completed.returncode} detail={detail}"
+        )
+    try:
+        payload = json.loads(completed.stdout.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ContinuationGateError(
+            f"sealed acquisition completion audit returned invalid JSON: {exc}"
+        ) from exc
+    expected_context = {
+        "completion": str(authority["completion"]),
+        "contract_sha256": authority["contract_sha256"],
+        "project": authority["scheduler"]["project"],
+        "project_active_cap": authority["scheduler"]["project_active_cap"],
+        "repository_revision": authority["repository_revision"],
+        "scheduler_url": authority["scheduler"]["url"],
+        "source_root": str(authority["source_root"]),
+        "task_prefix": authority["scheduler"]["task_prefix"],
+    }
+    if (
+        not isinstance(payload, Mapping)
+        or set(payload) != {"context", "report"}
+        or payload.get("context") != expected_context
+        or not isinstance(payload.get("report"), Mapping)
+    ):
+        raise ContinuationGateError(
+            "sealed acquisition completion audit authority changed"
+        )
+    return dict(payload["report"])
+
+
+def _successor_runner_source(
+    acquisition: Any,
+    sealed_revision: str,
+) -> dict[str, Any]:
+    source_root = Path(__file__).resolve(strict=True).parent
+    acquisition_path = Path(acquisition.__file__).resolve(strict=True)
+    if acquisition_path.parent != source_root:
+        raise ContinuationGateError(
+            "successor acquisition adapter is not co-located with the continuation"
+        )
+
+    def git(*arguments: str) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            ["git", "-C", str(source_root), *arguments],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    revision_result = git("rev-parse", "HEAD")
+    revision = revision_result.stdout.decode("ascii", errors="replace").strip().lower()
+    if revision_result.returncode != 0 or len(revision) != 40:
+        raise ContinuationGateError("successor Git revision cannot be proven")
+    status_result = git("status", "--porcelain", "--untracked-files=no")
+    if status_result.returncode != 0:
+        raise ContinuationGateError("successor Git status cannot be proven")
+    if status_result.stdout.strip():
+        raise ContinuationGateError("successor Git source has tracked changes")
+    if git("merge-base", "--is-ancestor", sealed_revision, revision).returncode != 0:
+        raise ContinuationGateError(
+            "successor Git revision does not descend from the sealed acquisition"
+        )
+    records: dict[str, dict[str, str]] = {}
+    for name, path in {
+        "acquisition": acquisition_path,
+        "continuation": Path(__file__).resolve(strict=True),
+    }.items():
+        relative = path.relative_to(source_root).as_posix()
+        committed = git("show", f"{revision}:{relative}")
+        if committed.returncode != 0 or committed.stdout != path.read_bytes():
+            raise ContinuationGateError(
+                f"successor {name} source differs from revision {revision}"
+            )
+        records[name] = _artifact_contract(path)
+    return {
+        **records,
+        "repository_revision": revision,
+        "source_root": str(source_root),
+    }
+
+
+def _trusted_sealed_source_closure(
+    acquisition: Any,
+    authority: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        live_sources, snapshots = acquisition.contract_builder._source_provenance(
+            authority["source_root"], authority["repository_revision"]
+        )
+    except Exception as exc:
+        raise ContinuationGateError(
+            f"sealed acquisition source closure cannot be proven: {exc}"
+        ) from exc
+    if live_sources != authority.get("repository_sources"):
+        raise ContinuationGateError(
+            "sealed acquisition live source closure differs from its contract"
+        )
+    try:
+        trusted = {
+            **dict(authority),
+            "runner_path": Path(live_sources["runner"]["path"]),
+            "sealed_continuation": Path(
+                live_sources["stage2_continuation"]["path"]
+            ),
+            "executable": Path(live_sources["runner_executable"]["path"]),
+            "source_snapshots": tuple(snapshots),
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ContinuationGateError(
+            f"sealed acquisition trusted source records are incomplete: {exc}"
+        ) from exc
+    return trusted
+
+
+def _audit_trusted_v4r10_completion(
+    acquisition: Any,
+    authority: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    successor = _successor_runner_source(
+        acquisition, str(authority["repository_revision"])
+    )
+    trusted = _trusted_sealed_source_closure(acquisition, authority)
+    try:
+        for snapshot in trusted["source_snapshots"]:
+            acquisition.authority.assert_snapshot_unchanged(
+                snapshot, snapshot.path.name
+            )
+    except Exception as exc:
+        raise ContinuationGateError(
+            f"sealed acquisition source changed before execution: {exc}"
+        ) from exc
+    report = _audit_v4r10_completion(trusted)
+    return report, successor, trusted
+
+
 def _quick_validate_precollected_stage2_contract(
     args: argparse.Namespace,
     contract: Mapping[str, Any],
@@ -1469,38 +1783,70 @@ def _quick_validate_precollected_stage2_contract(
         "continue_ipmsm_v2_stage3_acquisition_v4r9"
     )
 
-    source_root = Path(str(runner_source.get("source_root") or ""))
     current_continuation = Path(__file__).resolve(strict=True)
     current_acquisition = Path(acquisition.__file__).resolve(strict=True)
-    if (
-        not source_root.is_absolute()
-        or current_continuation != source_root / "continue_ipmsm_v2_stage2.py"
-        or current_acquisition
-        != source_root / "continue_ipmsm_v2_stage3_acquisition_v4r9.py"
-    ):
-        raise ContinuationGateError(
-            "precollected Stage2 runner modules moved outside the authoritative source root"
+    adapter = _v4r10_adapter_authority(completion["contract"], acquisition)
+    if adapter is None:
+        source_root = Path(str(runner_source.get("source_root") or ""))
+        if (
+            not source_root.is_absolute()
+            or current_continuation != source_root / "continue_ipmsm_v2_stage2.py"
+            or current_acquisition
+            != source_root / "continue_ipmsm_v2_stage3_acquisition_v4r9.py"
+            or runner_source.get("repository_revision")
+            != contract.get("repository_revision")
+        ):
+            raise ContinuationGateError(
+                "precollected Stage2 runner modules moved outside the authoritative source root"
+            )
+        expected_sources = {
+            "continuation": current_continuation,
+            "acquisition": current_acquisition,
+        }
+    else:
+        expected_fields = {
+            "mode",
+            "sealed_acquisition",
+            "sealed_continuation",
+            "sealed_repository_revision",
+            "sealed_source_root",
+            "successor_acquisition",
+            "successor_continuation",
+            "successor_repository_revision",
+            "successor_source_root",
+        }
+        if set(runner_source) != expected_fields or runner_source.get(
+            "mode"
+        ) != "v4r10_sealed_successor_v1":
+            raise ContinuationGateError(
+                "precollected successor runner source fields changed"
+            )
+        if (
+            runner_source["sealed_repository_revision"]
+            != contract.get("repository_revision")
+            or Path(runner_source["sealed_source_root"]) != adapter["source_root"]
+            or Path(runner_source["successor_source_root"])
+            != current_continuation.parent
+        ):
+            raise ContinuationGateError(
+                "precollected successor repository provenance changed"
+            )
+        expected_sources = {
+            "sealed_acquisition": adapter["source_root"]
+            / "continue_ipmsm_v2_stage3_acquisition_v4r9.py",
+            "sealed_continuation": adapter["source_root"]
+            / "continue_ipmsm_v2_stage2.py",
+            "successor_acquisition": current_acquisition,
+            "successor_continuation": current_continuation,
+        }
+    for name, expected_path in expected_sources.items():
+        record = _bound_artifact_record(
+            runner_source.get(name), f"precollected {name} runner"
         )
-    continuation_record = _bound_artifact_record(
-        runner_source.get("continuation"), "precollected continuation runner"
-    )
-    acquisition_record = _bound_artifact_record(
-        runner_source.get("acquisition"), "precollected acquisition runner"
-    )
-    if (
-        Path(continuation_record["path"]) != current_continuation
-        or Path(acquisition_record["path"]) != current_acquisition
-    ):
-        raise ContinuationGateError(
-            "precollected Stage2 runner module paths changed"
-        )
-    if runner_source.get("repository_revision") != contract.get(
-        "repository_revision"
-    ):
-        raise ContinuationGateError(
-            "precollected Stage2 runner repository revision binding changed"
-        )
-    _bound_artifact_record(completion["contract"], "precollected acquisition contract")
+        if Path(record["path"]) != expected_path:
+            raise ContinuationGateError(
+                f"precollected {name} runner path changed"
+            )
     effective = completion["effective_plan"]
     result = completion["result"]
     _bound_artifact_record(
@@ -1550,29 +1896,50 @@ def _precollected_stage2_contract(
             raise ContinuationGateError(
                 "precollected Stage2 completion is not an authoritative v4r9 completion"
             )
-        contract_record = _bound_artifact_record(
-            completion.get("contract"), "precollected acquisition contract"
-        )
-        context = acquisition.load_contract(contract_record["path"])
-        if (
-            Path(context.outputs["completion"]).resolve(strict=False)
-            != completion_path.resolve(strict=False)
-        ):
-            raise ContinuationGateError(
-                "precollected completion path differs from its acquisition contract"
-            )
         current_continuation = Path(__file__).resolve(strict=True)
         current_acquisition = Path(acquisition.__file__).resolve(strict=True)
-        authoritative_source_root = context.source_root.resolve(strict=True)
-        if (
-            current_continuation
-            != authoritative_source_root / "continue_ipmsm_v2_stage2.py"
-            or current_acquisition
-            != authoritative_source_root
-            / "continue_ipmsm_v2_stage3_acquisition_v4r9.py"
-        ):
+        adapter = _v4r10_adapter_authority(
+            completion.get("contract"), acquisition
+        )
+        if adapter is None:
+            contract_record = _bound_artifact_record(
+                completion.get("contract"), "precollected acquisition contract"
+            )
+            context = acquisition.load_contract(contract_record["path"])
+            authoritative_completion = Path(context.outputs["completion"])
+            authoritative_scheduler = {
+                "project": context.project,
+                "project_active_cap": context.project_active_cap,
+                "task_prefix": context.task_prefix,
+                "url": context.scheduler_url,
+            }
+            authoritative_source_root = context.source_root.resolve(strict=True)
+            if (
+                current_continuation
+                != authoritative_source_root / "continue_ipmsm_v2_stage2.py"
+                or current_acquisition
+                != authoritative_source_root
+                / "continue_ipmsm_v2_stage3_acquisition_v4r9.py"
+            ):
+                raise ContinuationGateError(
+                    "precollected Stage2 runner modules are outside the exact source root"
+                )
+            repository_revision = context.repository_revision
+            runner_source = {
+                "acquisition": _artifact_contract(current_acquisition),
+                "continuation": _artifact_contract(current_continuation),
+                "repository_revision": repository_revision,
+                "source_root": str(authoritative_source_root),
+            }
+        else:
+            authoritative_completion = adapter["completion"]
+            authoritative_scheduler = adapter["scheduler"]
+            repository_revision = adapter["repository_revision"]
+        if authoritative_completion.resolve(
+            strict=False
+        ) != completion_path.resolve(strict=False):
             raise ContinuationGateError(
-                "precollected Stage2 runner modules are outside the exact source root"
+                "precollected completion path differs from its acquisition contract"
             )
         argument_scheduler = {
             "project": str(args.project),
@@ -1580,17 +1947,33 @@ def _precollected_stage2_contract(
             "task_prefix": str(args.stage2_task_prefix),
             "url": str(args.scheduler_url),
         }
-        authoritative_scheduler = {
-            "project": context.project,
-            "project_active_cap": context.project_active_cap,
-            "task_prefix": context.task_prefix,
-            "url": context.scheduler_url,
-        }
         if argument_scheduler != authoritative_scheduler:
             raise ContinuationGateError(
                 "continuation scheduler identity differs from precollected acquisition"
             )
-        live_report = acquisition._verify_existing_completion(context)
+        if adapter is None:
+            live_report = acquisition._verify_existing_completion(context)
+        else:
+            live_report, successor, trusted_adapter = (
+                _audit_trusted_v4r10_completion(acquisition, adapter)
+            )
+            runner_source = {
+                "mode": "v4r10_sealed_successor_v1",
+                "sealed_acquisition": _artifact_contract(
+                    trusted_adapter["runner_path"]
+                ),
+                "sealed_continuation": _artifact_contract(
+                    trusted_adapter["sealed_continuation"]
+                ),
+                "sealed_repository_revision": repository_revision,
+                "sealed_source_root": str(adapter["source_root"]),
+                "successor_acquisition": successor["acquisition"],
+                "successor_continuation": successor["continuation"],
+                "successor_repository_revision": successor[
+                    "repository_revision"
+                ],
+                "successor_source_root": successor["source_root"],
+            }
     except ContinuationGateError:
         raise
     except Exception as exc:
@@ -1729,12 +2112,7 @@ def _precollected_stage2_contract(
         ),
         "repository_revision": verified.get("repository_revision"),
         "result": dict(result),
-        "runner_source": {
-            "acquisition": _artifact_contract(current_acquisition),
-            "continuation": _artifact_contract(current_continuation),
-            "repository_revision": context.repository_revision,
-            "source_root": str(authoritative_source_root),
-        },
+        "runner_source": runner_source,
         "scheduler": dict(scheduler),
         "schema_version": verified.get("schema_version"),
         "status": verified.get("status"),
