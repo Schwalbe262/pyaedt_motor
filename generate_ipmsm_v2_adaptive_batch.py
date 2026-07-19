@@ -9,13 +9,14 @@ is intentionally absent and must be supplied separately to training through
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import tempfile
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from atomic_publish import (
     PROOF_SCHEMA_VERSION,
@@ -42,6 +43,14 @@ DEFAULT_CALIBRATION_SEED_BASE = foundation.STAGE3_CALIBRATION_SEED
 DEFAULT_CANDIDATE_POOL_GEOMETRIES = foundation.STAGE3_CANDIDATE_POOL_GEOMETRIES
 MIN_PRIMARY_R2_IMPROVEMENT = 0.01
 PLATEAU_CONSECUTIVE_BATCHES = 2
+
+
+@dataclass(frozen=True)
+class AdaptiveR2PredecessorAudit:
+    adaptive_evidence: dict[str, Any]
+    payload: bytes
+    predecessor_proof: Path
+    snapshots: tuple[tuple[str, dict[str, str]], ...]
 
 
 def adaptive_batch_seed(base_seed: int, batch_index: int) -> int:
@@ -124,22 +133,12 @@ def _failed_decision_r2_record(path: Path, label: str) -> tuple[dict[str, str], 
     }, min(values)
 
 
-def _initial_r2_history_bytes(failed_decision: Path) -> bytes:
-    decision, minimum = _failed_decision_r2_record(
-        failed_decision.resolve(strict=False),
-        "initial adaptive failed decision",
-    )
+def _r2_history_bytes(records: Sequence[Mapping[str, Any]]) -> bytes:
     return (
         json.dumps(
             {
                 "schema_version": R2_HISTORY_SCHEMA_VERSION,
-                "records": [
-                    {
-                        "batch_index": 0,
-                        "decision": decision,
-                        "min_primary_r2": minimum,
-                    }
-                ],
+                "records": list(records),
             },
             ensure_ascii=False,
             allow_nan=False,
@@ -148,6 +147,22 @@ def _initial_r2_history_bytes(failed_decision: Path) -> bytes:
         )
         + "\n"
     ).encode("utf-8")
+
+
+def _initial_r2_history_bytes(failed_decision: Path) -> bytes:
+    decision, minimum = _failed_decision_r2_record(
+        failed_decision.resolve(strict=False),
+        "initial adaptive failed decision",
+    )
+    return _r2_history_bytes(
+        [
+            {
+                "batch_index": 0,
+                "decision": decision,
+                "min_primary_r2": minimum,
+            }
+        ]
+    )
 
 
 def _r2_history_publish_proof_path(path: Path) -> Path:
@@ -340,23 +355,38 @@ def _recover_absent_r2_history_publication(
         )
 
 
-def initialize_adaptive_r2_history(
-    path: Path,
+def _load_and_finally_audit_r2_history(
+    output: Path,
     *,
     failed_decision: Path,
+    batch_index: int,
+    final_input_audit: Callable[[], None] | None,
 ) -> dict[str, Any]:
-    """Publish or audit the canonical baseline history for adaptive batch one.
+    if final_input_audit is not None:
+        final_input_audit()
+    loaded = load_adaptive_r2_history(
+        output,
+        failed_decision=failed_decision,
+        batch_index=batch_index,
+    )
+    if final_input_audit is not None:
+        final_input_audit()
+    return loaded
 
-    The history is an independent resumable checkpoint.  Once published, it
-    intentionally remains valid if later adaptive-plan validation fails; an
-    exact rerun audits and reuses the same bytes.
-    """
+
+def _publish_or_audit_adaptive_r2_history(
+    path: Path,
+    *,
+    payload: bytes,
+    failed_decision: Path,
+    batch_index: int,
+    existing_mismatch: str,
+    final_input_audit: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """Publish immutable canonical history while retaining proof through final audit."""
 
     output = path.resolve(strict=False)
     decision = failed_decision.resolve(strict=False)
-    if output == decision:
-        raise ValueError("adaptive R2 history must differ from the failed decision")
-    payload = _initial_r2_history_bytes(decision)
     proof = _r2_history_publish_proof_path(output)
     if os.path.lexists(proof):
         if os.path.lexists(output):
@@ -380,6 +410,20 @@ def initialize_adaptive_r2_history(
                 require_destination=True,
                 require_source=False,
             )
+            try:
+                loaded = _load_and_finally_audit_r2_history(
+                    output,
+                    failed_decision=decision,
+                    batch_index=batch_index,
+                    final_input_audit=final_input_audit,
+                )
+            except BaseException as exc:
+                if not rollback_owned_output(receipt):
+                    raise RuntimeError(
+                        "adaptive R2 history audit failed and rollback was unsafe"
+                    ) from exc
+                cleanup_publish_receipt(receipt)
+                raise
             _cleanup_verified_r2_history_publication(receipt, payload)
             if (
                 output.is_symlink()
@@ -389,11 +433,7 @@ def initialize_adaptive_r2_history(
                 raise RuntimeError(
                     "adaptive R2 history changed during proof cleanup"
                 )
-            return load_adaptive_r2_history(
-                output,
-                failed_decision=decision,
-                batch_index=1,
-            )
+            return loaded
         receipt = _r2_history_proof_receipt(
             output,
             proof,
@@ -409,13 +449,12 @@ def initialize_adaptive_r2_history(
         except OSError as exc:
             raise ValueError(f"cannot audit existing adaptive R2 history: {exc}") from exc
         if existing != payload:
-            raise ValueError(
-                "existing adaptive R2 history does not exactly match the failed decision"
-            )
-        return load_adaptive_r2_history(
+            raise ValueError(existing_mismatch)
+        return _load_and_finally_audit_r2_history(
             output,
             failed_decision=decision,
-            batch_index=1,
+            batch_index=batch_index,
+            final_input_audit=final_input_audit,
         )
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -436,10 +475,11 @@ def initialize_adaptive_r2_history(
         receipt = publish_no_replace(staged, output, proof_path=proof)
         if output.read_bytes() != payload:
             raise RuntimeError("published adaptive R2 history bytes changed")
-        loaded = load_adaptive_r2_history(
+        loaded = _load_and_finally_audit_r2_history(
             output,
             failed_decision=decision,
-            batch_index=1,
+            batch_index=batch_index,
+            final_input_audit=final_input_audit,
         )
         audit_complete = True
     except BaseException as exc:
@@ -458,6 +498,33 @@ def initialize_adaptive_r2_history(
         raise RuntimeError("adaptive R2 history publication returned no receipt")
     _cleanup_verified_r2_history_publication(receipt, payload)
     return loaded
+
+
+def initialize_adaptive_r2_history(
+    path: Path,
+    *,
+    failed_decision: Path,
+) -> dict[str, Any]:
+    """Publish or audit the canonical baseline history for adaptive batch one.
+
+    The history is an independent resumable checkpoint.  Once published, it
+    intentionally remains valid if later adaptive-plan validation fails; an
+    exact rerun audits and reuses the same bytes.
+    """
+
+    output = path.resolve(strict=False)
+    decision = failed_decision.resolve(strict=False)
+    if output == decision:
+        raise ValueError("adaptive R2 history must differ from the failed decision")
+    return _publish_or_audit_adaptive_r2_history(
+        output,
+        payload=_initial_r2_history_bytes(decision),
+        failed_decision=decision,
+        batch_index=1,
+        existing_mismatch=(
+            "existing adaptive R2 history does not exactly match the failed decision"
+        ),
+    )
 
 
 def load_adaptive_r2_history(
@@ -555,6 +622,385 @@ def load_adaptive_r2_history(
         "plateau": plateau,
         "records": normalized,
     }
+
+
+def _exact_verified_artifact(
+    record: object,
+    label: str,
+) -> tuple[Path, bytes, dict[str, str]]:
+    if not isinstance(record, Mapping) or set(record) != {"path", "sha256"}:
+        raise ValueError(f"{label} must be an exact path/SHA-256 artifact")
+    path, payload, actual = foundation._verified_artifact(record, label)
+    if dict(record) != actual:
+        raise ValueError(f"{label} path or SHA-256 is not canonical")
+    return path, payload, actual
+
+
+def _artifact_projection(record: object, label: str) -> dict[str, str]:
+    if not isinstance(record, Mapping):
+        raise ValueError(f"{label} must contain an artifact proof")
+    path, _, actual = foundation._verified_artifact(
+        {"path": record.get("path"), "sha256": record.get("sha256")},
+        label,
+    )
+    if Path(str(record.get("path") or "")).resolve(strict=False) != path:
+        raise ValueError(f"{label} path is not canonical")
+    return actual
+
+
+def _assert_adaptive_artifact_snapshots(
+    snapshots: Sequence[tuple[str, Mapping[str, str]]],
+) -> None:
+    for label, expected in snapshots:
+        try:
+            _, _, actual = foundation._verified_artifact(expected, label)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(
+                f"{label} changed during adaptive R2 advancement"
+            ) from exc
+        if actual != dict(expected):
+            raise RuntimeError(f"{label} changed during adaptive R2 advancement")
+
+
+def _close_adaptive_r2_predecessor_audit(
+    audit: AdaptiveR2PredecessorAudit,
+) -> None:
+    _assert_adaptive_artifact_snapshots(audit.snapshots)
+    if os.path.lexists(audit.predecessor_proof):
+        raise RuntimeError(
+            "adaptive predecessor R2 history gained a publication proof"
+        )
+
+
+def _audit_adaptive_r2_predecessor(
+    *,
+    failed_decision: Path,
+    batch_index: int,
+    source_case_plans: list[dict[str, Any]],
+    expected_previous_history: Path | None,
+) -> AdaptiveR2PredecessorAudit:
+    """Audit the exact D -> manifest -> predecessor-history chain for batch N."""
+
+    if type(batch_index) is not int or batch_index < 2:
+        raise ValueError("adaptive R2 predecessor audit requires batch index 2 or later")
+    decision_path = failed_decision.resolve(strict=False)
+    current_decision, current_minimum = _failed_decision_r2_record(
+        decision_path,
+        "adaptive advancement failed decision",
+    )
+    _, decision_bytes, decision_snapshot = _exact_verified_artifact(
+        current_decision,
+        "adaptive advancement failed decision",
+    )
+    decision = foundation._strict_json_bytes(
+        decision_bytes,
+        "adaptive advancement failed decision",
+    )
+    if (
+        Path(str(decision.get("decision_output") or "")).resolve(strict=False)
+        != decision_path
+    ):
+        raise ValueError("adaptive advancement failed decision_output changed")
+    decision_execution = decision.get("execution_contract")
+    if not isinstance(decision_execution, Mapping):
+        raise ValueError("adaptive advancement failed decision lacks execution_contract")
+    if decision.get("contract_sha256") != foundation._canonical_sha256(
+        decision_execution
+    ):
+        raise ValueError("adaptive advancement failed decision contract_sha256 changed")
+    decision_stage2 = decision_execution.get("stage2")
+    decision_training = decision_execution.get("training")
+    if not isinstance(decision_stage2, Mapping) or not isinstance(
+        decision_training, Mapping
+    ):
+        raise ValueError("adaptive advancement failed decision lacks stage2/training contracts")
+
+    manifest_path, manifest_bytes, manifest_snapshot = _exact_verified_artifact(
+        decision_stage2.get("case_manifest"),
+        "adaptive predecessor case manifest",
+    )
+    top_stage2 = decision.get("stage2")
+    if not isinstance(top_stage2, Mapping):
+        raise ValueError("adaptive advancement failed decision lacks top-level stage2")
+    top_manifest = {
+        "path": str(
+            Path(str(top_stage2.get("case_manifest") or "")).resolve(strict=False)
+        ),
+        "sha256": str(top_stage2.get("case_manifest_sha256") or ""),
+    }
+    if top_manifest != manifest_snapshot:
+        raise ValueError(
+            "adaptive failed decision top-level and execution case manifests differ"
+        )
+
+    manifest = foundation._strict_json_bytes(
+        manifest_bytes,
+        "adaptive predecessor case manifest",
+    )
+    failures: list[str] = []
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        failures.append("schema_version")
+    if manifest.get("mode") != "write":
+        failures.append("mode")
+    execution = manifest.get("execution_contract")
+    expected_execution_fields = {
+        "batch_index",
+        "case_plan",
+        "failed_decision",
+        "fixed_audit_case_plan",
+        "plateau_policy",
+        "r2_history",
+        "seed_policy",
+    }
+    if not isinstance(execution, Mapping):
+        failures.append("execution_contract")
+        execution = {}
+    elif set(execution) != expected_execution_fields:
+        failures.append("execution_contract.fields")
+    if manifest.get("execution_contract_sha256") != foundation._canonical_sha256(
+        execution
+    ):
+        failures.append("execution_contract_sha256")
+    if type(execution.get("batch_index")) is not int or execution.get(
+        "batch_index"
+    ) != batch_index - 1:
+        failures.append("execution_contract.batch_index")
+    if failures:
+        raise ValueError(
+            "adaptive predecessor manifest does not bind execution: "
+            + ", ".join(failures)
+        )
+
+    previous_path, _, previous_snapshot = _exact_verified_artifact(
+        execution.get("r2_history"),
+        "adaptive predecessor R2 history",
+    )
+    if (
+        expected_previous_history is not None
+        and previous_path != expected_previous_history.resolve(strict=False)
+    ):
+        raise ValueError("adaptive predecessor manifest binds a different R2 history")
+    previous_proof = _r2_history_publish_proof_path(previous_path)
+    if os.path.lexists(previous_proof):
+        raise ValueError(
+            "adaptive predecessor R2 history has a pending publication proof"
+        )
+    predecessor_decision_path, _, predecessor_decision = _exact_verified_artifact(
+        execution.get("failed_decision"),
+        "adaptive predecessor failed decision",
+    )
+    previous = load_adaptive_r2_history(
+        previous_path,
+        failed_decision=predecessor_decision_path,
+        batch_index=batch_index - 1,
+    )
+    if previous["artifact"] != previous_snapshot:
+        raise ValueError("adaptive predecessor R2 history artifact changed")
+    if previous["records"][-1]["decision"] != predecessor_decision:
+        raise ValueError(
+            "adaptive predecessor manifest failed decision differs from history"
+        )
+    if manifest.get("r2_history") != previous:
+        raise ValueError("adaptive predecessor manifest full R2 history differs")
+    if execution.get("plateau_policy") != previous["plateau"]:
+        raise ValueError("adaptive predecessor manifest plateau policy differs")
+    if (
+        previous["plateau"].get("stop_fea") is not False
+        or previous["plateau"].get("action") != "continue_adaptive_fea"
+    ):
+        raise ValueError("adaptive predecessor manifest was created after an R2 plateau")
+
+    _, _, manifest_case_plan = _exact_verified_artifact(
+        execution.get("case_plan"),
+        "adaptive predecessor case plan",
+    )
+    decision_case_plan = _artifact_projection(
+        decision_stage2.get("case_plan"),
+        "adaptive failed decision stage2 case plan",
+    )
+    top_case_plan = {
+        "path": str(Path(str(manifest.get("case_plan") or "")).resolve(strict=False)),
+        "sha256": str(manifest.get("case_plan_sha256") or ""),
+    }
+    if (
+        manifest_case_plan != decision_case_plan
+        or top_case_plan != manifest_case_plan
+    ):
+        raise ValueError("adaptive predecessor case-plan bindings differ")
+
+    _, _, fixed_audit = _exact_verified_artifact(
+        execution.get("fixed_audit_case_plan"),
+        "adaptive predecessor fixed audit case plan",
+    )
+    decision_fixed_audit = _artifact_projection(
+        decision_training.get("audit_case_plan"),
+        "adaptive failed decision training audit case plan",
+    )
+    if (
+        manifest.get("fixed_audit_case_plan") != fixed_audit
+        or decision_fixed_audit != fixed_audit
+    ):
+        raise ValueError("adaptive predecessor fixed-audit bindings differ")
+
+    failed_gate = manifest.get("failed_gate_evidence")
+    if not isinstance(failed_gate, Mapping):
+        raise ValueError("adaptive predecessor manifest lacks failed-gate evidence")
+    if _artifact_projection(
+        failed_gate.get("decision"),
+        "adaptive predecessor manifest failed decision",
+    ) != predecessor_decision:
+        raise ValueError("adaptive predecessor manifest failed-gate decision differs")
+    if _artifact_projection(
+        failed_gate.get("stage2_audit_case_plan"),
+        "adaptive predecessor manifest fixed audit",
+    ) != fixed_audit:
+        raise ValueError("adaptive predecessor manifest failed-gate audit differs")
+
+    evidence = foundation.load_stage3_adaptive_evidence(
+        decision_path,
+        source_case_plans,
+    )
+    proof = evidence.get("proof") if isinstance(evidence, Mapping) else None
+    if not isinstance(proof, Mapping) or _artifact_projection(
+        proof.get("decision"),
+        "adaptive advancement evidence decision",
+    ) != current_decision:
+        raise ValueError("adaptive advancement evidence differs from failed decision")
+    if _artifact_projection(
+        proof.get("stage2_audit_case_plan"),
+        "adaptive advancement evidence fixed audit",
+    ) != fixed_audit:
+        raise ValueError("adaptive advancement evidence uses a different fixed audit")
+
+    snapshots = (
+        ("adaptive advancement failed decision", decision_snapshot),
+        ("adaptive predecessor case manifest", manifest_snapshot),
+        ("adaptive predecessor R2 history", previous_snapshot),
+    )
+    record = {
+        "batch_index": batch_index - 1,
+        "decision": current_decision,
+        "min_primary_r2": current_minimum,
+    }
+    audit = AdaptiveR2PredecessorAudit(
+        adaptive_evidence=evidence,
+        payload=_r2_history_bytes([*previous["records"], record]),
+        predecessor_proof=previous_proof,
+        snapshots=snapshots,
+    )
+    _close_adaptive_r2_predecessor_audit(audit)
+    return audit
+
+
+def _advance_adaptive_r2_history_with_audit(
+    path: Path,
+    *,
+    previous_history: Path,
+    failed_decision: Path,
+    batch_index: int,
+    source_case_plans: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], AdaptiveR2PredecessorAudit]:
+    """Publish H_N and retain its predecessor audit for the plan transaction."""
+
+    output = path.resolve(strict=False)
+    previous_path = previous_history.resolve(strict=False)
+    decision_path = failed_decision.resolve(strict=False)
+    if len({output, previous_path, decision_path}) != 3:
+        raise ValueError(
+            "adaptive current history, predecessor history, and failed decision must differ"
+        )
+    audit = _audit_adaptive_r2_predecessor(
+        failed_decision=decision_path,
+        batch_index=batch_index,
+        source_case_plans=source_case_plans,
+        expected_previous_history=previous_path,
+    )
+
+    def final_input_audit() -> None:
+        _close_adaptive_r2_predecessor_audit(audit)
+
+    loaded = _publish_or_audit_adaptive_r2_history(
+        output,
+        payload=audit.payload,
+        failed_decision=decision_path,
+        batch_index=batch_index,
+        existing_mismatch=(
+            "existing adaptive R2 history is not the exact canonical predecessor append"
+        ),
+        final_input_audit=final_input_audit,
+    )
+    return loaded, audit.adaptive_evidence, audit
+
+
+def advance_adaptive_r2_history(
+    path: Path,
+    *,
+    previous_history: Path,
+    failed_decision: Path,
+    batch_index: int,
+    source_case_plans: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Immutably append D_(N-1) from H_(N-1) and publish canonical H_N."""
+
+    loaded, evidence, _ = _advance_adaptive_r2_history_with_audit(
+        path,
+        previous_history=previous_history,
+        failed_decision=failed_decision,
+        batch_index=batch_index,
+        source_case_plans=source_case_plans,
+    )
+    return loaded, evidence
+
+
+def _audit_existing_adaptive_r2_advancement_with_audit(
+    path: Path,
+    *,
+    failed_decision: Path,
+    batch_index: int,
+    source_case_plans: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], AdaptiveR2PredecessorAudit]:
+    """Audit existing H_N and retain its provenance for the plan transaction."""
+
+    audit = _audit_adaptive_r2_predecessor(
+        failed_decision=failed_decision,
+        batch_index=batch_index,
+        source_case_plans=source_case_plans,
+        expected_previous_history=None,
+    )
+    history_path = path.resolve(strict=False)
+    try:
+        payload = history_path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"cannot audit existing adaptive R2 advancement: {exc}") from exc
+    if payload != audit.payload:
+        raise ValueError(
+            "adaptive R2 history is not the exact canonical predecessor append"
+        )
+    loaded = load_adaptive_r2_history(
+        history_path,
+        failed_decision=failed_decision,
+        batch_index=batch_index,
+    )
+    _close_adaptive_r2_predecessor_audit(audit)
+    return loaded, audit.adaptive_evidence, audit
+
+
+def audit_existing_adaptive_r2_advancement(
+    path: Path,
+    *,
+    failed_decision: Path,
+    batch_index: int,
+    source_case_plans: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Reject hand-authored H_N by reproducing its exact predecessor append."""
+
+    loaded, evidence, _ = _audit_existing_adaptive_r2_advancement_with_audit(
+        path,
+        failed_decision=failed_decision,
+        batch_index=batch_index,
+        source_case_plans=source_case_plans,
+    )
+    return loaded, evidence
 
 
 def _confirmed_exclusion_contract(paths: Iterable[Path]) -> tuple[set[str], list[dict[str, Any]]]:
@@ -793,6 +1239,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--advance-r2-history-from",
+        type=Path,
+        help=(
+            "With --write and --batch-index 2 or later, audit immutable H_(N-1) "
+            "and the failed batch manifest, then publish canonical H_N."
+        ),
+    )
+    parser.add_argument(
         "--exclude-case-plan",
         type=Path,
         action="append",
@@ -817,19 +1271,35 @@ def main(argv: list[str] | None = None) -> int:
     resolved_plan = args.output.resolve(strict=False)
     resolved_manifest = args.manifest_output.resolve(strict=False)
     resolved_history = args.r2_history.resolve(strict=False)
+    resolved_previous_history = (
+        args.advance_r2_history_from.resolve(strict=False)
+        if args.advance_r2_history_from is not None
+        else None
+    )
     plan_proof = foundation.stage3_publish_proof_path(args.output).resolve(strict=False)
     manifest_proof = foundation.stage3_publish_proof_path(
         args.manifest_output
     ).resolve(strict=False)
     history_proof = _r2_history_publish_proof_path(resolved_history)
-    reserved_paths = (
+    reserved_paths = [
         ("adaptive plan", resolved_plan),
         ("adaptive plan proof", plan_proof),
         ("adaptive manifest", resolved_manifest),
         ("adaptive manifest proof", manifest_proof),
         ("adaptive R2 history", resolved_history),
         ("adaptive R2 history proof", history_proof),
-    )
+    ]
+    previous_history_proof: Path | None = None
+    if resolved_previous_history is not None:
+        previous_history_proof = _r2_history_publish_proof_path(
+            resolved_previous_history
+        )
+        reserved_paths.extend(
+            [
+                ("adaptive predecessor R2 history", resolved_previous_history),
+                ("adaptive predecessor R2 history proof", previous_history_proof),
+            ]
+        )
     for index, (left_label, left) in enumerate(reserved_paths):
         for right_label, right in reserved_paths[index + 1 :]:
             if left == right or left in right.parents or right in left.parents:
@@ -837,7 +1307,15 @@ def main(argv: list[str] | None = None) -> int:
                     "reserved adaptive artifact paths must be distinct and non-nested: "
                     f"{left_label} conflicts with {right_label}"
                 )
-    if not args.initialize_r2_history and os.path.lexists(history_proof):
+    if args.initialize_r2_history and args.advance_r2_history_from is not None:
+        raise SystemExit(
+            "--initialize-r2-history and --advance-r2-history-from are mutually exclusive"
+        )
+    if (
+        not args.initialize_r2_history
+        and args.advance_r2_history_from is None
+        and os.path.lexists(history_proof)
+    ):
         raise SystemExit(
             "adaptive R2 history publication proof requires "
             "--initialize-r2-history recovery"
@@ -846,6 +1324,16 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--initialize-r2-history requires --write")
     if args.initialize_r2_history and args.batch_index != 1:
         raise SystemExit("--initialize-r2-history is allowed only for --batch-index 1")
+    if args.advance_r2_history_from is not None and not args.write:
+        raise SystemExit("--advance-r2-history-from requires --write")
+    if args.advance_r2_history_from is not None and args.batch_index < 2:
+        raise SystemExit(
+            "--advance-r2-history-from requires --batch-index 2 or later"
+        )
+    if previous_history_proof is not None and os.path.lexists(previous_history_proof):
+        raise SystemExit(
+            "adaptive predecessor R2 history has a pending publication proof"
+        )
     if args.write:
         foundation.recover_stage3_pair(args.output, args.manifest_output)
     elif args.output.exists() or args.manifest_output.exists():
@@ -871,6 +1359,8 @@ def main(argv: list[str] | None = None) -> int:
         abs_tol=1e-12,
     ):
         raise SystemExit("adaptive spec beta calibration does not match the source plans")
+    evidence: dict[str, Any] | None = None
+    provenance_audit: AdaptiveR2PredecessorAudit | None = None
     if args.initialize_r2_history:
         try:
             initialize_adaptive_r2_history(
@@ -880,20 +1370,41 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, RuntimeError) as exc:
             raise SystemExit(str(exc)) from exc
     try:
-        r2_history = load_adaptive_r2_history(
-            args.r2_history,
-            failed_decision=args.failed_decision,
-            batch_index=args.batch_index,
-        )
+        if args.advance_r2_history_from is not None:
+            r2_history, evidence, provenance_audit = (
+                _advance_adaptive_r2_history_with_audit(
+                    args.r2_history,
+                    previous_history=args.advance_r2_history_from,
+                    failed_decision=args.failed_decision,
+                    batch_index=args.batch_index,
+                    source_case_plans=source_case_plans,
+                )
+            )
+        else:
+            r2_history = load_adaptive_r2_history(
+                args.r2_history,
+                failed_decision=args.failed_decision,
+                batch_index=args.batch_index,
+            )
+            if args.batch_index >= 2:
+                r2_history, evidence, provenance_audit = (
+                    _audit_existing_adaptive_r2_advancement_with_audit(
+                        args.r2_history,
+                        failed_decision=args.failed_decision,
+                        batch_index=args.batch_index,
+                        source_case_plans=source_case_plans,
+                    )
+                )
         if r2_history["plateau"]["stop_fea"] is True:
             raise ValueError(
                 "adaptive R2 plateau reached: two consecutive completed batches improved "
                 "minimum primary R2 by less than 0.01; stop FEA and diagnose model/physics"
             )
-        evidence = foundation.load_stage3_adaptive_evidence(
-            args.failed_decision,
-            source_case_plans,
-        )
+        if evidence is None:
+            evidence = foundation.load_stage3_adaptive_evidence(
+                args.failed_decision,
+                source_case_plans,
+            )
         fixed_audit = _fixed_audit_contract(args.fixed_audit_case_plan, evidence)
         decision_proof = evidence["proof"]["decision"]
         current_history_decision = r2_history["records"][-1]["decision"]
@@ -964,6 +1475,8 @@ def main(argv: list[str] | None = None) -> int:
         if foundation._file_sha256(Path(artifact["path"])) != artifact["sha256"]:
             raise RuntimeError("adaptive immutable evidence changed during generation")
     if args.write:
+        if provenance_audit is not None:
+            _close_adaptive_r2_predecessor_audit(provenance_audit)
         foundation.publish_stage3_pair(
             args.output,
             args.manifest_output,

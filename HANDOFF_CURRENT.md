@@ -332,4 +332,6 @@
 - Stage3 has 294/300 valid rows; the six same-geometry result failures are bounded retries 61217-61222, currently queued behind global running60/60 while project active0/queued6 under cap50.
 - Commit `043809b` seals the post-gate NSGA-II activation, remote source/runtime checks, recovery claims, and target-load handoff; broad validation170/170 and frozen-clone focused validation66/66 passed.
 - Scheduled Task `PYAEDT_MOTOR_IPMSM_V2_STAGE3_TRAIN_V4R10_NATIVE` polls every15m and starts the exact 1300-row continuation only after authoritative v4r10 completion; its no-completion smoke exited0 without outputs.
-- Next: collect the six retries (or deterministic replacement), run the1300-row R² gate/adaptive acquisition, deploy exact `043809b`, then execute NSGA-II/Pareto FEA and matched-load final selection.
+- Commit `06c8267` adds canonical batch-1 R2-history initialization; the current checkpoint adds immutable batch-2+ D/manifest/history advancement, proof-race rollback, and plateau provenance ordering.
+- Advancement validation is 37/37 focused plus 64/64 continuation/activation, with independent post-fix P0-P2 review clean; the separate adaptive coordinator remains under review.
+- Updated next: collect the six retries, run the 1300-row R2 gate, finish and deploy the final coordinator revision, then execute NSGA-II/Pareto FEA and matched-load final selection.
