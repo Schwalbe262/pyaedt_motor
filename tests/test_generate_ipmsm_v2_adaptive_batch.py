@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -318,6 +320,778 @@ class AdaptiveBatchTests(unittest.TestCase):
                     failed_decision=Path(records[-1]["decision"]["path"]),
                     batch_index=3,
                 )
+
+    def test_batch_one_initializes_canonical_history_idempotently(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            decision = write_failed_decision(decision_path, 0.51)
+            history_path = root / "history.json"
+
+            first = adaptive.initialize_adaptive_r2_history(
+                history_path,
+                failed_decision=decision_path,
+            )
+            payload = history_path.read_bytes()
+            decoded = json.loads(payload.decode("utf-8"))
+            self.assertEqual(
+                payload,
+                (
+                    json.dumps(
+                        decoded,
+                        ensure_ascii=False,
+                        allow_nan=False,
+                        sort_keys=True,
+                        indent=2,
+                    )
+                    + "\n"
+                ).encode("utf-8"),
+            )
+            self.assertEqual(
+                decoded,
+                {
+                    "schema_version": adaptive.R2_HISTORY_SCHEMA_VERSION,
+                    "records": [
+                        {
+                            "batch_index": 0,
+                            "decision": decision,
+                            "min_primary_r2": 0.51,
+                        }
+                    ],
+                },
+            )
+            modified = history_path.stat().st_mtime_ns
+            second = adaptive.initialize_adaptive_r2_history(
+                history_path,
+                failed_decision=decision_path,
+            )
+            self.assertEqual(first, second)
+            self.assertEqual(history_path.read_bytes(), payload)
+            self.assertEqual(history_path.stat().st_mtime_ns, modified)
+
+    def test_history_initialization_rejects_mismatch_partial_and_race(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            write_failed_decision(decision_path, 0.51)
+
+            mismatched = root / "mismatched.json"
+            mismatched.write_bytes(b"{}\n")
+            with self.assertRaisesRegex(ValueError, "does not exactly match"):
+                adaptive.initialize_adaptive_r2_history(
+                    mismatched,
+                    failed_decision=decision_path,
+                )
+            self.assertEqual(mismatched.read_bytes(), b"{}\n")
+
+            partial = root / "partial.json"
+            proof = adaptive._r2_history_publish_proof_path(partial)
+            proof.write_bytes(b"foreign proof")
+            with self.assertRaisesRegex(RuntimeError, "invalid adaptive R2 history"):
+                adaptive.initialize_adaptive_r2_history(
+                    partial,
+                    failed_decision=decision_path,
+                )
+            self.assertFalse(partial.exists())
+            self.assertEqual(proof.read_bytes(), b"foreign proof")
+
+            raced = root / "raced.json"
+
+            def race(*args: object, **kwargs: object) -> None:
+                del args, kwargs
+                raced.write_bytes(b"foreign winner")
+                raise FileExistsError("simulated publication race")
+
+            with (
+                mock.patch.object(adaptive, "publish_no_replace", side_effect=race),
+                self.assertRaisesRegex(FileExistsError, "publication race"),
+            ):
+                adaptive.initialize_adaptive_r2_history(
+                    raced,
+                    failed_decision=decision_path,
+                )
+            self.assertEqual(raced.read_bytes(), b"foreign winner")
+            self.assertEqual(list(root.glob(".raced.json.*.tmp")), [])
+
+    def test_history_initialization_recovers_only_proof_owned_orphan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            write_failed_decision(decision_path, 0.51)
+            history_path = root / "history.json"
+            proof = adaptive._r2_history_publish_proof_path(history_path)
+            staged = root / ".history.json.owned.tmp"
+            staged.write_bytes(adaptive._initial_r2_history_bytes(decision_path))
+            adaptive.publish_no_replace(staged, history_path, proof_path=proof)
+            modified = history_path.stat().st_mtime_ns
+
+            loaded = adaptive.initialize_adaptive_r2_history(
+                history_path,
+                failed_decision=decision_path,
+            )
+            self.assertEqual(loaded["records"][0]["min_primary_r2"], 0.51)
+            self.assertEqual(
+                history_path.read_bytes(),
+                adaptive._initial_r2_history_bytes(decision_path),
+            )
+            self.assertFalse(proof.exists())
+            self.assertFalse(staged.exists())
+            self.assertEqual(history_path.stat().st_mtime_ns, modified)
+
+            absent_history = root / "absent.json"
+            absent_proof = adaptive._r2_history_publish_proof_path(absent_history)
+            absent_stage = root / ".absent.json.owned.tmp"
+            absent_stage.write_bytes(adaptive._initial_r2_history_bytes(decision_path))
+            adaptive.publish_no_replace(
+                absent_stage,
+                absent_history,
+                proof_path=absent_proof,
+            )
+            absent_history.unlink()
+            recovered = adaptive.initialize_adaptive_r2_history(
+                absent_history,
+                failed_decision=decision_path,
+            )
+            self.assertEqual(recovered["records"][0]["min_primary_r2"], 0.51)
+            self.assertTrue(absent_history.is_file())
+            self.assertFalse(absent_proof.exists())
+            self.assertFalse(absent_stage.exists())
+
+            foreign_history = root / "foreign.json"
+            foreign_proof = adaptive._r2_history_publish_proof_path(foreign_history)
+            foreign_stage = root / ".foreign.json.owned.tmp"
+            foreign_stage.write_bytes(adaptive._initial_r2_history_bytes(decision_path))
+            adaptive.publish_no_replace(
+                foreign_stage,
+                foreign_history,
+                proof_path=foreign_proof,
+            )
+            foreign_history.unlink()
+            foreign_history.write_bytes(b"foreign replacement")
+            with self.assertRaisesRegex(RuntimeError, "does not match canonical bytes"):
+                adaptive.initialize_adaptive_r2_history(
+                    foreign_history,
+                    failed_decision=decision_path,
+                )
+            self.assertEqual(foreign_history.read_bytes(), b"foreign replacement")
+            self.assertTrue(foreign_proof.exists())
+
+            proof_owned_foreign = root / "proof-owned-foreign.json"
+            proof_owned_foreign_proof = adaptive._r2_history_publish_proof_path(
+                proof_owned_foreign
+            )
+            proof_owned_foreign_stage = root / ".proof-owned-foreign.json.owned.tmp"
+            proof_owned_foreign_stage.write_bytes(b"proof-owned foreign payload")
+            adaptive.publish_no_replace(
+                proof_owned_foreign_stage,
+                proof_owned_foreign,
+                proof_path=proof_owned_foreign_proof,
+            )
+            with self.assertRaisesRegex(RuntimeError, "does not match canonical bytes"):
+                adaptive.initialize_adaptive_r2_history(
+                    proof_owned_foreign,
+                    failed_decision=decision_path,
+                )
+            self.assertEqual(
+                proof_owned_foreign.read_bytes(),
+                b"proof-owned foreign payload",
+            )
+            self.assertTrue(proof_owned_foreign_proof.exists())
+
+    def test_absent_output_preserves_structurally_valid_foreign_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            write_failed_decision(decision_path, 0.51)
+            history_path = root / "history.json"
+            proof = adaptive._r2_history_publish_proof_path(history_path)
+            foreign_source = root / "not-an-adaptive-stage.bin"
+            proof_payload = (
+                json.dumps(
+                    {
+                        "schema_version": adaptive.PROOF_SCHEMA_VERSION,
+                        "source": str(foreign_source.absolute()),
+                        "destination": str(history_path.absolute()),
+                        "identity": {"device": 1, "inode": 1, "size": 1},
+                    },
+                    sort_keys=True,
+                    indent=2,
+                )
+                + "\n"
+            ).encode("utf-8")
+            proof.write_bytes(proof_payload)
+
+            with self.assertRaisesRegex(RuntimeError, "staging path changed"):
+                adaptive.initialize_adaptive_r2_history(
+                    history_path,
+                    failed_decision=decision_path,
+                )
+
+            self.assertFalse(history_path.exists())
+            self.assertEqual(proof.read_bytes(), proof_payload)
+
+    def test_exact_proof_cleanup_failure_preserves_history_and_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            write_failed_decision(decision_path, 0.51)
+            history_path = root / "history.json"
+            proof = adaptive._r2_history_publish_proof_path(history_path)
+            staged = root / ".history.json.owned.tmp"
+            staged.write_bytes(adaptive._initial_r2_history_bytes(decision_path))
+            adaptive.publish_no_replace(staged, history_path, proof_path=proof)
+            payload = history_path.read_bytes()
+            modified = history_path.stat().st_mtime_ns
+
+            original_unlink = adaptive.os.unlink
+
+            def fail_proof_unlink(path: object, *args: object, **kwargs: object) -> None:
+                if Path(path).absolute() == proof.absolute():
+                    raise PermissionError("simulated proof cleanup failure")
+                original_unlink(path, *args, **kwargs)
+
+            with (
+                mock.patch.object(
+                    adaptive.os,
+                    "unlink",
+                    side_effect=fail_proof_unlink,
+                ),
+                self.assertRaisesRegex(RuntimeError, "cannot clean verified"),
+            ):
+                adaptive.initialize_adaptive_r2_history(
+                    history_path,
+                    failed_decision=decision_path,
+                )
+            self.assertEqual(history_path.read_bytes(), payload)
+            self.assertEqual(history_path.stat().st_mtime_ns, modified)
+            self.assertTrue(proof.is_file())
+            self.assertFalse(staged.exists())
+
+    def test_exact_proof_source_cleanup_failure_preserves_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            write_failed_decision(decision_path, 0.51)
+            history_path = root / "history.json"
+            proof = adaptive._r2_history_publish_proof_path(history_path)
+            staged = root / ".history.json.owned.tmp"
+            staged.write_bytes(adaptive._initial_r2_history_bytes(decision_path))
+            adaptive.publish_no_replace(staged, history_path, proof_path=proof)
+            payload = history_path.read_bytes()
+            modified = history_path.stat().st_mtime_ns
+
+            original_unlink = adaptive.os.unlink
+
+            def fail_source_unlink(path: object, *args: object, **kwargs: object) -> None:
+                if Path(path).absolute() == staged.absolute():
+                    raise PermissionError("simulated staging cleanup failure")
+                original_unlink(path, *args, **kwargs)
+
+            with (
+                mock.patch.object(
+                    adaptive.os,
+                    "unlink",
+                    side_effect=fail_source_unlink,
+                ),
+                self.assertRaisesRegex(RuntimeError, "staging file"),
+            ):
+                adaptive.initialize_adaptive_r2_history(
+                    history_path,
+                    failed_decision=decision_path,
+                )
+            self.assertEqual(history_path.read_bytes(), payload)
+            self.assertEqual(history_path.stat().st_mtime_ns, modified)
+            self.assertTrue(proof.is_file())
+            self.assertTrue(staged.is_file())
+
+    def test_new_publish_cleanup_failure_blocks_downstream_and_preserves_evidence(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            write_failed_decision(decision_path, 0.51)
+            history_path = root / "history.json"
+            proof = adaptive._r2_history_publish_proof_path(history_path)
+            original_unlink = adaptive.os.unlink
+
+            def fail_source_unlink(path: object, *args: object, **kwargs: object) -> None:
+                candidate = Path(path).absolute()
+                if (
+                    candidate.parent == root.absolute()
+                    and candidate.name.startswith(".history.json.")
+                    and candidate.name.endswith(".tmp")
+                ):
+                    raise PermissionError("simulated fresh staging cleanup failure")
+                original_unlink(path, *args, **kwargs)
+
+            with (
+                mock.patch.object(
+                    adaptive.os,
+                    "unlink",
+                    side_effect=fail_source_unlink,
+                ),
+                self.assertRaisesRegex(RuntimeError, "staging file"),
+            ):
+                adaptive.initialize_adaptive_r2_history(
+                    history_path,
+                    failed_decision=decision_path,
+                )
+
+            self.assertEqual(
+                history_path.read_bytes(),
+                adaptive._initial_r2_history_bytes(decision_path),
+            )
+            self.assertTrue(proof.is_file())
+            staged = list(root.glob(".history.json.*.tmp"))
+            self.assertEqual(len(staged), 1)
+
+            loaded = adaptive.initialize_adaptive_r2_history(
+                history_path,
+                failed_decision=decision_path,
+            )
+            self.assertEqual(loaded["records"][0]["min_primary_r2"], 0.51)
+            self.assertFalse(proof.exists())
+            self.assertFalse(staged[0].exists())
+
+    def test_history_initialization_rolls_back_owned_post_publish_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            write_failed_decision(decision_path, 0.51)
+            history_path = root / "history.json"
+            with (
+                mock.patch.object(
+                    adaptive,
+                    "load_adaptive_r2_history",
+                    side_effect=ValueError("post-publish audit failed"),
+                ),
+                self.assertRaisesRegex(ValueError, "post-publish audit failed"),
+            ):
+                adaptive.initialize_adaptive_r2_history(
+                    history_path,
+                    failed_decision=decision_path,
+                )
+            self.assertFalse(history_path.exists())
+            self.assertFalse(adaptive._r2_history_publish_proof_path(history_path).exists())
+            self.assertEqual(list(root.glob(".history.json.*.tmp")), [])
+
+    def test_history_initialization_preserves_unsafe_rollback_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            write_failed_decision(decision_path, 0.51)
+            history_path = root / "history.json"
+            proof = adaptive._r2_history_publish_proof_path(history_path)
+            with (
+                mock.patch.object(
+                    adaptive,
+                    "load_adaptive_r2_history",
+                    side_effect=ValueError("post-publish audit failed"),
+                ),
+                mock.patch.object(
+                    adaptive,
+                    "rollback_owned_output",
+                    return_value=False,
+                ),
+                self.assertRaisesRegex(RuntimeError, "rollback was unsafe"),
+            ):
+                adaptive.initialize_adaptive_r2_history(
+                    history_path,
+                    failed_decision=decision_path,
+                )
+            self.assertTrue(history_path.is_file())
+            self.assertTrue(proof.is_file())
+            self.assertEqual(
+                history_path.read_bytes(),
+                adaptive._initial_r2_history_bytes(decision_path),
+            )
+
+    def test_initialize_history_cli_is_write_only_and_batch_one_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history = root / "history.json"
+
+            def argv(batch_index: int, *, write: bool) -> list[str]:
+                value = [
+                    "--spec",
+                    str(root / "spec.json"),
+                    "--output",
+                    str(root / "plan.csv"),
+                    "--manifest-output",
+                    str(root / "manifest.json"),
+                    "--failed-decision",
+                    str(root / "decision.json"),
+                    "--fixed-audit-case-plan",
+                    str(root / "fixed.csv"),
+                    "--r2-history",
+                    str(history),
+                    "--initialize-r2-history",
+                    "--exclude-case-plan",
+                    str(root / "prior.csv"),
+                    "--batch-index",
+                    str(batch_index),
+                ]
+                return [*value, "--write"] if write else value
+
+            with self.assertRaisesRegex(
+                SystemExit,
+                "--initialize-r2-history requires --write",
+            ):
+                adaptive.main(argv(1, write=False))
+            self.assertFalse(history.exists())
+
+            with self.assertRaisesRegex(
+                SystemExit,
+                "allowed only for --batch-index 1",
+            ):
+                adaptive.main(argv(2, write=True))
+            self.assertFalse(history.exists())
+            self.assertFalse((root / "plan.csv").exists())
+            self.assertFalse((root / "manifest.json").exists())
+
+    def test_initialize_history_cli_rejects_artifact_path_collisions_before_writes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for collision, preexisting in (("plan", False), ("manifest", True)):
+                case_root = root / collision
+                case_root.mkdir()
+                plan = case_root / "plan.csv"
+                manifest = case_root / "manifest.json"
+                history = plan if collision == "plan" else manifest
+                original = b"preexisting history input\n"
+                if preexisting:
+                    history.write_bytes(original)
+                args = [
+                    "--spec",
+                    str(case_root / "spec.json"),
+                    "--output",
+                    str(plan),
+                    "--manifest-output",
+                    str(manifest),
+                    "--failed-decision",
+                    str(case_root / "decision.json"),
+                    "--fixed-audit-case-plan",
+                    str(case_root / "fixed.csv"),
+                    "--r2-history",
+                    str(history),
+                    "--initialize-r2-history",
+                    "--exclude-case-plan",
+                    str(case_root / "prior.csv"),
+                    "--batch-index",
+                    "1",
+                    "--write",
+                ]
+
+                with (
+                    mock.patch.object(
+                        adaptive.foundation,
+                        "recover_stage3_pair",
+                    ) as recover,
+                    mock.patch.object(
+                        adaptive,
+                        "initialize_adaptive_r2_history",
+                    ) as initialize,
+                ):
+                    for _ in range(2):
+                        with self.assertRaisesRegex(
+                            SystemExit,
+                            "distinct and non-nested",
+                        ):
+                            adaptive.main(args)
+
+                recover.assert_not_called()
+                initialize.assert_not_called()
+                if preexisting:
+                    self.assertEqual(history.read_bytes(), original)
+                else:
+                    self.assertFalse(history.exists())
+                other = manifest if collision == "plan" else plan
+                self.assertFalse(other.exists())
+
+    def test_initialize_history_cli_rejects_proof_namespace_collisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cases = []
+
+            first_root = root / "plan-is-history-proof"
+            history = first_root / "history.json"
+            cases.append(
+                (
+                    adaptive._r2_history_publish_proof_path(history),
+                    first_root / "manifest.json",
+                    history,
+                )
+            )
+
+            second_root = root / "history-is-plan-proof"
+            plan = second_root / "plan.csv"
+            cases.append(
+                (
+                    plan,
+                    second_root / "manifest.json",
+                    adaptive.foundation.stage3_publish_proof_path(plan),
+                )
+            )
+
+            for plan, manifest, history in cases:
+                case_root = plan.parent
+                args = [
+                    "--spec",
+                    str(case_root / "spec.json"),
+                    "--output",
+                    str(plan),
+                    "--manifest-output",
+                    str(manifest),
+                    "--failed-decision",
+                    str(case_root / "decision.json"),
+                    "--fixed-audit-case-plan",
+                    str(case_root / "fixed.csv"),
+                    "--r2-history",
+                    str(history),
+                    "--initialize-r2-history",
+                    "--exclude-case-plan",
+                    str(case_root / "prior.csv"),
+                    "--batch-index",
+                    "1",
+                    "--write",
+                ]
+                with (
+                    mock.patch.object(
+                        adaptive.foundation,
+                        "recover_stage3_pair",
+                    ) as recover,
+                    mock.patch.object(
+                        adaptive,
+                        "initialize_adaptive_r2_history",
+                    ) as initialize,
+                ):
+                    for _ in range(2):
+                        with self.assertRaisesRegex(
+                            SystemExit,
+                            "distinct and non-nested",
+                        ):
+                            adaptive.main(args)
+                recover.assert_not_called()
+                initialize.assert_not_called()
+                self.assertFalse(plan.exists())
+                self.assertFalse(manifest.exists())
+                self.assertFalse(history.exists())
+
+    def test_initialize_history_cli_rejects_nested_artifact_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = root / "plan"
+            manifest = root / "manifest.json"
+            history = plan / "history.json"
+            args = [
+                "--spec",
+                str(root / "spec.json"),
+                "--output",
+                str(plan),
+                "--manifest-output",
+                str(manifest),
+                "--failed-decision",
+                str(root / "decision.json"),
+                "--fixed-audit-case-plan",
+                str(root / "fixed.csv"),
+                "--r2-history",
+                str(history),
+                "--initialize-r2-history",
+                "--exclude-case-plan",
+                str(root / "prior.csv"),
+                "--batch-index",
+                "1",
+                "--write",
+            ]
+
+            with (
+                mock.patch.object(
+                    adaptive.foundation,
+                    "recover_stage3_pair",
+                ) as recover,
+                mock.patch.object(
+                    adaptive,
+                    "initialize_adaptive_r2_history",
+                ) as initialize,
+            ):
+                for _ in range(2):
+                    with self.assertRaisesRegex(
+                        SystemExit,
+                        "distinct and non-nested",
+                    ):
+                        adaptive.main(args)
+
+            recover.assert_not_called()
+            initialize.assert_not_called()
+            self.assertFalse(plan.exists())
+            self.assertFalse(manifest.exists())
+
+    def test_cli_cannot_bypass_pending_history_proof_without_initialize(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            decision_path = root / "failed.json"
+            write_failed_decision(decision_path, 0.51)
+            history = root / "history.json"
+            history_payload = adaptive._initial_r2_history_bytes(decision_path)
+            history.write_bytes(history_payload)
+            proof = adaptive._r2_history_publish_proof_path(history)
+            proof_payload = b"pending publication proof\n"
+            proof.write_bytes(proof_payload)
+            plan = root / "plan.csv"
+            manifest = root / "manifest.json"
+            args = [
+                "--spec",
+                str(root / "spec.json"),
+                "--output",
+                str(plan),
+                "--manifest-output",
+                str(manifest),
+                "--failed-decision",
+                str(decision_path),
+                "--fixed-audit-case-plan",
+                str(root / "fixed.csv"),
+                "--r2-history",
+                str(history),
+                "--exclude-case-plan",
+                str(root / "prior.csv"),
+                "--batch-index",
+                "1",
+                "--write",
+            ]
+
+            with (
+                mock.patch.object(
+                    adaptive.foundation,
+                    "recover_stage3_pair",
+                ) as recover,
+                mock.patch.object(
+                    adaptive,
+                    "load_adaptive_r2_history",
+                ) as load,
+            ):
+                for _ in range(2):
+                    with self.assertRaisesRegex(
+                        SystemExit,
+                        "requires --initialize-r2-history recovery",
+                    ):
+                        adaptive.main(args)
+
+            recover.assert_not_called()
+            load.assert_not_called()
+            self.assertEqual(history.read_bytes(), history_payload)
+            self.assertEqual(proof.read_bytes(), proof_payload)
+            self.assertFalse(plan.exists())
+            self.assertFalse(manifest.exists())
+
+    def test_initialize_history_cli_write_is_exactly_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec_path = root / "spec.json"
+            spec_path.write_bytes(b"{}")
+            decision_path = root / "failed.json"
+            decision = write_failed_decision(decision_path, 0.51)
+            history_path = root / "history.json"
+            plan_path = root / "adaptive.csv"
+            manifest_path = root / "adaptive.manifest.json"
+            fixed_path = root / "fixed.csv"
+            fixed_path.write_bytes(b"fixed audit")
+            fixed = {
+                "path": str(fixed_path.resolve(strict=False)),
+                "sha256": adaptive.foundation._file_sha256(fixed_path),
+            }
+            source_plans = []
+            for index in range(2):
+                path = root / f"source-{index}.csv"
+                path.write_bytes(f"source {index}".encode("ascii"))
+                source_plans.append(
+                    {
+                        "path": str(path.resolve(strict=False)),
+                        "sha256": adaptive.foundation._file_sha256(path),
+                        "beta_calibration_id": valid_spec().beta_calibration.calibration_id,
+                        "electrical_zero_deg": valid_spec().beta_calibration.electrical_zero_deg,
+                    }
+                )
+            evidence = {"proof": {"decision": decision}}
+            selection = {"seed_policy": {"stride": 100}}
+            summary = {"rows": 300}
+            plan_bytes = b"case_id\r\nadaptive-1\r\n"
+            args = [
+                "--spec",
+                str(spec_path),
+                "--output",
+                str(plan_path),
+                "--manifest-output",
+                str(manifest_path),
+                "--failed-decision",
+                str(decision_path),
+                "--fixed-audit-case-plan",
+                str(fixed_path),
+                "--r2-history",
+                str(history_path),
+                "--initialize-r2-history",
+                "--exclude-case-plan",
+                str(root / "source-0.csv"),
+                "--batch-index",
+                "1",
+                "--write",
+            ]
+            spec = valid_spec()
+            with (
+                mock.patch.object(
+                    adaptive,
+                    "optimization_spec_from_mapping",
+                    return_value=spec,
+                ),
+                mock.patch.object(
+                    adaptive.foundation,
+                    "stage3_exclusion_contract",
+                    return_value=(set(), source_plans),
+                ),
+                mock.patch.object(
+                    adaptive.foundation,
+                    "load_stage3_adaptive_evidence",
+                    return_value=evidence,
+                ),
+                mock.patch.object(
+                    adaptive,
+                    "_fixed_audit_contract",
+                    return_value=fixed,
+                ),
+                mock.patch.object(
+                    adaptive,
+                    "generate_adaptive_batch_rows",
+                    return_value=([{"case_id": "adaptive-1"}], selection),
+                ),
+                mock.patch.object(
+                    adaptive,
+                    "validate_adaptive_batch_rows",
+                    return_value=summary,
+                ),
+                mock.patch.object(
+                    adaptive.foundation,
+                    "_stage3_csv_bytes",
+                    return_value=plan_bytes,
+                ),
+                mock.patch.object(
+                    adaptive,
+                    "initialize_adaptive_r2_history",
+                    wraps=adaptive.initialize_adaptive_r2_history,
+                ) as initialize,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(adaptive.main(args), 0)
+                first = {
+                    path: (path.read_bytes(), path.stat().st_mtime_ns)
+                    for path in (history_path, plan_path, manifest_path)
+                }
+                self.assertEqual(adaptive.main(args), 0)
+            self.assertEqual(initialize.call_count, 2)
+            for path, (payload, modified) in first.items():
+                self.assertEqual(path.read_bytes(), payload)
+                self.assertEqual(path.stat().st_mtime_ns, modified)
 
     def test_exclusion_case_plan_is_a_required_cli_input(self) -> None:
         action = next(
