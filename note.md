@@ -3990,3 +3990,7 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 
 ## 2026-07-14 23:10:54 +09:00 - Stage3 acquisition v4r8 contract rebuilt locally
 - Part/goal/hypothesis: repair zero-exit failed-row deadlock and reseal cap100/backend authority; treating result failure as the existing bounded terminal lineage should preserve fail-closed progress. Actions/options: added generic retry/evidence handling plus v4r8 standalone/pooled builder, driver, and focused tests; no live/deployment/scheduler/push action. Metrics/result: compile pass, focused77/77, full1346 with9 skipped and56 known legacy failures (54 Y-path,2 frozen v4r7 seals); token sample unavailable because the local Codex SQLite DB was absent. Failure/next: none in changed modules; publish only after an authorized LF325 build-config dry run.
+
+## 2026-07-19 15:35:00 +09:00 - NSGA-II activation sealed and Stage3 training chained
+- Part/goal/hypothesis: finish the post-Stage3 execution path while preserving exact v4r10 authority. Actions/result: committed/pushed `043809b`; registered the guarded 15m 1300-row training continuation Task, whose no-completion smoke exited0 with no artifacts.
+- Metrics/next: broad170/170 and exact-clone66/66 tests; Stage3 valid294/300, retries61217-61222 queued, project active0/queued6, global running60/60. Wait for capacity, collect or replace deterministically, then evaluate the fixed audit gate before activation.

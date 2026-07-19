@@ -327,3 +327,9 @@
 - v4r8 builder/driver seal project cap100, standalone/pooled backend choice, current pooled runtime closure, and the deployed v4r7 authority chain; no live files, tasks, submissions, or pushes were changed.
 - Validation: touched-file compile passed; focused campaign/v4r8 tests77/77; full Anaconda suite1346 run/9 skipped with the expected54 Y-checkout authority incompatibilities plus2 frozen-v4r7 seal failures.
 - Next: create the LF325 v4r8 build config/source copy, dry-run the selected backend, and obtain separate authority before any publication or execution.
+
+## 2026-07-19 - Stage3 v4r10 recovery and optimization activation
+- Stage3 has 294/300 valid rows; the six same-geometry result failures are bounded retries 61217-61222, currently queued behind global running60/60 while project active0/queued6 under cap50.
+- Commit `043809b` seals the post-gate NSGA-II activation, remote source/runtime checks, recovery claims, and target-load handoff; broad validation170/170 and frozen-clone focused validation66/66 passed.
+- Scheduled Task `PYAEDT_MOTOR_IPMSM_V2_STAGE3_TRAIN_V4R10_NATIVE` polls every15m and starts the exact 1300-row continuation only after authoritative v4r10 completion; its no-completion smoke exited0 without outputs.
+- Next: collect the six retries (or deterministic replacement), run the1300-row R² gate/adaptive acquisition, deploy exact `043809b`, then execute NSGA-II/Pareto FEA and matched-load final selection.
