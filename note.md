@@ -4006,3 +4006,9 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - Actions/result: added strict modern contract raw/canonical handling, isolated sealed completion verification, completed-output-only freshness adaptation, legacy compatibility, successor ancestry/blob checks, and tamper regressions; runtime/tasks remained unchanged.
 - Metrics: Stage3 completion300/300 and50 groups; live audit history315/success300/writes0 in380.1s; focused43/43 and integrated107/107 pass, Ruff/compile/diff-check pass; post-fix independent review P0=P1=P2=0.
 - Failure/next: the first audit found the old verifier's fresh-output check and the bounded adapter corrected only that check; commit/push, clean-clone dry-run, then execute the1300-row gate at cap50 before cap300 transition.
+
+## 2026-07-19 20:36:00 +09:00 - 1300-row gate finalized and cap300 activated
+- Part/goal/hypothesis: finalize the authoritative surrogate gate and enter the user-approved maximum-concurrency adaptive path; a bounded native-stderr workaround should preserve all model settings while avoiding PowerShell5 warning termination.
+- Actions/result: pushed `b48b162`, passed clean-clone107/107 and no-write dry-run, recoverably quarantined two partial staging trees, completed foreground resume, and CAS-raised scheduler policy revision3→6 to desired/effective/validated/max300 with zero active work.
+- Metrics: combined1300 rows/210 groups/40 repeats/0 validation failures; R² min/avg0.662977/0.825468, seven primary failures, total-loss0.95879 and voltage0.96235 pass; final claim/staging absent.
+- Failure/next: Stage2/fixed-audit intentionally alias the same sealed plan but coordinator rejected every duplicate; minimal exact-record alias fix and tests64/64 are ready, so review/commit/deploy it before adaptive300 execution.

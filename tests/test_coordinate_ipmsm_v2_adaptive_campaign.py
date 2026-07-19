@@ -1069,6 +1069,66 @@ class CoordinateIpmsmV2AdaptiveCampaignTests(unittest.TestCase):
             with self.assertRaisesRegex(coordinator.CoordinatorError, "remote.*non-nested"):
                 coordinator._validate_path_args(nested)
 
+    def test_exact_stage2_fixed_audit_alias_matches_live_contract_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = make_args(Path(tmp), execute=False)
+            args.fixed_audit_case_plan = args.initial_stage2_case_plan
+
+            coordinator._validate_path_args(args)
+
+            self.assertEqual(
+                args.initial_stage2_case_plan,
+                args.fixed_audit_case_plan,
+            )
+
+    def test_stage2_fixed_audit_alias_rejects_different_bound_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            shared = Path(tmp).resolve() / "replacement_plan.csv"
+            artifacts = {
+                "initial_stage2_case_plan": coordinator.Artifact(shared, "a" * 64),
+                "fixed_audit_case_plan": coordinator.Artifact(shared, "b" * 64),
+            }
+            paths = {name: shared for name in artifacts}
+
+            with self.assertRaisesRegex(
+                coordinator.CoordinatorError, "records must be exact-equal"
+            ):
+                coordinator._validate_protected_input_aliases(paths, artifacts)
+
+    def test_non_stage2_protected_input_alias_remains_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = make_args(Path(tmp), execute=False)
+            args.beta_summary = args.spec
+
+            with self.assertRaisesRegex(
+                coordinator.CoordinatorError, "distinct except.*Stage2/fixed-audit"
+            ):
+                coordinator._validate_path_args(args)
+
+    def test_distinct_hardlink_input_aliases_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = make_args(Path(tmp), execute=False)
+            args.beta_summary.unlink()
+            try:
+                os.link(args.spec, args.beta_summary)
+            except OSError as exc:
+                self.skipTest(f"hard links unavailable: {exc}")
+
+            with self.assertRaisesRegex(coordinator.CoordinatorError, "hard-linked"):
+                coordinator._validate_path_args(args)
+
+    def test_stage2_fixed_audit_hardlink_paths_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = make_args(Path(tmp), execute=False)
+            args.fixed_audit_case_plan.unlink()
+            try:
+                os.link(args.initial_stage2_case_plan, args.fixed_audit_case_plan)
+            except OSError as exc:
+                self.skipTest(f"hard links unavailable: {exc}")
+
+            with self.assertRaisesRegex(coordinator.CoordinatorError, "hard-linked"):
+                coordinator._validate_path_args(args)
+
     def test_runtime_authority_and_project_cap_300_are_exact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

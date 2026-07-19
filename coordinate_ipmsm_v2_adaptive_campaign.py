@@ -1504,6 +1504,48 @@ def _paths_overlap(left: Path, right: Path) -> bool:
     return first == second or first in second.parents or second in first.parents
 
 
+def _validate_protected_input_aliases(
+    paths: Mapping[str, Path],
+    artifacts: Mapping[str, Artifact],
+) -> None:
+    aliases: dict[Path, list[str]] = {}
+    for name, path in paths.items():
+        aliases.setdefault(path.resolve(strict=False), []).append(name)
+    resolved_items = list(aliases)
+    for index, left in enumerate(resolved_items):
+        for right in resolved_items[index + 1 :]:
+            try:
+                same_file = (
+                    left.is_file()
+                    and right.is_file()
+                    and os.path.samefile(left, right)
+                )
+            except OSError as exc:
+                raise CoordinatorError(
+                    f"cannot inspect coordinator input file identity: {exc}"
+                ) from exc
+            if same_file:
+                raise CoordinatorError(
+                    "hard-linked coordinator input artifact paths are not permitted"
+                )
+    allowed_names = {"initial_stage2_case_plan", "fixed_audit_case_plan"}
+    for names in aliases.values():
+        if len(names) == 1:
+            continue
+        name_set = set(names)
+        if name_set != allowed_names or len(names) != len(allowed_names):
+            raise CoordinatorError(
+                "coordinator input artifact paths must be distinct except for the "
+                "exact Stage2/fixed-audit alias"
+            )
+        stage2 = artifacts.get("initial_stage2_case_plan")
+        fixed_audit = artifacts.get("fixed_audit_case_plan")
+        if stage2 is None or fixed_audit is None or stage2 != fixed_audit:
+            raise CoordinatorError(
+                "aliased Stage2/fixed-audit artifact records must be exact-equal"
+            )
+
+
 def _validate_path_args(args: argparse.Namespace) -> None:
     path_names = (
         "source_root",
@@ -1544,7 +1586,7 @@ def _validate_path_args(args: argparse.Namespace) -> None:
     if not args.python_executable.is_absolute():
         raise CoordinatorError("Python executable must be an explicit absolute path")
     args.python_executable = args.python_executable.resolve(strict=False)
-    for name in (
+    immutable_input_names = (
         "spec",
         "initial_stage1_case_plan",
         "initial_stage2_case_plan",
@@ -1553,10 +1595,30 @@ def _validate_path_args(args: argparse.Namespace) -> None:
         "beta_case_plan",
         "beta_results",
         "beta_calibration_manifest",
-    ):
-        _artifact(getattr(args, name), name.replace("_", " "))
-    for path in args.confirmed_exclusion_csv:
-        _artifact(path, "confirmed exclusion CSV")
+    )
+    protected_input_artifacts = {
+        name: _artifact(getattr(args, name), name.replace("_", " "))
+        for name in immutable_input_names
+    }
+    protected_input_artifacts.update(
+        {
+            f"confirmed_exclusion_csv[{index}]": _artifact(
+                path, "confirmed exclusion CSV"
+            )
+            for index, path in enumerate(args.confirmed_exclusion_csv)
+        }
+    )
+    protected_input_paths = {
+        "initial_failed_decision": args.initial_failed_decision,
+        **{name: getattr(args, name) for name in immutable_input_names},
+        **{
+            f"confirmed_exclusion_csv[{index}]": path
+            for index, path in enumerate(args.confirmed_exclusion_csv)
+        },
+    }
+    _validate_protected_input_aliases(
+        protected_input_paths, protected_input_artifacts
+    )
     if not args.source_root.is_dir():
         raise CoordinatorError(f"source root is missing: {args.source_root}")
     if not args.python_executable.is_absolute() or not args.python_executable.is_file():
@@ -1605,22 +1667,7 @@ def _validate_path_args(args: argparse.Namespace) -> None:
         for right in output_roots[index + 1 :]:
             if left == right or left in right.parents or right in left.parents:
                 raise CoordinatorError("campaign output roots must be distinct and non-nested")
-    protected_inputs = tuple(
-        getattr(args, name)
-        for name in (
-            "spec",
-            "initial_failed_decision",
-            "initial_stage1_case_plan",
-            "initial_stage2_case_plan",
-            "fixed_audit_case_plan",
-            "beta_summary",
-            "beta_case_plan",
-            "beta_results",
-            "beta_calibration_manifest",
-        )
-    ) + tuple(args.confirmed_exclusion_csv)
-    if len(set(protected_inputs)) != len(protected_inputs):
-        raise CoordinatorError("coordinator input artifact paths must be distinct")
+    protected_inputs = tuple(protected_input_paths.values())
     for input_path in protected_inputs:
         if _paths_overlap(input_path, args.source_root) or _paths_overlap(
             input_path, args.python_executable
