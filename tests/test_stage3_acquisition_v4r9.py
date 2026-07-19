@@ -370,6 +370,20 @@ class Stage3AcquisitionV4r9Tests(unittest.TestCase):
                 self.assertEqual(dry_report["contract_writes_performed"], 0)
                 self.assertEqual(dry_report["directory_writes_performed"], 0)
 
+                with self.assertRaisesRegex(
+                    builder.Stage3RecoveryBuildError,
+                    "dry-run contract SHA-256 changed",
+                ):
+                    builder.build_or_publish(
+                        runtime_root,
+                        source_root,
+                        runtime_root / "prior.json",
+                        "f" * 40,
+                        publish=True,
+                        expected_output_raw_sha256="0" * 64,
+                    )
+                self.assertFalse(recovery_root.exists())
+
                 publish_report = builder.build_or_publish(
                     runtime_root,
                     source_root,

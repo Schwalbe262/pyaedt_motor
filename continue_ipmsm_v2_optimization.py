@@ -130,6 +130,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--simulation-dir", default=DEFAULT_SIMULATION_DIR)
     parser.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
     parser.add_argument(
+        "--env-setup",
+        default=campaign_submitter.ANSYS_ELECTRONICS_MODULE,
+    )
+    parser.add_argument(
         "--poll-interval-seconds",
         type=float,
         default=campaign_runner.DEFAULT_POLL_INTERVAL_SECONDS,
@@ -742,6 +746,8 @@ def _campaign_argv(
         _scoped_remote_path(args.simulation_dir, scope),
         "--log-dir",
         _scoped_remote_path(args.log_dir, scope),
+        "--env-setup",
+        args.env_setup,
         "--output-dir",
         str(paths.fea_output_dir),
         "--merged-output",

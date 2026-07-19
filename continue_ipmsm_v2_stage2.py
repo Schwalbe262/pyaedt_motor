@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import errno
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -1464,7 +1465,9 @@ def _quick_validate_precollected_stage2_contract(
         raise ContinuationGateError(
             "precollected Stage2 runner source binding disappeared"
         )
-    import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+    acquisition = importlib.import_module(
+        "continue_ipmsm_v2_stage3_acquisition_v4r9"
+    )
 
     source_root = Path(str(runner_source.get("source_root") or ""))
     current_continuation = Path(__file__).resolve(strict=True)
@@ -1536,7 +1539,9 @@ def _precollected_stage2_contract(
 
     completion = _read_json(completion_path, "precollected Stage2 completion")
     try:
-        import continue_ipmsm_v2_stage3_acquisition_v4r9 as acquisition
+        acquisition = importlib.import_module(
+            "continue_ipmsm_v2_stage3_acquisition_v4r9"
+        )
 
         if (
             completion.get("schema_version") != acquisition.COMPLETION_SCHEMA_VERSION

@@ -23,6 +23,7 @@ import csv
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import hashlib
+import importlib
 import json
 import logging
 import math
@@ -33,7 +34,7 @@ import re
 import shutil
 import sys
 import time
-from typing import Any
+from typing import Any, Mapping
 import uuid
 
 
@@ -2331,7 +2332,9 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                     AEDT_RELEASE_WAIT_ENV,
                     DEFAULT_AEDT_RELEASE_WAIT_SECONDS,
                 )
-                from module.aedt_attach_client import acquire_project_lease
+                acquire_project_lease = importlib.import_module(
+                    "module.aedt_attach_client"
+                ).acquire_project_lease
 
                 requested_workspace = prepare_pooled_workspace(
                     Path(options.simulation_dir),

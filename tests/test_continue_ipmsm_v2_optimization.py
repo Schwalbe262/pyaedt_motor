@@ -489,7 +489,10 @@ class OptimizationContinuationTests(unittest.TestCase):
         self.assertEqual(first["dedupe_keys"], ["key-a", "key-b"])
 
     def test_campaign_remote_paths_and_task_prefix_are_run_scoped(self) -> None:
-        args = continuation.build_parser().parse_args(self.argv())
+        exact_setup = "module load exact\nexport PYTHONDONTWRITEBYTECODE=1"
+        args = continuation.build_parser().parse_args(
+            self.argv("--env-setup", exact_setup)
+        )
         paths = continuation.output_paths(args)
         argv = continuation._campaign_argv(args, self.audited, paths)
         scope = continuation._campaign_scope(args, self.audited, paths)
@@ -504,6 +507,7 @@ class OptimizationContinuationTests(unittest.TestCase):
             "--log-dir",
         ):
             self.assertTrue(argv[argv.index(option) + 1].endswith("/" + scope))
+        self.assertEqual(argv[argv.index("--env-setup") + 1], exact_setup)
         changed = continuation.AuditedInputs(
             **{
                 **self.audited.__dict__,

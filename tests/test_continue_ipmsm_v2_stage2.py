@@ -729,14 +729,19 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
                 "successful_results": 300,
                 "writes_performed": 0,
             }
-            with mock.patch.object(acquisition, "load_contract", return_value=context):
-                with mock.patch.object(
-                    acquisition,
-                    "_verify_existing_completion",
-                    return_value=live_report,
-                ) as verify:
-                    first = continuation._precollected_stage2_contract(args)
-                    second = continuation._precollected_stage2_contract(args)
+            with mock.patch.object(
+                continuation.importlib,
+                "import_module",
+                wraps=continuation.importlib.import_module,
+            ) as lazy_import:
+                with mock.patch.object(acquisition, "load_contract", return_value=context):
+                    with mock.patch.object(
+                        acquisition,
+                        "_verify_existing_completion",
+                        return_value=live_report,
+                    ) as verify:
+                        first = continuation._precollected_stage2_contract(args)
+                        second = continuation._precollected_stage2_contract(args)
 
             self.assertEqual(first, second)
             self.assertEqual(first["effective_plan"]["kind"], "original")
@@ -748,6 +753,14 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
             )
             self.assertEqual(first["runner_source"]["repository_revision"], "a" * 40)
             verify.assert_called_once_with(context)
+            self.assertEqual(
+                lazy_import.call_args_list,
+                [
+                    mock.call("continue_ipmsm_v2_stage3_acquisition_v4r9"),
+                    mock.call("continue_ipmsm_v2_stage3_acquisition_v4r9"),
+                    mock.call("continue_ipmsm_v2_stage3_acquisition_v4r9"),
+                ],
+            )
             mismatches = (
                 ("project", "OTHER_PROJECT"),
                 ("project_active_cap", 49),

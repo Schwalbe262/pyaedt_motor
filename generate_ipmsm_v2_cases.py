@@ -28,6 +28,7 @@ import continue_ipmsm_v2_stage2 as stage2_continuation
 from generate_ipmsm_quality_cases import MESH_ELEMENT_KEYS, QUALITY_PROFILES
 from ipmsm_optimization import (
     OptimizationSpec,
+    current_density_a_per_mm2 as current_density_a_per_mm2,
     geometry_metrics,
     load_optimization_spec as load_optimization_spec,
     optimization_spec_from_mapping,
