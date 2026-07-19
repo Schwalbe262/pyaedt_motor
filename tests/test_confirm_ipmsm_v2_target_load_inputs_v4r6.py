@@ -117,7 +117,7 @@ class TargetLoadAuthorityTests(unittest.TestCase):
                 "required_capability": "conda:pyaedt2026v1",
                 "env_profile": "pyaedt2026v1",
                 "env_setup": "module load ansys-electronics/v252",
-                "project_active_cap": 50,
+                "project_active_cap": 300,
                 "max_workers_per_node": 4,
             },
             "result_settle_seconds": 60,

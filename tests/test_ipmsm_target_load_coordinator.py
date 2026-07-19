@@ -669,7 +669,7 @@ class UpstreamFinalFrontAuditTests(unittest.TestCase):
                 maximum_scale_per_attempt=1.5,
                 project="PYAEDT_MOTOR_IPMSM_V2",
                 project_id=2,
-                project_active_cap=50,
+                project_active_cap=300,
                 remote_root="$HOME/slurm_scheduler/projects/PYAEDT_MOTOR_IPMSM_V2/pyaedt_motor",
                 env_setup="module load ansys-electronics/v252",
                 max_workers_per_node=4,
@@ -720,7 +720,7 @@ class UpstreamFinalFrontAuditTests(unittest.TestCase):
             call["upstream_pareto_binding"]["selected_candidate_ids"],
             ["pareto_low"],
         )
-        self.assertEqual(call["scheduler_contract"]["server_cap"], 50)
+        self.assertEqual(call["scheduler_contract"]["server_cap"], 300)
         self.assertEqual(call["pyaedt_core_source"], injected_pyaedt_core)
         self.assertFalse(workspace.exists())
 

@@ -44,7 +44,7 @@ from ipmsm_surrogate_bundle import (
 
 SCHEMA_VERSION = "ipmsm_v2_optimization_continuation_v1"
 DEFAULT_MAX_FEA_CANDIDATES = 12
-DEFAULT_PROJECT_ACTIVE_CAP = 50
+DEFAULT_PROJECT_ACTIVE_CAP = 300
 DEFAULT_TASK_PREFIX = "ipmsm-v2-pareto-fea"
 DEFAULT_REMOTE_CASES_DIR = "remote/ipmsm_v2_pareto_fea"
 DEFAULT_RESULT_DIR = "simul_log/ipmsm_v2_pareto_fea"
@@ -812,7 +812,7 @@ def validate_args(args: argparse.Namespace, paths: OutputPaths) -> None:
     if not str(args.project or "").strip():
         raise OptimizationContinuationError("--project must not be blank")
     if not 1 <= args.project_active_cap <= DEFAULT_PROJECT_ACTIVE_CAP:
-        raise OptimizationContinuationError("--project-active-cap must be between 1 and 50")
+        raise OptimizationContinuationError("--project-active-cap must be between 1 and 300")
     if not 1 <= args.max_fea_candidates <= DEFAULT_MAX_FEA_CANDIDATES:
         raise OptimizationContinuationError("--max-fea-candidates must be between 1 and 12")
     if not str(args.task_prefix or "").strip():

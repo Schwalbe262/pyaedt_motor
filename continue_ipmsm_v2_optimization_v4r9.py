@@ -423,9 +423,13 @@ def load_activation(path: str | Path) -> ActivationContext:
         != activation_builder.REMOTE_DEPLOYMENT_POLICY["project"]
         or remote_snapshot.get("auto_pull") is not False
         or remote_snapshot.get("cleanup_globs") != "*.aedtresults"
-        or remote_snapshot.get("max_active_tasks") != 50
+        or remote_snapshot.get("max_active_tasks")
+        != activation_builder.REMOTE_DEPLOYMENT_POLICY["max_active_tasks"]
         or type(remote_snapshot.get("validated_concurrency_limit")) is not int
-        or remote_snapshot["validated_concurrency_limit"] < 50
+        or remote_snapshot["validated_concurrency_limit"]
+        < activation_builder.REMOTE_DEPLOYMENT_POLICY[
+            "minimum_validated_concurrency_limit"
+        ]
     ):
         raise OptimizationActivationError(
             "activation remote deployment snapshot changed"

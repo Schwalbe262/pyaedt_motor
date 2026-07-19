@@ -88,7 +88,7 @@ class TargetLoadContinuationBuilderTests(unittest.TestCase):
                 "required_capability": "conda:pyaedt2026v1",
                 "env_profile": "pyaedt2026v1",
                 "env_setup": "module load ansys-electronics/v252",
-                "project_active_cap": 50,
+                "project_active_cap": 300,
                 "max_workers_per_node": 4,
             },
             "result_settle_seconds": 60,
@@ -217,7 +217,7 @@ class TargetLoadContinuationBuilderTests(unittest.TestCase):
             set(first.document), {"schema_version", "contract_sha256", "continuation"}
         )
         body = first.document["continuation"]
-        self.assertEqual(body["scheduler"]["project_active_cap"], 50)
+        self.assertEqual(body["scheduler"]["project_active_cap"], 300)
         self.assertEqual(body["scheduler"]["endpoint"], "/api/tasks")
         self.assertEqual(body["scheduler"]["cpus"], 4)
         self.assertEqual(
@@ -257,7 +257,7 @@ class TargetLoadContinuationBuilderTests(unittest.TestCase):
             context = continuation.load_continuation_context(built.output)
         self.assertEqual(context.contract_sha256, built.document["contract_sha256"])
         self.assertEqual(context.paths["workspace"], self.output_root / builder.WORKSPACE_NAME)
-        self.assertEqual(context.scheduler["project_active_cap"], 50)
+        self.assertEqual(context.scheduler["project_active_cap"], 300)
 
     def test_execute_is_no_replace_and_repeatable(self) -> None:
         self._write_config()
@@ -329,7 +329,7 @@ class TargetLoadContinuationBuilderTests(unittest.TestCase):
         with self.assertRaisesRegex(builder.TargetLoadContinuationBuildError, "PyAEDT"):
             self._build()
 
-    def test_cap50_and_strict_upstream_hashes_are_not_overridable(self) -> None:
+    def test_cap300_and_strict_upstream_hashes_are_not_overridable(self) -> None:
         self._write_config()
         original = deepcopy(self.target_load)
         self.target_load["scheduler"]["project_active_cap"] = 100

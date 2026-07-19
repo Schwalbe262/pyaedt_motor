@@ -67,10 +67,10 @@ class SubmitIpmsmV2CampaignTests(unittest.TestCase):
         )
 
     def test_campaign_policy_cannot_exceed_cap_or_change_fea_environment(self) -> None:
-        campaign.validate_args(parsed_args("--project-active-cap", "100"))
+        campaign.validate_args(parsed_args("--project-active-cap", "300"))
         invalid = (
             ("--task-prefix", "", "must not be blank"),
-            ("--project-active-cap", "101", "must be <= 100"),
+            ("--project-active-cap", "301", "must be <= 300"),
             ("--scheduling-profile", "standard", "require --scheduling-profile fea_bursty"),
             ("--required-capability", "conda:other", "require --required-capability"),
             ("--env-profile", "other", "require --env-profile"),

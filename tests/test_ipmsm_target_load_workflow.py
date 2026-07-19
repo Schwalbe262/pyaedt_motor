@@ -920,6 +920,23 @@ class RootManifestTests(unittest.TestCase):
             {key: scheduler_contract()[key] for key in sorted(scheduler_contract())},
         )
         kwargs = build_kwargs()
+        cap300 = {**scheduler_contract(), "server_cap": 300}
+        self.assertEqual(
+            workflow.build_root_manifest(
+                **{**kwargs, "scheduler_contract": cap300}  # type: ignore[arg-type]
+            )["identity"]["scheduler_contract"]["server_cap"],
+            300,
+        )
+        with self.assertRaisesRegex(
+            workflow.TargetLoadWorkflowError,
+            "300-task concurrency cap",
+        ):
+            workflow.build_root_manifest(
+                **{
+                    **kwargs,
+                    "scheduler_contract": {**cap300, "server_cap": 301},
+                }  # type: ignore[arg-type]
+            )
         invalid = (
             ("entrypoint", "other.py", "subprocess_run.py"),
             ("partition", "cpu2", "partition='auto'"),

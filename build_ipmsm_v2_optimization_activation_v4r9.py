@@ -98,8 +98,8 @@ REMOTE_DEPLOYMENT_POLICY = {
     "deployment_status": "deployed",
     "auto_pull": False,
     "cleanup_globs": "*.aedtresults",
-    "max_active_tasks": 50,
-    "minimum_validated_concurrency_limit": 50,
+    "max_active_tasks": 300,
+    "minimum_validated_concurrency_limit": 300,
     "aedt_backend": "standalone",
     "setup": (
         "source /etc/profile.d/lmod.sh 2>/dev/null || true\n"
@@ -124,7 +124,7 @@ EXPECTED_PARENT_BASE = {
 SCHEDULER_POLICY = {
     "url": "http://127.0.0.1:8002",
     "endpoint": "/api/tasks",
-    "project_active_cap": 50,
+    "project_active_cap": 300,
     "scheduling_profile": "fea_bursty",
     "required_capability": "conda:pyaedt2026v1",
     "env_profile": "pyaedt2026v1",
@@ -1563,7 +1563,7 @@ def _build_base_document(
         "--decision-output": str(paths.decision),
         "--project": scheduler_project,
         "--scheduler-url": SCHEDULER_POLICY["url"],
-        "--project-active-cap": "50",
+        "--project-active-cap": str(SCHEDULER_POLICY["project_active_cap"]),
         "--max-fea-candidates": "12",
         "--task-prefix": NAMESPACE["task_prefix"],
         "--remote-cases-dir": NAMESPACE["remote_cases_dir"],
@@ -1680,6 +1680,8 @@ def _audit_campaign_defaults() -> None:
             "placeholder",
             "--scheduler-url",
             SCHEDULER_POLICY["url"],
+            "--project-active-cap",
+            str(SCHEDULER_POLICY["project_active_cap"]),
         ]
     )
     actual = {
@@ -1849,11 +1851,11 @@ def audit_remote_deployment(source_revision: str) -> dict[str, Any]:
     expected_simulation_core = {
         "project": project,
         "name": project,
-        "desired_simulations": 50,
-        "effective_simulations": 50,
-        "validated_concurrency_limit": 50,
+        "desired_simulations": SCHEDULER_POLICY["project_active_cap"],
+        "effective_simulations": SCHEDULER_POLICY["project_active_cap"],
+        "validated_concurrency_limit": SCHEDULER_POLICY["project_active_cap"],
         "min_desired_simulations": 0,
-        "max_desired_simulations": 50,
+        "max_desired_simulations": SCHEDULER_POLICY["project_active_cap"],
         "scale_down_mode": "drain",
         "control_enabled": True,
     }

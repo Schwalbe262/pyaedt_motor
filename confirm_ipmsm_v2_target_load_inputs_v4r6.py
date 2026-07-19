@@ -797,7 +797,7 @@ def _validated_target_load(
     _assert_equal(scheduler["required_capability"], "conda:pyaedt2026v1", "capability")
     _assert_equal(scheduler["env_profile"], "pyaedt2026v1", "environment profile")
     _assert_equal(scheduler["env_setup"], "module load ansys-electronics/v252", "environment setup")
-    _assert_equal(scheduler["project_active_cap"], 50, "project active cap")
+    _assert_equal(scheduler["project_active_cap"], 300, "project active cap")
     _assert_equal(scheduler["max_workers_per_node"], 4, "workers per node")
     _positive_int(target["result_settle_seconds"], "result_settle_seconds")
 

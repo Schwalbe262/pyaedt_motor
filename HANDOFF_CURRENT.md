@@ -334,4 +334,6 @@
 - Scheduled Task `PYAEDT_MOTOR_IPMSM_V2_STAGE3_TRAIN_V4R10_NATIVE` polls every15m and starts the exact 1300-row continuation only after authoritative v4r10 completion; its no-completion smoke exited0 without outputs.
 - Commit `06c8267` adds canonical batch-1 R2-history initialization; the current checkpoint adds immutable batch-2+ D/manifest/history advancement, proof-race rollback, and plateau provenance ordering.
 - Advancement validation is 37/37 focused plus 64/64 continuation/activation, with independent post-fix P0-P2 review clean; the separate adaptive coordinator remains under review.
-- Updated next: collect the six retries, run the 1300-row R2 gate, finish and deploy the final coordinator revision, then execute NSGA-II/Pareto FEA and matched-load final selection.
+- Replacement tasks 63440-63445 run the six deterministic new-geometry rows on n116 with no scheduler failure; v4r10 completion remains pending.
+- The adaptive coordinator now closes batch-2+ lineage, runtime identity, reparse containment, child failure evidence, and terminal rehashes; integrated102/102 plus cap300 core146/146 passed and two independent P0-P2 reviews are clean.
+- User-approved post-completion policy is validated/max/desired FEA concurrency300; preserve the current cap50 only through v4r10 completion, then deploy the checkpoint, run the 1300-row gate, and route to adaptive300 or NSGA-II/target-load final selection.

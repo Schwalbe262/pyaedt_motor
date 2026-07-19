@@ -365,7 +365,7 @@ def _validate_scheduler(value: Any, target: Mapping[str, Any]) -> dict[str, Any]
     ):
         if scheduler[name] != target_scheduler[name]:
             raise TargetLoadContinuationError(f"scheduler.{name} differs from v4r6 authority")
-    if scheduler["endpoint"] != "/api/tasks" or scheduler["project_active_cap"] != 50:
+    if scheduler["endpoint"] != "/api/tasks" or scheduler["project_active_cap"] != 300:
         raise TargetLoadContinuationError("scheduler endpoint/cap differs from required policy")
     if scheduler["partition"] != "auto" or scheduler["entrypoint"] != "subprocess_run.py":
         raise TargetLoadContinuationError("scheduler partition/entrypoint differs from required policy")

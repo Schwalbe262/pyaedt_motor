@@ -724,8 +724,8 @@ def _assert_path_fresh(path: Path, label: str) -> None:
 def validate_args(args: argparse.Namespace) -> None:
     if not str(args.project or "").strip():
         raise ContinuationGateError("--project must not be blank")
-    if not 1 <= args.project_active_cap <= 50:
-        raise ContinuationGateError("--project-active-cap must be between 1 and 50")
+    if not 1 <= args.project_active_cap <= 300:
+        raise ContinuationGateError("--project-active-cap must be between 1 and 300")
     if not math.isfinite(args.r2_threshold) or not 0.0 < args.r2_threshold <= 1.0:
         raise ContinuationGateError("--r2-threshold must be finite and between 0 and 1")
     if not math.isfinite(args.poll_interval_seconds) or args.poll_interval_seconds <= 0.0:

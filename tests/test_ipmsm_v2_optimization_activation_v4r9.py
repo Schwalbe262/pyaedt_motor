@@ -497,7 +497,7 @@ class OptimizationActivationBuilderTests(unittest.TestCase):
         argv = successor["optimization"]["argv_template"]
         expected = {
             "--scheduler-url": "http://127.0.0.1:8002",
-            "--project-active-cap": "50",
+            "--project-active-cap": "300",
             "--max-fea-candidates": "12",
             "--task-prefix": builder.NAMESPACE["task_prefix"],
             "--remote-cases-dir": builder.NAMESPACE["remote_cases_dir"],
@@ -624,8 +624,8 @@ class OptimizationActivationBuilderTests(unittest.TestCase):
             remote_deployment_snapshot={
                 "project": "PYAEDT_MOTOR_IPMSM_V2",
                 "source_revision": "c" * 40,
-                "max_active_tasks": 50,
-                "validated_concurrency_limit": 100,
+                "max_active_tasks": 300,
+                "validated_concurrency_limit": 300,
             },
             audited_inputs=SimpleNamespace(model_bundle_contract={"metadata": "bound"}),
             paths=paths,
@@ -737,8 +737,8 @@ class OptimizationActivationBuilderTests(unittest.TestCase):
                 ],
                 "auto_pull": False,
                 "cleanup_globs": "*.aedtresults",
-                "max_active_tasks": 50,
-                "validated_concurrency_limit": 100,
+                "max_active_tasks": 300,
+                "validated_concurrency_limit": 300,
                 "aedt_backend": "standalone",
                 "setup": policy["setup"],
                 "entrypoints": [
@@ -756,11 +756,11 @@ class OptimizationActivationBuilderTests(unittest.TestCase):
                 "simulation_policy": {
                     "project": policy["project"],
                     "name": policy["project"],
-                    "desired_simulations": 50,
-                    "effective_simulations": 50,
-                    "validated_concurrency_limit": 50,
+                    "desired_simulations": 300,
+                    "effective_simulations": 300,
+                    "validated_concurrency_limit": 300,
                     "min_desired_simulations": 0,
-                    "max_desired_simulations": 50,
+                    "max_desired_simulations": 300,
                     "scale_down_mode": "drain",
                     "control_enabled": True,
                 },
@@ -775,7 +775,7 @@ class OptimizationActivationBuilderTests(unittest.TestCase):
         self.assertEqual(snapshot["source_revision"], revision)
         self.assertIs(snapshot["auto_pull"], False)
         self.assertEqual(snapshot["cleanup_globs"], "*.aedtresults")
-        self.assertEqual(snapshot["validated_concurrency_limit"], 100)
+        self.assertEqual(snapshot["validated_concurrency_limit"], 300)
         self.assertEqual(
             set(snapshot["entrypoints"]),
             {"run_ipmsm_batch.py", "subprocess_run.py"},
@@ -888,8 +888,8 @@ class OptimizationActivationRunnerTests(unittest.TestCase):
             remote_deployment_snapshot={
                 "project": "PYAEDT_MOTOR_IPMSM_V2",
                 "source_revision": "d" * 40,
-                "max_active_tasks": 50,
-                "validated_concurrency_limit": 100,
+                "max_active_tasks": 300,
+                "validated_concurrency_limit": 300,
             },
             audited_inputs=SimpleNamespace(),
             wrapper_argv=self.wrapper,
@@ -924,11 +924,11 @@ class OptimizationActivationRunnerTests(unittest.TestCase):
             {"contract_sha256": "1" * 64},
         )
 
-    def test_scheduler_policy_is_exact_and_cap50(self) -> None:
+    def test_scheduler_policy_is_exact_and_cap300(self) -> None:
         flags = {
             "--project": "PYAEDT_MOTOR_IPMSM_V2",
             "--scheduler-url": "http://127.0.0.1:8002",
-            "--project-active-cap": "50",
+            "--project-active-cap": "300",
             "--max-fea-candidates": "12",
             "--env-setup": builder.remote_task_env_setup("d" * 40),
         }

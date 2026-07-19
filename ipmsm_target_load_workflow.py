@@ -725,8 +725,8 @@ def _validate_scheduler_contract(contract: Mapping[str, object]) -> dict[str, An
     ):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise TargetLoadWorkflowError(f"{label} must be a positive integer")
-    if server_cap > 200:
-        raise TargetLoadWorkflowError("server_cap must not exceed the 200-task concurrency cap")
+    if server_cap > 300:
+        raise TargetLoadWorkflowError("server_cap must not exceed the 300-task concurrency cap")
     if max_workers > server_cap:
         raise TargetLoadWorkflowError("max_workers_per_node must not exceed server_cap")
     if cores_per_process > cpus:

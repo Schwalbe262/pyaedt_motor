@@ -1196,6 +1196,20 @@ class ContinueIpmsmV2Stage2Tests(unittest.TestCase):
                 ):
                     continuation.main(cli(paths))
 
+    def test_project_active_cap_300_is_accepted_and_301_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = fixture(Path(tmp))
+            args = continuation.build_parser().parse_args(
+                cli(paths, "--project-active-cap", "300")
+            )
+            continuation.validate_args(args)
+            args.project_active_cap = 301
+            with self.assertRaisesRegex(
+                continuation.ContinuationGateError,
+                "between 1 and 300",
+            ):
+                continuation.validate_args(args)
+
     def test_stage_plans_must_not_overlap_by_case_or_design(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             paths = fixture(Path(tmp))

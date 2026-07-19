@@ -67,7 +67,7 @@ git diff -- path/to/file
 
 ## Simulation Scheduler Policy
 
-- The 50-simulation limit is the current active concurrency cap, not a lifetime total; larger non-overlapping case plans may continue through refill batches while keeping queued/running FEA tasks at or below 50.
+- The user-approved active FEA concurrency cap is 300; keep queued/running FEA tasks at or below 300, preserve deterministic non-overlapping case plans, and use bounded refill only when a plan exceeds 300 cases.
 - Use the current `slurm_scheduler` policy for automated remote-cwd FEA: `/api/tasks` JSON with `scheduling_profile=fea_bursty`, `required_capability=conda:pyaedt2026v1`, `env_profile=pyaedt2026v1`, deterministic `dedupe_key`, optional `max_workers_per_node`, and explicit `module load ansys-electronics/v252`; keep legacy `/tasks` only as a manual compatibility path.
 - Before each new batch, generate a non-overlapping case plan, apply confirmed exclusion rules only, dry-run or smoke new nodes, and fetch only filtered result summaries.
 
