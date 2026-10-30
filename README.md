@@ -47,6 +47,12 @@ Windows의 새 `simulate` 명령은 코드와 보조 라이브러리를 C:에 �
 
 새 실험계획과 모델·최적화 명령은 [데이터 생성](docs/DATASET_V3.md), [모델 학습](docs/PHYSICAL_MODEL.md), [설계 탐색](docs/PHYSICAL_OPTIMIZATION.md), [클러스터 실행](docs/CLUSTER_RUNS.md)을 참고합니다. 과거 `controller.py`와 v4 자동화는 이전 실행 재현용입니다. 현재 연구에는 새 `/api/tasks` 경로와 공유 시도 원장을 사용합니다.
 
+계산 자원은 예약한 코어 수와 실제 solver 사용 기록을 구분해 확인합니다. 저장된 native `.profile`과 해당 실행의 ACF가 있으면 다음 명령으로 행렬 계산의 실제 코어 수·비선형 잔차를 점검합니다. 원본 증거와 해석 설정은 변경하지 않으며, 이 점검 결과만으로 정확도나 속도 개선을 승인하지 않습니다.
+
+```powershell
+python -m pyaedt_motor.solver_profile <실행.profile> --requested-cores 4 --acf <실행.acf> --output <C의점검결과.json>
+```
+
 ## 품질과 실험 한도
 
 - 신규 FEA는 실패·재시도를 포함해 총 3,000회 이내이며 진단 300회, 학습 데이터 2,400회, 최종 설계 검증 300회를 배정합니다.
