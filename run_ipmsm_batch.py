@@ -413,6 +413,7 @@ INPUT_CORE_COLUMNS = (
     "input_core_bh_curve_points",
     "input_core_bh_curve_bmax_t",
     "input_core_bh_curve_hmax_a_per_m",
+    "input_core_bh_curve_sha256",
 )
 
 INPUT_RUN_COLUMNS = (
@@ -657,6 +658,7 @@ def setup_fingerprint(
             "analysis_purpose": spec.analysis_purpose,
             "compute_inductance": spec.compute_inductance,
             "circle_segments": spec.circle_segments,
+            "band_circle_segments": spec.band_circle_segments,
             "loss_policy": spec.loss_policy,
             "strict_setup": spec.strict_setup,
             "mesh_maximum_lengths_mm": spec.mesh_maximum_lengths_mm,
@@ -1027,6 +1029,7 @@ def build_spec(
         strict_setup=case_bool(case, "strict_setup", default=True),
         require_steady_state=case_bool(case, "require_steady_state", default=False),
         circle_segments=case_int(case, "circle_segments", "input_circle_segments", default=0),
+        band_circle_segments=case_int(case, "band_circle_segments", "input_band_circle_segments", default=144),
         loss_policy=str(case_value(case, "loss_policy", "input_loss_policy", default="laminated_core")),
         mesh_maximum_lengths_mm={
             key: case_float(case, f"mesh_{key}_max_length_mm", default=0.0)
@@ -1739,6 +1742,9 @@ def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None
     phase_voltage_limit_svpwm = vdc / math.sqrt(3.0)
     output_summary["output_phase_voltage_limit_spwm_v"] = phase_voltage_limit_spwm
     output_summary["output_phase_voltage_limit_svpwm_v"] = phase_voltage_limit_svpwm
+    output_summary["output_voltage_phase_proxy_assumption"] = "balanced_sinusoidal_phase_peak"
+    span = finite_float(output_summary.get("output_voltage_span_last_peak_v"))
+    output_summary["output_dc_bus_span_margin_last_v"] = vdc - span if math.isfinite(span) else math.nan
 
     for window in TIME_DOMAIN_WINDOWS:
         torque_avg = finite_float(output_summary.get(f"output_torque_{window}_avg_nm"))

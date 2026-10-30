@@ -100,6 +100,26 @@ def periodic_derivative(times: Any, values: Any, start: float, end: float, sampl
     return np.r_[grid, end], np.r_[derivative, derivative[0]], closure
 
 
+def three_phase_voltage_metrics(voltages: Any) -> dict[str, Any]:
+    """Full-wave inverter demand, invariant to a common-mode voltage offset.
+
+    Min-max injection centers all three references in [-span/2, span/2].
+    Averaged two-level PWM duties fit the DC bus iff the span fits Vdc.
+    """
+    values = np.asarray(voltages, dtype=float)
+    if values.ndim != 2 or values.shape[0] != 3 or values.shape[1] < 2 or not np.isfinite(values).all():
+        raise ValueError("three complete finite phase-voltage arrays are required")
+    result: dict[str, Any] = {}
+    for a, b, label in [(0, 1, "ab"), (1, 2, "bc"), (2, 0, "ca")]:
+        result[f"output_line_{label}_voltage_last_peak_abs_v"] = float(np.max(np.abs(values[a] - values[b])))
+    span = float(np.max(np.max(values, axis=0) - np.min(values, axis=0)))
+    result["output_voltage_span_last_peak_v"] = span
+    result["output_line_voltage_last_peak_abs_v"] = span
+    result["output_svm_centered_phase_last_peak_abs_v"] = span / 2
+    result["output_voltage_span_source"] = "physical_three_phase_waveform"
+    return result
+
+
 def analyze_exported_waveforms(
     exported: dict[str, str], spec: Any, operation: str = "sin_current",
     physical_waveform_output: Path | None = None,
@@ -210,6 +230,8 @@ def analyze_exported_waveforms(
         result["output_phase_voltage_source"] = "flux_derivative_three_phase"
         result["output_back_emf_source"] = "periodic_flux_derivative"
         result["output_flux_derivative_method"] = "periodic_fft"
+        result.update(three_phase_voltage_metrics(
+            [physical_waveforms[f"phase{phase}_voltage_v"] for phase in "abc"]))
         runner.summarize_phase_envelope(result, tuple(f"output_phase{p}_voltage" for p in "abc"), "output_phase_voltage", "v")
         if physical_waveform_output is not None:
             import pandas as pd

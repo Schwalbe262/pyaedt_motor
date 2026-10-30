@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass, field
+import hashlib
+import json
 import math
 from pathlib import Path
 import re
@@ -98,6 +100,7 @@ class IPMSMPPTSpec:
     strict_setup: bool = True
     require_steady_state: bool = False
     circle_segments: int = 0
+    band_circle_segments: int = 144
     loss_policy: str = "laminated_core"
     mesh_maximum_lengths_mm: dict[str, float] = field(default_factory=dict)
     mesh_elements: dict[str, int] = field(
@@ -218,6 +221,8 @@ def validate_ppt_spec_contract(
         raise ValueError("only screening may omit inductance; training requires Ld/Lq")
     if spec.circle_segments != 0 and spec.circle_segments < 12:
         raise ValueError("circle_segments must be 0 (exact arcs) or at least 12")
+    if spec.band_circle_segments != 0 and spec.band_circle_segments < 12:
+        raise ValueError("band_circle_segments must be 0 (exact arcs) or at least 12")
     if spec.loss_policy not in {"laminated_core", "legacy_implicit"}:
         raise ValueError("unsupported loss_policy")
     for group, length in spec.mesh_maximum_lengths_mm.items():
@@ -575,47 +580,60 @@ def _load_core_bh_curve() -> list[list[float]]:
             raise ValueError(f"BH curve CSV must have B and H columns: {path}")
 
         points: list[list[float]] = []
-        for row in reader:
+        for line_number, row in enumerate(reader, start=2):
             try:
                 b_value = float(row[b_column])
                 h_value = float(row[h_column])
-            except Exception:
-                continue
-            if math.isfinite(b_value) and math.isfinite(h_value) and b_value >= 0.0 and h_value >= 0.0:
-                points.append([h_value, b_value])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid BH curve value at {path}:{line_number}") from exc
+            if not (math.isfinite(b_value) and math.isfinite(h_value) and b_value >= 0.0 and h_value >= 0.0):
+                raise ValueError(f"Nonfinite or negative BH curve value at {path}:{line_number}")
+            points.append([h_value, b_value])
 
     points.sort(key=lambda point: (point[0], point[1]))
     unique_points: list[list[float]] = []
-    seen_h: set[float] = set()
+    seen_h: dict[float, float] = {}
     for h_value, b_value in points:
         rounded_h = round(h_value, 12)
         if rounded_h in seen_h:
+            if seen_h[rounded_h] != b_value:
+                raise ValueError(f"Conflicting B values for H={h_value}: {path}")
             continue
-        seen_h.add(rounded_h)
+        seen_h[rounded_h] = b_value
+        if unique_points and b_value < unique_points[-1][1]:
+            raise ValueError(f"BH curve must be monotone: {path}")
         unique_points.append([h_value, b_value])
 
+    if unique_points and unique_points[0][0] == 0.0 and unique_points[0][1] != 0.0:
+        raise ValueError(f"Initial magnetization curve must have B=0 at H=0: {path}")
     if unique_points and (unique_points[0][0] > 0.0 or unique_points[0][1] > 0.0):
         unique_points.insert(0, [0.0, 0.0])
+    if len(unique_points) < 3 or unique_points[-1][0] <= 0.0 or unique_points[-1][1] <= 0.0:
+        raise ValueError(f"BH curve needs at least three valid points: {path}")
     return unique_points
 
 
-def get_core_bh_curve_metadata() -> dict[str, float]:
-    """Return summary metadata for the nonlinear B-H curve used by the core material."""
+def get_core_bh_curve_metadata() -> dict[str, Any]:
+    """Identify every applied B-H point, including interior saturation data."""
     curve = _load_core_bh_curve()
     if not curve:
         return {
             "bh_curve_points": 0,
             "bh_curve_bmax_t": math.nan,
             "bh_curve_hmax_a_per_m": math.nan,
+            "bh_curve_sha256": "",
         }
     return {
         "bh_curve_points": len(curve),
         "bh_curve_bmax_t": max(point[1] for point in curve),
         "bh_curve_hmax_a_per_m": max(point[0] for point in curve),
+        "bh_curve_sha256": hashlib.sha256(
+            json.dumps(curve, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest(),
     }
 
 
-def get_core_material_properties() -> dict[str, float]:
+def get_core_material_properties() -> dict[str, Any]:
     """Return scalar core material properties applied to the custom steel material."""
     properties = {
         "resistivity_ohm_m": DEFAULT_CORE_RESISTIVITY_OHM_M,
@@ -641,9 +659,11 @@ def _set_electrical_steel_coreloss_with_y(mat: Any, coeff: dict[str, float], cut
     mat.update()
 
 
-def _apply_core_bh_curve(mat: Any) -> dict[str, Any]:
+def _apply_core_bh_curve(mat: Any, *, strict: bool = False) -> dict[str, Any]:
     bh_curve = _load_core_bh_curve()
     if not bh_curve:
+        if strict:
+            raise ValueError("Strict simulation requires the nonlinear core B-H curve")
         mat.permeability = "1000"
         return {"source": "fallback_simple_permeability", "points": 0}
 
@@ -659,8 +679,10 @@ def _apply_core_bh_curve(mat: Any) -> dict[str, Any]:
     }
 
 
-def _apply_core_material_properties(mat: Any, coeff: dict[str, float]) -> dict[str, Any]:
-    result = {"bh_curve": _apply_core_bh_curve(mat)}
+def _apply_core_material_properties(
+    mat: Any, coeff: dict[str, float], *, strict: bool = False
+) -> dict[str, Any]:
+    result = {"bh_curve": _apply_core_bh_curve(mat, strict=strict)}
     mat.conductivity = f"{DEFAULT_CORE_CONDUCTIVITY_S_PER_M:.12g}"
     mat.mass_density = f"{DEFAULT_CORE_MASS_DENSITY_KG_PER_M3:.12g}"
     try:
@@ -681,7 +703,7 @@ def ensure_ppt_materials(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
         result[spec.core_material] = "exists"
         try:
             mat = m2d.materials[spec.core_material]
-            applied = _apply_core_material_properties(mat, coeff)
+            applied = _apply_core_material_properties(mat, coeff, strict=spec.strict_setup)
             result[f"{spec.core_material}_coreloss"] = coeff
             result[f"{spec.core_material}_properties"] = get_core_material_properties()
             result[f"{spec.core_material}_bh_curve"] = applied["bh_curve"]
@@ -691,7 +713,7 @@ def ensure_ppt_materials(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
         try:
             mat = m2d.materials.add_material(spec.core_material)
             try:
-                applied = _apply_core_material_properties(mat, coeff)
+                applied = _apply_core_material_properties(mat, coeff, strict=spec.strict_setup)
                 result[f"{spec.core_material}_coreloss"] = coeff
                 result[f"{spec.core_material}_properties"] = get_core_material_properties()
                 result[f"{spec.core_material}_bh_curve"] = applied["bh_curve"]
@@ -872,8 +894,13 @@ def ensure_region_and_band(
     object_groups: dict[str, Any] | None,
     create_missing_region: bool = True,
     create_missing_band: bool = True,
-) -> dict[str, list[str]]:
-    """Reuse Region/Band if present; otherwise create simple circular sheets."""
+    band_circle_segments: int = 144,
+) -> dict[str, Any]:
+    """Reuse Region/Band, with configurable moving-interface faceting.
+
+    This is an artificial interface within air, not the physical rotor surface.
+    Region stays unchanged so band-only comparisons isolate the interface mesh.
+    """
     m2d = _m2d(design)
     region = _get_group(m2d, object_groups, "region", ("Region",))
     band = _get_group(m2d, object_groups, "band", ("Band",))
@@ -892,13 +919,28 @@ def ensure_region_and_band(
         obj = m2d.modeler.create_circle(
             origin=[0, 0, 0],
             radius="rotor_radius + rotator_gap/2",
-            num_sides=144,
+            num_sides=band_circle_segments,
             name="Band",
             material="air",
         )
         band = [_name(obj)]
 
-    return {"region": region, "band": band}
+    result: dict[str, Any] = {"region": region, "band": band}
+    if band:
+        if len(band) != 1:
+            raise RuntimeError("moving-band geometry must contain exactly one interface object")
+        edge_count = len(m2d.modeler.oeditor.GetEdgeIDsFromObject(band[0]))
+        expected_edges = band_circle_segments if band_circle_segments else 1
+        if edge_count != expected_edges:
+            raise RuntimeError(f"moving-band geometry differs from requested segments: {edge_count} edges, expected {expected_edges}")
+        result["band_geometry"] = {"requested_segments": band_circle_segments, "edge_count": edge_count}
+    return result
+
+
+def live_material_name(m2d: Any, object_name: str) -> str:
+    """Read AEDT directly: Object3d.material_name caches its setter value."""
+    value = m2d.modeler.oeditor.GetPropertyValue("Geometry3DAttributeTab", object_name, "Material")
+    return str(value).strip().strip('"')
 
 
 def _assign_material(
@@ -912,6 +954,8 @@ def _assign_material(
         try:
             obj = m2d.modeler.get_object_from_name(obj_name)
             obj.material_name = material
+            if live_material_name(m2d, obj_name).casefold() != material.casefold():
+                continue
             if solve_inside is not None:
                 obj.solve_inside = solve_inside
             assigned.append(obj_name)
@@ -920,7 +964,7 @@ def _assign_material(
     return assigned
 
 
-def assign_ppt_materials(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPPTSpec) -> dict[str, list[str]]:
+def assign_ppt_materials(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPPTSpec) -> dict[str, Any]:
     """Assign deck materials to already-created geometry."""
     m2d = _m2d(design)
     stator = _get_group(m2d, object_groups, "stator", ("stator", "main_stator"))
@@ -930,24 +974,51 @@ def assign_ppt_materials(design: Any, object_groups: dict[str, Any] | None, spec
     windings = _get_group(m2d, object_groups, "windings", ("winding",))
     regions = _get_group(m2d, object_groups, "region", ("Region",))
     bands = _get_group(m2d, object_groups, "band", ("Band",))
+    pockets = _get_group(m2d, object_groups, "air_pockets", ("magnet_space",))
 
     core_material_candidates = (spec.core_material,) + spec.core_material_fallbacks
     core_assigned = []
     selected_core_material = core_material_candidates[0]
     for material in core_material_candidates:
         core_assigned = _assign_material(m2d, stator + rotor, material)
-        if core_assigned:
+        if core_assigned and set(core_assigned) == set(stator + rotor):
             selected_core_material = material
             break
 
-    return {
+    result: dict[str, Any] = {
         "core_material": [selected_core_material],
         "stator_rotor": core_assigned,
         "shaft": _assign_material(m2d, shaft, spec.shaft_material),
         "magnets": _assign_material(m2d, magnets, spec.magnet_material),
         "windings": _assign_material(m2d, windings, spec.winding_material, solve_inside=True),
-        "air": _assign_material(m2d, regions + bands, spec.air_material),
+        "air": _assign_material(m2d, regions + bands + pockets, spec.air_material),
+        "air_pockets": pockets,
     }
+    expected = {"stator_rotor": stator + rotor, "shaft": shaft, "magnets": magnets,
+                "windings": windings, "air": regions + bands + pockets}
+    errors = []
+    if not stator or not rotor:
+        errors.append("both stator and rotor iron objects are required")
+    if spec.strict_setup and selected_core_material.casefold() != spec.core_material.casefold():
+        errors.append("fallback core material cannot satisfy the requested strict material contract")
+    if spec.model_extent == "full_360":
+        for label, names, count in [("magnets", magnets, spec.pole_number),
+                                    ("windings", windings, 2 * spec.slot_number)]:
+            if len(names) != count:
+                errors.append(f"{label}: expected {count} objects, found {len(names)}")
+    for group, names in expected.items():
+        if set(result[group]) != set(names):
+            errors.append(f"{group}: assigned {len(result[group])}/{len(names)} objects")
+    readback = {}
+    for name in dict.fromkeys(name for names in expected.values() for name in names):
+        try:
+            readback[name] = live_material_name(m2d, name)
+        except Exception as exc:
+            errors.append(f"{name}: live material readback failed: {exc}")
+    result["expected_counts"] = {key: len(names) for key, names in expected.items()}
+    result["material_readback"] = readback
+    result["errors"] = errors
+    return result
 
 
 def resolve_geometry_overlaps(design: Any, object_groups: dict[str, Any] | None) -> dict[str, Any]:
@@ -1438,6 +1509,7 @@ def configure_ipmsm_from_ppt(
         object_groups,
         create_missing_region=create_missing_region,
         create_missing_band=create_missing_band,
+        band_circle_segments=spec.band_circle_segments,
     )
     merged_groups = dict(object_groups or {})
     merged_groups.setdefault("region", created["region"])

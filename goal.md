@@ -13,8 +13,9 @@
 - 시뮬레이션 코드 개선.
 - 시뮬레이션 정확도 향상.
 - 시뮬레이션 시간이 크게 증가하는 개선은 피한다.
-- 기존 run path인 `controller.py` -> `simulation1.sh` -> `subprocess_run.py` -> `run_ipmsm_batch.py`를 보존하면서 deterministic 기능, tests, docs, UI/report hooks를 보강한다.
+- 새 연구는 `python -m pyaedt_motor`와 `pyaedt_motor.cluster`의 `/api/tasks` 경로를 사용한다. `controller.py` 및 v4 자동화는 과거 실행 재현용으로 보존하며, 고정 소스·승인 계약은 완화하지 않는다.
 - Approved 2026-10-30: IPMSM queued/running FEA cap is 300; new campaign budget is 3000 attempts including failures/retries (diagnostics300, training2400, design validation300). Each batch requires setup/smoke evidence and a non-overlapping plan.
+- 위 한도 내의 계획된 해석·로컬 검증은 이미 승인됐다. 목표는 8극12슬롯, 1200/5000 rpm의 7.5 kW, 직경 300 mm 이하·적층 40~70 mm이며 `configs/ipmsm_7p5kw.json`을 기준으로 한다. 출력은 전압 span을 포함한 10개를 검증하고, 최종 후보는 두 속도에서 직접 FEA로 확인한다.
 
 ## System Roles
 
@@ -66,7 +67,7 @@
 - Compare before/after simulation behavior with evidence.
 - Use accumulated traces for prompt tuning, evals, regression tests, operator training, or future deterministic agent improvements.
 
-## Current Status
+## Historical Status (현재 상태는 HANDOFF_CURRENT.md 참고)
 
 - Root project-memory files now define the default context budget.
 - Existing runnable entrypoints are source scripts, not a packaged CLI.

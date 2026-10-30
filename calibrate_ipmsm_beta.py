@@ -126,7 +126,7 @@ def calibration_source_from_spec(path: Path, *, geometry_seed: int = 42) -> dict
     Zero calibration is allowed before ``beta_calibration`` exists.  The
     temporary value injected here is never written to a solve row or manifest.
     """
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(raw, dict):
         raise ValueError(f"{path} must contain one JSON object")
     spec_raw = dict(raw)
@@ -138,11 +138,11 @@ def calibration_source_from_spec(path: Path, *, geometry_seed: int = 42) -> dict
             "convention": BETA_CONVENTION,
         },
     )
-    from generate_ipmsm_v2_cases import _valid_geometry_samples
+    from pyaedt_motor.doe import sample_feasible_geometries
     from ipmsm_optimization import optimization_spec_from_mapping, phase_resistance_100c_ohm
 
     spec = optimization_spec_from_mapping(spec_raw)
-    design, stack_length_mm, design_hash = _valid_geometry_samples(spec, 1, geometry_seed)[0]
+    design, stack_length_mm, design_hash = sample_feasible_geometries(spec, 1, geometry_seed)[0]
     return {
         "case_id": f"beta_source_{design_hash[:12]}",
         "geometry_group_id": f"beta_source_{design_hash[:12]}",

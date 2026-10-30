@@ -25,6 +25,9 @@ python -m pip install --no-deps --no-build-isolation -e .
 python -m pyaedt_motor --help
 python -m pyaedt_motor simulate --help
 python -m pyaedt_motor plan --source <검증할결과.csv> --output <새실험계획.csv>
+python -m pyaedt_motor doe --help
+python -m pyaedt_motor quality --help
+python -m pyaedt_motor.cluster --help
 python -m pyaedt_motor audit --dataset <결과.csv> --output <점검요약.json>
 python -m pyaedt_motor train --help
 python -m pyaedt_motor optimize --help
@@ -34,7 +37,9 @@ python -m pyaedt_motor archive --source <완료폴더> --destination <D의새보
 
 해석은 C: 작업 영역 또는 클러스터에서 실행합니다. `PYAEDT_LIBRARY_ROOT`에는 해당 실행에서 사용할 `pyaedt_module`의 상위 폴더나 `pyaedt_library` 저장소를 지정할 수 있습니다. 기존 `run_ipmsm_batch.py`와 상위 실행 스크립트의 인자도 유지합니다.
 
-Windows의 새 `simulate` 명령은 코드와 보조 라이브러리를 C:에 복사하고 파일별 해시를 검증한 뒤 그 실행본으로 해석합니다. 기본 프로젝트·결과 경로도 해당 C: 실행 폴더입니다. `IPMSM_RUNTIME_ROOT`로 작업 상위 폴더를 지정할 수 있습니다.
+Windows의 새 `simulate` 명령은 코드와 보조 라이브러리를 C:에 복사하고 파일별 해시를 검증한 뒤 그 실행본으로 해석합니다. 기본 프로젝트·결과 경로도 해당 C: 실행 폴더입니다. `train`과 `optimize`도 C:의 고정 소스를 새 Python 프로세스에서 사용하며 출력은 C: 경로로 지정합니다. `IPMSM_RUNTIME_ROOT`로 작업 상위 폴더를 지정할 수 있습니다.
+
+새 실험계획과 모델·최적화 명령은 [데이터 생성](docs/DATASET_V3.md), [모델 학습](docs/PHYSICAL_MODEL.md), [설계 탐색](docs/PHYSICAL_OPTIMIZATION.md), [클러스터 실행](docs/CLUSTER_RUNS.md)을 참고합니다. 과거 `controller.py`와 v4 자동화는 이전 실행 재현용입니다. 현재 연구에는 새 `/api/tasks` 경로와 공유 시도 원장을 사용합니다.
 
 ## 품질과 실험 한도
 
@@ -42,5 +47,5 @@ Windows의 새 `simulate` 명령은 코드와 보조 라이브러리를 C:에 �
 - 클러스터의 프로젝트 전체 대기·실행 합계는 300 이하로 유지합니다. 먼저 설정 스모크와 소수 해석을 검증합니다.
 - `screening`만 인덕턴스 계산을 생략할 수 있습니다. 정식 `training`과 `reference`는 Ld/Lq를 계산합니다.
 - 설정 검증과 결과 품질 검증은 별개입니다. 정상상태·메시·시간 간격 수렴과 물리 정의를 확인한 데이터로 모델을 학습합니다.
-- 모델 승격에는 주요 8개 출력과 전압의 시험 R²≥0.95가 필요합니다. 미달 모델의 최적화 결과는 검증 완료 설계로 표시하지 않습니다.
+- 새 모델 승격에는 전압 span을 포함한 전체 10개 출력의 시험 R²≥0.95와 물리·출처 검사가 필요합니다. 현재 새 연구 모델과 최종 설계는 아직 승인하지 않았습니다.
 - 보관 명령은 원본을 삭제하지 않습니다. 파일별 해시 검증과 사용 여부 확인 후 정리합니다.
