@@ -224,6 +224,89 @@ def own_process_token(pid: int) -> tuple[int, str] | None:
         return None
 
 
+def assert_desktop_owned(desktop: Any, pid: int, token: tuple[int, str]) -> None:
+    actual = desktop.odesktop.GetProcessID()
+    reported = desktop.aedt_process_id
+    if (type(pid) is not int or pid <= 0 or type(actual) is not int or actual != pid
+            or type(reported) is not int or reported != pid or token is None or own_process_token(pid) != token):
+        raise ValueError("Desktop PID/UID/start token no longer matches the owned session")
+
+
+def create_owned_desktop(factory: Callable[..., Any], previous_pids: set[int]) -> tuple[Any, int, tuple[int, str]]:
+    desktop = factory(version="2025.2", non_graphical=True, new_desktop=True, close_on_exit=False)
+    pid = desktop.odesktop.GetProcessID()
+    if type(pid) is not int or pid <= 0 or pid in previous_pids or pid not in ansys_pids():
+        raise ValueError("fresh Desktop ownership could not be established before project open")
+    token = own_process_token(pid)
+    if token is None:
+        raise ValueError("Desktop UID/start token could not be verified before project open")
+    assert_desktop_owned(desktop, pid, token)
+    return desktop, pid, token
+
+
+def open_bound_copy(factory: Callable[..., Any], desktop: Any, pid: int,
+                    token: tuple[int, str], project: Path, design: str) -> Any:
+    assert_desktop_owned(desktop, pid, token)
+    # Never supply solution_type/setup: opening must not alter the saved setup.
+    app = factory(project=str(project), design=design, version="2025.2", non_graphical=True,
+                  new_desktop=False, aedt_process_id=pid, close_on_exit=False, remove_lock=False)
+    assert_desktop_owned(app.desktop_class, pid, token)
+    return app
+
+
+def close_owned_session(app: Any, desktop: Any, pid: int, token: tuple[int, str],
+                        copied_project: Path) -> dict[str, Any]:
+    """Retain the verified Desktop owner across a failed Maxwell constructor."""
+    if type(pid) is not int or pid <= 0:
+        raise ValueError("verified Desktop PID required for cleanup")
+    if own_process_token(pid) != token:
+        return {"own_pid": pid, "process_exited": True, "api_errors": [], "owner_already_exited": True}
+    assert_desktop_owned(desktop, pid, token)
+    errors = []
+    if app is not None:
+        try:
+            assert_desktop_owned(app.desktop_class, pid, token)
+            actual = Path(app.project_path) / (app.project_name + ".aedt")
+            if actual.resolve(strict=True) != copied_project.resolve(strict=True):
+                raise ValueError("app wrapper is not the verified private copy")
+        except Exception as exc:
+            errors.append(f"unusable/foreign app wrapper refused: {exc}")
+        else:
+            return close_owned_desktop(app, pid, token)
+    names = list(desktop.project_list)
+    if len(names) > 1 or any(name != copied_project.stem for name in names):
+        raise ValueError("owned Desktop contains an unexpected project; leave it intact")
+    if names:
+        project = desktop.odesktop.GetActiveProject()
+        if (project.GetName() != copied_project.stem
+                or Path(project.GetPath()).resolve(strict=True) != copied_project.parent.resolve(strict=True)):
+            raise ValueError("partial project is not the verified private copy; leave it intact")
+        desktop.odesktop.CloseProject(copied_project.stem)  # Native no-save close.
+        if list(desktop.project_list):
+            raise ValueError("partial copy did not close without saving")
+    handle = desktop.odesktop
+    try:
+        if desktop.release_desktop(close_projects=False, close_on_exit=True) is not True:
+            errors.append("blank/partial owner release returned False/None")
+    except Exception as exc:
+        errors.append(f"blank/partial owner release: {type(exc).__name__}: {exc}")
+    if own_process_token(pid) == token:
+        try:
+            assert_desktop_owned(desktop, pid, token)
+            handle.QuitApplication()
+        except Exception as exc:
+            errors.append(f"own QuitApplication: {type(exc).__name__}: {exc}")
+        deadline = time.monotonic() + 15
+        while own_process_token(pid) == token and time.monotonic() < deadline:
+            time.sleep(0.2)
+    exited = own_process_token(pid) != token
+    if not exited:
+        errors.append("owned Desktop still active; no forced kill attempted")
+    return {"own_pid": pid, "process_exited": exited, "api_errors": errors,
+            "constructor_failure_owner_cleanup": True, "explicit_process_signal_attempted": False,
+            "PyAEDT_release_may_signal_own_pid_on_timeout": True}
+
+
 def close_owned_desktop(app: Any, pid: int, token: tuple[int, str]) -> dict[str, Any]:
     """No-save close, check release return, and own-handle Quit fallback only."""
     desktop = app.desktop_class
@@ -482,7 +565,7 @@ def audit(project: Path, output: Path, *, design: str | None = None,
         "script_sha256": file_sha256(Path(__file__)), "python": sys.version,
         "pyaedt_version": version, "threads": threads,
     }
-    app, own_pid, token, closed = None, None, None, False
+    app, desktop, own_pid, token, closed = None, None, None, None, False
     original_cwd = Path.cwd()
     started = time.monotonic()
     try:
@@ -505,16 +588,14 @@ def audit(project: Path, output: Path, *, design: str | None = None,
         os.chdir(scratch)
         design = existing_saved_design(copied_project, design)
         previous_pids = ansys_pids()
-        from ansys.aedt.core import Maxwell2d
-        # Never supply solution_type/setup: opening must not alter saved setup.
-        app = Maxwell2d(project=str(copied_project), design=design, version="2025.2",
-                        non_graphical=True, new_desktop=True, close_on_exit=False, remove_lock=False)
-        pid = int(app.desktop_class.aedt_process_id)
-        report["desktop_pid"] = pid
-        token = own_process_token(pid)
-        if pid <= 0 or pid in previous_pids or pid not in ansys_pids() or token is None:
-            raise ValueError("new Desktop ownership could not be established; no external process will be closed")
-        own_pid = pid
+        from ansys.aedt.core import Desktop, Maxwell2d, settings
+        settings.enable_error_handler = False
+        settings.release_on_exception = False
+        desktop, own_pid, token = create_owned_desktop(Desktop, previous_pids)
+        report["desktop_pid"] = own_pid
+        report["Desktop_first_ownership_verified"] = True
+        report["owned_UID_start_token"] = list(token)
+        app = open_bound_copy(Maxwell2d, desktop, own_pid, token, copied_project, design)
         actual = Path(app.project_path) / (app.project_name + ".aedt")
         if actual.resolve(strict=True) != copied_project.resolve(strict=True):
             raise ValueError(f"opened project is not our verified copy: {actual}")
@@ -528,9 +609,9 @@ def audit(project: Path, output: Path, *, design: str | None = None,
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
     finally:
-        if app is not None and own_pid is not None and token is not None:
+        if desktop is not None and own_pid is not None and token is not None:
             try:
-                report["desktop_cleanup"] = close_owned_desktop(app, own_pid, token)
+                report["desktop_cleanup"] = close_owned_session(app, desktop, own_pid, token, copied_project)
                 closed = report["desktop_cleanup"]["process_exited"]
                 if report["desktop_cleanup"]["api_errors"]:
                     report["cleanup_error"] = "; ".join(report["desktop_cleanup"]["api_errors"])

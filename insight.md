@@ -1057,3 +1057,10 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: experimental exactint guard rejected native builtins.boolTrue and stopped both100907/100908 beforeAnalyze.
 - After/evidence:100909 reproducesboolTrue twice with nativeerrors0; V4typedguard22tests+wrapper11+bootstrap1 pass; actual100910/100911 both passvalidation and enterAnalyze, lowcompletes0 while highcore-nonperiodicity stillfails. Rawproofs0d171950.../8069d978...; source128/library23 unchanged.
 - Remaining risk: native validation acceptance is not physical accuracy or mesh convergence. Quarterpairfailscorelosscomparison522a6ef9..., so zero/loaded3/training remainheld.
+
+## 2026-10-31 08:40 KST | Lossless large CSV recovery across a text-only artifact API
+- Source loop: part18, cachedmetadata100913/100915; comparisonf76cc854... and42fileseal5c24383... atR/loss_component_accounting_review_20261031.
+- Improvement: preserve originalrawfile/seal, create deterministicgzip+unwrappedASCIIbase64 in a NEWpublication; verifyencoded/gzip/decodedraw sizes+SHA andstrictbase64decode before fullcollection acceptance.
+- Before:2.6MBrawGET504three times; max_bytes/tail returns suffix andtail-lines normalizesCRLF. Rawbinarygzip cannot roundtrip the endpoint's UTF8text contract; bothpartial/reformatted attempts were rejected.
+- After/evidence: actual~1.31MBASCII files traversed the unchangedendpoint, restored both originalCSVbytes/fullhashes, andboth24-channel cyclemeanrecomputations matchedexactly.17puretests+independentactualapply_text_window positive/negative checks; originalCSV/seals/case/source unchanged, no FEA rerun.
+- Remaining risk: networktimeout stillpossible; keepboundedGET andoriginal partialproofs. Losslesscollection is not physicalaccuracy anddoesnotpermitgate/Pin/efficiencychanges.
