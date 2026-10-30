@@ -16,3 +16,4 @@
 # Historical untracked scripts retain exact bytes, including Markdown string spacing.
 legacy/final_design_2026_07/** -text -whitespace
 legacy/reference_artifacts_2026_07/** -text -whitespace
+legacy/replay_analysis/** -text -whitespace

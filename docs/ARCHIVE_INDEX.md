@@ -14,9 +14,9 @@
 
 기존 데이터와 읽기 전용 대시보드가 사용하는 `C:\Users\peets\NEC\pyaedt_motor_blob_lf_325`는 유지합니다. 켜져 있던 과거 예약 작업 7개는 비활성화했습니다. 실행 중이던 대시보드 프로세스는 유지하며, 새 물리 계약에 대한 승인을 과거 자동화 계약으로 대신하지 않습니다.
 
-현재 클러스터 FEA 소스는 배포 프로젝트 `PYAEDT_MOTOR_REBUILD_V3_20261030`의 고정 커밋 `5914cb3`입니다. 실행 자원·라이선스 정책은 기존 모터 프로젝트 `PYAEDT_MOTOR_IPMSM_V2`를 사용합니다. 진행 중인 작업이 끝나기 전에는 해당 원격 소스 배포를 갱신하지 않습니다.
+현재 M19 기준 모델의 클러스터 FEA 소스는 `PYAEDT_MOTOR_REBUILD_M19_43006688`의 고정 커밋 `4300668`입니다. 이전 source4~7은 각 실험의 재현용으로 보존합니다. 실행 자원·라이선스 정책은 기존 모터 프로젝트 `PYAEDT_MOTOR_IPMSM_V2`를 사용하며, 진행 중인 작업의 원격 소스를 갱신하지 않습니다. 최신 상태는 `HANDOFF_CURRENT.md`에서 확인합니다.
 
-원격 task ID, 시도 예산, 실험 계획·제출 기록과 수집 결과는 C: 실행 폴더의 `attempt_ledger.jsonl`, `cluster_wave_rb3b`에서 확인합니다. 이 폴더는 완료 후 D:에 보관합니다. `tools/collect_cluster_wave.py`는 이 제출 기록을 읽어 결과와 실제 메시 요소 수를 수집하며, 작업을 새로 제출하거나 재시도하지 않습니다.
+원격 task ID와 시도 예산은 C: 실행 폴더의 `attempt_ledger.jsonl`, 현재 M19 영점 해석은 `m19_zero2_43006688`, 이전 PNF 실험은 `cluster_wave_rb3b` 등 각 실행 폴더에서 확인합니다. 완료된 실행은 D:에 보관합니다. 수집 도구는 결과와 실제 메시 요소 수를 읽으며, 수집만으로 작업을 새로 제출하거나 재시도하지 않습니다.
 
 
 ## 2026-10-30 추가 정리
@@ -27,11 +27,15 @@ Y:의 과거 수집·모델·PPT 추출·md 폴더는 각각 D:의 `y0`~`y4`로 
 
 현재 상세 이동·검증 상태는 C: 실행 폴더의 `retired_y_move_plan.json`, `retired_y_verified.json`, `leftover_worktree_backup_index.json`에서 확인합니다. 완료된 이전 연구 버전은 Git tag와 bundle로 복원할 수 있도록 정리합니다.
 
+2026-10-31 확인 시점에 기존 simulation 원본 이동은 일부만 완료됐습니다. `D:\IPMSM_Archive\y5`의 73,052파일과 Y:에 남은 40,311파일을 합쳐 전체 백업과 SHA가 일치함을 확인했습니다. Y:에 약 3.01 GB가 남아 있으며, 중복 삭제나 무조건 덮어쓰기는 하지 않습니다. 기존 smoke 원본 7,350파일(19,385,885,523 bytes)은 `D:\IPMSM_Archive\sm1`으로 이동하고 전체 SHA를 재검증했습니다. 독립 백업은 `sm0`에 있으며 Y:의 기존 smoke 폴더는 정리됐습니다.
+
 
 ## main과 과거 브랜치
 
 검증한 연구 코드를 main에 통합하고, 과거 브랜치 6개는 원래 HEAD를 가리키는 원격 annotated tag를 확인한 뒤 정리했습니다. 태그는 `archive/20261030/chore/...`, `archive/20261030/release/...`, `archive/20261030/fix/...`이며 이전 main은 `archive/20261030/main-before-rebuild`입니다. 현재 local·origin 작업 브랜치는 main과 research/ipmsm-rebuild-20261030입니다. D의 3개 작업트리는 원래 HEAD에서 detached 상태로 보관했습니다. 상세 전후 ref는 C 실행 폴더의 `git_consolidation_result.json`을 참고합니다.
 
 과거 untracked 분석·그림 도구 5개와 테스트 2개는 `legacy/final_design_2026_07`에 모았습니다. `source_map.csv`와 README에 원래 경로·SHA·복원 방법이 있습니다. `.gitattributes`도 해당 보관 파일의 원래 바이트를 유지하도록 설정했습니다. 원래 수정돼 있던 adaptive 소스·테스트 2개는 작업 파일에서 변경하지 않았습니다.
+
+이전 replay 분석·계획 도구 4개와 일반 테스트 4개는 `legacy/replay_analysis`에 모았습니다. 원본 8파일(55,649 bytes)은 `D:\IPMSM_Archive\ra0`에 먼저 백업·검증했고, 이동 후 SHA도 대조했습니다. CRLF·코드·테스트 기준을 그대로 보존하며, 보관 폴더 README에 별도 19개 테스트 실행 명령을 남겼습니다. 과거 권위 계약에 묶인 다른 루트 소스·테스트는 유지했습니다.
 
 원격 source 프로젝트4는 기존5914cb3 수렴 실험을 위해 유지합니다. 새 source 프로젝트5 `PYAEDT_MOTOR_REBUILD_V3B_8BB5216`은8bb5216에 고정했고4계정 배포를 확인했습니다. 프로젝트5의 max_active_tasks=0은 source 관리 전용이라는 뜻입니다. 실제 해석은 기존 runtime/license 프로젝트2와 승인된 cap300을 사용합니다.
