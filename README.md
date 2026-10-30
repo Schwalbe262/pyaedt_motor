@@ -4,6 +4,8 @@
 
 현재 개선 작업과 검증 결과는 [연구 점검 기록](docs/RESEARCH_AUDIT.md), 출력값의 뜻은 [파라미터 설명](docs/PARAMETERS.md), 새 실행을 재개할 때는 `HANDOFF_CURRENT.md`를 확인합니다.
 
+참고자료는 [references](references/README.md), 이전 탐색 노트북은 [notebooks/legacy](notebooks/legacy/README.md), 정리한 실행본과 검증 백업의 위치는 [보관 대응표](docs/ARCHIVE_INDEX.md)에 있습니다. 노트북의 코드·설명은 보존했고 실행 출력은 D: 원본 백업에서 확인할 수 있습니다.
+
 ## 작업 위치
 
 | 위치 | 용도 |

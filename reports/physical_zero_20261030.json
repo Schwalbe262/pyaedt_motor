@@ -1,0 +1,37 @@
+{
+  "workflow_version": "beta_calibration_v2",
+  "method": "signed_phasea_back_emf_fundamental_v2",
+  "convention": "dq_current_advance_v2",
+  "electrical_zero_deg": -90.90936963662185,
+  "source_case_id": "v2s3_train_0016_rated_torque_01@1200rpm",
+  "design_hash": "v2s3_train_geometry_0016_1c9f9c542b8d",
+  "quality_profile": "rb3_zero_6x180",
+  "initial_position_deg": -22.5,
+  "successful_rows": 2,
+  "successful_speeds_rpm": [
+    1200.0,
+    5000.0
+  ],
+  "circular_resultant": 0.9999864188949905,
+  "max_circular_deviation_deg": 0.2986109130051773,
+  "observations": [
+    {
+      "speed_rpm": 1200.0,
+      "cos_peak_v": 14.892948371046733,
+      "sin_peak_v": 0.15876112966617623,
+      "amplitude_peak_v": 14.893794556087997,
+      "inferred_zero_deg": -90.6107587236167
+    },
+    {
+      "speed_rpm": 5000.0,
+      "cos_peak_v": 62.01046317870665,
+      "sin_peak_v": 1.3075750929874623,
+      "amplitude_peak_v": 62.02424764768642,
+      "inferred_zero_deg": -91.20798054962701
+    }
+  ],
+  "metric_contract": "motor_metrics_v3",
+  "producer_fingerprint": "producer_v3:sha256:dd52d2a56db1dcf50c8479c06f86ace9764bfe254943bc1bf6941a4b022c7c0e",
+  "back_emf_source": "periodic_flux_derivative",
+  "calibration_id": "beta-calibration:sha256:801a54be56be383c4fe35c7e9441ed59eeea91f4dacf9589318856fecfae89fe"
+}

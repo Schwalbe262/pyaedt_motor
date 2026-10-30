@@ -1,3 +1,13 @@
+# Current research rebuild | 2026-10-30
+- Branch research/ipmsm-rebuild-20261030, latest pushed74c4a4c; active FEA uses immutable remote5914cb3 in source project4, existing motor runtime/license project2. Do not redeploy that source while tasks run.
+- User scope: 7.5kW at1200/5000rpm, diameter<=300mm, 8p12s, attempts<=3000 incl retries, queued+running<=300; Y source/C runtime/D archive. Mail-list instruction was withdrawn.
+- Runtime: C:/Users/peets/NEC/pyaedt_motor_runtime/rebuild_20261030. Physical-zero100786/100787 completed: -90.90937deg, speed deviation+/-0.29861deg, manifest physical_zero_manifest_v3.json. FEA3 row+training gate pass; related111 and new plan2 tests pass.
+- Wave cluster_wave_rb3b has45 tasks100788-100832 (42 paired diagnostic+3 modified design), n111 strict, source guard5914cb3, budget50/3000 (diagnostic47/design3). Frozen read-only collector session56547 writes collection_summary.json/combined_results.csv and mesh statistics; resume its frozen script with --watch if needed.
+- Modified design A: prior v2s1_0070 geometry, diameter297.612mm, stack70mm, I137.8A, beta20/35/50, recomputed R100C0.0185534ohm/fill0.29947. Not verified or promoted. Early2-period cases reject periodicity; some5000rpm4x90 rows exceed1% power balance.
+- D:/IPMSM_Archive/retired/index.json maps20 moved C clones,7250 files rehashed. Keep C blob_lf_325 (dashboard/data) and runtime. All25 old task XMLs backed up;7 enabled tasks disabled. Notebooks moved to notebooks/legacy with source-cell hashes preserved; full outputs backed up on D. Practice PPT is references/.
+- Y legacy data archive session32958: collected/models/PPT exports/md verified, simulation113363files~7.8GiB copying to D:/IPMSM_Archive/s0 (do not move source until verified). New plan/tests/collector/docs/notebook organization are uncommitted; original adaptive source/test changes remain preserved.
+- Next: live material audit (magnet_space remains copper in source; material setter caches require editor readback), correct before production; finish profile convergence and modified FEA, v3 DOE/model improvement and final design; finish Y/version/branch/main cleanup. Native legacy tests still fail frozen SHA/fixture contracts; do not relax them. Atomic writes required on Y.
+
 # Current Handoff
 
 ## Current status

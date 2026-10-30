@@ -1,0 +1,21 @@
+{
+  "cases": 45,
+  "diagnostic_cases": 42,
+  "design_cases": 3,
+  "plan_sha256": "6a2c5ee3de99811c73d03340184b59c8d1737b11b6a54ee2178d633882402f8e",
+  "remote_commit": "5914cb3b1ba2319ce99856d8b1aafd151da54291",
+  "node": "n111",
+  "node_setup_smoke_task": 100785,
+  "node_analysis_smoke_tasks": [
+    100786,
+    100787
+  ],
+  "parent_diagnostic_plan_sha256": "b9eaaa503590c351f2084eaa25ee65b9743c133cfb590db3c62185e42b27c3bc",
+  "zero_manifest": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\physical_zero_manifest_v3.json",
+  "candidate_source_case_id": "v2s1_0070_rated_torque_02",
+  "candidate_stator_radius_mm": 148.80603225901723,
+  "candidate_stack_mm": 70,
+  "candidate_resistance_100c_ohm": 0.018553381670251397,
+  "candidate_fill_ratio": 0.299469863630488,
+  "candidate_is_unverified": true
+}
