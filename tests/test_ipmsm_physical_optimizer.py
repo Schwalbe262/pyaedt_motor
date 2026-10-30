@@ -29,7 +29,18 @@ def zero_manifest():
     from calibrate_ipmsm_beta import ZERO_CALIBRATION_METHOD
     value = {"method": ZERO_CALIBRATION_METHOD, "convention": "dq_current_advance_v2",
              "metric_contract": "motor_metrics_v3", "back_emf_source": "periodic_flux_derivative",
-             "electrical_zero_deg": -90.9}
+             "electrical_zero_deg": -90.9, "initial_position_deg": -22.5,
+             "producer_fingerprint": "producer_v3:sha256:" + "a" * 64}
+    raw = source_spec()
+    value["material_context"] = raw["material_context"]
+    winding = raw["winding"]
+    value["winding_context"] = {
+        "series_turns_per_phase": winding["series_turns_per_phase"],
+        "turns_per_coil_side": winding["turns_per_coil_side"],
+        "conductor_area_per_branch_mm2": winding["strand_area_mm2"] * winding["strands_per_turn"],
+        "slot_fill_limit": winding["fill_factor"],
+    }
+    value["material_fingerprint"] = "materials_v2:sha256:" + "b" * 64
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     value["calibration_id"] = "beta-calibration:sha256:" + hashlib.sha256(payload).hexdigest()
     return value
@@ -38,7 +49,7 @@ def zero_manifest():
 def fingerprints():
     return {"input_dataset_schema_version": "ipmsm_v2", "input_metric_contract_version": "motor_metrics_v3",
             "input_producer_fingerprint": "producer_v3:sha256:" + "a" * 64,
-            "input_material_fingerprint": "materials_v2:sha256:fixture", "input_setup_fingerprint": "setup_v2:sha256:fixture",
+            "input_material_fingerprint": "materials_v2:sha256:" + "b" * 64, "input_setup_fingerprint": "setup_v2:sha256:fixture",
             "input_beta_calibration_id": zero_manifest()["calibration_id"], "input_beta_convention": "dq_current_advance_v2",
             "input_model_extent": "full_360", "input_quality_profile": "analytic", "input_aedt_version": "2025.2"}
 
@@ -129,6 +140,34 @@ class AnalyticBundle:
         lower[optimization.EFFICIENCY] = 100 * power_lo / (power_lo + upper[optimization.LOSS])
         upper[optimization.EFFICIENCY] = 100 * power_hi / (power_hi + lower[optimization.LOSS])
         return point, lower, upper
+
+
+def validation_profile(root):
+    """Sealed synthetic replay fixture, not a certified research profile."""
+    from ipmsm_optimization import fixed_case_context_fields
+    from pyaedt_motor import doe
+    from run_ipmsm_batch import build_spec, setup_fingerprint
+    fields = fixed_case_context_fields(parsed_spec().material_context, parsed_spec().winding)
+    settings = {"quality_profile": "analytic", "transient_periods": 6, "steps_per_period": 150,
+                "mesh_elements": {group: 1000 for group in doe.MESH_GROUPS},
+                "band_circle_segments": 0, "initial_position_deg": -22.5, **doe.CANONICAL_FLAGS}
+    flat = {key: value for key, value in settings.items() if key != "mesh_elements"}
+    flat.update({f"mesh_{key}_elements": value for key, value in settings["mesh_elements"].items()})
+    case = {**baseline(), **fields, **flat, "model_extent": "full_360", "symmetry_factor": 1,
+            "beta_convention": "dq_current_advance_v2", "electrical_zero_deg": zero_manifest()["electrical_zero_deg"]}
+    expected = fingerprints()
+    expected["input_setup_fingerprint"] = setup_fingerprint(build_spec(case), "analytic", "sin_current", False)
+    bundle = AnalyticBundle(); bundle.metadata["fingerprints"] = expected
+    bound = optimization.PhysicalBundleAdapter(bundle, source_spec(), expected, zero_manifest())
+    evidence = root / "synthetic_evidence.txt"; evidence.write_text("synthetic replay settings only", encoding="utf-8")
+    document = {"schema_version": doe.PROFILE_SCHEMA, "metric_contract_version": "motor_metrics_v3",
+                "producer_fingerprint": expected["input_producer_fingerprint"], "settings": settings,
+                "material_context": {key: fields[key] for key in ("core_material_model", "core_material")},
+                "material_fingerprint": expected["input_material_fingerprint"],
+                "winding_context": {key: fields[key] for key in doe.WINDING_CONTEXT_FIELDS},
+                "evidence": [{"path": evidence.name, "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest()}]}
+    path = root / "selected_profile.json"; path.write_text(json.dumps(document), encoding="utf-8")
+    return bound, path, document
 
 
 def adapter(bundle=None):
@@ -285,6 +324,8 @@ class PhysicalOptimizerTests(unittest.TestCase):
         self.assertEqual(len(report["proposals"]), 3)
         self.assertFalse(report["search"]["held_out_labels_read"])
         self.assertFalse(report["search"]["fea_submitted"])
+        self.assertEqual(report["fea_validation_plan"]["status"], "proposal_only_profile_required")
+        self.assertEqual(report["fea_validation_rows"], [])
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "proposals.json"
             optimization.write_search_report(report, path)
@@ -296,6 +337,48 @@ class PhysicalOptimizerTests(unittest.TestCase):
                 optimization.write_search_report(changed, Path(tmp) / "altered.json")
         with self.assertRaisesRegex(ValueError, "duplicate"):
             optimization.search_designs(bound, [baseline(), baseline()])
+
+    def test_validation_rows_replay_explicit_profile_material_wire_and_setup(self):
+        from run_ipmsm_batch import build_spec, setup_fingerprint
+        with tempfile.TemporaryDirectory() as tmp:
+            bound, path, document = validation_profile(Path(tmp))
+            report = optimization.search_designs(bound, [baseline()], selected_profile=path)
+        rows = report["fea_validation_rows"]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(report["fea_validation_plan"]["status"], "ready_for_independent_fea")
+        self.assertFalse(report["fea_validation_plan"]["submitted"])
+        self.assertEqual(len({row["case_id"] for row in rows}), 2)
+        for row in rows:
+            applied = build_spec(row)
+            for key, value in {**document["material_context"], **document["winding_context"]}.items():
+                self.assertEqual(row[key], value)
+                self.assertEqual(getattr(applied, key), value)
+            self.assertEqual(row["expected_material_fingerprint"], bound.fingerprints["input_material_fingerprint"])
+            self.assertEqual(row["analysis_purpose"], "training")
+            self.assertEqual(row["transient_periods"], 6)
+            self.assertEqual(row["steps_per_period"], 150)
+            self.assertEqual(row["band_circle_segments"], 0)
+            self.assertEqual(setup_fingerprint(applied, "analytic", "sin_current", False), bound.fingerprints["input_setup_fingerprint"])
+
+    def test_validation_rows_reject_wrong_or_incomplete_profile_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bound, path, original = validation_profile(Path(tmp))
+            proposal = optimization.evaluate_design(bound, baseline())
+            variants = []
+            for key in ("material_context", "winding_context", "material_fingerprint"):
+                changed = deepcopy(original); changed.pop(key); variants.append(changed)
+            changed = deepcopy(original); changed["material_context"] = {"core_material_model": "legacy_pnf_hybrid_v1", "core_material": "27PNF1500_CustomCoreLoss"}; variants.append(changed)
+            changed = deepcopy(original); changed["winding_context"]["conductor_area_per_branch_mm2"] += .01; variants.append(changed)
+            changed = deepcopy(original); changed["material_fingerprint"] = "materials_v2:sha256:" + "c" * 64; variants.append(changed)
+            changed = deepcopy(original); changed["producer_fingerprint"] = "producer_v3:sha256:" + "d" * 64; variants.append(changed)
+            changed = deepcopy(original); changed["settings"]["quality_profile"] = "other_profile"; variants.append(changed)
+            changed = deepcopy(original); changed["settings"]["transient_periods"] = 12; variants.append(changed)
+            changed = deepcopy(original); changed["settings"]["initial_position_deg"] = -20.; variants.append(changed)
+            for index, changed in enumerate(variants):
+                with self.subTest(variant=index):
+                    path.write_text(json.dumps(changed), encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        optimization.build_fea_validation_rows(bound, [proposal], path)
 
     def test_full_geometry_doe_and_explicit_local_mode_respect_budgets(self):
         bound = adapter()

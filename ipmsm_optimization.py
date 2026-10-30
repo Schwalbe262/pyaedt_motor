@@ -19,6 +19,10 @@ from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
 SPEC_SCHEMA_VERSION = 1
 BETA_CONVENTION = "dq_current_advance_v2"
+CORE_MATERIAL_MODELS = {
+    "legacy_pnf_hybrid_v1": "27PNF1500_CustomCoreLoss",
+    "m19_29g_reference_y2_v1": "M19_29G_reference_y2",
+}
 
 # These are the independent geometry variables and ranges used by
 # module/variable.py.  Slot/pole count remain the v1 fixed 12/8 topology.
@@ -330,6 +334,23 @@ class NSGA2Spec:
 
 
 @dataclass(frozen=True)
+class MaterialContextSpec:
+    """One fixed steel model per study; the library reference is a distinct grade."""
+
+    core_material_model: str = "legacy_pnf_hybrid_v1"
+    core_material: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.core_material_model, str) or self.core_material_model not in CORE_MATERIAL_MODELS:
+            raise ValueError("material_context.core_material_model is unsupported")
+        expected = CORE_MATERIAL_MODELS[self.core_material_model]
+        if self.core_material is None:
+            object.__setattr__(self, "core_material", expected)
+        elif self.core_material != expected:
+            raise ValueError("material_context.core_material differs from its declared model")
+
+
+@dataclass(frozen=True)
 class OptimizationSpec:
     schema_version: int
     operating_points: tuple[OperatingPoint, ...]
@@ -343,6 +364,7 @@ class OptimizationSpec:
     nsga2: NSGA2Spec = field(default_factory=NSGA2Spec)
     slot_number: int = 12
     pole_number: int = 8
+    material_context: MaterialContextSpec = field(default_factory=MaterialContextSpec)
 
     def __post_init__(self) -> None:
         if self.schema_version != SPEC_SCHEMA_VERSION:
@@ -363,6 +385,8 @@ class OptimizationSpec:
             raise ValueError("stack_length_bounds name must be stack_length_mm")
         if self.slot_number != 12 or self.pole_number != 8:
             raise ValueError("schema v1 supports only the fixed 12-slot/8-pole topology")
+        if not isinstance(self.material_context, MaterialContextSpec):
+            raise ValueError("material_context must be a MaterialContextSpec")
 
     @property
     def design_space(self) -> tuple[DesignVariableBound, ...]:
@@ -591,6 +615,10 @@ def _optimization_spec_from_mapping(raw: Mapping[str, Any]) -> OptimizationSpec:
     topology_raw = _mapping(root.get("topology", {}), "topology")
     slot_number = _positive_int(topology_raw.get("slot_number", 12), "topology.slot_number")
     pole_number = _positive_int(topology_raw.get("pole_number", 8), "topology.pole_number")
+    material_raw = _mapping(root.get("material_context", {}), "material_context")
+    if set(material_raw) - {"core_material_model", "core_material"}:
+        raise OptimizationSpecError("material_context contains unsupported fields")
+    material_context = MaterialContextSpec(**material_raw)
 
     try:
         return OptimizationSpec(
@@ -606,6 +634,7 @@ def _optimization_spec_from_mapping(raw: Mapping[str, Any]) -> OptimizationSpec:
             nsga2=nsga2,
             slot_number=slot_number,
             pole_number=pole_number,
+            material_context=material_context,
         )
     except ValueError as exc:
         raise OptimizationSpecError(str(exc)) from exc
@@ -637,6 +666,25 @@ def load_optimization_spec(path: str | Path) -> OptimizationSpec:
     if not isinstance(decoded, Mapping):
         raise OptimizationSpecError("optimization spec root must be an object")
     return optimization_spec_from_mapping(decoded)
+
+
+def fixed_case_context_fields(material: MaterialContextSpec, winding: WindingSpec) -> dict[str, Any]:
+    """Serialize fixed material and physical winding inputs for the FEA runner.
+
+    These values identify one study context; they are not design variables or
+    surrogate features. The current 12-slot runner has one parallel branch.
+    """
+    if (winding.series_turns_per_phase, winding.turns_per_coil_side,
+            winding.coils_per_phase, winding.parallel_branches) != (48, 12, 4, 1):
+        raise ValueError("case generation requires Ns=48, 12 turns/coil side and one parallel branch")
+    return {
+        "core_material_model": material.core_material_model,
+        "core_material": material.core_material,
+        "series_turns_per_phase": winding.series_turns_per_phase,
+        "turns_per_coil_side": winding.turns_per_coil_side,
+        "conductor_area_per_branch_mm2": winding.conductor_area_per_branch_mm2,
+        "slot_fill_limit": winding.fill_factor,
+    }
 
 
 def active_volume_m3(stator_outer_radius_mm: float, stack_length_mm: float) -> float:

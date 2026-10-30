@@ -25,6 +25,8 @@
 |---|---|
 | `metric_contract_version` | `motor_metrics_v3` |
 | `producer_fingerprint` | 선택 결과에 대응하는 실제 `producer_v3:sha256:...` 지문 |
+| `material_context`, `material_fingerprint` | 실제 해석에서 확인한 재료 모델·이름과 지문. 새 M19 기준 모델에는 명시 필수 |
+| `winding_context` | 상 직렬 턴수·코일 측 턴수·분기 도체 단면적·점적률 한도. 새 M19 기준 모델에는 네 항목 모두 필수 |
 | `settings.quality_profile` | 명시적인 프로파일 이름 |
 | `settings.transient_periods`, `settings.steps_per_period` | 검증 후 선택한 정수 값 |
 | `settings.mesh_elements` | `magnet`, `rotor`, `stator`, `winding`, `band`의 다섯 정수 값 |
@@ -33,6 +35,8 @@
 | `evidence` | 하나 이상의 `{path, sha256}` 기록. 상대 경로는 manifest 폴더 기준 |
 
 학습 설정은 실제 모터 원호 `circle_segments=0`, `loss_policy=laminated_core`, `strict_setup=true`, `require_steady_state=true`, `compute_inductance=true`, `analysis_purpose=training`으로 고정합니다. 이 항목을 다르게 지정하면 거부합니다. 선택한 설정이 실제 실행기의 `build_spec`에서 적용되는지도 확인하므로 무시되는 옵션을 기록만 하고 넘어가지 않습니다.
+
+현재 사양의 `m19_29g_reference_y2_v1`은 별도 강판 기준 모델입니다. 원본 PNF 실습 재료는 보유하지 않으며, M19를 PNF와 동등한 재료로 취급하지 않습니다. 선택 프로파일·영점 보정·계획의 재료 및 권선 조건을 대조하고, 실제 재료 지문이 다른 실행은 Desktop을 시작하기 전에 거부합니다. 도체 단면적은 전류와 무관한 고정 입력이며, 생성 계획의 점적률 검사에 더해 실제 CAD 코일 창 면적도 해석 전에 확인합니다.
 
 근거 파일의 바이트 해시는 확인하지만, 생성기가 그 파일의 수치 수렴을 인증하지는 않습니다. 결과 manifest에도 `profile_convergence_certified_by_generator=false`를 기록합니다. 프로파일 선택과 새 코드 생산자의 적합성은 실제 해석 비교로 별도 검증해야 합니다.
 

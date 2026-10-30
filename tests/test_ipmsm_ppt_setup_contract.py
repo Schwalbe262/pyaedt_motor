@@ -29,6 +29,7 @@ class IPMSMPPTSetupContractTests(unittest.TestCase):
             "set_operation_current",
             "clear_previous_ppt_setup",
             "resolve_geometry_overlaps",
+            "audit_actual_winding_geometry",
             "ensure_ppt_materials",
             "assign_ppt_materials",
             "assign_magnet_coordinate_systems",

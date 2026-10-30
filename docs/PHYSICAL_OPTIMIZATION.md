@@ -80,6 +80,7 @@ $env:PYTHONPATH = "src;."
   --spec C:/Users/peets/NEC/pyaedt_motor_runtime/rebuild_20261030/train/source_spec.json `
   --expected-fingerprints C:/Users/peets/NEC/pyaedt_motor_runtime/rebuild_20261030/expected_context.json `
   --calibration-manifest C:/Users/peets/NEC/pyaedt_motor_runtime/rebuild_20261030/physical_zero_manifest_v3.json `
+  --selected-profile C:/Users/peets/NEC/pyaedt_motor_runtime/rebuild_20261030/selected_profile.json `
   --baseline C:/Users/peets/NEC/pyaedt_motor_runtime/rebuild_20261030/baseline_geometry.json `
   --count 32 --seed 42 `
   --output C:/Users/peets/NEC/pyaedt_motor_runtime/rebuild_20261030/proposals.json
@@ -92,3 +93,10 @@ seed, specification/calibration/model/source provenance, support domain and
 self-content SHA256. Publication is exclusive, verifies written bytes, and
 requires the C runtime drive on Windows. Reuse a new output filename for each
 run. No completed report means no published proposal set.
+
+`--selected-profile` adds runnable `fea_validation_rows` for supported,
+predicted-feasible controls. Its sealed producer, material, winding, calibrated
+frame and numerical setup must match the approved bundle. These rows replay
+the approved setup; `plan_purpose=independent_design_validation` records their
+purpose separately. Without this input, the report remains proposal-only and
+records `proposal_only_profile_required`. Neither path submits FEA tasks.

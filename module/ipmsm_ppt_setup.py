@@ -32,6 +32,10 @@ DEFAULT_CORE_LOSS_COEFFICIENTS = {
     "Kdc": 0.0,
 }
 DEFAULT_CORE_BH_CURVE_CSV = "30PNF1600_BH.csv"
+LEGACY_CORE_MATERIAL_MODEL = "legacy_pnf_hybrid_v1"
+M19_REFERENCE_CORE_MATERIAL_MODEL = "m19_29g_reference_y2_v1"
+M19_REFERENCE_CORE_MATERIAL_NAME = "M19_29G_reference_y2"
+M19_REFERENCE_PACK_SHA256 = "ad85048a90e1da6cfaa33d8f4fa9df9ffd5a58960b5aeedface5e1a34cd59a04"
 
 MODEL_EXTENT_FULL_360 = "full_360"
 MODEL_EXTENT_SECTOR_90 = "sector_90"
@@ -65,6 +69,8 @@ PPT_REPORT_DEFS = {
         "InducedVoltage(PhaseC)+R_phase*InputCurrent(PhaseC)",
     ],
     "PPT_Losses": ["CoreLoss", "SolidLoss"],
+    # Optional diagnostic only; it is not a physical acceptance criterion.
+    "PPT_EnergyError": ["EnergyError"],
     "PPT_Flux_Linkages": ["FluxLinkage(PhaseA)", "FluxLinkage(PhaseB)", "FluxLinkage(PhaseC)"],
 }
 
@@ -89,6 +95,7 @@ class IPMSMPPTSpec:
     transient_periods: int = 10
     steps_per_period: int = 90
     core_material: str = DEFAULT_CORE_MATERIAL_NAME
+    core_material_model: str = LEGACY_CORE_MATERIAL_MODEL
     core_material_fallbacks: tuple[str, ...] = ("30PNF1600", "steel_1008 - Copy", "steel_1008")
     magnet_material: str = "NdFeB_1.25T"
     winding_material: str = "copper"
@@ -102,6 +109,8 @@ class IPMSMPPTSpec:
     circle_segments: int = 0
     band_circle_segments: int = 144
     loss_policy: str = "laminated_core"
+    conductor_area_per_branch_mm2: float = 15.3206469
+    slot_fill_limit: float = 0.45
     mesh_maximum_lengths_mm: dict[str, float] = field(default_factory=dict)
     mesh_elements: dict[str, int] = field(
         default_factory=lambda: {
@@ -195,6 +204,13 @@ def validate_ppt_spec_contract(
     use_periodic_boundary: bool = False,
 ) -> None:
     """Fail closed on model-extent, symmetry, periodic, and beta mismatches."""
+    _validate_core_material_selection(spec)
+    for name, value in (("conductor_area_per_branch_mm2", spec.conductor_area_per_branch_mm2),
+                        ("slot_fill_limit", spec.slot_fill_limit)):
+        if isinstance(value, bool) or not math.isfinite(float(value)) or float(value) <= 0:
+            raise ValueError(f"{name} must be finite and positive")
+    if spec.slot_fill_limit > 1:
+        raise ValueError("slot_fill_limit must be <=1")
     if spec.model_extent not in {MODEL_EXTENT_FULL_360, MODEL_EXTENT_SECTOR_90}:
         raise ValueError(
             f"model_extent must be {MODEL_EXTENT_FULL_360!r} or {MODEL_EXTENT_SECTOR_90!r}"
@@ -560,8 +576,62 @@ def _material_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "material"
 
 
-def get_core_loss_coefficients() -> dict[str, float]:
+def core_material_name_for_model(model_id: str) -> str:
+    """Resolve an explicit material model without relabelling another grade."""
+    names = {LEGACY_CORE_MATERIAL_MODEL: DEFAULT_CORE_MATERIAL_NAME,
+             M19_REFERENCE_CORE_MATERIAL_MODEL: M19_REFERENCE_CORE_MATERIAL_NAME}
+    if model_id not in names:
+        raise ValueError(f"unsupported core_material_model: {model_id!r}")
+    return names[model_id]
+
+
+def _validate_core_material_selection(spec: IPMSMPPTSpec) -> None:
+    canonical = core_material_name_for_model(spec.core_material_model)
+    if not isinstance(spec.core_material, str) or not spec.core_material.strip():
+        raise ValueError("core_material must be a nonempty name")
+    if spec.core_material_model == M19_REFERENCE_CORE_MATERIAL_MODEL:
+        if spec.core_material != canonical:
+            raise ValueError("reference core material name/model mismatch")
+    elif spec.core_material.casefold() == M19_REFERENCE_CORE_MATERIAL_NAME.casefold():
+        raise ValueError("the M19 reference name requires its explicit reference model")
+
+
+def _reference_core_pack_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "configs" / "material_m19_29g_reference_y2.json"
+
+
+def load_reference_core_material_pack() -> dict[str, Any]:
+    """Load the pinned original-point reference, not an inferred PNF replacement."""
+    # Git may check JSON out with CRLF on Windows. Canonical UTF8/LF identity is
+    # the same across accounts and C/Linux freezes; JSON content changes fail.
+    raw = _reference_core_pack_path().read_bytes().decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+    if hashlib.sha256(raw).hexdigest() != M19_REFERENCE_PACK_SHA256:
+        raise ValueError("M19 reference material pack SHA256 mismatch")
+    pack = json.loads(raw)
+    if (pack["schema_version"] != "ipmsm_core_material_reference_v1"
+            or pack["model_id"] != M19_REFERENCE_CORE_MATERIAL_MODEL
+            or pack["solver_material_name"] != M19_REFERENCE_CORE_MATERIAL_NAME):
+        raise ValueError("M19 reference material pack identity mismatch")
+    points = pack["bh"]["points_H_B"]
+    if len(points) != 23 or points[0] != [0.0, 0.0]:
+        raise ValueError("M19 reference requires the23 original BH points")
+    for index, point in enumerate(points):
+        if len(point) != 2 or any(isinstance(v, bool) or not math.isfinite(v) or v < 0 for v in point):
+            raise ValueError("invalid M19 reference BH point")
+        if index and (point[0] <= points[index - 1][0] or point[1] <= points[index - 1][1]):
+            raise ValueError("M19 reference BH points must be strictly increasing")
+    digest = hashlib.sha256(json.dumps(points, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    if digest != pack["bh"]["points_sha256"]:
+        raise ValueError("M19 reference BH point digest mismatch")
+    return pack
+
+
+def get_core_loss_coefficients(model_id: str = LEGACY_CORE_MATERIAL_MODEL) -> dict[str, float]:
     """Return the Electrical Steel core-loss coefficients applied to the core material."""
+    core_material_name_for_model(model_id)
+    if model_id == M19_REFERENCE_CORE_MATERIAL_MODEL:
+        loss = load_reference_core_material_pack()["core_loss"]
+        return {key: float(loss[key]) for key in ("Kh", "Kc", "Ke", "Y", "Kdc")}
     return _load_core_loss_coefficients()
 
 
@@ -613,9 +683,11 @@ def _load_core_bh_curve() -> list[list[float]]:
     return unique_points
 
 
-def get_core_bh_curve_metadata() -> dict[str, Any]:
+def get_core_bh_curve_metadata(model_id: str = LEGACY_CORE_MATERIAL_MODEL) -> dict[str, Any]:
     """Identify every applied B-H point, including interior saturation data."""
-    curve = _load_core_bh_curve()
+    core_material_name_for_model(model_id)
+    curve = (load_reference_core_material_pack()["bh"]["points_H_B"]
+             if model_id == M19_REFERENCE_CORE_MATERIAL_MODEL else _load_core_bh_curve())
     if not curve:
         return {
             "bh_curve_points": 0,
@@ -633,8 +705,20 @@ def get_core_bh_curve_metadata() -> dict[str, Any]:
     }
 
 
-def get_core_material_properties() -> dict[str, Any]:
+def get_core_material_properties(model_id: str = LEGACY_CORE_MATERIAL_MODEL) -> dict[str, Any]:
     """Return scalar core material properties applied to the custom steel material."""
+    core_material_name_for_model(model_id)
+    if model_id == M19_REFERENCE_CORE_MATERIAL_MODEL:
+        pack = load_reference_core_material_pack()
+        properties = dict(pack["properties"])
+        properties.update({"resistivity_ohm_m": 1.0 / properties["conductivity_s_per_m"],
+                           "core_material_model": model_id,
+                           "solver_material_name": pack["solver_material_name"],
+                           "material_pack_sha256": M19_REFERENCE_PACK_SHA256,
+                           # Static provenance is portable; never insert resolved runtime paths.
+                           "material_definition": pack})
+        properties.update(get_core_bh_curve_metadata(model_id))
+        return properties
     properties = {
         "resistivity_ohm_m": DEFAULT_CORE_RESISTIVITY_OHM_M,
         "conductivity_s_per_m": DEFAULT_CORE_CONDUCTIVITY_S_PER_M,
@@ -693,13 +777,142 @@ def _apply_core_material_properties(
     return result
 
 
+def _reference_native_material_payload(pack: dict[str, Any]) -> list[Any]:
+    """Documented native Coordinate/X/Y syntax avoids the0.22 AMAT importer bug."""
+    scalar = lambda value: format(float(value), ".15g")
+    loss, props = pack["core_loss"], pack["properties"]
+    coordinates = ["NAME:BHCoordinates"] + [
+        ["NAME:Coordinate", "X:=", h, "Y:=", b] for h, b in pack["bh"]["points_H_B"]]
+    return [
+        "NAME:" + pack["solver_material_name"], "CoordinateSystemType:=", "Cartesian",
+        "BulkOrSurfaceType:=", 1, ["NAME:PhysicsTypes", "set:=", ["Electromagnetic"]],
+        ["NAME:permeability", "property_type:=", "nonlinear", "BTypeForSingleCurve:=", "Normal",
+         "HUnit:=", pack["bh"]["H_unit"], "BUnit:=", pack["bh"]["B_unit"],
+         "IsTemperatureDependent:=", False, "RecoilPermeability:=", "1", coordinates],
+        "conductivity:=", scalar(props["conductivity_s_per_m"]),
+        "mass_density:=", scalar(props["mass_density_kg_per_m3"]),
+        ["NAME:magnetic_coercivity", "property_type:=", "VectorProperty", "Magnitude:=", "0A_per_meter",
+         "DirComp1:=", "1", "DirComp2:=", "0", "DirComp3:=", "0"],
+        ["NAME:core_loss_type", "property_type:=", "ChoiceProperty", "Choice:=", loss["model"]],
+        "core_loss_kh:=", scalar(loss["Kh"]), "core_loss_kc:=", scalar(loss["Kc"]),
+        "core_loss_ke:=", scalar(loss["Ke"]), "core_loss_y:=", scalar(loss["Y"]),
+        "core_loss_kdc:=", scalar(loss["Kdc"]),
+        "core_loss_equiv_cut_depth:=", scalar(loss["equivalent_cut_depth_m"]) + "meter",
+        ["NAME:stacking_type", "property_type:=", "ChoiceProperty", "Choice:=", pack["composition"]["type"]],
+    ]
+
+
+def _native_material_properties(raw: Any, expected_name: str) -> dict[str, Any]:
+    from ansys.aedt.core.generic.data_handlers import _arg2dict
+
+    if isinstance(raw, bool) or raw is None:
+        raise ValueError("native material GetData returned no payload")
+    parsed: dict[str, Any] = {}
+    _arg2dict(list(raw), parsed)
+    if set(parsed) != {expected_name} or not isinstance(parsed[expected_name], dict):
+        raise ValueError("native material GetData name differs from the requested reference")
+    return parsed[expected_name]
+
+
+def _material_readback_number(value: Any, unit: str = "") -> float:
+    if isinstance(value, bool):
+        raise ValueError("boolean material scalar is invalid")
+    text = str(value).strip()
+    if unit:
+        match = re.fullmatch(r"([-+0-9.eE]+)\s*(meter|mm|m|A_per_meter)", text)
+        if not match or (unit == "meter" and match[2] not in {"meter", "mm", "m"}) or (
+                unit == "A_per_meter" and match[2] != unit):
+            raise ValueError(f"unexpected material scalar unit: {value!r}")
+        number = float(match[1]) * (0.001 if match[2] == "mm" else 1.0)
+    else:
+        number = float(text)
+    if not math.isfinite(number):
+        raise ValueError("nonfinite material readback")
+    return number
+
+
+def _verify_reference_material_readback(props: dict[str, Any], pack: dict[str, Any]) -> None:
+    permeability = props["permeability"]
+    if (permeability.get("property_type") != "nonlinear"
+            or str(permeability.get("BTypeForSingleCurve", "")).casefold() != "normal"
+            or str(permeability.get("HUnit", "")).casefold() != "a_per_meter"
+            or str(permeability.get("BUnit", "")).casefold() != "tesla"
+            or permeability.get("IsTemperatureDependent") is not False):
+        raise ValueError("reference native BH type/units/temperature definition mismatch")
+    coordinates = permeability["BHCoordinates"]
+    points = coordinates.get("Point", coordinates.get("Coordinate"))
+    if not isinstance(points, list):
+        raise ValueError("reference native BH readback is unavailable")
+    if points and isinstance(points[0], dict):
+        points = [[p["X"], p["Y"]] for p in points]
+    expected = pack["bh"]["points_H_B"]
+    if len(points) != len(expected) or any(
+            len(p) != 2 or any(not math.isclose(_material_readback_number(x), y, rel_tol=1e-12, abs_tol=1e-9)
+                               for x, y in zip(p, q)) for p, q in zip(points, expected)):
+        raise ValueError("reference native BH differs from the23 original points")
+    scalar_expectations = {"conductivity": pack["properties"]["conductivity_s_per_m"],
+                           "mass_density": pack["properties"]["mass_density_kg_per_m3"],
+                           **{"core_loss_" + key.lower(): pack["core_loss"][key]
+                              for key in ("Kh", "Kc", "Ke", "Y", "Kdc")}}
+    for key, expected_value in scalar_expectations.items():
+        if not math.isclose(_material_readback_number(props[key]), expected_value, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValueError(f"reference native material scalar mismatch: {key}")
+    for key, choice in (("core_loss_type", "Electrical Steel"), ("stacking_type", "Solid")):
+        if props[key].get("Choice") != choice:
+            raise ValueError(f"reference native material choice mismatch: {key}")
+    if not math.isclose(_material_readback_number(props["core_loss_equiv_cut_depth"], "meter"),
+                        pack["core_loss"]["equivalent_cut_depth_m"], rel_tol=1e-12):
+        raise ValueError("reference equivalent cut depth mismatch")
+    if _material_readback_number(props["magnetic_coercivity"]["Magnitude"], "A_per_meter") != 0:
+        raise ValueError("reference core coercivity must be zero")
+    if _material_readback_number(permeability["RecoilPermeability"]) != 1:
+        raise ValueError("reference recoil permeability mismatch")
+
+
+def _ensure_reference_core_material(m2d: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
+    """Write a private project material, then verify independent live native data."""
+    if spec.core_material != core_material_name_for_model(spec.core_material_model):
+        raise ValueError("reference core material name/model mismatch")
+    pack = load_reference_core_material_pack()
+    manager = m2d.oproject.GetDefinitionManager()
+    names = list(manager.GetProjectMaterialNames())
+    collisions = [name for name in names if name.casefold() == spec.core_material.casefold()]
+    if collisions and collisions != [spec.core_material]:
+        raise ValueError("ambiguous existing reference material name")
+    payload = _reference_native_material_payload(pack)
+    operation = "updated" if collisions else "created"
+    applied = (manager.EditMaterial(spec.core_material, payload) if collisions else manager.AddMaterial(payload))
+    # Native documented APIs return None on success; direct readback is authoritative.
+    if applied is False:
+        raise ValueError("native reference material registration returned False")
+    after_names = list(manager.GetProjectMaterialNames())
+    if after_names.count(spec.core_material) != 1:
+        raise ValueError("native reference material is missing from the project inventory")
+    raw = manager.GetManager("Material").GetData(spec.core_material)
+    props = _native_material_properties(raw, spec.core_material)
+    _verify_reference_material_readback(props, pack)
+    obj = m2d.oproject.GetChildObject("Materials").GetChildObject(spec.core_material)
+    if "Composition" not in list(obj.GetPropNames()) or str(obj.GetPropValue("Composition")) != "Solid":
+        raise ValueError("live reference material Composition is not Solid")
+    return {spec.core_material: operation, "core_material_model": spec.core_material_model,
+            "material_pack_sha256": M19_REFERENCE_PACK_SHA256,
+            "bh_curve_sha256": pack["bh"]["points_sha256"], "bh_curve_points": 23,
+            "native_readback_verified": True, "composition_live": "Solid",
+            # Keep raw provenance opaque to the generic operation-failure scanner.
+            "native_GetData_json": json.dumps(list(raw)),
+            "reference_note": pack["identity_note"]}
+
+
 def ensure_ppt_materials(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
     """Create the deck materials when they are absent from the AEDT project."""
+    _validate_core_material_selection(spec)
     m2d = _m2d(design)
     result: dict[str, Any] = {}
-    coeff = _load_core_loss_coefficients()
+    coeff = get_core_loss_coefficients(spec.core_material_model)
 
-    if _material_exists(m2d, spec.core_material):
+    if spec.core_material_model == M19_REFERENCE_CORE_MATERIAL_MODEL:
+        result.update(_ensure_reference_core_material(m2d, spec))
+    elif _material_exists(m2d, spec.core_material):
         result[spec.core_material] = "exists"
         try:
             mat = m2d.materials[spec.core_material]
@@ -966,6 +1179,7 @@ def _assign_material(
 
 def assign_ppt_materials(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPPTSpec) -> dict[str, Any]:
     """Assign deck materials to already-created geometry."""
+    _validate_core_material_selection(spec)
     m2d = _m2d(design)
     stator = _get_group(m2d, object_groups, "stator", ("stator", "main_stator"))
     rotor = _get_group(m2d, object_groups, "rotor", ("rotator", "rotor"))
@@ -976,7 +1190,8 @@ def assign_ppt_materials(design: Any, object_groups: dict[str, Any] | None, spec
     bands = _get_group(m2d, object_groups, "band", ("Band",))
     pockets = _get_group(m2d, object_groups, "air_pockets", ("magnet_space",))
 
-    core_material_candidates = (spec.core_material,) + spec.core_material_fallbacks
+    core_material_candidates = ((spec.core_material,) if spec.core_material_model == M19_REFERENCE_CORE_MATERIAL_MODEL
+                                else (spec.core_material,) + spec.core_material_fallbacks)
     core_assigned = []
     selected_core_material = core_material_candidates[0]
     for material in core_material_candidates:
@@ -1019,6 +1234,141 @@ def assign_ppt_materials(design: Any, object_groups: dict[str, Any] | None, spec
     result["material_readback"] = readback
     result["errors"] = errors
     return result
+
+
+def audit_actual_winding_geometry(
+    m2d: Any,
+    winding_names: Any,
+    *,
+    turns_per_coil_side: int,
+    conductor_area_per_branch_mm2: float,
+    slot_fill_limit: float,
+    expected_count: int = 24,
+) -> dict[str, Any]:
+    """Read actual winding windows after CAD Booleans and reject invalid fill.
+
+    Face areas come directly from the live editor in model-length squared.
+    Only millimetre models are accepted. The declared conductor area is a fixed
+    physical input, independent of the operating current. No cached geometry,
+    analytic estimate, unit default, or synthesized area can satisfy this gate.
+    Failures raise ValueError with a JSON-safe ``winding_geometry_audit``.
+    """
+    audit: dict[str, Any] = {
+        "schema_version": "ipmsm_actual_winding_geometry_v1",
+        "source": "live_editor.GetModelUnits/GetFaceIDs/GetFaceArea",
+        "model_units_live": None,
+        "units": {"length": "mm", "window_area": "mm^2", "conductor_area": "mm^2"},
+        "count": 0,
+        "expected_count": None,
+        "min_window_area_mm2": None,
+        "max_slot_fill_ratio": None,
+        "objects": [],
+        "violations": [],
+        "passed": False,
+    }
+
+    def fail(message: str) -> None:
+        audit["error"] = message
+        error = ValueError("actual winding geometry audit failed: " + message)
+        error.winding_geometry_audit = audit
+        raise error
+
+    def positive_number(value: Any, label: str) -> float:
+        if isinstance(value, bool) or value is None:
+            fail(label + " must be finite and positive, not bool/missing")
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            fail(label + " must be a finite positive number")
+        if not math.isfinite(number) or number <= 0.0:
+            fail(label + " must be finite and positive")
+        return number
+
+    if isinstance(expected_count, bool) or not isinstance(expected_count, int) or expected_count <= 0:
+        fail("expected_count must be a positive integer")
+    audit["expected_count"] = expected_count
+    if isinstance(turns_per_coil_side, bool) or not isinstance(turns_per_coil_side, int) or turns_per_coil_side <= 0:
+        fail("turns_per_coil_side must be a positive integer")
+    conductor_area = positive_number(conductor_area_per_branch_mm2, "conductor_area_per_branch_mm2")
+    fill_limit = positive_number(slot_fill_limit, "slot_fill_limit")
+    if fill_limit > 1.0:
+        fail("slot_fill_limit must not exceed 1")
+    copper_area = positive_number(turns_per_coil_side * conductor_area, "copper_area_per_coil_side_mm2")
+    audit.update(turns_per_coil_side=turns_per_coil_side,
+                 conductor_area_per_branch_mm2=conductor_area,
+                 copper_area_per_coil_side_mm2=copper_area,
+                 slot_fill_limit=fill_limit)
+    if winding_names is None or isinstance(winding_names, (bool, str, bytes)):
+        fail("winding_names must be a sequence of distinct object names")
+    try:
+        names = list(winding_names)
+    except Exception as exc:
+        fail("winding_names unavailable: " + type(exc).__name__ + ": " + str(exc))
+    audit["count"] = len(names)
+    if len(names) != expected_count:
+        fail(f"unexpected winding count {len(names)}; expected {expected_count}")
+    if any(not isinstance(name, str) or not name or name != name.strip() for name in names):
+        fail("winding object names must be nonempty strings without surrounding whitespace")
+    if len({name.casefold() for name in names}) != expected_count:
+        fail("duplicate winding object names")
+    try:
+        editor = m2d.modeler.oeditor
+        model_units = editor.GetModelUnits()
+    except Exception as exc:
+        fail("live editor model units unavailable: " + type(exc).__name__ + ": " + str(exc))
+    if isinstance(model_units, str):
+        audit["model_units_live"] = model_units
+    if not isinstance(model_units, str) or model_units.strip() != "mm":
+        fail("live editor model units must be mm")
+    seen_faces: set[int] = set()
+    for name in names:
+        obj: dict[str, Any] = {"name": name, "face_ids": [], "face_areas_mm2": [],
+                               "window_area_mm2": None, "slot_fill_ratio": None}
+        audit["objects"].append(obj)
+        try:
+            raw_faces = editor.GetFaceIDs(name)
+        except Exception as exc:
+            fail("live face IDs unavailable for " + name + ": " + type(exc).__name__ + ": " + str(exc))
+        if raw_faces is None or isinstance(raw_faces, (bool, str, bytes)):
+            fail("missing/invalid face IDs for " + name)
+        try:
+            face_ids = list(raw_faces)
+        except Exception as exc:
+            fail("invalid face IDs for " + name + ": " + type(exc).__name__ + ": " + str(exc))
+        if not face_ids:
+            fail("missing face IDs for " + name)
+        for raw_face in face_ids:
+            if isinstance(raw_face, bool):
+                fail("bool face ID for " + name)
+            if isinstance(raw_face, int):
+                face = raw_face
+            elif isinstance(raw_face, str) and raw_face.isascii() and raw_face.isdecimal():
+                face = int(raw_face)
+            else:
+                fail("non-integer face ID for " + name)
+            if face <= 0:
+                fail("nonpositive face ID for " + name)
+            if face in seen_faces:
+                fail("duplicate face ID " + str(face) + " for " + name)
+            seen_faces.add(face)
+            obj["face_ids"].append(face)
+            try:
+                raw_area = editor.GetFaceArea(face)
+            except Exception as exc:
+                fail("live face area unavailable for " + name + ": " + type(exc).__name__ + ": " + str(exc))
+            area = positive_number(raw_area, "face area for " + name + "/" + str(face))
+            obj["face_areas_mm2"].append(area)
+        window_area = positive_number(sum(obj["face_areas_mm2"]), "total window area for " + name)
+        fill = positive_number(copper_area / window_area, "slot fill for " + name)
+        obj.update(window_area_mm2=window_area, slot_fill_ratio=fill)
+        audit["min_window_area_mm2"] = min(item["window_area_mm2"] for item in audit["objects"])
+        audit["max_slot_fill_ratio"] = max(item["slot_fill_ratio"] for item in audit["objects"])
+        if fill > fill_limit:
+            audit["violations"].append({"name": name, "slot_fill_ratio": fill, "slot_fill_limit": fill_limit})
+    if audit["violations"]:
+        fail(f"maximum actual slot fill {audit['max_slot_fill_ratio']:.12g} exceeds limit {fill_limit:.12g}")
+    audit["passed"] = True
+    return audit
 
 
 def resolve_geometry_overlaps(design: Any, object_groups: dict[str, Any] | None) -> dict[str, Any]:
@@ -1467,7 +1817,7 @@ def critical_setup_issues(result: dict[str, Any]) -> list[str]:
                 inspect(item, f"{path}[{index}]")
 
     for stage in (
-        "geometry_overlap_resolution", "material_definitions", "materials",
+        "geometry_overlap_resolution", "winding_geometry_audit", "material_definitions", "materials",
         "magnet_coordinate_systems", "boundaries_motion", "windings", "losses",
         "mesh", "inductance_computation", "setup", "validation",
     ):
@@ -1516,11 +1866,20 @@ def configure_ipmsm_from_ppt(
     merged_groups.setdefault("band", created["band"])
 
     setup_started = time.perf_counter()
+    overlap_resolution = resolve_geometry_overlaps(design, merged_groups)
+    m2d = _m2d(design)
+    winding_geometry_audit = audit_actual_winding_geometry(
+        m2d, _get_group(m2d, merged_groups, "windings", ("winding",)),
+        turns_per_coil_side=spec.turns_per_coil_side,
+        conductor_area_per_branch_mm2=spec.conductor_area_per_branch_mm2,
+        slot_fill_limit=spec.slot_fill_limit, expected_count=2 * spec.slot_number,
+    )
     result = {
         "variables": "applied",
         "cleanup": cleanup,
         "region_band": created,
-        "geometry_overlap_resolution": resolve_geometry_overlaps(design, merged_groups),
+        "geometry_overlap_resolution": overlap_resolution,
+        "winding_geometry_audit": winding_geometry_audit,
         "material_definitions": ensure_ppt_materials(design, spec),
         "materials": assign_ppt_materials(design, merged_groups, spec),
         "magnet_coordinate_systems": assign_magnet_coordinate_systems(design, merged_groups, spec),
@@ -1548,7 +1907,7 @@ def configure_ipmsm_from_ppt(
 
     result["setup_issues"] = critical_setup_issues(result)
     result["timings"] = {"setup_s": time.perf_counter() - setup_started}
-    if spec.strict_setup and result["setup_issues"]:
+    if (spec.strict_setup or spec.core_material_model == M19_REFERENCE_CORE_MATERIAL_MODEL) and result["setup_issues"]:
         raise RuntimeError("Essential AEDT setup failed: " + "; ".join(result["setup_issues"]))
 
     if create_reports:

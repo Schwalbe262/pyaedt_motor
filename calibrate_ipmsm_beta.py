@@ -14,6 +14,7 @@ from typing import Any, Iterable, Mapping
 
 from generate_ipmsm_quality_cases import MESH_ELEMENT_KEYS, QUALITY_PROFILES
 from run_ipmsm_batch import extract_fixed_geometry
+from ipmsm_optimization import MaterialContextSpec, fixed_case_context_fields
 
 
 BETA_CONVENTION = "dq_current_advance_v2"
@@ -158,6 +159,7 @@ def calibration_source_from_spec(path: Path, *, geometry_seed: int = 42) -> dict
         "initial_position_deg": -22.5,
         "slot_num": spec.slot_number,
         "pole_num": spec.pole_number,
+        **fixed_case_context_fields(spec.material_context, spec.winding),
         **design,
     }
 
@@ -211,6 +213,9 @@ def _source_case_common(source: dict[str, str], quality_profile: str) -> dict[st
         "beta_convention": BETA_CONVENTION,
         "initial_position_deg": initial_position_deg,
         **required_operating_values,
+        **_case_fixed_context(source, legacy_defaults=True),
+        **({"expected_material_fingerprint": str(source["expected_material_fingerprint"]).strip()}
+           if str(source.get("expected_material_fingerprint") or "").strip() else {}),
         **geometry,
         **profile,
     }
@@ -301,6 +306,95 @@ def _required_finite_alias(row: Mapping[str, Any], names: tuple[str, ...], label
     return values[0]
 
 
+CASE_WINDING_FIELDS = (
+    "series_turns_per_phase", "turns_per_coil_side",
+    "conductor_area_per_branch_mm2", "slot_fill_limit",
+)
+
+
+def _case_fixed_context(row: Mapping[str, Any], *, legacy_defaults: bool = False,
+                        actual_only: bool = False) -> dict[str, Any]:
+    """Read fixed case metadata without treating a reference as legacy.
+
+    Historical legacy source CSVs may lack wire metadata. Only that source
+    path uses the runner's historical defaults. Actual reference results must
+    report the explicit input_* values; copied plan fields cannot substitute.
+    """
+    def aliases(key: str) -> tuple[str, ...]:
+        return ("input_" + key,) if actual_only else (key, "input_" + key)
+
+    def optional_text(key: str) -> str:
+        names = aliases(key)
+        if not any(row.get(name) is not None and str(row[name]).strip() for name in names):
+            return ""
+        return _required_text_alias(row, names, key)
+
+    model, name = optional_text("core_material_model"), optional_text("core_material")
+    material = MaterialContextSpec(model or "legacy_pnf_hybrid_v1", name or None)
+    reference = material.core_material_model != "legacy_pnf_hybrid_v1"
+    if reference and (not model or not name):
+        raise ValueError("reference calibration requires explicit core_material_model and core_material")
+    result: dict[str, Any] = {
+        "core_material_model": material.core_material_model,
+        "core_material": material.core_material,
+    }
+    present = {key for key in CASE_WINDING_FIELDS
+               if any(row.get(alias) is not None and str(row[alias]).strip() for alias in aliases(key))}
+    full_wire = reference or bool(present & set(CASE_WINDING_FIELDS[2:]))
+    if full_wire:
+        present = set(CASE_WINDING_FIELDS)
+    if legacy_defaults and not full_wire:
+        from module.ipmsm_ppt_setup import IPMSMPPTSpec
+        defaults = IPMSMPPTSpec()
+        result.update({key: getattr(defaults, key) for key in CASE_WINDING_FIELDS})
+    for key in CASE_WINDING_FIELDS:
+        if key in present:
+            result[key] = _required_finite_alias(row, aliases(key), key)
+    for key in CASE_WINDING_FIELDS:
+        if key not in result:
+            continue
+        value = float(result[key])
+        if not math.isfinite(value) or value <= 0 or (key == "slot_fill_limit" and value > 1):
+            raise ValueError(f"invalid calibration {key}")
+        if key in CASE_WINDING_FIELDS[:2]:
+            expected = 48 if key == "series_turns_per_phase" else 12
+            if value != expected:
+                raise ValueError(f"calibration requires {key}={expected}")
+            result[key] = int(value)
+    return result
+
+
+def _actual_fixed_context(row: Mapping[str, Any], expected: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    declared = _case_fixed_context(row)
+    reference = (declared["core_material_model"] != "legacy_pnf_hybrid_v1" or
+                 (expected or {}).get("core_material_model", "legacy_pnf_hybrid_v1") != "legacy_pnf_hybrid_v1")
+    actual = _case_fixed_context(row, actual_only=reference)
+    if reference and actual["core_material_model"] == "legacy_pnf_hybrid_v1":
+        raise ValueError("reference calibration result lacks explicit actual input material context")
+    return actual
+
+
+def _require_zero_context(context: Mapping[str, Any], manifest: Mapping[str, Any]) -> None:
+    material = manifest.get("material_context")
+    reference = context["core_material_model"] != "legacy_pnf_hybrid_v1"
+    if material is None:
+        if reference:
+            raise ValueError("reference calibration requires a zero manifest with material/winding context")
+        return  # Truly historical legacy manifests retain their original identity.
+    if not isinstance(material, dict) or set(material) != {"core_material_model", "core_material"}:
+        raise ValueError("zero manifest material_context must contain both identifiers")
+    winding = manifest.get("winding_context")
+    if winding is not None and (not isinstance(winding, dict) or set(winding) != set(CASE_WINDING_FIELDS)):
+        raise ValueError("zero manifest winding_context must contain the four exact physical fields")
+    normalized = _case_fixed_context({**material, **(winding or {})})
+    if reference and (set(CASE_WINDING_FIELDS) - set(normalized) or
+                      not str(manifest.get("material_fingerprint") or "").strip()):
+        raise ValueError("reference zero manifest requires actual winding and material fingerprint")
+    for key, expected in normalized.items():
+        if key not in context or context[key] != expected:
+            raise ValueError(f"zero manifest material/winding context mismatch: {key}")
+
+
 def _duplicate_values(values: Iterable[Any]) -> list[Any]:
     seen: set[Any] = set()
     duplicates: list[Any] = []
@@ -355,6 +449,7 @@ def validate_beta_case_plan_results(
 
     plan_betas: list[float] = []
     plan_design_hashes: list[str] = []
+    plan_contexts: list[dict[str, Any]] = []
     for index, (plan_row, result_row) in enumerate(zip(plan, results), start=1):
         case_id = plan_ids[index - 1]
         status = str(result_row.get("status") or "").strip().lower()
@@ -372,6 +467,21 @@ def validate_beta_case_plan_results(
         )
         if plan_schema != DATASET_SCHEMA_VERSION or result_schema != DATASET_SCHEMA_VERSION:
             raise ValueError(f"strict beta schema mismatch for case_id={case_id!r}")
+
+        expected_context = _case_fixed_context(plan_row)
+        actual_context = _actual_fixed_context(result_row, expected_context)
+        _require_zero_context(expected_context, calibration_manifest)
+        for key, expected in expected_context.items():
+            if actual_context.get(key) != expected:
+                raise ValueError(f"strict beta material/winding context mismatch for {case_id}: {key}")
+        expected_material = str(plan_row.get("expected_material_fingerprint") or "").strip()
+        if expected_material and _required_text_alias(
+                result_row, ("input_material_fingerprint", "material_fingerprint"), "actual material fingerprint") != expected_material:
+            raise ValueError(f"strict beta expected material fingerprint mismatch for {case_id}")
+        if calibration_manifest.get("material_fingerprint") and _required_text_alias(
+                result_row, ("input_material_fingerprint", "material_fingerprint"), "actual material fingerprint") != calibration_manifest["material_fingerprint"]:
+            raise ValueError(f"strict beta material differs from zero calibration for {case_id}")
+        plan_contexts.append(expected_context)
 
         plan_beta = _required_finite_alias(
             plan_row,
@@ -471,6 +581,8 @@ def validate_beta_case_plan_results(
         plan_betas.append(plan_beta)
         plan_design_hashes.append(plan_design_hash)
 
+    if any(context != plan_contexts[0] for context in plan_contexts[1:]):
+        raise ValueError("strict beta case plan mixes material/winding context")
     duplicate_betas = _duplicate_values(plan_betas)
     if duplicate_betas:
         raise ValueError(f"strict beta case plan has duplicate beta values: {duplicate_betas!r}")
@@ -564,6 +676,7 @@ def analyze_zero_calibration_rows(
         "input_aedt_version": set(),
     }
     initial_positions_deg: list[float] = []
+    fixed_contexts: list[dict[str, Any]] = []
     metric_versions = {str(row.get("input_metric_contract_version") or "").strip() for row in successful}
     if len(metric_versions) != 1:
         raise ValueError("zero calibration mixes metric contracts")
@@ -571,6 +684,7 @@ def analyze_zero_calibration_rows(
         homogeneous["input_metric_contract_version"] = set()
         homogeneous["input_producer_fingerprint"] = set()
     for row in successful:
+        fixed_contexts.append(_actual_fixed_context(row))
         if metric_versions != {""}:
             if row.get("input_metric_contract_version") != "motor_metrics_v3":
                 raise ValueError("zero calibration requires supported physical EMF contract")
@@ -626,6 +740,8 @@ def analyze_zero_calibration_rows(
         )
 
     mixed = [column for column, values in homogeneous.items() if len(values) > 1]
+    if any(context != fixed_contexts[0] for context in fixed_contexts[1:]):
+        mixed.append("material/winding context")
     initial_reference_deg = initial_positions_deg[0]
     if any(
         not math.isclose(value, initial_reference_deg, rel_tol=0.0, abs_tol=1e-9)
@@ -669,6 +785,15 @@ def analyze_zero_calibration_rows(
         "max_circular_deviation_deg": max_deviation,
         "observations": observations,
     }
+    explicit_context = any(str(first.get(prefix + key) or "").strip()
+                           for key in ("core_material_model", "core_material", *CASE_WINDING_FIELDS[2:])
+                           for prefix in ("", "input_"))
+    if explicit_context:
+        context = fixed_contexts[0]
+        payload["material_context"] = {key: context[key] for key in ("core_material_model", "core_material")}
+        if set(CASE_WINDING_FIELDS) <= set(context):
+            payload["winding_context"] = {key: context[key] for key in CASE_WINDING_FIELDS}
+        payload["material_fingerprint"] = str(first["input_material_fingerprint"])
     if metric_versions != {""}:
         payload["metric_contract"] = first["input_metric_contract_version"]
         payload["producer_fingerprint"] = first["input_producer_fingerprint"]
@@ -711,7 +836,8 @@ def apply_zero_manifest_to_spec(
     }
     from ipmsm_optimization import optimization_spec_from_mapping
 
-    optimization_spec_from_mapping(updated)
+    parsed = optimization_spec_from_mapping(updated)
+    _require_zero_context(fixed_case_context_fields(parsed.material_context, parsed.winding), calibration_manifest)
     return updated
 
 
@@ -732,6 +858,11 @@ def generate_beta_sweep_rows(
     if len(betas) < 3 or any(not math.isfinite(beta) for beta in betas):
         raise ValueError("loaded beta sweep requires at least three distinct finite beta values")
     common = _source_case_common(source, quality_profile)
+    _require_zero_context(common, calibration_manifest)
+    if calibration_manifest.get("material_fingerprint"):
+        if common.get("expected_material_fingerprint", calibration_manifest["material_fingerprint"]) != calibration_manifest["material_fingerprint"]:
+            raise ValueError("source expected material fingerprint differs from zero calibration")
+        common["expected_material_fingerprint"] = calibration_manifest["material_fingerprint"]
     manifest_initial_position = finite_float(calibration_manifest.get("initial_position_deg"))
     if math.isfinite(manifest_initial_position) and not math.isclose(
         float(common["initial_position_deg"]), manifest_initial_position, abs_tol=1e-9

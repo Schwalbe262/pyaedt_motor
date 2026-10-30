@@ -68,6 +68,12 @@ PROFILE_NUMERIC = ("transient_periods", "steps_per_period", "circle_segments",
                    "band_circle_segments")
 PROFILE_BOOLEAN = ("compute_inductance", "strict_setup")
 PROFILE_TEXT = ("loss_policy", "analysis_purpose")
+LEGACY_MATERIAL_CONTEXT = {"core_material_model": "legacy_pnf_hybrid_v1",
+                           "core_material": "27PNF1500_CustomCoreLoss"}
+REFERENCE_MATERIAL_CONTEXT = {"core_material_model": "m19_29g_reference_y2_v1",
+                              "core_material": "M19_29G_reference_y2"}
+WINDING_CONTEXT_FIELDS = ("series_turns_per_phase", "turns_per_coil_side",
+                          "conductor_area_per_branch_mm2", "slot_fill_limit")
 
 
 def _boolean(row, name):
@@ -129,6 +135,71 @@ def _input_text(row, name):
     return values.pop()
 
 
+def _row_context(row):
+    """Read declared material/wire identity without inferring a reference grade."""
+    model_present = bool(_values(row, "core_material_model"))
+    name_present = bool(_values(row, "core_material"))
+    fields_present = any(key in row for name in ("core_material_model", "core_material")
+                         for key in (name, "input_" + name))
+    if not model_present and name_present:
+        if _input_text(row, "core_material") != LEGACY_MATERIAL_CONTEXT["core_material"]:
+            raise ValueError("missing_core_material_model")
+        material = dict(LEGACY_MATERIAL_CONTEXT)
+        provenance = "legacy_name_only_model_id_absent"
+    elif not model_present and not name_present and not fields_present:
+        material = dict(LEGACY_MATERIAL_CONTEXT)
+        provenance = "legacy_default_both_fields_absent"
+    else:
+        material = {key: _input_text(row, key) for key in ("core_material_model", "core_material")}
+        if material not in (LEGACY_MATERIAL_CONTEXT, REFERENCE_MATERIAL_CONTEXT):
+            raise ValueError("unknown_or_inconsistent_material_context")
+        provenance = "explicit_row_metadata"
+    reference = material == REFERENCE_MATERIAL_CONTEXT
+    wire_fields_present = any(key in row for name in ("conductor_area_per_branch_mm2", "slot_fill_limit")
+                              for key in (name, "input_" + name))
+    winding = None
+    if reference or wire_fields_present:
+        winding = {key: _number(row, key) for key in WINDING_CONTEXT_FIELDS}
+        for key in ("series_turns_per_phase", "turns_per_coil_side"):
+            if winding[key] <= 0 or not winding[key].is_integer():
+                raise ValueError("invalid_winding_context:" + key)
+            winding[key] = int(winding[key])
+        if winding["conductor_area_per_branch_mm2"] <= 0 or not 0 < winding["slot_fill_limit"] <= 1:
+            raise ValueError("invalid_winding_context:area_or_fill_limit")
+    fingerprint = _text(row.get("input_material_fingerprint"))
+    if reference and not re.fullmatch(r"materials_v2:sha256:[0-9a-f]{64}", fingerprint):
+        raise ValueError("invalid_reference_material_fingerprint")
+    return {"material_context": material, "material_context_source": provenance,
+            "winding_context": winding, "material_fingerprint": fingerprint}
+
+
+def _comparison_context(rows):
+    records, issues = [], []
+    for row in rows:
+        try:
+            records.append({"case_id": _text(row.get("case_id")), **_row_context(row)})
+        except ValueError as exc:
+            issues.append("invalid_row_context:" + _text(row.get("case_id")) + ":" + str(exc))
+    contexts, winding, fingerprints = None, None, None
+    if records:
+        def uniform(key):
+            variants = {json.dumps(record[key], sort_keys=True) for record in records}
+            if len(variants) != 1:
+                issues.append("mixed_" + key)
+                return None
+            return json.loads(next(iter(variants)))
+        contexts, winding, fingerprints = (uniform(key) for key in
+                                           ("material_context", "winding_context", "material_fingerprint"))
+        if not fingerprints:
+            issues.append("missing_material_fingerprint")
+    else:
+        issues.append("missing_result_context")
+    return {"material_context": contexts, "winding_context": winding,
+            "material_fingerprint": fingerprints,
+            "material_context_provenance": [{"case_id": record["case_id"],
+                                              "source": record["material_context_source"]} for record in records]}, issues
+
+
 def _profile(row):
     return _input_text(row, "quality_profile")
 
@@ -168,7 +239,14 @@ def _identity_issues(row, expected):
                     problems.append("plan_mismatch:" + key)
             except ValueError as exc:
                 problems.append(str(exc))
-    for key in (*PROFILE_TEXT, "core_material", "magnet_material", "winding_material", "shaft_material", "air_material"):
+    for key in ("conductor_area_per_branch_mm2", "slot_fill_limit"):
+        if _values(expected, key):
+            try:
+                if not math.isclose(_number(row, key), _number(expected, key), rel_tol=1e-10, abs_tol=1e-9):
+                    problems.append("plan_mismatch:" + key)
+            except ValueError as exc:
+                problems.append(str(exc))
+    for key in (*PROFILE_TEXT, "core_material_model", "core_material", "magnet_material", "winding_material", "shaft_material", "air_material"):
         if _values(expected, key):
             try:
                 if _input_text(row, key) != _input_text(expected, key):
@@ -188,6 +266,10 @@ def _identity_issues(row, expected):
 
 def _row_issues(row, rules):
     problems = []
+    try:
+        _row_context(row)
+    except ValueError as exc:
+        problems.append("invalid_row_context:" + str(exc))
     if _text(row.get("status")).lower() != "ok":
         problems.append("result_not_ok")
     if _text(row.get("analyze")).lower() not in {"true", "1", "1.0"}:
@@ -262,6 +344,13 @@ def _deltas(row, reference, rules):
 def _source_issues(candidate, reference):
     issues = ["incompatible_source:" + key for key in PAIR_SOURCE_FIELDS
               if not _text(candidate.get(key)) or _text(candidate.get(key)) != _text(reference.get(key))]
+    try:
+        actual, baseline = _row_context(candidate), _row_context(reference)
+        for key in ("material_context", "winding_context"):
+            if actual[key] != baseline[key]:
+                issues.append("incompatible_source:" + key)
+    except ValueError as exc:
+        issues.append("invalid_row_context:" + str(exc))
     for key in ("source_case_id", "geometry_group_id", "design_hash"):
         if _values(candidate, key) or _values(reference, key):
             try:
@@ -324,6 +413,9 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
                  if _text(row.get("input_producer_fingerprint"))}
     if len(producers) != 1:
         global_issues.append("missing_or_mixed_producers")
+    context, context_issues = _comparison_context([row for case, rows in index.items()
+                                                  if case in planned for row in rows])
+    global_issues.extend(context_issues)
     mesh_counts = mesh_counts or {}
     unpaired, comparisons, certifications, coverage = [], [], [], []
     for point, profiles in groups.items():
@@ -440,6 +532,7 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
             "production_metric_contract_complete": modern_contract,
             "planned_reference_groups": len(coverage), "result_rows": len(results),
             "producer_fingerprint": next(iter(producers)) if len(producers) == 1 else None,
+            **context,
             "global_issues": global_issues, "duplicate_result_case_ids": duplicate_results,
             "unplanned_result_case_ids": unplanned, "unpaired_plan_case_ids": sorted(unpaired),
             "reference_coverage": coverage, "reference_certification": certifications,
@@ -474,6 +567,20 @@ def selected_profile_manifest(report, report_path: Path, profile: str) -> dict:
     certifications = report["reference_certification"]
     if not expected or row["observed_pairs"] != expected or row["planned_pairs"] != expected or len(certifications) != expected or not all(item["certified"] is True for item in certifications):
         raise ValueError("selected profile lacks complete independently certified reference coverage")
+    material = report.get("material_context")
+    winding = report.get("winding_context")
+    fingerprint = report.get("material_fingerprint")
+    if not isinstance(material, dict) or set(material) != {"core_material_model", "core_material"} or not _text(fingerprint):
+        raise ValueError("selected profile lacks uniform actual material context/fingerprint")
+    if winding is not None and (not isinstance(winding, dict) or set(winding) != set(WINDING_CONTEXT_FIELDS)):
+        raise ValueError("selected profile lacks complete declared winding context")
+    try:
+        declared = _row_context({**material, **(winding or {}), "input_material_fingerprint": fingerprint})
+    except ValueError as exc:
+        raise ValueError("selected profile has invalid material/winding context: " + str(exc)) from None
+    if material == REFERENCE_MATERIAL_CONTEXT and (not report.get("material_context_provenance") or
+            any(item.get("source") != "explicit_row_metadata" for item in report["material_context_provenance"])):
+        raise ValueError("reference material requires explicit actual row context")
     flat = row["settings"]
     required = ["transient_periods", "steps_per_period", "compute_inductance", "strict_setup",
                 "circle_segments", "loss_policy", *("mesh_" + group + "_elements" for group in
@@ -493,10 +600,15 @@ def selected_profile_manifest(report, report_path: Path, profile: str) -> dict:
         settings["mesh_maximum_lengths_mm"] = local
     if "band_circle_segments" in flat:
         settings["band_circle_segments"] = flat["band_circle_segments"]
-    return {"schema_version": "ipmsm_v3_selected_profile_v1", "metric_contract_version": METRIC_CONTRACT_VERSION,
-            "producer_fingerprint": report["producer_fingerprint"], "settings": settings,
-            "evidence": [{"path": str(report_path.resolve()),
-                          "sha256": hashlib.sha256(report_bytes).hexdigest()}]}
+    selected = {"schema_version": "ipmsm_v3_selected_profile_v1", "metric_contract_version": METRIC_CONTRACT_VERSION,
+                "producer_fingerprint": report["producer_fingerprint"], "settings": settings,
+                "material_context": dict(declared["material_context"]), "material_fingerprint": fingerprint,
+                "material_context_provenance": report.get("material_context_provenance", []),
+                "evidence": [{"path": str(report_path.resolve()),
+                              "sha256": hashlib.sha256(report_bytes).hexdigest()}]}
+    if declared["winding_context"] is not None:
+        selected["winding_context"] = dict(declared["winding_context"])
+    return selected
 
 
 def read_mesh_counts(root: Path) -> dict[str, int]:

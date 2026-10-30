@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from calibrate_ipmsm_beta import apply_zero_manifest_to_spec
 from ipmsm_optimization import geometry_metrics, optimization_spec_from_mapping, phase_resistance_100c_ohm
@@ -20,10 +21,19 @@ from pyaedt_motor import doe
 from tests.test_calibrate_ipmsm_beta import zero_manifest
 
 
-def physical_zero():
+def physical_zero(*, reference=True):
     value = zero_manifest(-90.0)
     value.update(metric_contract="motor_metrics_v3", back_emf_source="periodic_flux_derivative",
-                 producer_fingerprint="producer_v3:sha256:" + "a" * 64)
+                 producer_fingerprint="producer_v3:sha256:" + "b" * 64)
+    if reference:
+        raw = json.loads((Path(__file__).parents[1] / "configs/ipmsm_7p5kw.json").read_text(encoding="utf-8"))
+        winding = raw["winding"]
+        value["material_context"] = raw["material_context"]
+        value["winding_context"] = {"series_turns_per_phase": winding["series_turns_per_phase"],
+                                    "turns_per_coil_side": winding["turns_per_coil_side"],
+                                    "conductor_area_per_branch_mm2": winding["strand_area_mm2"] * winding["strands_per_turn"],
+                                    "slot_fill_limit": winding["fill_factor"]}
+        value["material_fingerprint"] = "materials_v2:sha256:" + "c" * 64
     value.pop("calibration_id")
     value["calibration_id"] = "beta-calibration:sha256:" + hashlib.sha256(doe._json_bytes(value)).hexdigest()
     return value
@@ -45,6 +55,12 @@ class V3DoeTests(unittest.TestCase):
                          "steps_per_period": 150, "mesh_elements": {"magnet": 100, "rotor": 1000,
                          "stator": 1000, "winding": 100, "band": 2000},
                          "mesh_maximum_lengths_mm": {"band": .2}},
+            "material_context": {"core_material_model": self.spec.material_context.core_material_model,
+                                 "core_material": self.spec.material_context.core_material},
+            "material_fingerprint": "materials_v2:sha256:" + "c" * 64,
+            "winding_context": {"series_turns_per_phase": 48, "turns_per_coil_side": 12,
+                                "conductor_area_per_branch_mm2": self.spec.winding.conductor_area_per_branch_mm2,
+                                "slot_fill_limit": self.spec.winding.fill_factor},
             "evidence": [{"path": evidence.name, "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest()}],
         }
         self.profile_path = self.root / "selected.json"
@@ -123,6 +139,11 @@ class V3DoeTests(unittest.TestCase):
             groups[row["design_hash"]].append(row)
             self.assertEqual(row["stator_shoe_thick"], 1.5)
             self.assertEqual(row["dataset_schema_version"], "ipmsm_v2")
+            self.assertEqual(row["core_material_model"], "m19_29g_reference_y2_v1")
+            self.assertEqual(row["core_material"], "M19_29G_reference_y2")
+            self.assertEqual(row["conductor_area_per_branch_mm2"], self.spec.winding.conductor_area_per_branch_mm2)
+            self.assertEqual(row["slot_fill_limit"], self.spec.winding.fill_factor)
+            self.assertEqual(row["expected_material_fingerprint"], self.profile_document["material_fingerprint"])
             self.assertNotIn("setup_fingerprint", row)
             self.assertNotIn("producer_fingerprint", row)
             self.assertLessEqual(row["stator_outer_radius"], 150)
@@ -153,6 +174,142 @@ class V3DoeTests(unittest.TestCase):
         self.assertFalse(proof["profile_convergence_certified_by_generator"])
         with self.assertRaisesRegex(ValueError, "2400"):
             doe.generate_training_plan(self.spec, self.calibration, self.profile, geometries=721)
+
+    def test_actual_parallel_conductor_area_and_fill_are_propagated_and_sealed(self):
+        winding = replace(self.spec.winding, strand_area_mm2=self.spec.winding.strand_area_mm2 / 2,
+                          strands_per_turn=2, fill_factor=.44)
+        calibration = self.calibration_for_winding(winding)
+        spec = replace(self.spec, winding=winding, beta_calibration=replace(self.spec.beta_calibration, calibration_id=calibration["calibration_id"]))
+        profile = self.profile_for_winding(winding)
+        rows, manifest = doe.generate_training_plan(spec, calibration, profile, geometries=10)
+        self.assertEqual(manifest["material_context"], {"core_material_model": "m19_29g_reference_y2_v1",
+                                                        "core_material": "M19_29G_reference_y2"})
+        self.assertEqual(manifest["winding_spec"]["strands_per_turn"], 2)
+        self.assertEqual(manifest["expected_material_fingerprint"], self.profile_document["material_fingerprint"])
+        for row in rows:
+            self.assertEqual(row["conductor_area_per_branch_mm2"], winding.strand_area_mm2 * 2)
+            self.assertNotEqual(row["conductor_area_per_branch_mm2"], winding.strand_area_mm2)
+            self.assertEqual(row["slot_fill_limit"], .44)
+        path = self.root / "actual_winding.csv"
+        proof = doe.write_training_plan(path, rows, manifest)
+        self.assertEqual(doe.verify_training_plan(path), proof)
+
+    def test_legacy_spec_and_undeclared_legacy_profile_remain_supported(self):
+        raw = dict(self.raw)
+        raw.pop("material_context")
+        calibration = physical_zero(reference=False)
+        spec = optimization_spec_from_mapping(apply_zero_manifest_to_spec(raw, calibration))
+        document = {key: value for key, value in self.profile_document.items()
+                    if key not in {"material_context", "material_fingerprint", "winding_context"}}
+        self.profile_path.write_text(json.dumps(document), encoding="utf-8")
+        profile = doe.load_selected_profile(self.profile_path)
+        rows, _ = doe.generate_training_plan(spec, calibration, profile, geometries=10)
+        self.assertTrue(all(row["core_material_model"] == "legacy_pnf_hybrid_v1" for row in rows))
+        self.assertTrue(all(row["core_material"] == "27PNF1500_CustomCoreLoss" for row in rows))
+        self.assertTrue(all(row["expected_material_fingerprint"] == "" for row in rows))
+
+    def test_reference_profile_requires_the_same_explicit_material_context(self):
+        for field in ["material_context", "material_fingerprint", "winding_context"]:
+            document = dict(self.profile_document)
+            document.pop(field)
+            self.profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "material context|reference profile"):
+                profile = doe.load_selected_profile(self.profile_path)
+                doe.generate_training_plan(self.spec, self.calibration, profile, geometries=10)
+        document = dict(self.profile_document, material_context={"core_material_model": "legacy_pnf_hybrid_v1",
+                                                                "core_material": "27PNF1500_CustomCoreLoss"})
+        self.profile_path.write_text(json.dumps(document), encoding="utf-8")
+        legacy = doe.load_selected_profile(self.profile_path)
+        with self.assertRaisesRegex(ValueError, "material context"):
+            doe.generate_training_plan(self.spec, self.calibration, legacy, geometries=10)
+
+    def test_selected_material_and_winding_provenance_cannot_change_in_memory(self):
+        self.profile.material_context["core_material"] = "27PNF1500_CustomCoreLoss"
+        with self.assertRaisesRegex(ValueError, "changed in memory"):
+            self.plan()
+        profile = doe.load_selected_profile(self.profile_path)
+        altered = replace(profile, material_fingerprint="materials_v2:sha256:" + "d" * 64)
+        with self.assertRaisesRegex(ValueError, "changed in memory"):
+            doe.generate_training_plan(self.spec, self.calibration, altered, geometries=10)
+        profile.winding_context["slot_fill_limit"] = .44
+        with self.assertRaisesRegex(ValueError, "changed in memory"):
+            doe.generate_training_plan(self.spec, self.calibration, profile, geometries=10)
+
+    def test_production_doe_rejects_nonphysical_fixed_winding_contract(self):
+        for winding in [replace(self.spec.winding, series_turns_per_phase=24, turns_per_coil_side=6),
+                        replace(self.spec.winding, parallel_branches=2, coils_per_phase=8)]:
+            with self.subTest(winding=winding), self.assertRaisesRegex(ValueError, "fixed48"):
+                doe.generate_training_plan(replace(self.spec, winding=winding), self.calibration,
+                                           self.profile, geometries=10)
+
+    def test_runner_ignoring_a_declared_winding_field_is_rejected(self):
+        import run_ipmsm_batch
+        original = run_ipmsm_batch.build_spec
+        spec = replace(self.spec, winding=replace(self.spec.winding, fill_factor=.44))
+        calibration = self.calibration_for_winding(spec.winding)
+        spec = replace(spec, beta_calibration=replace(spec.beta_calibration, calibration_id=calibration["calibration_id"]))
+        profile = self.profile_for_winding(spec.winding)
+        with mock.patch.object(run_ipmsm_batch, "build_spec", side_effect=lambda row: replace(
+                original(row), slot_fill_limit=.45)), self.assertRaisesRegex(ValueError, "declared material/winding field"):
+            doe.generate_training_plan(spec, calibration, profile, geometries=10)
+
+    def test_mixed_material_or_winding_rows_cannot_publish_or_verify_after_resealing(self):
+        rows, manifest = self.plan()
+        for index, (field, value) in enumerate([("core_material_model", "legacy_pnf_hybrid_v1"),
+                                               ("core_material", "27PNF1500_CustomCoreLoss"),
+                                               ("conductor_area_per_branch_mm2", 99.0),
+                                               ("slot_fill_limit", .4),
+                                               ("expected_material_fingerprint", "materials_v2:sha256:" + "d" * 64)]):
+            altered = [dict(row) for row in rows]
+            altered[0][field] = value
+            path = self.root / f"mixed{index}.csv"
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "material/winding context"):
+                doe.write_training_plan(path, altered, manifest)
+            self.assertFalse(path.exists())
+            proof = doe.write_training_plan(path, rows, manifest)
+            payload = io_csv(altered)
+            path.write_bytes(payload)
+            proof["plan_sha256"] = hashlib.sha256(payload).hexdigest()
+            proof.pop("manifest_id")
+            proof["manifest_id"] = "training_plan_v3:sha256:" + hashlib.sha256(doe._json_bytes(proof)).hexdigest()
+            path.with_suffix(".manifest.json").write_text(json.dumps(proof), encoding="utf-8")
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "material/winding context"):
+                doe.verify_training_plan(path)
+
+    def calibration_for_winding(self, winding):
+        value = dict(self.calibration, winding_context={
+            "series_turns_per_phase": winding.series_turns_per_phase,
+            "turns_per_coil_side": winding.turns_per_coil_side,
+            "conductor_area_per_branch_mm2": winding.conductor_area_per_branch_mm2,
+            "slot_fill_limit": winding.fill_factor})
+        value.pop("calibration_id")
+        value["calibration_id"] = "beta-calibration:sha256:" + hashlib.sha256(doe._json_bytes(value)).hexdigest()
+        return value
+
+    def test_reference_doe_requires_zero_context_material_fingerprint_and_producer(self):
+        variants = []
+        for field in ("material_context", "winding_context", "material_fingerprint", "producer_fingerprint"):
+            changed = json.loads(json.dumps(self.calibration)); changed.pop(field); variants.append(changed)
+        changed = json.loads(json.dumps(self.calibration)); changed["material_context"] = {
+            "core_material_model": "legacy_pnf_hybrid_v1", "core_material": "27PNF1500_CustomCoreLoss"}; variants.append(changed)
+        changed = json.loads(json.dumps(self.calibration)); changed["winding_context"]["slot_fill_limit"] = .44; variants.append(changed)
+        changed = json.loads(json.dumps(self.calibration)); changed["material_fingerprint"] = "materials_v2:sha256:" + "d" * 64; variants.append(changed)
+        changed = json.loads(json.dumps(self.calibration)); changed["producer_fingerprint"] = "producer_v3:sha256:" + "e" * 64; variants.append(changed)
+        for index, calibration in enumerate(variants):
+            calibration.pop("calibration_id")
+            calibration["calibration_id"] = "beta-calibration:sha256:" + hashlib.sha256(doe._json_bytes(calibration)).hexdigest()
+            spec = replace(self.spec, beta_calibration=replace(self.spec.beta_calibration, calibration_id=calibration["calibration_id"]))
+            with self.subTest(variant=index), self.assertRaisesRegex(ValueError, "context|fingerprint|producer|finite"):
+                doe.generate_training_plan(spec, calibration, self.profile, geometries=10)
+
+    def profile_for_winding(self, winding):
+        document = dict(self.profile_document, winding_context={
+            "series_turns_per_phase": winding.series_turns_per_phase,
+            "turns_per_coil_side": winding.turns_per_coil_side,
+            "conductor_area_per_branch_mm2": winding.conductor_area_per_branch_mm2,
+            "slot_fill_limit": winding.fill_factor})
+        self.profile_path.write_text(json.dumps(document), encoding="utf-8")
+        return doe.load_selected_profile(self.profile_path)
 
     def test_invalid_profile_flags_or_modified_evidence_cannot_be_sealed(self):
         for key, invalid in [("circle_segments", 72), ("strict_setup", False), ("compute_inductance", False),

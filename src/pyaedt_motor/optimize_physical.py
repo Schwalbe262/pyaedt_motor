@@ -22,7 +22,7 @@ from scipy.stats import qmc
 
 from ipmsm_optimization import (
     OperatingPoint, active_volume_m3,
-    current_density_a_per_mm2, dq_currents, geometry_metrics,
+    current_density_a_per_mm2, dq_currents, geometry_metrics, fixed_case_context_fields,
     optimization_spec_from_mapping, phase_resistance_100c_ohm,
 )
 from . import doe
@@ -90,6 +90,8 @@ class PhysicalBundleAdapter:
         if (self.spec.beta_calibration.calibration_id != expected_fingerprints["input_beta_calibration_id"] or
                 self.spec.beta_calibration.convention != expected_fingerprints["input_beta_convention"]):
             raise ValueError("calibrated-zero frame differs from expected fingerprints")
+        if calibration_manifest.get("material_fingerprint") not in (None, expected_fingerprints["input_material_fingerprint"]):
+            raise ValueError("zero calibration material differs from the approved model")
         self.bundle = bundle
         self.fingerprints = deepcopy(dict(expected_fingerprints))
         self.domain = deepcopy(bundle.metadata["domain"])
@@ -436,9 +438,99 @@ def generate_design_plan(adapter: PhysicalBundleAdapter, baseline: Mapping, *, c
     return plan
 
 
+def build_fea_validation_rows(adapter: PhysicalBundleAdapter, proposals: Sequence[DesignProposal],
+                              selected_profile: Path) -> tuple[list[dict], dict]:
+    """Replay a sealed approved profile; never guess missing artifact settings.
+
+    Only supported predicted-feasible proposals receive runnable rows. These
+    are independent FEA requests, not certified designs or submitted tasks.
+    """
+    if not adapter.bundle.approved or _digest(adapter.bundle.metadata) != adapter._metadata_sha256:
+        raise ValueError("validation plan requires the unchanged approved model")
+    profile = doe.load_selected_profile(selected_profile)
+    fields = fixed_case_context_fields(adapter.spec.material_context, adapter.spec.winding)
+    material = {key: fields[key] for key in ("core_material_model", "core_material")}
+    winding = {key: fields[key] for key in doe.WINDING_CONTEXT_FIELDS}
+    if profile.producer_fingerprint != adapter.fingerprints["input_producer_fingerprint"]:
+        raise ValueError("validation profile producer differs from the approved model")
+    if profile.material_fingerprint != adapter.fingerprints["input_material_fingerprint"]:
+        raise ValueError("validation profile material fingerprint differs from the approved model")
+    if profile.material_context != material or profile.winding_context != winding:
+        raise ValueError("validation profile material/winding context differs from the source spec")
+    settings = doe.profile_settings(profile.settings)
+    if settings["quality_profile"] != adapter.fingerprints["input_quality_profile"]:
+        raise ValueError("validation profile quality differs from the approved model")
+    for key in material:
+        if settings.get(key, fields[key]) != fields[key]:
+            raise ValueError(f"validation profile has a conflicting material setting: {key}")
+    from calibrate_ipmsm_beta import _require_zero_context
+    _require_zero_context(fields, adapter.calibration_manifest)
+    if material["core_material_model"] != "legacy_pnf_hybrid_v1" and adapter.calibration_manifest.get("producer_fingerprint") != profile.producer_fingerprint:
+        raise ValueError("validation profile producer differs from reference zero calibration")
+    if adapter.calibration_manifest.get("material_fingerprint") not in (None, profile.material_fingerprint):
+        raise ValueError("validation profile material differs from zero calibration")
+    initial = float(adapter.calibration_manifest.get("initial_position_deg", float("nan")))
+    if not math.isfinite(initial) or settings.get("initial_position_deg", initial) != initial:
+        raise ValueError("validation profile must replay the zero calibration initial position")
+    replay = {key: value for key, value in settings.items()
+              if key not in {"mesh_elements", "mesh_maximum_lengths_mm"}}
+    replay.update({f"mesh_{group}_elements": value for group, value in settings["mesh_elements"].items()})
+    replay.update({f"mesh_{group}_max_length_mm": value for group, value in settings["mesh_maximum_lengths_mm"].items()})
+    replay["initial_position_deg"] = initial
+    # Retain analysis_purpose=training and every numerical flag: changing these
+    # at proposal time would no longer replay the approved setup fingerprint.
+    from run_ipmsm_batch import build_spec, setup_fingerprint
+    context_key = _digest({"fingerprints": adapter.fingerprints, "profile": profile.manifest_sha256})[:12]
+    rows: list[dict] = []
+    for proposal in proposals:
+        if not proposal.feasible:
+            continue
+        design = adapter.normalize_design(proposal.geometry)
+        if physical_geometry_hash(design) != proposal.design_hash or len(proposal.controls) != len(adapter.spec.operating_points):
+            raise ValueError("validation proposal geometry/control identity changed")
+        for index, (control, point) in enumerate(zip(proposal.controls, adapter.spec.operating_points)):
+            if (control.status != "feasible" or not control.selected or not control.selected["feasible"] or
+                    any(control.operating_point.get(key) != value for key, value in asdict(point).items())):
+                raise ValueError("validation plan requires every selected control to be supported and feasible")
+            current, beta = control.selected["current_peak_a"], control.selected["beta_dq_deg"]
+            inputs = adapter.build_inputs(design, point, [(current, beta)])
+            validate_inputs(inputs, adapter.domain)
+            row = {
+                "case_id": f"physical_validation_{context_key}_{proposal.design_hash[:20]}_p{index}",
+                "geometry_group_id": "v3geo_" + proposal.design_hash,
+                "design_hash": proposal.design_hash, "doe_split": "validation", "repeat_of_case_id": "",
+                "plan_purpose": "independent_design_validation", "dataset_schema_version": "ipmsm_v2",
+                "operating_point_id": point.name, "slot_num": adapter.spec.slot_number,
+                "pole_num": adapter.spec.pole_number, "geometry_mode": "fixed", **design,
+                "phase_resistance_ohm": float(inputs.iloc[0].input_phase_resistance_ohm),
+                "vdc_v": adapter.spec.inverter.vdc_v, "base_rpm": point.speed_rpm,
+                "i_peak_a": current, "beta_dq_deg": beta, "beta_deg": beta,
+                "beta_convention": adapter.spec.beta_calibration.convention,
+                "beta_calibration_id": adapter.spec.beta_calibration.calibration_id,
+                "electrical_zero_deg": adapter.spec.beta_calibration.electrical_zero_deg,
+                "model_extent": "full_360", "symmetry_factor": 1, "use_periodic_boundary": False,
+                "operation": "sin_current", **replay, **fields,
+                "expected_material_fingerprint": adapter.fingerprints["input_material_fingerprint"],
+                "expected_setup_fingerprint": adapter.fingerprints["input_setup_fingerprint"],
+            }
+            applied = build_spec(row)
+            if any(getattr(applied, key, None) != value for key, value in fields.items()):
+                raise ValueError("runner does not replay validation material/winding context")
+            if setup_fingerprint(applied, row["quality_profile"], "sin_current", False) != adapter.fingerprints["input_setup_fingerprint"]:
+                raise ValueError("validation profile setup differs from the approved model")
+            rows.append(row)
+    if len({row["case_id"] for row in rows}) != len(rows):
+        raise ValueError("duplicate validation cases")
+    return rows, {"status": "ready_for_independent_fea", "submitted": False,
+                  "selected_profile_sha256": profile.manifest_sha256,
+                  "selected_profile_evidence": list(profile.evidence), "settings": settings,
+                  "material_context": material, "winding_context": winding,
+                  "expected_material_fingerprint": profile.material_fingerprint}
+
+
 def search_designs(adapter: PhysicalBundleAdapter, designs: Sequence[Mapping], *, seed: int | None = None,
                    search_variables: Sequence[str] | None = None, search_mode: str = "explicit_plan",
-                   max_design_evaluations: int = 256) -> dict:
+                   max_design_evaluations: int = 256, selected_profile: Path | None = None) -> dict:
     if not designs:
         raise ValueError("an explicit nonempty design plan is required")
     if (isinstance(max_design_evaluations, bool) or not isinstance(max_design_evaluations, int) or
@@ -476,6 +568,12 @@ def search_designs(adapter: PhysicalBundleAdapter, designs: Sequence[Mapping], *
                               "The support box does not establish dense joint geometry/control coverage.",
                               "Joint geometry-calibrated intervals do not certify a newly optimized design by FEA.",
                               "Manufacturing, thermal, demagnetization and mechanical integrity need separate assessment."]}
+    if selected_profile is None:
+        report["fea_validation_rows"] = []
+        report["fea_validation_plan"] = {"status": "proposal_only_profile_required", "submitted": False}
+    else:
+        rows, plan = build_fea_validation_rows(adapter, proposals, selected_profile)
+        report["fea_validation_rows"], report["fea_validation_plan"] = rows, plan
     report["report_content_sha256"] = _digest(report)
     return report
 
@@ -502,6 +600,7 @@ def main(argv=None) -> int:
     parser.add_argument("--expected-fingerprints", type=Path, required=True)
     parser.add_argument("--calibration-manifest", type=Path, required=True)
     parser.add_argument("--baseline", type=Path, required=True, help="JSON independent geometry plus stack_length_mm")
+    parser.add_argument("--selected-profile", type=Path, help="Sealed approved profile required for runnable FEA validation rows")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--count", type=int, default=32)
     parser.add_argument("--seed", type=int, default=42)
@@ -514,7 +613,8 @@ def main(argv=None) -> int:
     plan = generate_design_plan(adapter, read(args.baseline), count=args.count, seed=args.seed, mode=args.mode, variables=args.variables)
     variables = [*ACTIVE_GEOMETRY, "stack_length_mm"] if args.mode == "full_geometry" else (args.variables or ["stator_outer_radius", "stack_length_mm"])
     report = search_designs(adapter, plan, seed=args.seed, search_variables=variables,
-                           search_mode=args.mode, max_design_evaluations=args.max_design_evaluations)
+                           search_mode=args.mode, max_design_evaluations=args.max_design_evaluations,
+                           selected_profile=args.selected_profile)
     write_search_report(report, args.output)
     print(json.dumps({"output": str(args.output), "counts": report["counts"], "pareto_proposals": len(report["pareto_design_hashes"])}))
     return 0

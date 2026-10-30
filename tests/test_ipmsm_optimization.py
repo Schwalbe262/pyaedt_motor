@@ -103,6 +103,38 @@ class BatchAnalyticPredictor:
 
 
 class OptimizationSpecTests(unittest.TestCase):
+    def test_material_context_defaults_to_legacy_and_resolves_reference_name(self) -> None:
+        spec = opt.optimization_spec_from_mapping(valid_spec_mapping())
+        self.assertEqual(spec.material_context.core_material_model, "legacy_pnf_hybrid_v1")
+        self.assertEqual(spec.material_context.core_material, "27PNF1500_CustomCoreLoss")
+        raw = valid_spec_mapping()
+        raw["material_context"] = {"core_material_model": "m19_29g_reference_y2_v1"}
+        reference = opt.optimization_spec_from_mapping(raw)
+        self.assertEqual(reference.material_context.core_material, "M19_29G_reference_y2")
+        self.assertEqual(reference.design_variable_names, spec.design_variable_names)
+
+    def test_material_context_rejects_unknown_models_names_or_variable_fields(self) -> None:
+        contexts = [
+            {"core_material_model": "unknown_grade"},
+            {"core_material_model": "m19_29g_reference_y2_v1", "core_material": "27PNF1500_CustomCoreLoss"},
+            {"core_material": "M19_29G_reference_y2"},
+            {"core_material_model": "m19_29g_reference_y2_v1", "vary_material": True},
+            {"core_material_model": ["legacy_pnf_hybrid_v1", "m19_29g_reference_y2_v1"]},
+        ]
+        for context in contexts:
+            with self.subTest(context=context), self.assertRaisesRegex(opt.OptimizationSpecError, "material_context"):
+                opt.optimization_spec_from_mapping(dict(valid_spec_mapping(), material_context=context))
+
+    def test_main_project_explicitly_uses_one_distinct_library_reference_grade(self) -> None:
+        raw = json.loads((Path(__file__).parents[1] / "configs/ipmsm_7p5kw.json").read_text(encoding="utf-8"))
+        self.assertEqual(raw["material_context"], {"core_material_model": "m19_29g_reference_y2_v1",
+                                                   "core_material": "M19_29G_reference_y2"})
+        raw["beta_calibration"] = valid_spec_mapping()["beta_calibration"]
+        spec = opt.optimization_spec_from_mapping(raw)
+        self.assertEqual(spec.material_context.core_material_model, "m19_29g_reference_y2_v1")
+        self.assertEqual((spec.winding.series_turns_per_phase, spec.winding.turns_per_coil_side,
+                          spec.winding.parallel_branches), (48, 12, 1))
+
     def test_load_spec_exposes_stable_design_and_control_properties(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "optimization.json"

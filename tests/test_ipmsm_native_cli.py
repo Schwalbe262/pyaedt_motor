@@ -134,7 +134,8 @@ class NativeCLITests(unittest.TestCase):
         commands = {
             "train": ["--data", "input cases.csv", "--spec=motor.json", "--output", "model output"],
             "optimize": ["--bundle", "model/artifact", "--spec=motor.json", "--expected-fingerprints", "expected.json",
-                         "--calibration-manifest=zero.json", "--baseline", "baseline.json", "--output=proposals.json"],
+                         "--calibration-manifest=zero.json", "--selected-profile", "quality/selected.json",
+                         "--baseline", "baseline.json", "--output=proposals.json"],
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "repo"; root.mkdir(); small_repository(root)

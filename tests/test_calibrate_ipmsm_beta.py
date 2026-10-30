@@ -149,6 +149,37 @@ def beta_fixture(
     return manifest, cases, results
 
 
+def reference_context() -> dict:
+    return {
+        "core_material_model": "m19_29g_reference_y2_v1",
+        "core_material": "M19_29G_reference_y2",
+        "series_turns_per_phase": 48, "turns_per_coil_side": 12,
+        "conductor_area_per_branch_mm2": 15.320646925709, "slot_fill_limit": .45,
+    }
+
+
+def reference_zero_manifest() -> dict:
+    rows = [zero_result(600., 30., 50.), zero_result(1200., 30., 100.)]
+    for row in rows:
+        row.update({"input_" + key: value for key, value in reference_context().items()})
+        row["input_material_fingerprint"] = "materials_v2:sha256:" + "b" * 64
+    return calibration.analyze_zero_calibration_rows(rows)
+
+
+def reference_beta_fixture() -> tuple[dict, list[dict], list[dict]]:
+    _, _, results = beta_fixture()
+    manifest = reference_zero_manifest()
+    cases = calibration.generate_beta_sweep_rows(
+        {**source_row(), **reference_context()}, manifest, rpm=1200., current_peak_a=100.,
+        beta_values=(-10., 0., 20., 40.))
+    for case, result in zip(cases, results):
+        result.update(case)
+        result.update({"input_" + key: value for key, value in reference_context().items()})
+        result["input_beta_calibration_id"] = case["beta_calibration_id"]
+        result["input_material_fingerprint"] = manifest["material_fingerprint"]
+    return manifest, cases, results
+
+
 def write_beta_fixture(root: Path, manifest: dict, cases: list[dict], results: list[dict]) -> tuple[Path, Path, Path]:
     plan_path = root / "beta_plan.csv"
     result_path = root / "beta_results.csv"
@@ -179,6 +210,90 @@ class CalibrateIpmsmBetaTests(unittest.TestCase):
         self.assertIn("magnet_space_height_ratio", first)
         self.assertEqual((first["slot_num"], first["pole_num"]), (12, 8))
         self.assertGreater(first["phase_resistance_ohm"], 0.0)
+
+    def test_reference_context_survives_spec_source_zero_and_loaded_plan(self) -> None:
+        from ipmsm_optimization import fixed_case_context_fields, optimization_spec_from_mapping
+        raw = motor_spec_mapping()
+        raw["material_context"] = {key: reference_context()[key] for key in ("core_material_model", "core_material")}
+        # Deliberately nondefault wire: the exact declared product/fill must survive.
+        raw["winding"].update(strand_area_mm2=3.1, strands_per_turn=5, fill_factor=.44)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "reference.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            source = calibration.calibration_source_from_spec(path, geometry_seed=17)
+        ready = {**raw, "beta_calibration": {"electrical_zero_deg": 0., "calibration_id": "pending", "convention": calibration.BETA_CONVENTION}}
+        parsed = optimization_spec_from_mapping(ready)
+        context = fixed_case_context_fields(parsed.material_context, parsed.winding)
+        for key, value in context.items():
+            self.assertEqual(source[key], value)
+        zero_rows = calibration.generate_zero_calibration_rows(source, speeds_rpm=(600., 1200.))
+        for row in zero_rows:
+            applied = run_ipmsm_batch.build_spec(row)
+            self.assertNotIn("expected_material_fingerprint", row)
+            for key, value in context.items():
+                self.assertEqual(row[key], value)
+                self.assertEqual(getattr(applied, key), value)
+        manifest, cases, results = reference_beta_fixture()
+        calibration.validate_beta_case_plan_results(cases, results, manifest)
+        for case in cases:
+            applied = run_ipmsm_batch.build_spec(case)
+            self.assertEqual(case["expected_material_fingerprint"], manifest["material_fingerprint"])
+            for key, value in reference_context().items():
+                self.assertEqual(getattr(applied, key), value)
+
+    def test_reference_source_requires_explicit_complete_material_and_wire(self) -> None:
+        source = {**source_row(), **reference_context()}
+        for key in reference_context():
+            with self.subTest(missing=key):
+                changed = dict(source); changed.pop(key)
+                with self.assertRaises(ValueError):
+                    calibration.generate_zero_calibration_rows(changed, speeds_rpm=(600., 1200.))
+        changed = {**source, "input_slot_fill_limit": .4}
+        with self.assertRaisesRegex(ValueError, "aliases disagree"):
+            calibration.generate_zero_calibration_rows(changed, speeds_rpm=(600., 1200.))
+
+    def test_reference_strict_results_require_actual_input_context_and_same_material(self) -> None:
+        manifest, cases, results = reference_beta_fixture()
+        self.assertEqual(manifest["material_context"]["core_material_model"], "m19_29g_reference_y2_v1")
+        self.assertEqual(manifest["winding_context"]["conductor_area_per_branch_mm2"], 15.320646925709)
+        calibration.validate_beta_case_plan_results(cases, results, manifest)
+        for key in reference_context():
+            with self.subTest(missing_actual=key):
+                changed = copy.deepcopy(results)
+                changed[0].pop("input_" + key)
+                # Raw copied plan context remains; it must not mask missing actual metadata.
+                with self.assertRaises(ValueError):
+                    calibration.validate_beta_case_plan_results(cases, changed, manifest)
+        for key, value in (("core_material_model", "legacy_pnf_hybrid_v1"),
+                           ("conductor_area_per_branch_mm2", 12.), ("slot_fill_limit", .4)):
+            changed = copy.deepcopy(results); changed[0]["input_" + key] = value
+            with self.assertRaises(ValueError):
+                calibration.validate_beta_case_plan_results(cases, changed, manifest)
+        changed = copy.deepcopy(results); changed[0]["input_material_fingerprint"] = "materials_v2:sha256:" + "c" * 64
+        with self.assertRaisesRegex(ValueError, "material"):
+            calibration.validate_beta_case_plan_results(cases, changed, manifest)
+
+    def test_reference_zero_cannot_replay_legacy_or_missing_context(self) -> None:
+        raw = motor_spec_mapping()
+        raw["material_context"] = {key: reference_context()[key] for key in ("core_material_model", "core_material")}
+        with self.assertRaisesRegex(ValueError, "zero manifest"):
+            calibration.apply_zero_manifest_to_spec(raw, zero_manifest())
+        rows = [zero_result(600., 30., 50.), zero_result(1200., 30., 100.)]
+        for row in rows:
+            row.update(reference_context())  # A copied reference plan is not actual solver metadata.
+        with self.assertRaises(ValueError):
+            calibration.analyze_zero_calibration_rows(rows)
+
+    def test_truly_old_legacy_plan_results_and_manifest_remain_compatible(self) -> None:
+        manifest, cases, results = beta_fixture()
+        fields = (*reference_context(), "expected_material_fingerprint")
+        for row in [*cases, *results]:
+            for key in fields:
+                row.pop(key, None); row.pop("input_" + key, None)
+        calibration.validate_beta_case_plan_results(cases, results, manifest)
+        self.assertNotIn("material_context", manifest)
+        source = calibration.generate_zero_calibration_rows(source_row(), speeds_rpm=(600.,))[0]
+        self.assertEqual(source["core_material_model"], "legacy_pnf_hybrid_v1")
 
     def test_apply_zero_manifest_makes_spec_optimization_ready(self) -> None:
         manifest = zero_manifest()

@@ -22,7 +22,12 @@
     "fill_factor_end_turn_factor_and_overhang_require_manufacturing_confirmation": true,
     "rated_torque_derived_from_7500w": true,
     "maximum_motor_diameter_mm": 300.0,
-    "svpwm_voltage_reserve_fraction": 0.05
+    "svpwm_voltage_reserve_fraction": 0.05,
+    "core_steel_is_a_separate_official_library_reference_grade": true
+  },
+  "material_context": {
+    "core_material_model": "m19_29g_reference_y2_v1",
+    "core_material": "M19_29G_reference_y2"
   },
   "operating_points": [
     {

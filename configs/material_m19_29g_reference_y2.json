@@ -1,0 +1,184 @@
+{
+  "backend_evidence": {
+    "aedt_version": "2025.2.0",
+    "modes": {
+      "explicit-reference-y2": {
+        "observed_composition": "Solid",
+        "own_desktop_closed": true,
+        "readback_file": "reference_material_probe_run2/readback_explicit-reference-y2.json",
+        "sha256": "1c6c3f55fbf6fcdc1d080067b8aa2ac53b3164179bef563d7eb325001c159a08",
+        "success": true,
+        "syslib_bytes_unchanged": true
+      },
+      "native-stock": {
+        "observed_composition": "Solid",
+        "own_desktop_closed": true,
+        "readback_file": "reference_material_probe_run2/readback_native-stock.json",
+        "sha256": "0bb87d4d1d35336fb297251c08385a9a982607f90e4239e2e95a409795e4adc2",
+        "success": true,
+        "syslib_bytes_unchanged": true
+      }
+    },
+    "pyaedt_version": "0.22.0",
+    "registered_curve_points": 23,
+    "task_id": 100881
+  },
+  "bh": {
+    "B_unit": "Tesla",
+    "H_unit": "A_per_meter",
+    "direction_note": "Isotropic scalar library curve; no rolling-direction measurements identified.",
+    "kind": "Normal",
+    "points_H_B": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        22.28,
+        0.05
+      ],
+      [
+        25.46,
+        0.1
+      ],
+      [
+        31.83,
+        0.15
+      ],
+      [
+        47.74,
+        0.36
+      ],
+      [
+        63.66,
+        0.54
+      ],
+      [
+        79.57,
+        0.65
+      ],
+      [
+        159.15,
+        0.99
+      ],
+      [
+        318.3,
+        1.2
+      ],
+      [
+        477.46,
+        1.28
+      ],
+      [
+        636.61,
+        1.33
+      ],
+      [
+        795.77,
+        1.36
+      ],
+      [
+        1591.5,
+        1.44
+      ],
+      [
+        3183.0,
+        1.52
+      ],
+      [
+        4774.6,
+        1.58
+      ],
+      [
+        6366.1,
+        1.63
+      ],
+      [
+        7957.7,
+        1.67
+      ],
+      [
+        15915.0,
+        1.8
+      ],
+      [
+        31830.0,
+        1.9
+      ],
+      [
+        111407.0,
+        2.0
+      ],
+      [
+        190984.0,
+        2.1
+      ],
+      [
+        350138.0,
+        2.3
+      ],
+      [
+        509292.0,
+        2.5
+      ]
+    ],
+    "points_sha256": "2e9986022fe668ee48570155f58c82af2b9896bbeab4cf31b6fd06d5a7ac0926",
+    "tail_slope_over_mu0": 1.0000059256562543,
+    "temperature_dependence": false,
+    "temperature_note": "No source temperature specified; no temperature scaling assumed."
+  },
+  "composition": {
+    "status": "Explicit reference choice matching observed task100881 OO Composition; no inferred lamination/stacking factor or sheet thickness.",
+    "type": "Solid"
+  },
+  "core_loss": {
+    "Kc": 0.409,
+    "Kdc": 0.0,
+    "Ke": 0.0,
+    "Kh": 164.2,
+    "Y": 2.0,
+    "declared_reference_fields": {
+      "Kdc": "Explicit0 matches observed backend OO readback.",
+      "Y": "Explicit reference-model exponent2; stock rawY omitted, not a claim of measured data or native default.",
+      "equivalent_cut_depth_m": "Explicit0.001m matches observed backend OO readback; not a measured lamination thickness."
+    },
+    "equivalent_cut_depth_m": 0.001,
+    "fit_basis_note": "Library coefficient fit frequency/temperature ranges and underlying test curves are not specified.",
+    "flux_density_unit": "Tesla",
+    "formula": "Kh*f*B^Y + Kc*(f*B)^2 + Ke*(f*B)^1.5; Kdc=0",
+    "frequency_unit": "Hz",
+    "loss_density_unit": "W_per_m3",
+    "model": "Electrical Steel",
+    "source_literal_fields": [
+      "Kh",
+      "Kc",
+      "Ke"
+    ]
+  },
+  "grade": "M19_29G",
+  "identity_note": "Separate ANSYS-library numerical reference; not equivalent to 27PNF1500 or30PNF1600 and not verified manufacturer measurement data.",
+  "model_id": "m19_29g_reference_y2_v1",
+  "official_api_source": "https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v252/en/Subsystems/Maxwell/Subsystems/Maxwell%20Scripting/Content/AddMaterialMaxwell.htm",
+  "properties": {
+    "conductivity_s_per_m": 1960000.0,
+    "magnetic_coercivity_a_per_m": 0.0,
+    "mass_density_kg_per_m3": 7650.0,
+    "relative_recoil_permeability": 1.0
+  },
+  "schema_version": "ipmsm_core_material_reference_v1",
+  "solver_material_name": "M19_29G_reference_y2",
+  "source": {
+    "curve_status": "Original23 library points including library saturation tail; no points added or interpolated; manufacturer test provenance not established.",
+    "library": "RMxprt.amat",
+    "library_sha256": "910544df5e06be1550857e7e0f575e941458b882a6aeef18bc2840ea1aafcb74",
+    "material_block_canonical_sha256": "c17032e17ad9c39a882d41d2cdf4a2f207f6759d2560ebb2fd19c0573dc3afe0",
+    "material_block_lines": [
+      2271,
+      2391
+    ],
+    "material_block_raw_sha256": "c17032e17ad9c39a882d41d2cdf4a2f207f6759d2560ebb2fd19c0573dc3afe0",
+    "observed_linux_install_path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/syslib/RMxprt.amat",
+    "publisher": "ANSYS installed official system material library",
+    "windows_install_path": "C:/Program Files/ANSYS Inc/v252/AnsysEM/syslib/RMxprt.amat"
+  }
+}

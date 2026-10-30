@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     if command in {"train", "optimize"} and os.name == "nt" and not any(arg in {"-h", "--help"} for arg in args):
         from .runtime import freeze_source, native_runtime_path
         path_flags = ["--data", "--spec", "--output"] if command == "train" else [
-            "--bundle", "--spec", "--expected-fingerprints", "--calibration-manifest", "--baseline", "--output"]
+            "--bundle", "--spec", "--expected-fingerprints", "--calibration-manifest", "--selected-profile", "--baseline", "--output"]
         for flag in path_flags:
             for index in range(1, len(args)):
                 if args[index] == flag and index + 1 < len(args):

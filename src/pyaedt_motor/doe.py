@@ -26,7 +26,7 @@ from scipy.stats import qmc
 
 import ipmsm_optimization as _geometry_helper
 from ipmsm_optimization import (
-    GEOMETRY_VARIABLE_NAMES, OptimizationSpec, current_density_a_per_mm2,
+    GEOMETRY_VARIABLE_NAMES, MaterialContextSpec, OptimizationSpec, WindingSpec, current_density_a_per_mm2,
     geometry_metrics, optimization_spec_from_mapping, phase_resistance_100c_ohm,
 )
 
@@ -35,6 +35,8 @@ PROFILE_SCHEMA = "ipmsm_v3_selected_profile_v1"
 METRIC_CONTRACT = "motor_metrics_v3"
 ACTIVE_GEOMETRY = tuple(name for name in GEOMETRY_VARIABLE_NAMES if name != "stator_shoe_thick")
 MESH_GROUPS = ("magnet", "rotor", "stator", "winding", "band")
+WINDING_CONTEXT_FIELDS = ("series_turns_per_phase", "turns_per_coil_side",
+                          "conductor_area_per_branch_mm2", "slot_fill_limit")
 TRAINING_ATTEMPT_BUDGET = 2400
 DEFAULT_RETRY_RESERVE = 240
 CANONICAL_FLAGS = {"circle_segments": 0, "loss_policy": "laminated_core", "strict_setup": True,
@@ -45,7 +47,7 @@ _SOURCE_PATHS = {_GENERATOR_NAME: Path(__file__).resolve(),
                  _HELPER_NAME: Path(__file__).resolve().parents[2] / _HELPER_NAME}
 _GENERATOR_MODULE = sys.modules[__name__]
 _HELPER_BINDINGS = {name: globals()[name] for name in (
-    "GEOMETRY_VARIABLE_NAMES", "OptimizationSpec", "current_density_a_per_mm2",
+    "GEOMETRY_VARIABLE_NAMES", "MaterialContextSpec", "OptimizationSpec", "WindingSpec", "current_density_a_per_mm2",
     "geometry_metrics", "optimization_spec_from_mapping", "phase_resistance_100c_ohm")}
 
 
@@ -243,7 +245,7 @@ def profile_settings(raw: Mapping[str, Any]) -> dict[str, Any]:
     """Validate explicit numerical settings; never infer numerical convergence."""
     result = dict(raw)
     allowed = {"quality_profile", "transient_periods", "steps_per_period", "mesh_elements",
-               "mesh_maximum_lengths_mm", "core_material", "magnet_material", "shaft_material",
+               "mesh_maximum_lengths_mm", "core_material_model", "core_material", "magnet_material", "shaft_material",
                "winding_material", "air_material", "initial_position_deg", "setup_name",
                "band_circle_segments", *CANONICAL_FLAGS}
     if set(result) - allowed:
@@ -274,7 +276,7 @@ def profile_settings(raw: Mapping[str, Any]) -> dict[str, Any]:
         _integer(result["band_circle_segments"], "band_circle_segments")
     if "initial_position_deg" in result:
         result["initial_position_deg"] = _finite(result["initial_position_deg"], "initial_position_deg")
-    for key in ("core_material", "magnet_material", "shaft_material", "winding_material", "air_material", "setup_name"):
+    for key in ("core_material_model", "core_material", "magnet_material", "shaft_material", "winding_material", "air_material", "setup_name"):
         if key in result and (not isinstance(result[key], str) or not result[key].strip()):
             raise ValueError(f"{key} must be nonblank text")
     return result
@@ -287,6 +289,40 @@ class SelectedProfile:
     producer_fingerprint: str
     manifest_sha256: str
     selection_content_sha256: str
+    material_context: dict[str, str] | None = None
+    material_fingerprint: str | None = None
+    winding_context: dict[str, Any] | None = None
+
+
+def _profile_context(document: Mapping[str, Any]) -> tuple[dict | None, str | None, dict | None]:
+    material, winding = document.get("material_context"), document.get("winding_context")
+    if material is not None:
+        try:
+            if material != asdict(MaterialContextSpec(**material)):
+                raise ValueError("both material identifiers must be explicit")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid selected-profile material context: " + str(exc)) from exc
+        material = dict(material)
+    fingerprint = document.get("material_fingerprint")
+    if fingerprint is not None and not re.fullmatch(r"materials_v2:sha256:[0-9a-f]{64}", str(fingerprint)):
+        raise ValueError("selected profile requires a valid actual material fingerprint")
+    if winding is not None:
+        if not isinstance(winding, dict) or set(winding) != set(WINDING_CONTEXT_FIELDS):
+            raise ValueError("selected-profile winding context requires the four explicit fields")
+        winding = {key: _finite(value, key) for key, value in winding.items()}
+        if any(value <= 0 for value in winding.values()) or any(
+                not winding[key].is_integer() for key in WINDING_CONTEXT_FIELDS[:2]) or winding["slot_fill_limit"] > 1:
+            raise ValueError("invalid selected-profile winding context")
+        for key in WINDING_CONTEXT_FIELDS[:2]: winding[key] = int(winding[key])
+    if material and material["core_material_model"] != "legacy_pnf_hybrid_v1" and (fingerprint is None or winding is None):
+        raise ValueError("reference profile requires actual material fingerprint and winding context")
+    return material, fingerprint, winding
+
+
+def _selection_content(settings, evidence, producer, material, fingerprint, winding) -> str:
+    return _sha(_json_bytes({"settings": settings, "evidence": evidence, "producer": producer,
+                             "material_context": material, "material_fingerprint": fingerprint,
+                             "winding_context": winding}))
 
 
 def load_selected_profile(path: Path) -> SelectedProfile:
@@ -317,8 +353,49 @@ def load_selected_profile(path: Path) -> SelectedProfile:
             raise ValueError(f"profile evidence SHA256 mismatch: {source}")
         verified.append({"path": str(source.resolve()), "sha256": digest})
     normalized = profile_settings(settings)
-    content_sha = _sha(_json_bytes({"settings": normalized, "evidence": verified, "producer": producer}))
-    return SelectedProfile(normalized, tuple(verified), producer, _sha(payload), content_sha)
+    material, fingerprint, winding = _profile_context(document)
+    if material is None:
+        legacy = asdict(MaterialContextSpec())
+        if any(key in normalized and normalized[key] != value for key, value in legacy.items()):
+            raise ValueError("nonlegacy selected profile requires explicit material context")
+    content_sha = _selection_content(normalized, verified, producer, material, fingerprint, winding)
+    return SelectedProfile(normalized, tuple(verified), producer, _sha(payload), content_sha,
+                           material, fingerprint, winding)
+
+
+def _case_context_fields(material: MaterialContextSpec, winding: WindingSpec) -> dict[str, Any]:
+    if (winding.series_turns_per_phase, winding.turns_per_coil_side, winding.parallel_branches) != (48, 12, 1):
+        raise ValueError("production winding requires fixed48series turns/12turns per side/1parallel branch")
+    if winding.fill_factor > .45 or winding.winding_temperature_c != 100:
+        raise ValueError("production winding context requires fill<=0.45 and temperature100C")
+    return {**asdict(material), "conductor_area_per_branch_mm2": winding.conductor_area_per_branch_mm2,
+            "slot_fill_limit": winding.fill_factor, "series_turns_per_phase": winding.series_turns_per_phase,
+            "turns_per_coil_side": winding.turns_per_coil_side}
+
+
+def _require_plan_context(rows: list[dict], manifest: Mapping[str, Any]) -> None:
+    try:
+        material_raw, winding_raw = manifest["material_context"], manifest["winding_spec"]
+        material, winding = MaterialContextSpec(**material_raw), WindingSpec(**winding_raw)
+        if material_raw != asdict(material) or winding_raw != asdict(winding):
+            raise ValueError("context must declare all material/winding values")
+        expected = _case_context_fields(material, winding)
+        if manifest.get("winding_context") != {key: expected[key] for key in WINDING_CONTEXT_FIELDS}:
+            raise ValueError("declared winding context differs from its full specification")
+        fingerprint = manifest["expected_material_fingerprint"]
+        if not isinstance(fingerprint, str) or (fingerprint and not re.fullmatch(r"materials_v2:sha256:[0-9a-f]{64}", fingerprint)):
+            raise ValueError("invalid expected material fingerprint")
+        if material.core_material_model != "legacy_pnf_hybrid_v1" and not fingerprint:
+            raise ValueError("reference context requires a selected-profile material fingerprint")
+        expected["expected_material_fingerprint"] = fingerprint
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("training plan material/winding context is invalid: " + str(exc)) from exc
+    for row in rows:
+        for key, value in expected.items():
+            matches = row.get(key) == value if isinstance(value, str) else math.isclose(
+                _finite(row.get(key), key), value, rel_tol=1e-12, abs_tol=1e-12)
+            if not matches:
+                raise ValueError("training plan mixes or changes material/winding context: " + key)
 
 
 def _production_spec(spec: OptimizationSpec) -> None:
@@ -335,6 +412,7 @@ def _production_spec(spec: OptimizationSpec) -> None:
         raise ValueError("production plan supports the agreed1200/5000rpm operating points")
     if not 0 <= spec.beta_bounds_deg[0] < spec.beta_bounds_deg[1] <= 80:
         raise ValueError("production beta bounds must stay within0..80deg")
+    _case_context_fields(spec.material_context, spec.winding)
 
 
 def generate_training_plan(
@@ -345,7 +423,7 @@ def generate_training_plan(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build three controls/geometry with independent preassigned group partitions."""
     source_pin = _assert_source_pin()
-    from calibrate_ipmsm_beta import validated_zero_manifest
+    from calibrate_ipmsm_beta import validated_zero_manifest, _require_zero_context
     _production_spec(spec)
     geometries = _integer(geometries, "geometries", 5)
     seed = _integer(seed, "seed")
@@ -367,8 +445,8 @@ def generate_training_plan(
         raise ValueError("an explicitly loaded selected profile is required")
     if not re.fullmatch(r"producer_v3:sha256:[0-9a-f]{64}", profile.producer_fingerprint):
         raise ValueError("selected profile requires an explicit producer fingerprint")
-    content_sha = _sha(_json_bytes({"settings": profile.settings, "evidence": profile.evidence,
-                                    "producer": profile.producer_fingerprint}))
+    content_sha = _selection_content(profile.settings, profile.evidence, profile.producer_fingerprint,
+                                    profile.material_context, profile.material_fingerprint, profile.winding_context)
     if content_sha != profile.selection_content_sha256:
         raise ValueError("selected profile settings/evidence changed in memory")
     for record in profile.evidence:
@@ -376,6 +454,24 @@ def generate_training_plan(
             raise ValueError("profile evidence changed after selection")
     initial = _finite(calibration.get("initial_position_deg"), "calibration initial_position_deg")
     settings = profile_settings(profile.settings)
+    context_fields = _case_context_fields(spec.material_context, spec.winding)
+    reference_material = spec.material_context.core_material_model != "legacy_pnf_hybrid_v1"
+    if profile.material_context != asdict(spec.material_context) and (reference_material or profile.material_context is not None):
+        raise ValueError("selected profile and spec material context differ or reference declaration is missing")
+    for key, value in asdict(spec.material_context).items():
+        if key in settings and settings[key] != value:
+            raise ValueError("selected profile and spec material context differ or reference declaration is missing: " + key)
+    if reference_material and (profile.material_fingerprint is None or profile.winding_context is None):
+        raise ValueError("reference profile requires actual material fingerprint and winding context")
+    if profile.winding_context is not None and any(not math.isclose(
+            profile.winding_context[key], context_fields[key], rel_tol=1e-12, abs_tol=1e-12) for key in WINDING_CONTEXT_FIELDS):
+        raise ValueError("selected profile and spec winding context differ")
+    _require_zero_context(context_fields, calibration)
+    calibration_material = calibration.get("material_fingerprint")
+    if (reference_material or (calibration_material is not None and profile.material_fingerprint is not None)) and calibration_material != profile.material_fingerprint:
+        raise ValueError("zero calibration material fingerprint differs from selected profile")
+    if reference_material and calibration.get("producer_fingerprint") != profile.producer_fingerprint:
+        raise ValueError("reference zero calibration producer differs from selected profile")
     if "initial_position_deg" in settings and settings["initial_position_deg"] != initial:
         raise ValueError("profile initial position differs from calibrated geometry frame")
     excluded = set(excluded_hashes)
@@ -430,7 +526,9 @@ def generate_training_plan(
                          "electrical_zero_deg": angle, "beta_calibration_id": calibration_id,
                          "initial_position_deg": initial, "series_turns_per_phase": spec.winding.series_turns_per_phase,
                          "turns_per_coil_side": spec.winding.turns_per_coil_side, "model_extent": "full_360",
-                         "symmetry_factor": 1, "use_periodic_boundary": False, "operation": "sin_current", **profile_case})
+                         "symmetry_factor": 1, "use_periodic_boundary": False, "operation": "sin_current",
+                         **profile_case, **context_fields,
+                         "expected_material_fingerprint": profile.material_fingerprint or ""})
             if current_density_a_per_mm2(current, spec.winding) > spec.constraints.current_density_limit_a_per_mm2 * (1 + 1e-12):
                 raise ValueError("generated current violates the declared RMS conductor current density")
     if len({row["case_id"] for row in rows}) != len(rows):
@@ -440,6 +538,9 @@ def generate_training_plan(
     for key, value in settings.items():
         if key != "quality_profile" and getattr(applied, key, None) != value:
             raise ValueError(f"runner does not apply selected profile setting {key!r}")
+    for key, value in context_fields.items():
+        if getattr(applied, key, None) != value:
+            raise ValueError(f"runner does not apply declared material/winding field {key!r}")
     groups = {label: sorted(row["design_hash"] for row in rows[::3] if row["doe_split"] == label)
               for label in ("train", "calibration", "test")}
     manifest = {"schema_version": PLAN_SCHEMA, "seed": seed, "cases": len(rows), "geometries": geometries,
@@ -460,9 +561,13 @@ def generate_training_plan(
                 "profile_settings": settings, "profile_convergence_certified_by_generator": False,
                 "expected_metric_contract": METRIC_CONTRACT, "expected_producer_fingerprint": profile.producer_fingerprint,
                 "spec_sha256": _sha(_json_bytes(asdict(spec))),
+                "material_context": asdict(spec.material_context),
+                "winding_context": {key: context_fields[key] for key in WINDING_CONTEXT_FIELDS},
+                "winding_spec": asdict(spec.winding), "expected_material_fingerprint": profile.material_fingerprint or "",
                 **source_pin, "generator_sha256": source_pin["source_sha256"][_GENERATOR_NAME],
                 "geometry_helper_sha256": source_pin["source_sha256"][_HELPER_NAME], "numpy_version": np.__version__,
                 "scipy_version": scipy.__version__, "submission_performed": False}
+    _require_plan_context(rows, manifest)
     _assert_source_pin(source_pin)
     return rows, manifest
 
@@ -470,6 +575,7 @@ def generate_training_plan(
 def write_training_plan(path: Path, rows: list[dict], manifest: Mapping[str, Any]) -> dict:
     source_pin = _assert_source_pin()
     _require_manifest_sources(manifest, source_pin)
+    _require_plan_context(rows, manifest)
     path = Path(path)
     proof_path = path.with_suffix(".manifest.json")
     if path.suffix.lower() != ".csv": raise ValueError("plan output must have a .csv suffix")
@@ -510,6 +616,7 @@ def verify_training_plan(path: Path) -> dict:
     rows = list(csv.DictReader(io.StringIO(payload.decode("utf-8-sig"))))
     if len(rows) != proof.get("cases") or len({row["case_id"] for row in rows}) != len(rows):
         raise ValueError("training plan case count/identities differ")
+    _require_plan_context(rows, proof)
     reserve = _integer(proof.get("retry_attempt_reserve"), "retry_attempt_reserve")
     if proof.get("training_attempt_budget") != TRAINING_ATTEMPT_BUDGET or proof.get("nominal_attempts") != len(rows) or len(rows)+reserve > TRAINING_ATTEMPT_BUDGET:
         raise ValueError("training plan attempt budget differs")

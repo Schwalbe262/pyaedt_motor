@@ -258,6 +258,7 @@ REPORT_NAMES = (
     "PPT_Phase_Voltages",
     "PPT_Losses",
     "PPT_Flux_Linkages",
+    "PPT_EnergyError",
 )
 
 TIME_DOMAIN_WINDOWS = ("first", "last", "all")
@@ -280,6 +281,7 @@ TIME_DOMAIN_OUTPUT_METRICS = (
     ("cogging_torque", "nm"),
     ("coreloss", "w"),
     ("solidloss", "w"),
+    ("mesh_energy_error", "raw"),
     ("phasea_current", "a"),
     ("phaseb_current", "a"),
     ("phasec_current", "a"),
@@ -325,6 +327,13 @@ OUTPUT_SUMMARY_COLUMNS = (
     "output_stop_time_s",
     "output_phase_current_source",
     "output_phase_voltage_source",
+    "output_mesh_energy_error_source",
+    "output_mesh_energy_error_unit",
+    "output_mesh_energy_error_error",
+    "output_winding_window_area_min_mm2",
+    "output_winding_slot_fill_max_ratio",
+    "output_winding_geometry_source",
+    "output_winding_geometry_count",
     *(
         f"output_{metric}_{window}_{stat}_{unit}"
         for metric, unit in TIME_DOMAIN_OUTPUT_METRICS
@@ -353,6 +362,8 @@ INPUT_SPEC_COLUMNS = (
     "input_commanded_iq_peak_a",
     "input_series_turns_per_phase",
     "input_turns_per_coil_side",
+    "input_conductor_area_per_branch_mm2",
+    "input_slot_fill_limit",
     "input_stack_length_mm",
     "input_phase_resistance_ohm",
     "input_vdc_v",
@@ -365,6 +376,7 @@ INPUT_SPEC_COLUMNS = (
     "input_transient_stop_time_s",
     "input_transient_time_step_s",
     "input_core_material",
+    "input_core_material_model",
     "input_core_material_fallbacks",
     "input_magnet_material",
     "input_winding_material",
@@ -647,6 +659,8 @@ def setup_fingerprint(
             "electrical_zero_deg": float(spec.electrical_zero_deg),
             "series_turns_per_phase": int(spec.series_turns_per_phase),
             "turns_per_coil_side": int(spec.turns_per_coil_side),
+            "conductor_area_per_branch_mm2": float(getattr(spec, "conductor_area_per_branch_mm2", 15.3206469)),
+            "slot_fill_limit": float(getattr(spec, "slot_fill_limit", 0.45)),
             "transient_periods": int(spec.transient_periods),
             "steps_per_period": int(spec.steps_per_period),
             "mesh_elements": {key: int(value) for key, value in sorted(spec.mesh_elements.items())},
@@ -675,6 +689,7 @@ def material_fingerprint(
         "materials_v2",
         {
             "core_material": spec.core_material,
+            "core_material_model": getattr(spec, "core_material_model", "legacy_pnf_hybrid_v1"),
             "core_material_fallbacks": list(spec.core_material_fallbacks),
             "magnet_material": spec.magnet_material,
             "winding_material": spec.winding_material,
@@ -974,9 +989,16 @@ def build_spec(
     default_electrical_zero_deg: float = 0.0,
 ) -> Any:
     """Build the PPT setup spec from one CSV/default case row."""
-    from module.ipmsm_ppt_setup import IPMSMPPTSpec, validate_ppt_spec_contract
+    from module.ipmsm_ppt_setup import IPMSMPPTSpec, core_material_name_for_model, validate_ppt_spec_contract
 
     defaults = IPMSMPPTSpec()
+    core_model = str(case_value(
+        case, "core_material_model", "input_core_material_model", default=defaults.core_material_model
+    )).strip()
+    model_core_name = core_material_name_for_model(core_model)
+    core_name = str(case_value(
+        case, "core_material", "input_core_material", default=model_core_name
+    )).strip()
     spec = IPMSMPPTSpec(
         pole_number=case_int(case, "pole_number", "pole_num", default=8),
         slot_number=case_int(case, "slot_number", "slot_num", default=12),
@@ -1016,13 +1038,20 @@ def build_spec(
         ),
         series_turns_per_phase=case_int(case, "series_turns_per_phase", default=48),
         turns_per_coil_side=case_int(case, "turns_per_coil_side", default=12),
+        conductor_area_per_branch_mm2=case_float(
+            case, "conductor_area_per_branch_mm2", "input_conductor_area_per_branch_mm2",
+            default=defaults.conductor_area_per_branch_mm2,
+        ),
+        slot_fill_limit=case_float(case, "slot_fill_limit", "input_slot_fill_limit", default=defaults.slot_fill_limit),
         stack_length_mm=case_float(case, "stack_length_mm", default=49.45),
         phase_resistance_ohm=case_float(case, "phase_resistance_ohm", "r_phase", default=0.01),
         vdc_v=case_float(case, "vdc_v", "vdc", default=200.0),
         initial_position_deg=case_float(case, "initial_position_deg", default=-22.5),
         transient_periods=case_int(case, "transient_periods", "periods", default=10),
         steps_per_period=case_int(case, "steps_per_period", default=90),
-        core_material=str(case_value(case, "core_material", default=defaults.core_material)),
+        core_material_model=core_model,
+        core_material=core_name,
+        core_material_fallbacks=defaults.core_material_fallbacks if core_model == "legacy_pnf_hybrid_v1" else (),
         magnet_material=str(case_value(case, "magnet_material", default=defaults.magnet_material)),
         analysis_purpose=str(case_value(case, "analysis_purpose", "input_analysis_purpose", default="training")),
         compute_inductance=case_bool(case, "compute_inductance", "input_compute_inductance", default=True),
@@ -1821,6 +1850,48 @@ def output_physics_issues(
     return []
 
 
+def summarize_energy_error_report(df: Any, period_s: float, stop_s: float) -> dict[str, Any]:
+    """Preserve the solver error indicator and its reported units, without rescaling.
+
+    This diagnostic is not magnetic energy or an efficiency loss. Use complete
+    time-weighted windows so a cycle endpoint is not counted twice in a mean.
+    """
+    column = find_column(list(df.columns), ("energyerror",))
+    if not column:
+        return {"output_mesh_energy_error_source": "missing_signal", "output_mesh_energy_error_unit": ""}
+    time_column = find_column(list(df.columns), ("time",)) or df.columns[0]
+    source_unit = extract_column_unit(column)
+    parsed = [parse_number_with_unit(value) for value in df[column]]
+    cell_units = {unit for _, unit in parsed if unit}
+    if len(cell_units) > 1 or (source_unit and cell_units and cell_units != {source_unit}):
+        raise ValueError("EnergyError has inconsistent raw units")
+    source_unit = source_unit or next(iter(cell_units), "")
+    times = [parse_time_seconds(value, extract_column_unit(time_column)) for value in df[time_column]]
+    values = [number for number, _ in parsed]
+    from module.ipmsm_waveform_quality import cycle_statistics
+
+    result = {"output_mesh_energy_error_source": "measured_solver_indicator_raw",
+              "output_mesh_energy_error_unit": source_unit}
+    for window, start, end in [("first", 0.0, period_s), ("last", stop_s - period_s, stop_s), ("all", 0.0, stop_s)]:
+        for stat, value in cycle_statistics(times, values, start, end).items():
+            result[f"output_mesh_energy_error_{window}_{stat}_raw"] = value
+    if not math.isfinite(result["output_mesh_energy_error_last_avg_raw"]):
+        result["output_mesh_energy_error_source"] = "incomplete_solver_indicator"
+    return result
+
+
+def winding_geometry_summary(audit: Any) -> dict[str, Any]:
+    """Keep compact live-CAD evidence in CSV; retain object details in JSON."""
+    if not isinstance(audit, dict):
+        return {}
+    return {
+        "output_winding_window_area_min_mm2": audit.get("min_window_area_mm2"),
+        "output_winding_slot_fill_max_ratio": audit.get("max_slot_fill_ratio"),
+        "output_winding_geometry_source": audit.get("source", ""),
+        "output_winding_geometry_count": audit.get("count"),
+    }
+
+
 def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, operation: str = "sin_current") -> dict[str, Any]:
     """Summarize first-cycle, last-cycle, and all-cycle transient outputs."""
     frq_hz = float(spec.base_rpm) * float(spec.pole_number) / 120.0
@@ -1830,6 +1901,9 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
         "output_electric_frequency_hz": frq_hz,
         "output_period_s": period_s,
         "output_stop_time_s": stop_s,
+        "output_mesh_energy_error_source": "unavailable",
+        "output_mesh_energy_error_unit": "",
+        "output_mesh_energy_error_error": "",
     }
 
     torque_path = exported_reports.get("artifact_report_PPT_Torque")
@@ -1965,6 +2039,15 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
             result.update(summarize_metric(df, core_column, "output_coreloss", period_s, stop_s, "w"))
         if solid_column:
             result.update(summarize_metric(df, solid_column, "output_solidloss", period_s, stop_s, "w"))
+
+    energy_path = exported_reports.get("artifact_report_PPT_EnergyError")
+    if energy_path and Path(energy_path).is_file():
+        try:
+            result.update(summarize_energy_error_report(read_report_csv(energy_path), period_s, stop_s))
+        except Exception as exc:
+            # Optional solver diagnostics must not discard the physical reports.
+            result["output_mesh_energy_error_source"] = "invalid_solver_indicator"
+            result["output_mesh_energy_error_error"] = f"{type(exc).__name__}: {exc}"
 
     add_derived_motor_metrics(result, spec)
     return result
@@ -2299,8 +2382,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         )
 
         validate_ppt_spec_contract(spec, use_periodic_boundary=use_periodic_boundary)
-        core_loss_coefficients = get_core_loss_coefficients()
-        core_material_properties = get_core_material_properties()
+        core_loss_coefficients = get_core_loss_coefficients(spec.core_material_model)
+        core_material_properties = get_core_material_properties(spec.core_material_model)
         quality_profile = str(
             case_value(case, "quality_profile", "input_quality_profile", default="default")
         ).strip() or "default"
@@ -2334,6 +2417,13 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             core_loss_coefficients=core_loss_coefficients,
             core_material_properties=core_material_properties,
         )
+        expected_material = str(case_value(case, "expected_material_fingerprint", default="")).strip()
+        if expected_material:
+            row["expected_material_fingerprint"] = expected_material
+            row.update(prefixed_row(input_data, "input_"))
+            if expected_material != input_data["material_fingerprint"]:
+                row["error_class"] = "material_context_mismatch"
+                raise ValueError("material fingerprint differs from the selected profile; refusing Desktop launch")
         input_data["aedt_version"] = aedt_version
         input_data["beta_calibration_id"] = case_value(
             case, "beta_calibration_id", "input_beta_calibration_id", default=""
@@ -2508,6 +2598,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 report_uncertain_pooled_solver
             )
         setup_result = configure_ipmsm_from_ppt(design, **configure_kwargs)
+        row.update(winding_geometry_summary(setup_result.get("winding_geometry_audit")))
         for stage, seconds in setup_result.get("timings", {}).items():
             row["timing_" + stage] = round(seconds, 6)
         row["input_metric_contract_version"] = "motor_metrics_v3"
@@ -2606,6 +2697,18 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     except Exception as exc:
         elapsed = time.time() - start
         logging.exception("Case failed: %s", case_id)
+        winding_audit = getattr(exc, "winding_geometry_audit", None)
+        if isinstance(winding_audit, dict):
+            row["error_class"] = "winding_geometry_invalid"
+            row.update(winding_geometry_summary(winding_audit))
+            if project_path is not None:
+                failure_audit = project_path / "winding_geometry_failure.json"
+                try:
+                    with failure_audit.open("x", encoding="utf-8") as stream:
+                        json.dump(winding_audit, stream, ensure_ascii=False, allow_nan=False, indent=2)
+                    row["artifact_winding_geometry_failure"] = str(failure_audit)
+                except Exception:
+                    logging.exception("Could not preserve winding-geometry failure evidence for %s", case_id)
         if project is not None:
             try:
                 project.save()
