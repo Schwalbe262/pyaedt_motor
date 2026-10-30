@@ -93,3 +93,11 @@ Y:에서 짧아지는 파일을 덮어쓴 뒤 이전 파일의 끝부분이 남�
 - `20231012_IPMSM 설계 실습_김성휘.pptx`: 지정한 Z: 원본과 기존 저장소 파일의 SHA-256이 일치합니다.
 - [Ansys: 과도해석 인덕턴스 계산](https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v261/en/Subsystems/Maxwell/Content/Maxwell/InductanceComputationfor2Dand3DTransientSolutions.htm)
 - [MathWorks: MTPA와 약계자 운전](https://www.mathworks.com/help/mcb/gs/field-weakening-control-mtpa-pmsm.html)
+
+
+## 실제 수집 호환성과 첫 수렴 비교 후속
+
+- **문제·시도:** 실제 결과 CSV의 UTF-8 BOM 때문에 새 수집기의 case_id 검사가 실패했습니다. 원본 바이트는 유지하고 파싱에서 BOM을 처리했습니다. 동일 코드가 다른 C 실행본에서 동작할 때의 경로 차이도, 최초 봉인 경로를 보존하고 내용 해시를 비교하도록 수정했습니다.
+- **확인된 효과:** 후속 호환 검사42개가 C 실행본에서 통과했습니다. 실제45개 결과의 재후처리는 오류0, CSV 바이트 동일이며 기존 원본·메트릭 증거는 변경되지 않았습니다. 이전12개 원격 해석도 재실행하지 않고 전부 수집했습니다.
+- **연구 결과:** 첫45개 비교에서4x150/6x150은 각각6점 중4점만 상대 기준을 통과했습니다. G2 저속의 철손 차이는 약33.1%/29.1%이며, G1 고속은12x300 기준 해석의 전력수지 잔차도1.31%입니다. 아직 빠른 프로파일을 승인할 수 없습니다.
+- **다음 시도:** 같은5914 소스의 정밀6건과 선택 메시4건으로 시간·공간 영향을 분리합니다. 새8bb 소스에서는 Band·저장 위치와57mm 적층 후보를 별도로 검증합니다. 길이 비례 추정은 후보 선정 가정이며 최종 FEA나 신뢰구간을 대신하지 않습니다.

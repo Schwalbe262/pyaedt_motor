@@ -363,3 +363,21 @@ def test_resume_uses_the_api_path_that_honors_history_cursor(tmp_path):
     queries = [q for method, endpoint, q in http.calls if endpoint == "/api/tasks" and method == "GET"]
     assert all(q["compact"] is True for q in queries)
     assert any("before_id" in q for q in queries)
+
+
+def test_actual_utf8_bom_result_is_preserved_and_collected_once(tmp_path):
+    controller, http = make_controller(tmp_path, count=1)
+    controller.tick(execute=True)
+    case = controller.plan.rows[0]["case_id"]
+    http.tasks[1].update(status="completed", exit_code=0)
+    http.results[1] = "\ufeff" + row_csv(case)
+    summary = controller.tick(execute=True)
+    assert summary["collected_results"] == 1 and summary["row_failures"] == 0
+    key = controller._identity(controller.plan.rows[0])[0]
+    result = controller.root / "collected" / key / "result.csv"
+    assert result.read_bytes() == http.results[1].encode("utf-8")
+    assert len(http.posts) == 1
+    result.unlink()
+    with pytest.raises(ValueError, match="immutable result changed"):
+        controller.tick(execute=True)
+    assert len(http.posts) == 1

@@ -4,11 +4,13 @@ import io
 import json
 import math
 from pathlib import Path
+import types
 
 import pytest
 
 from pyaedt_motor.postprocess import REMOTE_COMMIT, REMOTE_CWD, REMOTE_SUBDIR, enrich_wave, safe_artifact_path, waveform_metrics
 from pyaedt_motor.cluster import Config, Controller
+from pyaedt_motor import postprocess
 
 
 def sha(payload):
@@ -93,6 +95,92 @@ def test_get_enrichment_preserves_originals_and_reuses_verified_waveform(tmp_pat
     evidence = json.loads(Path(first["records"][0]["metrics_path"]).read_bytes())
     assert evidence["validation"]["complete_uniform_last_cycle"]
     assert len(evidence["processor_source_sha256"]) == 64 and len(evidence["metric_source_sha256"]) == 64
+
+
+def frozen_processor(root):
+    """Load byte-identical producer/metric files from distinct native freezes."""
+    processor = root / "src/pyaedt_motor/postprocess.py"
+    metric = root / "module/ipmsm_waveform_quality.py"
+    processor.parent.mkdir(parents=True)
+    metric.parent.mkdir(parents=True)
+    processor.write_bytes(Path(postprocess.__file__).read_bytes())
+    metric.write_bytes(Path(postprocess.__file__).parents[2].joinpath("module/ipmsm_waveform_quality.py").read_bytes())
+    module = types.ModuleType("pyaedt_motor._frozen_postprocess")
+    module.__file__, module.__package__ = str(processor), "pyaedt_motor"
+    exec(compile(processor.read_bytes(), str(processor), "exec"), module.__dict__)
+    return module, processor, metric
+
+
+def test_identical_code_at_new_freeze_path_reuses_sealed_provenance_without_changing_csv(tmp_path):
+    first_module, first_processor, first_metric = frozen_processor(tmp_path / "freeze_a")
+    second_module, second_processor, second_metric = frozen_processor(tmp_path / "freeze_b")
+    wave = tmp_path / "wave"
+    _, _, fake, _ = make_wave(wave)
+    first = first_module.enrich_wave(wave, fake)
+    assert first["postprocess_errors"] == 0
+    evidence_path = Path(first["records"][0]["metrics_path"])
+    before = {path: path.read_bytes() for path in wave.rglob("*") if path.is_file() and
+              path.name not in {"combined_results_with_voltage_span.csv", "combined_results_with_voltage_span.manifest.json"}}
+    output = (wave / "combined_results_with_voltage_span.csv").read_bytes()
+    assert sha(first_processor.read_bytes()) == sha(second_processor.read_bytes())
+    assert sha(first_metric.read_bytes()) == sha(second_metric.read_bytes())
+    second = second_module.enrich_wave(wave, fake)
+    assert second["postprocess_errors"] == 0
+    assert second["enriched_rows"] == 1
+    assert second["records"][0]["metrics_reused"] is True
+    assert json.loads(evidence_path.read_bytes())["metric_source_path"] == str(first_metric)
+    assert second["execution_source_paths"] == {"processor": str(second_processor), "metric": str(second_metric)}
+    assert (wave / "combined_results_with_voltage_span.csv").read_bytes() == output
+    assert all(path.read_bytes() == payload for path, payload in before.items())
+    assert len([call for call in fake.calls if call[0].endswith("/remote-file")]) == 1
+
+
+def test_changed_cached_source_is_rejected_after_relocation(tmp_path):
+    first_module, _, _ = frozen_processor(tmp_path / "freeze_a")
+    second_module, _, _ = frozen_processor(tmp_path / "freeze_b")
+    wave = tmp_path / "wave"
+    _, _, fake, _ = make_wave(wave)
+    report = first_module.enrich_wave(wave, fake)
+    source = wave / "voltage_postprocess_sources" / (report["metric_source_sha256"] + ".py")
+    source.write_bytes(source.read_bytes() + b"\n# actual source tamper\n")
+    tampered = source.read_bytes()
+    with pytest.raises(ValueError, match="immutable postprocess evidence changed"):
+        second_module.enrich_wave(wave, fake)
+    assert source.read_bytes() == tampered
+
+
+@pytest.mark.parametrize("field", ["waveform_sha256", "processor_source_sha256", "metric_source_sha256", "metrics"])
+def test_changed_cached_content_is_not_hidden_by_source_path_reuse(tmp_path, field):
+    first_module, _, _ = frozen_processor(tmp_path / "freeze_a")
+    second_module, _, _ = frozen_processor(tmp_path / "freeze_b")
+    wave = tmp_path / "wave"
+    _, _, fake, _ = make_wave(wave)
+    first = first_module.enrich_wave(wave, fake)
+    path = Path(first["records"][0]["metrics_path"])
+    evidence = json.loads(path.read_bytes())
+    evidence[field] = {} if field == "metrics" else "0" * 64
+    path.write_bytes(first_module._json(evidence))
+    tampered = path.read_bytes()
+    second = second_module.enrich_wave(wave, fake)
+    assert second["postprocess_errors"] == 1
+    assert "immutable postprocess evidence changed" in second["records"][0]["error"]
+    assert path.read_bytes() == tampered
+
+
+def test_live_metric_source_change_remains_rejected_after_freeze_relocation(tmp_path):
+    module, _, metric = frozen_processor(tmp_path / "freeze")
+    wave = tmp_path / "wave"
+    _, _, fake, _ = make_wave(wave)
+    original = fake.get
+    def changing_get(endpoint, **query):
+        result = original(endpoint, **query)
+        if endpoint.endswith("/remote-file"):
+            metric.write_bytes(metric.read_bytes() + b"\n# changed while processing\n")
+        return result
+    fake.get = changing_get
+    with pytest.raises(ValueError, match="source changed during execution"):
+        module.enrich_wave(wave, fake)
+    assert not (wave / "combined_results_with_voltage_span.csv").exists()
 
 
 def test_path_traversal_foreign_checkout_case_and_url_paths_rejected():

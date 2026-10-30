@@ -6,6 +6,8 @@
 
 참고자료는 [references](references/README.md), 이전 탐색 노트북은 [notebooks/legacy](notebooks/legacy/README.md), 정리한 실행본과 검증 백업의 위치는 [보관 대응표](docs/ARCHIVE_INDEX.md)에 있습니다. 노트북의 코드·설명은 보존했고 실행 출력은 D: 원본 백업에서 확인할 수 있습니다.
 
+과거 최종설계의 분석·그림 도구는 [legacy/final_design_2026_07](legacy/final_design_2026_07/README.md)에 모았습니다. 원래 경로와 파일 해시, 복원 방법도 함께 보관합니다.
+
 ## 작업 위치
 
 | 위치 | 용도 |

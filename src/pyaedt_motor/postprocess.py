@@ -335,6 +335,16 @@ def enrich_wave(wave: Path, transport=None, *, scheduler_url="http://127.0.0.1:8
                             processor_source_sha256=processor_sha, metric_source_sha256=metric_sha,
                             metric_source_path=str(metric_path), metrics=metrics, validation=validation)
             evidence_path = folder / ("voltage_metrics_" + processor_sha[:12] + "_" + metric_sha[:12] + ".json")
+            record["metrics_reused"] = evidence_path.exists()
+            if record["metrics_reused"]:
+                retained = json.loads(evidence_path.read_bytes())
+                sealed_path = retained.get("metric_source_path") if isinstance(retained, dict) else None
+                if not isinstance(sealed_path, str) or not sealed_path.strip():
+                    raise ValueError("immutable postprocess evidence has no sealed metric source path")
+                # A source location is first-publication provenance. Identical
+                # code bytes can execute from another checkout/freeze; retain
+                # that location while comparing every code/data/metric field.
+                evidence["metric_source_path"] = sealed_path
             _immutable(evidence_path, _json(evidence))
             # Never reinterpret an existing success/failure or alter old metrics.
             for key, value in metrics.items():
@@ -375,7 +385,9 @@ def enrich_wave(wave: Path, transport=None, *, scheduler_url="http://127.0.0.1:8
     output_path = wave / "combined_results_with_voltage_span.csv"
     report = {"schema_version": SCHEMA, "remote_commit": remote_commit, "controller_campaign_id": campaign_id,
               "original_inputs_sha256": source_inputs, "processor_source_sha256": processor_sha,
-              "metric_source_sha256": metric_sha, "output_csv": str(output_path), "output_sha256": _sha(output),
+              "metric_source_sha256": metric_sha,
+              "execution_source_paths": {"processor": str(Path(__file__)), "metric": str(metric_path)},
+              "output_csv": str(output_path), "output_sha256": _sha(output),
               "planned_cases": len(receipts), "submitted_cases": len(tasks), "original_result_rows": len(enriched_rows),
               "enriched_rows": sum(record["status"] == "ok" for record in records),
               "missing_original_results": sum(record["status"] == "missing_original_result" for record in records),

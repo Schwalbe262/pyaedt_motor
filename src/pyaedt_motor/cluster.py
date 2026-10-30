@@ -496,7 +496,7 @@ class Controller:
         _write(folder / "task.json", _json(task))
         if entry.get("collection_complete"):
             result_path = folder / "result.csv"
-            if result_path.exists() and _sha(result_path.read_bytes()) != entry.get("result_sha256"):
+            if not result_path.is_file() or _sha(result_path.read_bytes()) != entry.get("result_sha256"):
                 raise ValueError("collected immutable result changed: " + case)
             return
         try:
@@ -507,7 +507,7 @@ class Controller:
                 raise ValueError("remote result changed after collection: " + case)
             _write(result, payload)
             entry["result_sha256"] = _sha(payload)
-            rows = list(csv.DictReader(io.StringIO(text)))
+            rows = list(csv.DictReader(io.StringIO(text.removeprefix("\ufeff"))))
             if len(rows) != 1 or rows[0].get("case_id") != case:
                 raise ValueError("terminal result identity/row count differs: " + case)
             row = rows[0]

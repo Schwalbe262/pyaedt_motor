@@ -26,3 +26,12 @@ Y:의 과거 수집·모델·PPT 추출·md 폴더는 각각 D:의 `y0`~`y4`로 
 남은 Git 작업트리 3개는 `D:\IPMSM_Archive\wb0`에 일반 파일 994개와 Git 관리파일 23개를 백업했습니다. 모든 ref bundle도 별도 복원·fsck를 통과했습니다. C: native 작업트리는 `w0`으로 이동·repair·일반 파일 해시 검증을 마쳤고, Y:의 두 작업트리도 `w1`, `w2`로 이동·repair·전체 일반 파일 해시 검증을 완료했습니다. `.git` 경로 정규화의 전후 기록도 보존합니다. 브랜치·main 통합은 별도 단계이며 현재 이 백업을 완료 근거로 사용합니다.
 
 현재 상세 이동·검증 상태는 C: 실행 폴더의 `retired_y_move_plan.json`, `retired_y_verified.json`, `leftover_worktree_backup_index.json`에서 확인합니다. 완료된 이전 연구 버전은 Git tag와 bundle로 복원할 수 있도록 정리합니다.
+
+
+## main과 과거 브랜치
+
+검증한 연구 코드를 main에 통합하고, 과거 브랜치 6개는 원래 HEAD를 가리키는 원격 annotated tag를 확인한 뒤 정리했습니다. 태그는 `archive/20261030/chore/...`, `archive/20261030/release/...`, `archive/20261030/fix/...`이며 이전 main은 `archive/20261030/main-before-rebuild`입니다. 현재 local·origin 작업 브랜치는 main과 research/ipmsm-rebuild-20261030입니다. D의 3개 작업트리는 원래 HEAD에서 detached 상태로 보관했습니다. 상세 전후 ref는 C 실행 폴더의 `git_consolidation_result.json`을 참고합니다.
+
+과거 untracked 분석·그림 도구 5개와 테스트 2개는 `legacy/final_design_2026_07`에 모았습니다. `source_map.csv`와 README에 원래 경로·SHA·복원 방법이 있습니다. `.gitattributes`도 해당 보관 파일의 원래 바이트를 유지하도록 설정했습니다. 원래 수정돼 있던 adaptive 소스·테스트 2개는 작업 파일에서 변경하지 않았습니다.
+
+원격 source 프로젝트4는 기존5914cb3 수렴 실험을 위해 유지합니다. 새 source 프로젝트5 `PYAEDT_MOTOR_REBUILD_V3B_8BB5216`은8bb5216에 고정했고4계정 배포를 확인했습니다. 프로젝트5의 max_active_tasks=0은 source 관리 전용이라는 뜻입니다. 실제 해석은 기존 runtime/license 프로젝트2와 승인된 cap300을 사용합니다.

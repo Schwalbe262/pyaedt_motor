@@ -10,3 +10,6 @@
 /confirm_ipmsm_v2_model_families.py text eol=lf
 /diagnose_ipmsm_v2_model_families.py text eol=lf
 /train_ipmsm_lightgbm.py text eol=lf
+
+# Historical untracked scripts retain exact bytes, including Markdown string spacing.
+legacy/final_design_2026_07/** -text -whitespace
