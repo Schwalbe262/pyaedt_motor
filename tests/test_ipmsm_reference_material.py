@@ -120,10 +120,13 @@ def test_pack_integrity_and_semantic_identity_are_portable(tmp_path):
 def test_native_void_success_is_verified_without_cached_setters(existing, operation):
     database = NativeMaterials(existing=existing)
     motor = motor_fixture(database)
-    with mock.patch.object(setup, "_material_exists", return_value=True):
+    with mock.patch.object(setup, "_material_exists", return_value=True), \
+         mock.patch.object(setup, "_hydrate_reference_material_cache", return_value={"pyaedt_material_cache_verified": True}) as bridge:
         result = setup.ensure_ppt_materials(motor, reference_spec())
     assert database.calls == [operation]
     assert result["native_readback_verified"] is True
+    assert result["native_definition_unchanged_by_cache_bridge"] is True
+    bridge.assert_called_once_with(motor, setup.M19_REFERENCE_CORE_MATERIAL_NAME)
     assert setup.critical_setup_issues({"material_definitions": result}) == []
     motor.materials.add_material.assert_not_called()
 

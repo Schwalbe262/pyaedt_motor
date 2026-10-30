@@ -10,7 +10,7 @@ requires-python = ">=3.11,<3.14"
 dependencies = ["numpy", "pandas", "scipy", "scikit-learn", "lightgbm"]
 
 [project.optional-dependencies]
-fea = ["pyaedt>=0.22,<1"]
+fea = ["pyaedt==0.22.0"]
 optimization = ["pymoo==0.6.2"]
 
 [project.scripts]

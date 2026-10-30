@@ -24,6 +24,8 @@
 
 Python 3.11의 `pyaedt2026v1` 환경에서 다음을 실행합니다.
 
+FEA 연동은 현재 검토·시험한 PyAEDT 0.22.0과 Ansys v252를 기준으로 고정합니다. 버전을 바꿀 때는 실제 모터 설정 시험을 다시 수행합니다.
+
 ```powershell
 python -m pip install --no-deps --no-build-isolation -e .
 python -m pyaedt_motor --help

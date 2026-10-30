@@ -869,6 +869,38 @@ def _verify_reference_material_readback(props: dict[str, Any], pack: dict[str, A
         raise ValueError("reference recoil permeability mismatch")
 
 
+def _hydrate_reference_material_cache(m2d: Any, material: str) -> dict[str, Any]:
+    """Bind the already verified native definition to PyAEDT's read-only wrapper.
+
+    PyAEDT0.22's targeted loader constructs Material(material_update=False)
+    from native GetData. Refresh both in-memory name lists before any lookup:
+    a material_keys hit with a stale names list otherwise calls Material.update.
+    The caller verifies native GetData/Composition unchanged after this bridge.
+    """
+    materials = m2d.materials
+    names = list(materials.mat_names_aedt)  # Preserve lazy-loaded system/user names.
+    cached = materials._aedmattolibrary(material)
+    if cached is None or cached is False or getattr(cached, "name", None) != material:
+        raise RuntimeError("reference material cache hydration failed")
+    cached._material_update = False
+    if materials.material_keys.get(material.casefold()) is not cached:
+        raise RuntimeError("reference wrapper is absent from the PyAEDT material cache")
+    if material.casefold() not in {name.casefold() for name in names}:
+        names.append(material)
+    materials._mats = names
+    materials._mats_lower = [name.casefold() for name in names]
+    if (materials.exists_material(material) is not cached
+            or materials.exists_material(material.casefold()) is not cached
+            or materials[material] is not cached or materials[material.casefold()] is not cached):
+        raise RuntimeError("reference exact/lowercase PyAEDT lookups disagree")
+    if cached.is_conductor() is not True:
+        raise RuntimeError("reference PyAEDT wrapper cannot classify the verified conductor")
+    if cached._material_update is not False:
+        raise RuntimeError("reference PyAEDT wrapper must remain read-only")
+    return {"pyaedt_material_cache_verified": True, "pyaedt_conductor_verified": True,
+            "pyaedt_material_update_policy": "read_only"}
+
+
 def _ensure_reference_core_material(m2d: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
     """Write a private project material, then verify independent live native data."""
     if spec.core_material != core_material_name_for_model(spec.core_material_model):
@@ -894,12 +926,19 @@ def _ensure_reference_core_material(m2d: Any, spec: IPMSMPPTSpec) -> dict[str, A
     obj = m2d.oproject.GetChildObject("Materials").GetChildObject(spec.core_material)
     if "Composition" not in list(obj.GetPropNames()) or str(obj.GetPropValue("Composition")) != "Solid":
         raise ValueError("live reference material Composition is not Solid")
+    bridge = _hydrate_reference_material_cache(m2d, spec.core_material)
+    after_raw = manager.GetManager("Material").GetData(spec.core_material)
+    after_props = _native_material_properties(after_raw, spec.core_material)
+    _verify_reference_material_readback(after_props, pack)
+    if after_props != props or str(obj.GetPropValue("Composition")) != "Solid":
+        raise RuntimeError("reference native material changed during PyAEDT cache hydration")
     return {spec.core_material: operation, "core_material_model": spec.core_material_model,
             "material_pack_sha256": M19_REFERENCE_PACK_SHA256,
             "bh_curve_sha256": pack["bh"]["points_sha256"], "bh_curve_points": 23,
             "native_readback_verified": True, "composition_live": "Solid",
             # Keep raw provenance opaque to the generic operation-failure scanner.
-            "native_GetData_json": json.dumps(list(raw)),
+            "native_GetData_json": json.dumps(list(after_raw)),
+            "native_definition_unchanged_by_cache_bridge": True, **bridge,
             "reference_note": pack["identity_note"]}
 
 
@@ -1199,7 +1238,15 @@ def _assign_reference_core_material(m2d: Any, objects: list[str], material: str)
     # object happened to have the requested name before this operation.
     if applied is False:
         raise RuntimeError("native reference core assignment returned False")
-    return [name for name in objects if live_material_name(m2d, name).casefold() == material.casefold()]
+    assigned = []
+    for name in objects:
+        if live_material_name(m2d, name).casefold() == material.casefold():
+            # Downstream conductor classification uses Object3d.material_name.
+            # Synchronize only its Python cache after independent live proof;
+            # never invoke the setter or change SolveInside.
+            m2d.modeler.get_object_from_name(name)._material_name = material
+            assigned.append(name)
+    return assigned
 
 
 def assign_ppt_materials(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPPTSpec) -> dict[str, Any]:
