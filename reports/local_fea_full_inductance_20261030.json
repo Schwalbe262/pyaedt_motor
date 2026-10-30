@@ -1,0 +1,19 @@
+{
+  "case_id": "rb3a_local_fea_0003",
+  "result_csv": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\native_cli_runs\\run_20261030_175320_104979\\results.csv",
+  "status": "ok",
+  "validation_passed": true,
+  "metrics": {
+    "elapsed_s": "531.629",
+    "output_torque_last_avg_nm": "32.66062338977896",
+    "output_coreloss_last_avg_w": "47.84335581629552",
+    "output_solidloss_last_avg_w": "7.510537195068847",
+    "output_steady_state_passed": "True",
+    "output_power_balance_residual_last_pct": "0.021882182581960737",
+    "input_producer_fingerprint": "producer_v3:sha256:c43ed8311ceea9bf1c32eac6613cbcf3cb1be2a853497077683d4c566200fd45"
+  },
+  "limits": [
+    "Single geometry: no mesh/time convergence claim.",
+    "Electrical zero requires recalibration using physical flux-derived EMF."
+  ]
+}

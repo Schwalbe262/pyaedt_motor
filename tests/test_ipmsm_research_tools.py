@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from pyaedt_motor.archive import archive_tree, verify_archive
+from pyaedt_motor.archive import archive_tree, verify_archive, verify_source_matches_archive
 from pyaedt_motor.runtime import freeze_source
 from pyaedt_motor.io import atomic_write_bytes
 
@@ -50,6 +50,22 @@ class ResearchToolsTests(unittest.TestCase):
             with self.assertRaises(ValueError): archive_tree(source, source / "backup")
             destination = Path(tmp) / "archive"; destination.mkdir()
             with self.assertRaises(FileExistsError): archive_tree(source, destination)
+
+    def test_cleanup_verification_catches_new_files_and_later_edits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source"; source.mkdir()
+            (source / "case.csv").write_text("original", encoding="utf-8")
+            destination = Path(tmp) / "archive"
+            archive_tree(source, destination)
+            self.assertEqual(verify_source_matches_archive(source, destination)["files"], 1)
+            extra = source / "new_evidence.txt"
+            extra.write_text("new", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "file set changed"):
+                verify_source_matches_archive(source, destination)
+            extra.unlink()
+            (source / "case.csv").write_text("modified", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "source changed"):
+                verify_source_matches_archive(source, destination)
 
     def test_manifest_cannot_escape_archive(self):
         with tempfile.TemporaryDirectory() as tmp:

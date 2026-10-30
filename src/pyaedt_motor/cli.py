@@ -15,8 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    parser = argparse.ArgumentParser(description="IPMSM research: audit, plan, simulate, train, optimize, validate, archive")
-    parser.add_argument("command", choices=["audit", "plan", "simulate", "train", "optimize", "validate", "archive"])
+    parser = argparse.ArgumentParser(description="IPMSM research: audit, plan, simulate, train, benchmark, optimize, validate, archive")
+    parser.add_argument("command", choices=["audit", "plan", "simulate", "train", "benchmark", "optimize", "validate", "archive"])
     if not args or args[0] in {"-h", "--help"}:
         parser.print_help()
         return 0
@@ -25,8 +25,8 @@ def main(argv: list[str] | None = None) -> int:
     if not (root / "run_ipmsm_batch.py").is_file():
         raise RuntimeError(f"Cannot locate repository source: {root}")
     sys.path.insert(0, str(root))
-    if command in {"audit", "plan", "archive"}:
-        module = importlib.import_module("pyaedt_motor." + {"plan": "experiments", "archive": "archive", "audit": "audit"}[command])
+    if command in {"audit", "plan", "archive", "benchmark"}:
+        module = importlib.import_module("pyaedt_motor." + {"plan": "experiments", "archive": "archive", "audit": "audit", "benchmark": "benchmark"}[command])
         return int(module.main(args[1:]) or 0)
     if command == "simulate" and os.name == "nt" and not any(arg in {"-h", "--help"} for arg in args):
         from .runtime import freeze_source

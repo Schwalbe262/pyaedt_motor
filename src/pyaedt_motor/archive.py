@@ -91,6 +91,24 @@ def verify_archive(destination: Path) -> dict:
     return {"files": count, "bytes": size}
 
 
+def verify_source_matches_archive(source: Path, destination: Path) -> dict:
+    """Refuse cleanup if a source changed or acquired files after its backup."""
+    result = verify_archive(destination)
+    source = source.resolve()
+    recorded_source = Path((destination / "source_path.txt").read_text(encoding="utf-8")).resolve()
+    if source != recorded_source:
+        raise ValueError("source does not match archive identity")
+    with (destination / "archive_manifest.csv").open(newline="", encoding="utf-8") as stream:
+        records = {row["relative_path"]: row for row in csv.DictReader(stream)}
+    actual = {path.relative_to(source).as_posix(): path for path in files_in_tree(source)}
+    if set(actual) != set(records):
+        raise RuntimeError("source file set changed since archive")
+    for name, path in actual.items():
+        if path.stat().st_size != int(records[name]["bytes"]) or sha256(path) != records[name]["sha256"]:
+            raise RuntimeError(f"source changed since archive: {name}")
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path)

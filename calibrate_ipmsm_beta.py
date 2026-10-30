@@ -564,7 +564,20 @@ def analyze_zero_calibration_rows(
         "input_aedt_version": set(),
     }
     initial_positions_deg: list[float] = []
+    metric_versions = {str(row.get("input_metric_contract_version") or "").strip() for row in successful}
+    if len(metric_versions) != 1:
+        raise ValueError("zero calibration mixes metric contracts")
+    if metric_versions != {""}:
+        homogeneous["input_metric_contract_version"] = set()
+        homogeneous["input_producer_fingerprint"] = set()
     for row in successful:
+        if metric_versions != {""}:
+            if row.get("input_metric_contract_version") != "motor_metrics_v3":
+                raise ValueError("zero calibration requires supported physical EMF contract")
+            if row.get("output_back_emf_source") != "periodic_flux_derivative":
+                raise ValueError("zero calibration requires physical flux-derived back EMF")
+            if not truthy(row.get("output_steady_state_passed")) or not truthy(row.get("validation")):
+                raise ValueError("zero calibration requires validated steady-state results")
         if str(row.get("input_dataset_schema_version") or "").strip() != DATASET_SCHEMA_VERSION:
             raise ValueError(
                 f"zero calibration requires input_dataset_schema_version={DATASET_SCHEMA_VERSION!r}"
@@ -656,6 +669,10 @@ def analyze_zero_calibration_rows(
         "max_circular_deviation_deg": max_deviation,
         "observations": observations,
     }
+    if metric_versions != {""}:
+        payload["metric_contract"] = first["input_metric_contract_version"]
+        payload["producer_fingerprint"] = first["input_producer_fingerprint"]
+        payload["back_emf_source"] = first["output_back_emf_source"]
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     payload["calibration_id"] = f"beta-calibration:sha256:{hashlib.sha256(encoded).hexdigest()}"
     return payload

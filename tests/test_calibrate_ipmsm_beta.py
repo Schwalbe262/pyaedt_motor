@@ -234,6 +234,24 @@ class CalibrateIpmsmBetaTests(unittest.TestCase):
         self.assertEqual({row["symmetry_factor"] for row in rows}, {1})
         self.assertEqual({row["model_extent"] for row in rows}, {"full_360"})
 
+    def test_physical_zero_rejects_backward_difference_unsettled_or_mixed_producer(self) -> None:
+        rows = [zero_result(1200.0, -90.0), zero_result(5000.0, -90.1)]
+        for row in rows:
+            row.update(input_metric_contract_version="motor_metrics_v3",
+                       input_producer_fingerprint="producer_v3:sha256:" + "a" * 64,
+                       output_back_emf_source="periodic_flux_derivative",
+                       output_steady_state_passed=True, validation=True)
+        manifest = calibration.analyze_zero_calibration_rows(rows)
+        self.assertEqual(manifest["back_emf_source"], "periodic_flux_derivative")
+        calibration.validated_zero_manifest(manifest)
+        for key, bad in [("output_back_emf_source", "reported_backward_difference"),
+                         ("output_steady_state_passed", False),
+                         ("input_producer_fingerprint", "producer_v3:sha256:" + "b" * 64)]:
+            corrupted = [dict(row) for row in rows]
+            corrupted[0][key] = bad
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                calibration.analyze_zero_calibration_rows(corrupted)
+
     def test_zero_analysis_uses_signed_back_emf_phase_and_circular_mean(self) -> None:
         manifest = calibration.analyze_zero_calibration_rows(
             [zero_result(600.0, 29.5), zero_result(1200.0, 30.5)],

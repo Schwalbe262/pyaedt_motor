@@ -1,0 +1,70 @@
+{
+  "scope": "historical_diagnostic_only",
+  "metrics": {
+    "output_torque_last_avg_nm": {
+      "r2": 0.8613810769198427,
+      "mae": 3.6083350474283042,
+      "finite": true
+    },
+    "output_torque_last_max_nm": {
+      "r2": 0.8273005722886239,
+      "mae": 4.618940863093822,
+      "finite": true
+    },
+    "output_coreloss_last_avg_w": {
+      "r2": 0.9526234345898187,
+      "mae": 22.64358326424006,
+      "finite": true
+    },
+    "output_solidloss_last_avg_w": {
+      "r2": 0.7130037410130061,
+      "mae": 17.0273061373759,
+      "finite": true
+    },
+    "output_ld_last_avg_h": {
+      "r2": 0.8541566653817203,
+      "mae": 8.191547211043365e-05,
+      "finite": true
+    },
+    "output_lq_last_avg_h": {
+      "r2": 0.8908599330474175,
+      "mae": 8.899257323537694e-05,
+      "finite": true
+    },
+    "output_phase_voltage_last_peak_abs_v": {
+      "r2": 0.9654190185914924,
+      "mae": 11.65894742967957,
+      "finite": true
+    },
+    "output_total_loss_last_avg_w": {
+      "r2": 0.9643994285812142,
+      "mae": 32.40968535800567,
+      "finite": true
+    },
+    "output_efficiency_last_pct": {
+      "r2": 0.7861570480379599,
+      "mae": 1.5472978979074725,
+      "finite": true
+    }
+  },
+  "r2_threshold": 0.95,
+  "all_targets_pass": false,
+  "design_promotion_allowed": false,
+  "promotion_note": "Requires conformal calibration, input-domain checks and independent final FEA.",
+  "fingerprints": {
+    "input_dataset_schema_version": "ipmsm_v2",
+    "input_setup_fingerprint": "setup_v2:sha256:82badcd7712d9f4ddfce6e7b46b081e941a6995480f094c8cb9c2001d0847a84",
+    "input_quality_profile": "reference_ultra",
+    "input_material_fingerprint": "materials_v2:sha256:07f6b3fce02dfb83cd79130c472725e185097796949ba34847192bcd848c04ee",
+    "input_aedt_version": "2025.2",
+    "input_beta_calibration_id": "beta-calibration:sha256:33af20eb4faff7e97342fe3aacadcaf2b64021589645e0d04c8f05f8f83fdce7",
+    "input_beta_convention": "dq_current_advance_v2",
+    "input_model_extent": "full_360"
+  },
+  "rows": 1600,
+  "split_rows": {
+    "train": 970,
+    "calibration": 306,
+    "test": 324
+  }
+}
