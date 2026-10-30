@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import math
 import json
 from pathlib import Path
@@ -163,6 +164,10 @@ def reference_zero_manifest() -> dict:
     for row in rows:
         row.update({"input_" + key: value for key, value in reference_context().items()})
         row["input_material_fingerprint"] = "materials_v2:sha256:" + "b" * 64
+        row.update(input_metric_contract_version="motor_metrics_v3",
+                   input_producer_fingerprint="producer_v3:sha256:" + "a" * 64,
+                   output_back_emf_source="periodic_flux_derivative",
+                   output_steady_state_passed=True, validation=True)
     return calibration.analyze_zero_calibration_rows(rows)
 
 
@@ -177,6 +182,8 @@ def reference_beta_fixture() -> tuple[dict, list[dict], list[dict]]:
         result.update({"input_" + key: value for key, value in reference_context().items()})
         result["input_beta_calibration_id"] = case["beta_calibration_id"]
         result["input_material_fingerprint"] = manifest["material_fingerprint"]
+        result["input_metric_contract_version"] = manifest["metric_contract"]
+        result["input_producer_fingerprint"] = manifest["producer_fingerprint"]
     return manifest, cases, results
 
 
@@ -272,6 +279,33 @@ class CalibrateIpmsmBetaTests(unittest.TestCase):
         changed = copy.deepcopy(results); changed[0]["input_material_fingerprint"] = "materials_v2:sha256:" + "c" * 64
         with self.assertRaisesRegex(ValueError, "material"):
             calibration.validate_beta_case_plan_results(cases, changed, manifest)
+
+    def test_reference_strict_beta_requires_actual_v3_metric_and_zero_producer(self) -> None:
+        manifest, cases, results = reference_beta_fixture()
+        calibration.validate_beta_case_plan_results(cases, results, manifest)
+        for field, value in (("input_producer_fingerprint", None),
+                             ("input_producer_fingerprint", "producer_v3:sha256:" + "c" * 64),
+                             ("input_metric_contract_version", None),
+                             ("input_metric_contract_version", "motor_metrics_v2")):
+            for affected in ([0], list(range(len(results)))):
+                changed = copy.deepcopy(results)
+                for index in affected:
+                    if value is None:
+                        changed[index].pop(field)
+                    else:
+                        changed[index][field] = value
+                with self.subTest(field=field, value=value, affected=affected), self.assertRaisesRegex(ValueError, "producer|metric"):
+                    calibration.validate_beta_case_plan_results(cases, changed, manifest)
+        for field in ("producer_fingerprint", "metric_contract"):
+            changed = dict(manifest); changed.pop(field); changed.pop("calibration_id")
+            encoded = json.dumps(changed, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+            changed["calibration_id"] = "beta-calibration:sha256:" + hashlib.sha256(encoded).hexdigest()
+            altered_cases, altered_results = copy.deepcopy(cases), copy.deepcopy(results)
+            for case, result in zip(altered_cases, altered_results):
+                case["beta_calibration_id"] = changed["calibration_id"]
+                result["beta_calibration_id"] = result["input_beta_calibration_id"] = changed["calibration_id"]
+            with self.subTest(missing_zero=field), self.assertRaisesRegex(ValueError, "producer|metric"):
+                calibration.validate_beta_case_plan_results(altered_cases, altered_results, changed)
 
     def test_reference_zero_cannot_replay_legacy_or_missing_context(self) -> None:
         raw = motor_spec_mapping()

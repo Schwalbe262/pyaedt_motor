@@ -471,6 +471,17 @@ def validate_beta_case_plan_results(
         expected_context = _case_fixed_context(plan_row)
         actual_context = _actual_fixed_context(result_row, expected_context)
         _require_zero_context(expected_context, calibration_manifest)
+        if expected_context["core_material_model"] != "legacy_pnf_hybrid_v1":
+            actual_metric = _required_text_alias(
+                result_row, ("input_metric_contract_version",), "reference beta actual metric contract")
+            if actual_metric != "motor_metrics_v3" or calibration_manifest.get("metric_contract") != actual_metric:
+                raise ValueError("reference beta metric contract differs from physical zero calibration")
+            zero_producer = _required_text_alias(
+                calibration_manifest, ("producer_fingerprint",), "reference zero producer fingerprint")
+            actual_producer = _required_text_alias(
+                result_row, ("input_producer_fingerprint",), "reference beta actual producer fingerprint")
+            if actual_producer != zero_producer:
+                raise ValueError("reference beta producer differs from physical zero calibration")
         for key, expected in expected_context.items():
             if actual_context.get(key) != expected:
                 raise ValueError(f"strict beta material/winding context mismatch for {case_id}: {key}")

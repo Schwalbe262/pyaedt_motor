@@ -380,6 +380,17 @@ class PhysicalOptimizerTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         optimization.build_fea_validation_rows(bound, [proposal], path)
 
+    def test_validation_profile_cannot_silently_ignore_a_runner_setting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bound, path, document = validation_profile(Path(tmp))
+            proposal = optimization.evaluate_design(bound, baseline())
+            # This field is absent from setup_fingerprint and build_spec does
+            # not apply it. A matching setup hash alone cannot prove replay.
+            document["settings"]["winding_material"] = "aluminum"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "setting 'winding_material'"):
+                optimization.build_fea_validation_rows(bound, [proposal], path)
+
     def test_full_geometry_doe_and_explicit_local_mode_respect_budgets(self):
         bound = adapter()
         full = optimization.generate_design_plan(bound, baseline(), count=4, seed=9)

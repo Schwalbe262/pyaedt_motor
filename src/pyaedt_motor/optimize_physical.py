@@ -514,6 +514,9 @@ def build_fea_validation_rows(adapter: PhysicalBundleAdapter, proposals: Sequenc
                 "expected_setup_fingerprint": adapter.fingerprints["input_setup_fingerprint"],
             }
             applied = build_spec(row)
+            for key, value in settings.items():
+                if key != "quality_profile" and getattr(applied, key, None) != value:
+                    raise ValueError(f"runner does not replay selected profile setting {key!r}")
             if any(getattr(applied, key, None) != value for key, value in fields.items()):
                 raise ValueError("runner does not replay validation material/winding context")
             if setup_fingerprint(applied, row["quality_profile"], "sin_current", False) != adapter.fingerprints["input_setup_fingerprint"]:
