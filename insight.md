@@ -1050,3 +1050,10 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: inclusive arithmetic means counted first/last periodicendpointtwice, weighteduneven sampling incorrectly, andadmittedsinglepoint finitecyclevalues. After: defaultcompletecycle mean/RMS usecycle_statistics, incomplete/nonfinite requiredLd/Lq remainNaN; sample diagnostics requireexplicitFalse.
 - Evidence:65scopedtests include analyticuniform/nonuniform/off-grid/strictmissing cases;actual6correctedLd/Lq shiftmax.0606287511%,197originalfilesunchanged;W=m19_inductance_cycle_fix_20261031 validation_brief/actual_effect rawhashes inpart14note.
 - Remaining risk: smallstatisticalbiasdoesnotexplainlargecoreloss/powerfailures orprovebetterR2. Apparentdqdiagonalsdo notreplaceincremental/crosscoupledcontrollerparameters; frozen430produceroutputs remainunaltered.
+
+## 2026-10-31 07:48 KST | Native validation return types across PyAEDT/gRPC
+- Source loop: part16-17, actual0FEA100909 and V4FEAs100910/100911.
+- Improvement: retain raw return type/value and accept only exactboolTrue or int1 together with native validation log and error-message proof. Do not infer runtime API types solely from an int1/0 docstring or coerce truthy values.
+- Before: experimental exactint guard rejected native builtins.boolTrue and stopped both100907/100908 beforeAnalyze.
+- After/evidence:100909 reproducesboolTrue twice with nativeerrors0; V4typedguard22tests+wrapper11+bootstrap1 pass; actual100910/100911 both passvalidation and enterAnalyze, lowcompletes0 while highcore-nonperiodicity stillfails. Rawproofs0d171950.../8069d978...; source128/library23 unchanged.
+- Remaining risk: native validation acceptance is not physical accuracy or mesh convergence. Quarterpairfailscorelosscomparison522a6ef9..., so zero/loaded3/training remainheld.
