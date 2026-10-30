@@ -1625,32 +1625,55 @@ def find_inductance_matrix_column(columns: list[str], source: str, target: str) 
     return None
 
 
-def summarize_inductance_matrix(df: Any, spec: Any, period_s: float, stop_s: float) -> dict[str, float]:
-    """Summarize abc inductance entries and approximate D/Q inductance traces."""
+def summarize_inductance_matrix(
+    df: Any,
+    spec: Any,
+    period_s: float,
+    stop_s: float,
+    *,
+    integrate_cycles: bool = True,
+) -> dict[str, float]:
+    """Integrate complete abc/apparent D/Q traces; opt out only for sample diagnostics."""
+    from module.ipmsm_waveform_quality import cycle_statistics
+
     result: dict[str, float] = {}
     columns = list(df.columns)
-    matrix_columns: dict[str, str] = {}
+    time_column = find_column(columns, ("time",)) or df.columns[0]
+    time_unit = extract_column_unit(time_column)
+    times = [parse_time_seconds(value, time_unit) for value in df[time_column]]
+    finite_times = all(math.isfinite(value) for value in times)
+
+    def summarize(values: list[float], prefix: str, suffix: str) -> None:
+        if not integrate_cycles:
+            result.update(summarize_sampled_values(times, values, prefix, period_s, stop_s, suffix))
+            return
+        for window, start, end in [
+            ("first", 0.0, period_s),
+            ("last", stop_s - period_s, stop_s),
+            ("all", 0.0, stop_s),
+        ]:
+            stats = (cycle_statistics(times, values, start, end) if finite_times
+                     else {stat: math.nan for stat in TIME_DOMAIN_STATS})
+            for stat, value in stats.items():
+                result[f"{prefix}_{window}_{stat}_{suffix}"] = value
+
+    matrix_values: dict[str, list[float]] = {}
     for key, source, target in INDUCTANCE_MATRIX_ENTRIES:
         column = find_inductance_matrix_column(columns, source, target)
         if not column:
             continue
-        matrix_columns[key] = column
-        result.update(summarize_metric(df, column, f"output_inductance_{key}", period_s, stop_s, "h"))
+        unit = extract_column_unit(column)
+        matrix_values[key] = [parse_report_value(value, unit, "h") for value in df[column]]
+        summarize(matrix_values[key], f"output_inductance_{key}", "h")
 
-    if len(matrix_columns) != len(INDUCTANCE_MATRIX_ENTRIES):
+    if len(matrix_values) != len(INDUCTANCE_MATRIX_ENTRIES):
         return result
 
-    time_column = find_column(columns, ("time",)) or df.columns[0]
-    time_unit = extract_column_unit(time_column)
     ld_values: list[float] = []
     lq_values: list[float] = []
     saliency_values: list[float] = []
-    for index in range(len(df)):
-        time_s = parse_time_seconds(df[time_column].iloc[index], time_unit)
-        values: dict[str, float] = {}
-        for key, column in matrix_columns.items():
-            unit = extract_column_unit(column)
-            values[key] = parse_report_value(df[column].iloc[index], unit, "h")
+    for index, time_s in enumerate(times):
+        values = {key: samples[index] for key, samples in matrix_values.items()}
         if not math.isfinite(time_s) or not all(math.isfinite(value) for value in values.values()):
             ld_values.append(math.nan)
             lq_values.append(math.nan)
@@ -1680,13 +1703,9 @@ def summarize_inductance_matrix(df: Any, spec: Any, period_s: float, stop_s: flo
         lq_values.append(lq)
         saliency_values.append(safe_divide(lq, ld))
 
-    derived = df[[time_column]].copy()
-    derived["Ld [H]"] = ld_values
-    derived["Lq [H]"] = lq_values
-    derived["SaliencyRatio"] = saliency_values
-    result.update(summarize_metric(derived, "Ld [H]", "output_ld", period_s, stop_s, "h"))
-    result.update(summarize_metric(derived, "Lq [H]", "output_lq", period_s, stop_s, "h"))
-    result.update(summarize_metric(derived, "SaliencyRatio", "output_saliency_ratio", period_s, stop_s, "ratio"))
+    summarize(ld_values, "output_ld", "h")
+    summarize(lq_values, "output_lq", "h")
+    summarize(saliency_values, "output_saliency_ratio", "ratio")
     return result
 
 

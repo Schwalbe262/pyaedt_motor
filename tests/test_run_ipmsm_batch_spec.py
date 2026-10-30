@@ -67,6 +67,7 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
             types.SimpleNamespace(base_rpm=60.0, pole_number=4, electrical_zero_deg=0.0),
             period_s=1.0,
             stop_s=1.0,
+            integrate_cycles=False,
         )
         self.assertAlmostEqual(summary["output_ld_last_avg_h"], 0.003, places=12)
         self.assertAlmostEqual(summary["output_lq_last_avg_h"], 0.003, places=12)
@@ -403,7 +404,7 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
                 data[f"L({source},{target}) [H]"] = [labc[i][j]]
 
         summary = run_ipmsm_batch.summarize_inductance_matrix(
-            pd.DataFrame(data), spec, period_s=0.25, stop_s=0.25
+            pd.DataFrame(data), spec, period_s=0.25, stop_s=0.25, integrate_cycles=False
         )
 
         self.assertAlmostEqual(summary["output_ld_last_avg_h"], ld_h, places=12)

@@ -1044,3 +1044,9 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Source loop/improvement: part12; parse saved native .profile plus ACF before inferring parallel solver usage from scheduler CPUs or --cores. Keep absent observations unknown and retain raw hashes.
 - Before/after: requested4cores/ACF4 did not prove4-core execution; new read-only audit exposes observed matrix core counts and requested-versus-observed mismatch. Evidence:5native profiles5405matrix records all1/HPCDisabled,17isolatedC tests including missing/truncated evidence and input preservation; R/solver_profile_audit_20261031_0516 and convergence18/native_resource_summary.json.
 - Remaining risk: matrix-record counts do not measure CPU usage of every FEM stage and do not prove a speedup. TDM uses a distinct solver configuration and needs controlled accuracy/runtime/licensing validation; no shared registry changes made.
+
+## 2026-10-31T06:01:11+09:00 | part14: integrate complete inductance cycles without duplicated endpoints
+- Source loop/improvement: actualM19matrixaudit6 +part14; apply the same endpoint-interpolated time integral to abc/apparentdq inductance as to other physical cycle metrics.
+- Before: inclusive arithmetic means counted first/last periodicendpointtwice, weighteduneven sampling incorrectly, andadmittedsinglepoint finitecyclevalues. After: defaultcompletecycle mean/RMS usecycle_statistics, incomplete/nonfinite requiredLd/Lq remainNaN; sample diagnostics requireexplicitFalse.
+- Evidence:65scopedtests include analyticuniform/nonuniform/off-grid/strictmissing cases;actual6correctedLd/Lq shiftmax.0606287511%,197originalfilesunchanged;W=m19_inductance_cycle_fix_20261031 validation_brief/actual_effect rawhashes inpart14note.
+- Remaining risk: smallstatisticalbiasdoesnotexplainlargecoreloss/powerfailures orprovebetterR2. Apparentdqdiagonalsdo notreplaceincremental/crosscoupledcontrollerparameters; frozen430produceroutputs remainunaltered.
