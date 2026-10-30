@@ -21,13 +21,13 @@
 
 ## 2026-10-30 추가 정리
 
-Y:의 과거 수집·모델·PPT 추출·md 폴더는 각각 D:의 `y0`~`y4`로 이동했고, 이동 뒤 742파일(61,925,369 bytes)의 해시를 검증했습니다. 검증 백업은 순서대로 `yc0`, `ym0`, `yp0`, `yp1`, `yd0`입니다. 시뮬레이션 113,363파일(8,235,561,988 bytes)은 `D:\IPMSM_Archive\s0`에 전체 해시 검증을 마쳤으며, 원본을 짧은 보관 경로 `y5`로 이동 중입니다. 이동·재검증 완료 전에는 원래 폴더를 건드리지 않습니다.
+Y:의 과거 수집·모델·PPT 추출·md 폴더는 각각 D:의 `y0`~`y4`로 이동했고, 이동 뒤 742파일(61,925,369 bytes)의 해시를 검증했습니다. 검증 백업은 순서대로 `yc0`, `ym0`, `yp0`, `yp1`, `yd0`입니다. 시뮬레이션 113,363파일(8,235,561,988 bytes)은 `D:\IPMSM_Archive\s0`에 전체 해시 검증된 독립 백업이 있습니다. 원본은 D:의 `y5` 73,052파일과 프로젝트 `legacy/simulation`의 40,311파일로 나누어 보관합니다. 아래 이동 증명과 `legacy/LOCAL_DATA.md`를 참고합니다.
 
 남은 Git 작업트리 3개는 `D:\IPMSM_Archive\wb0`에 일반 파일 994개와 Git 관리파일 23개를 백업했습니다. 모든 ref bundle도 별도 복원·fsck를 통과했습니다. C: native 작업트리는 `w0`으로 이동·repair·일반 파일 해시 검증을 마쳤고, Y:의 두 작업트리도 `w1`, `w2`로 이동·repair·전체 일반 파일 해시 검증을 완료했습니다. `.git` 경로 정규화의 전후 기록도 보존합니다. 브랜치·main 통합은 별도 단계이며 현재 이 백업을 완료 근거로 사용합니다.
 
 현재 상세 이동·검증 상태는 C: 실행 폴더의 `retired_y_move_plan.json`, `retired_y_verified.json`, `leftover_worktree_backup_index.json`에서 확인합니다. 완료된 이전 연구 버전은 Git tag와 bundle로 복원할 수 있도록 정리합니다.
 
-2026-10-31 확인 시점에 기존 simulation 원본 이동은 일부만 완료됐습니다. `D:\IPMSM_Archive\y5`의 73,052파일과 Y:에 남은 40,311파일을 합쳐 전체 백업과 SHA가 일치함을 확인했습니다. Y:에 약 3.01 GB가 남아 있으며, 중복 삭제나 무조건 덮어쓰기는 하지 않습니다. 기존 smoke 원본 7,350파일(19,385,885,523 bytes)은 `D:\IPMSM_Archive\sm1`으로 이동하고 전체 SHA를 재검증했습니다. 독립 백업은 `sm0`에 있으며 Y:의 기존 smoke 폴더는 정리됐습니다.
+2026-10-31 기존 simulation 원본의 분할 보관을 확인했습니다. `D:\IPMSM_Archive\y5`의 73,052파일과 Y:의 40,311파일 합집합이 전체 백업과 SHA 일치했습니다. Y: 잔여 폴더는 같은 볼륨에서 `simulation` → `legacy/simulation`으로 이동했습니다. 이동 후 40,311파일(3,009,541,478 bytes)을 전부 새로 해시하여 누락·추가·크기·SHA 불일치·읽기 오류 0건을 확인했습니다. 프로젝트 루트의 이전 `simulation` 경로는 없어졌으며, D:의 백업과 분할 원본은 유지합니다. 증명은 C: 실행 폴더의 `simulation_directory_relocation_20261031/post_move_verification_summary.json`입니다. 기존 smoke 원본 7,350파일(19,385,885,523 bytes)은 `D:\IPMSM_Archive\sm1`으로 이동하고 전체 SHA를 재검증했습니다. 독립 백업은 `sm0`에 있으며 Y:의 기존 smoke 폴더는 정리됐습니다.
 
 
 ## main과 과거 브랜치
@@ -38,4 +38,4 @@ Y:의 과거 수집·모델·PPT 추출·md 폴더는 각각 D:의 `y0`~`y4`로 
 
 이전 replay 분석·계획 도구 4개와 일반 테스트 4개는 `legacy/replay_analysis`에 모았습니다. 원본 8파일(55,649 bytes)은 `D:\IPMSM_Archive\ra0`에 먼저 백업·검증했고, 이동 후 SHA도 대조했습니다. CRLF·코드·테스트 기준을 그대로 보존하며, 보관 폴더 README에 별도 19개 테스트 실행 명령을 남겼습니다. 과거 권위 계약에 묶인 다른 루트 소스·테스트는 유지했습니다.
 
-원격 source 프로젝트4는 기존5914cb3 수렴 실험을 위해 유지합니다. 새 source 프로젝트5 `PYAEDT_MOTOR_REBUILD_V3B_8BB5216`은8bb5216에 고정했고4계정 배포를 확인했습니다. 프로젝트5의 max_active_tasks=0은 source 관리 전용이라는 뜻입니다. 실제 해석은 기존 runtime/license 프로젝트2와 승인된 cap300을 사용합니다.
+원격 source 프로젝트4는 기존5914cb3 수렴 실험을 위해 유지합니다. 이전 source 프로젝트5 `PYAEDT_MOTOR_REBUILD_V3B_8BB5216`은8bb5216에 고정하여 보존합니다. 현재 M19 기준 해석은 위 source8의 고정4300668을 사용합니다. 프로젝트5의 max_active_tasks=0은 source 관리 전용이라는 뜻입니다. 실제 해석은 기존 runtime/license 프로젝트2와 승인된 cap300을 사용합니다.
