@@ -12,7 +12,7 @@
 
 - 시뮬레이션 코드 개선.
 - 시뮬레이션 정확도 향상.
-- 2026-10-31 우선순위: 저장모델 재개방에서 B-H 입력범위 초과와 큰 공간해석 오차지표를 확인했다. 일관된 고자속 재료자료·메시 검증·실제 CAD 권선 fill 보정을 먼저 수행한다. 준비한 추가 설계6건과2160건 학습은 미제출 상태이며, 수렴·재료 검증 전 결과를 최종 설계/학습 인증으로 승격하지 않는다.
+- 2026-10-31 우선순위: 실제 CAD 권선창 면적식·충전율 경계와 DOE 보조코드 버전 고정을 수정했다. 사용자가 원본 PNF 실습자료를 보유하지 않음을 확인했으므로 공식 라이브러리의 일관된 강판으로 별도 기준 모델을 구성·검증한다(기존 PNF와 구분). 재료·공간해석 검증 전 추가 설계6건/2160건 학습·최종 설계 승격은 보류한다.
 - 시뮬레이션 시간이 크게 증가하는 개선은 피한다.
 - 새 연구는 `python -m pyaedt_motor`와 `pyaedt_motor.cluster`의 `/api/tasks` 경로를 사용한다. `controller.py` 및 v4 자동화는 과거 실행 재현용으로 보존하며, 고정 소스·승인 계약은 완화하지 않는다.
 - Approved 2026-10-30: IPMSM queued/running FEA cap is 300; new campaign budget is 3000 attempts including failures/retries (diagnostics300, training2400, design validation300). Each batch requires setup/smoke evidence and a non-overlapping plan.

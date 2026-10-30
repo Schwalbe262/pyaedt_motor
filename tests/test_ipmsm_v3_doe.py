@@ -6,7 +6,11 @@ import csv
 from dataclasses import replace
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -52,6 +56,24 @@ class V3DoeTests(unittest.TestCase):
 
     def plan(self, **kwargs):
         return doe.generate_training_plan(self.spec, self.calibration, self.profile, geometries=10, seed=123, **kwargs)
+
+    def isolated_sources(self):
+        root = self.root / "runtime"
+        package = root / "src" / "pyaedt_motor"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        shutil.copyfile(doe.__file__, package / "doe.py")
+        shutil.copyfile(doe._geometry_helper.__file__, root / "ipmsm_optimization.py")
+        return root
+
+    def run_isolated(self, root, script):
+        entry = root / "check.py"
+        entry.write_text(script, encoding="utf-8")
+        env = dict(os.environ, PYTHONPATH=str(root / "src"), PYTHONDONTWRITEBYTECODE="1")
+        result = subprocess.run([sys.executable, str(entry)], cwd=root, env=env,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, (result.stdout + result.stderr)[-3000:])
+        return result.stdout
 
     def test_sampling_prefix_is_repeatable_and_can_be_used_before_zero_calibration(self):
         first = doe.sample_feasible_geometries(self.spec, 1, 71)
@@ -197,6 +219,11 @@ class V3DoeTests(unittest.TestCase):
         target = self.root / "cases.csv"
         proof = doe.write_training_plan(target, rows, manifest)
         self.assertEqual(doe.verify_training_plan(target), proof)
+        self.assertEqual(proof["schema_version"], "ipmsm_v3_training_plan_v2")
+        self.assertEqual(proof["generator_sha256"], hashlib.sha256(Path(doe.__file__).read_bytes()).hexdigest())
+        helper = Path(doe._geometry_helper.__file__)
+        self.assertEqual(proof["geometry_helper_sha256"], hashlib.sha256(helper.read_bytes()).hexdigest())
+        self.assertEqual(proof["source_import_origins"]["ipmsm_optimization.py"], str(helper.resolve()))
         original = target.read_bytes()
         with self.assertRaises(FileExistsError): doe.write_training_plan(target, rows, manifest)
         self.assertEqual(target.read_bytes(), original)
@@ -209,6 +236,152 @@ class V3DoeTests(unittest.TestCase):
         target.with_suffix(".manifest.json").write_text(json.dumps(proof), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "leaks across partitions"):
             doe.verify_training_plan(target)
+
+    def test_identical_sources_verify_from_another_native_checkout(self):
+        rows, manifest = self.plan()
+        target = self.root / "cases.csv"
+        doe.write_training_plan(target, rows, manifest)
+        root = self.isolated_sources()
+        self.run_isolated(root, f"""
+from pathlib import Path
+from pyaedt_motor import doe
+proof = doe.verify_training_plan(Path({str(target)!r}))
+assert proof['source_import_origins'] != doe._assert_source_pin()['source_import_origins']
+assert proof['source_sha256'] == doe._assert_source_pin()['source_sha256']
+""")
+
+    def test_helper_only_change_rejects_an_existing_plan_in_a_fresh_process(self):
+        rows, manifest = self.plan()
+        target = self.root / "cases.csv"
+        doe.write_training_plan(target, rows, manifest)
+        root = self.isolated_sources()
+        generator = root / "src" / "pyaedt_motor" / "doe.py"
+        self.assertEqual(generator.read_bytes(), Path(doe.__file__).read_bytes())
+        helper = root / "ipmsm_optimization.py"
+        helper.write_bytes(helper.read_bytes() + b"\n# changed geometry-helper revision\n")
+        self.run_isolated(root, f"""
+from pathlib import Path
+from pyaedt_motor import doe
+try:
+    doe.verify_training_plan(Path({str(target)!r}))
+except ValueError as exc:
+    assert 'generator/helper source SHA256' in str(exc), str(exc)
+else:
+    raise AssertionError('old plan accepted a different helper')
+""")
+
+    def test_source_drift_in_a_running_process_blocks_all_planning_entrypoints(self):
+        root = self.isolated_sources()
+        self.run_isolated(root, """
+from pathlib import Path
+from pyaedt_motor import doe
+helper = Path('ipmsm_optimization.py')
+helper.write_bytes(helper.read_bytes() + b'\\n# edited after import\\n')
+for operation in [lambda: doe.sample_feasible_geometries(None,1,1),
+                  lambda: doe.generate_training_plan(None,None,None),
+                  lambda: doe.write_training_plan(Path('blocked.csv'),[],{}),
+                  lambda: doe.verify_training_plan(Path('absent.csv'))]:
+    try:
+        operation()
+    except RuntimeError as exc:
+        assert 'changed after import' in str(exc), str(exc)
+    else:
+        raise AssertionError('stale process accepted planning work')
+assert not Path('blocked.csv').exists()
+""")
+
+    def test_helper_cached_before_doe_import_must_match_imported_source_pin(self):
+        root = self.isolated_sources()
+        self.run_isolated(root, """
+from pathlib import Path
+import ipmsm_optimization
+helper = Path('ipmsm_optimization.py')
+helper.write_bytes(helper.read_bytes() + b'\\ndef geometry_metrics(*args, **kwargs):\\n    raise ValueError("new helper")\\n')
+try:
+    from pyaedt_motor import doe
+except RuntimeError as exc:
+    assert 'geometry helper source changed after import' in str(exc), str(exc)
+else:
+    raise AssertionError('cached old helper was bound to new source bytes')
+""")
+
+    def test_cached_helper_constant_or_dataclass_default_changes_are_rejected(self):
+        root = self.isolated_sources()
+        self.run_isolated(root, """
+from pathlib import Path
+import sys
+helper = Path('ipmsm_optimization.py')
+original = helper.read_bytes()
+changes = [(b'BETA_CONVENTION = "dq_current_advance_v2"', b'BETA_CONVENTION = "changed_convention"'),
+           (b'copper_temp_coefficient_per_c: float = 0.00393', b'copper_temp_coefficient_per_c: float = 0.004')]
+for old,new in changes:
+    assert old in original
+    helper.write_bytes(original)
+    sys.modules.pop('ipmsm_optimization',None)
+    import ipmsm_optimization
+    helper.write_bytes(original.replace(old,new))
+    try:
+        from pyaedt_motor import doe
+    except RuntimeError as exc:
+        assert 'geometry helper source changed after import' in str(exc), str(exc)
+    else:
+        raise AssertionError('cached constant/default accepted a new source hash')
+""")
+
+    def test_same_helper_bytes_imported_from_wrong_project_are_rejected(self):
+        root = self.isolated_sources()
+        foreign = root / "foreign"
+        foreign.mkdir()
+        shutil.copyfile(root / "ipmsm_optimization.py", foreign / "ipmsm_optimization.py")
+        self.run_isolated(root, """
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path('foreign').resolve()))
+import ipmsm_optimization
+sys.path.pop(0)
+try:
+    from pyaedt_motor import doe
+except RuntimeError as exc:
+    assert 'import origin differs from project source' in str(exc), str(exc)
+else:
+    raise AssertionError('foreign helper import was accepted')
+""")
+
+    def test_source_change_during_sampling_cannot_return_rows(self):
+        root = self.isolated_sources()
+        (root / "spec.json").write_text(json.dumps(apply_zero_manifest_to_spec(self.raw, self.calibration)), encoding="utf-8")
+        self.run_isolated(root, """
+import json
+from pathlib import Path
+from pyaedt_motor import doe
+spec = doe.optimization_spec_from_mapping(json.loads(Path('spec.json').read_text()))
+original = doe.qmc.LatinHypercube.random
+def change_source(self,*args,**kwargs):
+    result = original(self,*args,**kwargs)
+    helper = Path('ipmsm_optimization.py')
+    helper.write_bytes(helper.read_bytes() + b'\\n# source changed while sampling\\n')
+    return result
+doe.qmc.LatinHypercube.random = change_source
+try:
+    doe.sample_feasible_geometries(spec,2,71)
+except RuntimeError as exc:
+    assert 'changed after import' in str(exc), str(exc)
+else:
+    raise AssertionError('rows escaped after source changed')
+""")
+
+    def test_incomplete_or_old_source_manifest_cannot_be_published(self):
+        rows, manifest = self.plan()
+        for index, missing in enumerate(["geometry_helper_sha256", "source_sha256", "source_import_origins"]):
+            altered = dict(manifest)
+            altered.pop(missing)
+            target = self.root / f"missing{index}.csv"
+            with self.subTest(missing=missing), self.assertRaises(ValueError):
+                doe.write_training_plan(target, rows, altered)
+            self.assertFalse(target.exists())
+        old = dict(manifest, schema_version="ipmsm_v3_training_plan_v1")
+        with self.assertRaisesRegex(ValueError, "source SHA256/schema"):
+            doe.write_training_plan(self.root / "old.csv", rows, old)
 
     def test_cli_records_input_provenance_without_claiming_convergence_or_submission(self):
         config = self.root / "spec.json"

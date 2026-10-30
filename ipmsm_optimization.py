@@ -9,6 +9,7 @@ fields documented by :class:`PredictionEnvelope`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -656,6 +657,40 @@ class GeometryMetrics:
     slot_fill_ratio: float
 
 
+def coil_window_area_mm2(
+    tooth_tip_radius_mm: float,
+    slot_outer_radius_mm: float,
+    tooth_width_mm: float,
+    *,
+    slot_number: int = 12,
+) -> float:
+    """Area of one coil-side sheet built by ``module.ipmsm_geometry``.
+
+    The slot is a straight-sided quadrilateral, bisected at its angular
+    midplane. Rotation preserves area; its two halves are equal trapezoids.
+    This is a CAD window area, before copper/insulation packing allowances.
+    """
+    if isinstance(slot_number, bool) or not isinstance(slot_number, int) or slot_number < 3:
+        raise ValueError("slot_number must be an integer >= 3")
+    a, outer, width = float(tooth_tip_radius_mm), float(slot_outer_radius_mm), float(tooth_width_mm)
+    if not all(math.isfinite(value) and value > 0.0 for value in (a, outer, width)):
+        raise ValueError("coil-window dimensions must be finite and > 0")
+    b = width / 2.0
+    if outer <= b:
+        raise ValueError("coil-window outer chord has no real intersection")
+    c = math.sqrt(outer * outer - b * b)
+    half_pitch = math.pi / slot_number
+    sine, cosine = math.sin(half_pitch), math.cos(half_pitch)
+    inner_half_height = a * sine - b * cosine
+    outer_half_height = c * sine - b * cosine
+    if c <= a or inner_half_height <= 0.0 or outer_half_height <= 0.0:
+        raise ValueError("coil-window quadrilateral is degenerate or self-intersecting")
+    area = 0.5 * (c - a) * cosine * (inner_half_height + outer_half_height)
+    if not math.isfinite(area) or area <= 0.0:
+        raise ValueError("design has nonpositive CAD coil-window area")
+    return area
+
+
 def geometry_metrics(
     design: Mapping[str, float],
     stack_length_mm: float,
@@ -663,11 +698,11 @@ def geometry_metrics(
     *,
     slot_number: int = 12,
 ) -> GeometryMetrics:
-    """Compute deterministic 2-D winding geometry approximations.
+    """Compute winding geometry with the builder's exact coil-window area.
 
-    The slot calculation is intentionally conservative and reproducible: the
-    annular slot-pitch sector between tooth tip and yoke is reduced by the
-    rectangular tooth body.  FEA remains the validation authority.
+    One slot contains two equal coil-side sheets. Mean-turn length retains
+    its existing centroid/end-turn approximation; final CAD remains the
+    authority for any changed topology or manufacturing allowances.
     """
 
     missing = [name for name in GEOMETRY_VARIABLE_NAMES if name not in design]
@@ -726,10 +761,9 @@ def geometry_metrics(
     mean_turn_length = 2.0 * stack_length_mm + 2.0 * (
         winding.end_turn_factor * chord + winding.overhang_mm
     )
-    pitch_sector_area = 0.5 * (slot_outer_radius**2 - tooth_tip_radius**2) * pitch_angle
-    slot_area = pitch_sector_area - tooth_width * tooth_length
-    if slot_area <= 0.0:
-        raise ValueError("design has nonpositive approximate slot area")
+    slot_area = 2.0 * coil_window_area_mm2(
+        tooth_tip_radius, slot_outer_radius, tooth_width, slot_number=slot_number
+    )
     copper_per_slot = (
         2.0
         * 3.0
@@ -1362,3 +1396,6 @@ def select_validation_candidates(
         for index in range(max_candidates)
     } if max_candidates > 1 else {min(range(len(rows)), key=lambda idx: 1.0 - rows[idx].cycle_efficiency)}
     return [rows[index] for index in sorted(selected_indices)]
+
+
+_IMPORTED_SOURCE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()

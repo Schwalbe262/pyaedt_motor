@@ -17,18 +17,20 @@ import math
 import os
 from pathlib import Path
 import re
+import sys
 from typing import Any, Iterable, Mapping
 
 import numpy as np
 import scipy
 from scipy.stats import qmc
 
+import ipmsm_optimization as _geometry_helper
 from ipmsm_optimization import (
     GEOMETRY_VARIABLE_NAMES, OptimizationSpec, current_density_a_per_mm2,
     geometry_metrics, optimization_spec_from_mapping, phase_resistance_100c_ohm,
 )
 
-PLAN_SCHEMA = "ipmsm_v3_training_plan_v1"
+PLAN_SCHEMA = "ipmsm_v3_training_plan_v2"
 PROFILE_SCHEMA = "ipmsm_v3_selected_profile_v1"
 METRIC_CONTRACT = "motor_metrics_v3"
 ACTIVE_GEOMETRY = tuple(name for name in GEOMETRY_VARIABLE_NAMES if name != "stator_shoe_thick")
@@ -37,6 +39,14 @@ TRAINING_ATTEMPT_BUDGET = 2400
 DEFAULT_RETRY_RESERVE = 240
 CANONICAL_FLAGS = {"circle_segments": 0, "loss_policy": "laminated_core", "strict_setup": True,
                    "require_steady_state": True, "compute_inductance": True, "analysis_purpose": "training"}
+_GENERATOR_NAME = "src/pyaedt_motor/doe.py"
+_HELPER_NAME = "ipmsm_optimization.py"
+_SOURCE_PATHS = {_GENERATOR_NAME: Path(__file__).resolve(),
+                 _HELPER_NAME: Path(__file__).resolve().parents[2] / _HELPER_NAME}
+_GENERATOR_MODULE = sys.modules[__name__]
+_HELPER_BINDINGS = {name: globals()[name] for name in (
+    "GEOMETRY_VARIABLE_NAMES", "OptimizationSpec", "current_density_a_per_mm2",
+    "geometry_metrics", "optimization_spec_from_mapping", "phase_resistance_100c_ohm")}
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -45,6 +55,48 @@ def _json_bytes(value: Any) -> bytes:
 
 def _sha(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _capture_source_pin() -> dict[str, dict[str, str]]:
+    origins = {}
+    for name, module in ((_GENERATOR_NAME, _GENERATOR_MODULE), (_HELPER_NAME, _geometry_helper)):
+        expected = _SOURCE_PATHS[name].resolve()
+        origin = getattr(module, "__file__", None)
+        spec_origin = getattr(getattr(module, "__spec__", None), "origin", origin)
+        if (sys.modules.get(module.__name__) is not module or not origin or not spec_origin
+                or Path(origin).resolve() != expected or Path(spec_origin).resolve() != expected):
+            raise RuntimeError(f"planning import origin differs from project source: {name}")
+        origins[name] = str(expected)
+    if any(globals()[name] is not value or getattr(_geometry_helper, name) is not value
+           for name, value in _HELPER_BINDINGS.items()):
+        raise RuntimeError("planning helper bindings changed after import; start a fresh process")
+    payloads = {name: path.read_bytes() for name, path in _SOURCE_PATHS.items()}
+    hashes = {name: _sha(payload) for name, payload in payloads.items()}
+    if getattr(_geometry_helper, "_IMPORTED_SOURCE_SHA256", None) != hashes[_HELPER_NAME]:
+        raise RuntimeError("geometry helper source changed after import; start a fresh process")
+    return {"source_sha256": hashes, "source_import_origins": origins}
+
+
+def _assert_source_pin(expected: Mapping | None = None) -> dict[str, dict[str, str]]:
+    current = _capture_source_pin()
+    if current != _IMPORTED_SOURCE_PIN or (expected is not None and current != expected):
+        raise RuntimeError("planning source changed after import; start a fresh process")
+    return current
+
+
+def _require_manifest_sources(manifest: Mapping[str, Any], pin: Mapping[str, Any]) -> None:
+    hashes = pin["source_sha256"]
+    if (manifest.get("schema_version") != PLAN_SCHEMA or manifest.get("source_sha256") != hashes
+            or manifest.get("generator_sha256") != hashes[_GENERATOR_NAME]
+            or manifest.get("geometry_helper_sha256") != hashes[_HELPER_NAME]):
+        raise ValueError("training plan generator/helper source SHA256/schema mismatch")
+    origins = manifest.get("source_import_origins")
+    if not isinstance(origins, dict) or set(origins) != set(hashes) or any(
+            not isinstance(origin, str) or not Path(origin).is_absolute()
+            or Path(origin).name != Path(name).name for name, origin in origins.items()):
+        raise ValueError("training plan lacks actual generation import origins")
+    # Generation origins are historical provenance. Identical source bytes may
+    # be verified from another correctly laid-out C-native frozen checkout.
 
 
 def _integer(value: Any, label: str, minimum: int = 0) -> int:
@@ -98,6 +150,7 @@ def sample_feasible_geometries(
     Only positive derived geometry, specified slot fill and prior identities
     exclude candidates; supplied bounds remain generic for calibration callers.
     """
+    source_pin = _assert_source_pin()
     count = _integer(count, "count", 1)
     seed = _integer(seed, "seed")
     limit = max(count * 100, 4096) if max_candidates is None else _integer(max_candidates, "max_candidates", count)
@@ -147,6 +200,7 @@ def sample_feasible_geometries(
     if len(selected) != count:
         raise ValueError(f"feasible geometry sampling exhausted after {scanned} candidates; "
                          f"found {len(selected)}/{count}; rejections={dict(rejected)}")
+    _assert_source_pin(source_pin)
     return selected
 
 
@@ -290,6 +344,7 @@ def generate_training_plan(
     current_min_fraction: float = .25,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build three controls/geometry with independent preassigned group partitions."""
+    source_pin = _assert_source_pin()
     from calibrate_ipmsm_beta import validated_zero_manifest
     _production_spec(spec)
     geometries = _integer(geometries, "geometries", 5)
@@ -405,12 +460,16 @@ def generate_training_plan(
                 "profile_settings": settings, "profile_convergence_certified_by_generator": False,
                 "expected_metric_contract": METRIC_CONTRACT, "expected_producer_fingerprint": profile.producer_fingerprint,
                 "spec_sha256": _sha(_json_bytes(asdict(spec))),
-                "generator_sha256": _sha(Path(__file__).read_bytes()), "numpy_version": np.__version__,
+                **source_pin, "generator_sha256": source_pin["source_sha256"][_GENERATOR_NAME],
+                "geometry_helper_sha256": source_pin["source_sha256"][_HELPER_NAME], "numpy_version": np.__version__,
                 "scipy_version": scipy.__version__, "submission_performed": False}
+    _assert_source_pin(source_pin)
     return rows, manifest
 
 
 def write_training_plan(path: Path, rows: list[dict], manifest: Mapping[str, Any]) -> dict:
+    source_pin = _assert_source_pin()
+    _require_manifest_sources(manifest, source_pin)
     path = Path(path)
     proof_path = path.with_suffix(".manifest.json")
     if path.suffix.lower() != ".csv": raise ValueError("plan output must have a .csv suffix")
@@ -426,6 +485,7 @@ def write_training_plan(path: Path, rows: list[dict], manifest: Mapping[str, Any
     payload = stream.getvalue().encode("utf-8")
     proof = dict(manifest, plan_sha256=_sha(payload), plan_file=path.name)
     proof["manifest_id"] = "training_plan_v3:sha256:" + _sha(_json_bytes(proof))
+    _assert_source_pin(source_pin)
     path.parent.mkdir(parents=True, exist_ok=True)
     # Both names are exclusive. A crash may leave partial evidence, which must
     # be retained/reconciled; consumers verify both hashes before submitting.
@@ -437,11 +497,13 @@ def write_training_plan(path: Path, rows: list[dict], manifest: Mapping[str, Any
 
 
 def verify_training_plan(path: Path) -> dict:
+    source_pin = _assert_source_pin()
     path = Path(path)
     proof = _strict_json(path.with_suffix(".manifest.json").read_bytes())
     identifier = proof.pop("manifest_id", None)
     if identifier != "training_plan_v3:sha256:" + _sha(_json_bytes(proof)):
         raise ValueError("training manifest content differs from its identifier")
+    _require_manifest_sources(proof, source_pin)
     payload = path.read_bytes()
     if proof.get("schema_version") != PLAN_SCHEMA or proof.get("plan_sha256") != _sha(payload):
         raise ValueError("training plan SHA256/schema mismatch")
@@ -473,6 +535,7 @@ def verify_training_plan(path: Path) -> dict:
         if len(group_rows) != 3 or {_finite(row["base_rpm"], "base_rpm") for row in group_rows} != {1200., 5000.}:
             raise ValueError("each geometry requires three controls covering both speeds")
     proof["manifest_id"] = identifier
+    _assert_source_pin(source_pin)
     return proof
 
 
@@ -504,6 +567,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Planned {len(rows)} cases/{args.geometries} groups; SHA256={proof['plan_sha256']}; "
           f"retry reserve={args.retry_reserve}; bounded refill={proof['bounded_refill_required']}; no submissions")
     return 0
+
+
+_IMPORTED_SOURCE_PIN = _capture_source_pin()
 
 
 if __name__ == "__main__":
