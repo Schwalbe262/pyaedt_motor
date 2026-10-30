@@ -1177,6 +1177,31 @@ def _assign_material(
     return assigned
 
 
+def _assign_reference_core_material(m2d: Any, objects: list[str], material: str) -> list[str]:
+    """Assign the verified project reference without PyAEDT's stale name cache.
+
+    Maxwell's documented ChangeProperty material block is also the final native
+    operation used by Object3d.material_name. Only its cached exists_material
+    lookup is bypassed. SolveInside and every other object property are kept.
+    """
+    if material != M19_REFERENCE_CORE_MATERIAL_NAME:
+        raise ValueError("native reference assignment requires the exact reference material name")
+    if not objects:
+        return []
+    manager = m2d.oproject.GetDefinitionManager()
+    if list(manager.GetProjectMaterialNames()).count(material) != 1:
+        raise ValueError("verified reference material is absent from the native project inventory")
+    applied = m2d.modeler.oeditor.ChangeProperty([
+        "NAME:AllTabs", ["NAME:Geometry3DAttributeTab", ["NAME:PropServers", *objects],
+                         ["NAME:ChangedProps", ["NAME:Material", "Value:=", '"' + material + '"']]],
+    ])
+    # Native success is void; a returned False is failure even if a stale live
+    # object happened to have the requested name before this operation.
+    if applied is False:
+        raise RuntimeError("native reference core assignment returned False")
+    return [name for name in objects if live_material_name(m2d, name).casefold() == material.casefold()]
+
+
 def assign_ppt_materials(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPPTSpec) -> dict[str, Any]:
     """Assign deck materials to already-created geometry."""
     _validate_core_material_selection(spec)
@@ -1195,7 +1220,10 @@ def assign_ppt_materials(design: Any, object_groups: dict[str, Any] | None, spec
     core_assigned = []
     selected_core_material = core_material_candidates[0]
     for material in core_material_candidates:
-        core_assigned = _assign_material(m2d, stator + rotor, material)
+        if spec.core_material_model == M19_REFERENCE_CORE_MATERIAL_MODEL:
+            core_assigned = _assign_reference_core_material(m2d, stator + rotor, material)
+        else:
+            core_assigned = _assign_material(m2d, stator + rotor, material)
         if core_assigned and set(core_assigned) == set(stator + rotor):
             selected_core_material = material
             break

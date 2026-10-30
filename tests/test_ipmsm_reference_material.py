@@ -152,10 +152,13 @@ def test_reference_never_tries_legacy_fallback_even_with_strict_setup_disabled()
     groups = {"stator": ["stator"], "rotor": ["rotor"]}
     with mock.patch.object(setup, "_get_group", side_effect=lambda m, g, key, p: groups.get(key, [])), \
          mock.patch.object(setup, "_assign_material", return_value=[]) as assign, \
+         mock.patch.object(setup, "_assign_reference_core_material", return_value=[]) as native_assign, \
          mock.patch.object(setup, "live_material_name", return_value="air"):
         result = setup.assign_ppt_materials(mock.Mock(), groups, reference_spec(strict_setup=False))
     core_calls = [call.args[2] for call in assign.call_args_list if call.args[1] == ["stator", "rotor"]]
-    assert core_calls == [setup.M19_REFERENCE_CORE_MATERIAL_NAME]
+    assert core_calls == []
+    assert native_assign.call_args.args[1:] == (["stator", "rotor"], setup.M19_REFERENCE_CORE_MATERIAL_NAME)
+    native_assign.assert_called_once()
     assert result["errors"]
 
 
