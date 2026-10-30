@@ -2,6 +2,8 @@
 
 `pyaedt_motor.train_physical`은 새 FEA 데이터로 최적설계용 모델 후보를 학습합니다. 기존 1,600행 진단 결과를 합격 모델로 승격하지 않습니다. 실제 새 데이터에 대한 학습·합격 판정은 별도 실행 결과를 확인해야 합니다.
 
+학습 전에 명세의 고정 재료 모델·이름과 실제 FEA 행의 `input_core_material_model`, `input_core_material`을 대조합니다. M19 기준 모델은 실제 도체 단면적·점적률 한도도 명시해야 하며, 학습·보정·시험 행 전체에서 권선 명세와 일치해야 합니다. 계획 CSV의 값으로 누락된 실제 메타데이터를 대신하지 않습니다. 이 문맥 정보는 회귀모델의 입력 특징으로 추가하지 않습니다.
+
 ```powershell
 & C:/Users/peets/anaconda3/envs/pyaedt2026v1/python.exe -m pyaedt_motor train --data C:\motor_run\accepted_results.csv --spec configs\ipmsm_7p5kw.json --output C:\motor_run\physical_model
 ```

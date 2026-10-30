@@ -199,6 +199,48 @@ def case_winding_constants(frame: pd.DataFrame, winding: Mapping | None = None) 
     return constants
 
 
+def case_study_context(frame: pd.DataFrame, spec: Mapping, winding) -> dict:
+    """Bind fixed material/wire declarations to actual FEA metadata, not features.
+
+    Only literal legacy data may omit the newer context columns. In particular,
+    copied flat plan fields cannot supply missing actual input_* reference data.
+    Material fingerprints retain the existing upstream homogeneous-source gate;
+    a core-only declaration cannot determine the magnet/shaft material choices.
+    """
+    from ipmsm_optimization import MaterialContextSpec
+
+    raw = spec.get("material_context", {})
+    if not isinstance(raw, Mapping):
+        raise ValueError("material_context must be a fixed material declaration")
+    material = MaterialContextSpec(**dict(raw))
+    reference = material.core_material_model != "legacy_pnf_hybrid_v1"
+    if not len(frame):
+        raise ValueError("training study context requires actual cases")
+    for key in ("core_material_model", "core_material"):
+        column = "input_" + key
+        if column not in frame:
+            if reference:
+                raise ValueError(f"missing actual material context: {column}")
+            continue
+        expected = getattr(material, key)
+        if not frame[column].map(lambda value: isinstance(value, str) and value.strip() == expected).all():
+            raise ValueError(f"actual material context differs from declared spec: {column}")
+    wire = {"input_conductor_area_per_branch_mm2": winding.conductor_area_per_branch_mm2,
+            "input_slot_fill_limit": winding.fill_factor}
+    constants = {}
+    if reference or any(column in frame for column in wire):
+        for column, expected in wire.items():
+            if column not in frame:
+                raise ValueError(f"missing actual winding context: {column}")
+            values = pd.to_numeric(frame[column], errors="coerce").to_numpy(float)
+            if (frame[column].map(lambda value: isinstance(value, (bool, np.bool_))).any()
+                    or not np.isfinite(values).all() or np.any(values <= 0)
+                    or not np.allclose(values, expected, rtol=1e-12, atol=1e-12)):
+                raise ValueError(f"actual winding context differs from declared spec: {column}")
+            constants[column] = float(expected)
+    return constants
+
+
 def derived_geometry_values(geometry: Mapping[str, float]) -> dict[str, float]:
     outer = geometry["stator_outer_radius"]
     yoke = outer * geometry["stator_back_yoke_thick_ratio"]
@@ -275,6 +317,8 @@ def domain_from_training(inputs: pd.DataFrame, spec: dict, *, case_frame: pd.Dat
         raise ValueError("FEA winding topology requires one parallel branch and four coils per phase")
     if not math.isclose(winding.winding_temperature_c, 100):
         raise ValueError("this resistance contract supports 100 degC winding temperature")
+    actual_cases = inputs if case_frame is None else case_frame
+    study_constants = case_study_context(actual_cases, spec, winding)
     missing = {"input_" + key for key in GEOMETRY_VARIABLE_NAMES} - set(inputs)
     if missing:
         raise ValueError(f"missing independent geometry inputs: {sorted(missing)}")
@@ -299,7 +343,8 @@ def domain_from_training(inputs: pd.DataFrame, spec: dict, *, case_frame: pd.Dat
     speeds = sorted({float(point["speed_rpm"]) for point in spec["operating_points"]})
     declaration = {"bounds": bounds, "constants": constants, "speeds_rpm": speeds, "winding": asdict(winding)}
     validate_declared_inputs(inputs, declaration)
-    winding_values = case_winding_constants(inputs if case_frame is None else case_frame, asdict(winding))
+    winding_values = case_winding_constants(actual_cases, asdict(winding))
+    winding_values.update(study_constants)
     observed = {column: [float(inputs[column].min()), float(inputs[column].max())] for column in inputs}
     return {"input_columns": list(inputs.columns), "declaration": declaration, "observed_bounds": observed,
             "winding_case_constants": winding_values, "winding_case_source": "fea_input_columns",

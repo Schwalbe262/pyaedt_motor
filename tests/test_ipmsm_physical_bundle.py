@@ -24,7 +24,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def spec():
-    return json.loads((ROOT / "configs/ipmsm_7p5kw.json").read_text(encoding="utf-8"))
+    raw = json.loads((ROOT / "configs/ipmsm_7p5kw.json").read_text(encoding="utf-8"))
+    # These synthetic historical-context rows are independent of the live M19 study.
+    raw["material_context"] = {"core_material_model": "legacy_pnf_hybrid_v1", "core_material": "27PNF1500_CustomCoreLoss"}
+    return raw
 
 
 def fingerprints():
