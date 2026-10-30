@@ -436,6 +436,18 @@ def validate_v2_fingerprints(data: Any, expected: dict[str, str] | None = None) 
             raise ValueError(f"mixed v2 fingerprint values for {column}: {distinct}")
         fingerprints[column] = distinct[0]
 
+    if "input_metric_contract_version" in data.columns:
+        from module.ipmsm_waveform_quality import v3_training_row_issues
+        for index, row in data.iterrows():
+            issues = v3_training_row_issues(row.fillna(""))
+            if not str(row.get("input_metric_contract_version", "")).strip() or issues:
+                raise ValueError(f"v3 training physics gate rejected row {index}: {issues}")
+        for column in ("input_metric_contract_version", "input_producer_fingerprint"):
+            distinct = set(data[column].astype(str))
+            if len(distinct) != 1:
+                raise ValueError(f"mixed v3 producer/metric fingerprint: {column}")
+            fingerprints[column] = next(iter(distinct))
+
     required_values = {
         "input_dataset_schema_version": V2_DATASET_SCHEMA_VERSION,
         "input_beta_convention": V2_BETA_CONVENTION,

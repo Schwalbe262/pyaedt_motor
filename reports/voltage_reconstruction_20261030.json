@@ -1,0 +1,16 @@
+{
+  "case_id": "rb3a_local_fea_0002",
+  "reprocessed_from_exports": true,
+  "source_csv": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\local_fea_results_v2.csv",
+  "results": {
+    "output_phase_voltage_source": "flux_derivative_three_phase",
+    "output_electrical_input_last_w": 4405.877774812829,
+    "output_solver_electrical_input_last_w": 4647.962224468331,
+    "output_phase_voltage_last_peak_abs_v": 56.9262597855314,
+    "output_mech_power_last_w": 4104.277170414913,
+    "output_total_loss_last_avg_w": 300.66420618236646,
+    "output_power_balance_residual_last_pct": 0.021253386122116892,
+    "output_steady_state_passed": true,
+    "output_physical_voltage_issues": ""
+  }
+}

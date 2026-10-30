@@ -218,6 +218,14 @@ def safe_path_exists(path: Path) -> bool:
 
 def add_local_library_paths() -> None:
     """Add the local pyaedt_library path used by this project."""
+    explicit_library = os.environ.get("PYAEDT_LIBRARY_ROOT", "").strip()
+    if explicit_library:
+        library = Path(explicit_library)
+        candidate = library / "src" if (library / "src").is_dir() else library
+        if not (candidate / "pyaedt_module").is_dir():
+            raise RuntimeError("PYAEDT_LIBRARY_ROOT does not contain pyaedt_module")
+        sys.path.insert(0, str(candidate))
+        return
     if os.name == "nt":
         candidates = [Path("Y:/git/pyaedt_library/src")]
     else:
@@ -249,6 +257,7 @@ REPORT_NAMES = (
     "PPT_PhaseA_Voltage_Limit",
     "PPT_Phase_Voltages",
     "PPT_Losses",
+    "PPT_Flux_Linkages",
 )
 
 TIME_DOMAIN_WINDOWS = ("first", "last", "all")
@@ -644,6 +653,13 @@ def setup_fingerprint(
             "quality_profile": quality_profile,
             "operation": operation,
             "use_periodic_boundary": bool(use_periodic_boundary),
+            "metric_contract_version": "motor_metrics_v3",
+            "analysis_purpose": spec.analysis_purpose,
+            "compute_inductance": spec.compute_inductance,
+            "circle_segments": spec.circle_segments,
+            "loss_policy": spec.loss_policy,
+            "strict_setup": spec.strict_setup,
+            "mesh_maximum_lengths_mm": spec.mesh_maximum_lengths_mm,
         },
     )
 
@@ -1006,6 +1022,17 @@ def build_spec(
         steps_per_period=case_int(case, "steps_per_period", default=90),
         core_material=str(case_value(case, "core_material", default=defaults.core_material)),
         magnet_material=str(case_value(case, "magnet_material", default=defaults.magnet_material)),
+        analysis_purpose=str(case_value(case, "analysis_purpose", "input_analysis_purpose", default="training")),
+        compute_inductance=case_bool(case, "compute_inductance", "input_compute_inductance", default=True),
+        strict_setup=case_bool(case, "strict_setup", default=True),
+        require_steady_state=case_bool(case, "require_steady_state", default=False),
+        circle_segments=case_int(case, "circle_segments", "input_circle_segments", default=0),
+        loss_policy=str(case_value(case, "loss_policy", "input_loss_policy", default="laminated_core")),
+        mesh_maximum_lengths_mm={
+            key: case_float(case, f"mesh_{key}_max_length_mm", default=0.0)
+            for key in MESH_ELEMENT_KEYS
+            if case_value(case, f"mesh_{key}_max_length_mm", default="") != ""
+        },
         mesh_elements=build_mesh_elements(case, defaults),
     )
     validate_transient_spec(spec)
@@ -1297,6 +1324,8 @@ def unit_scale_to_base(unit: str, unit_suffix: str) -> float:
         units = VOLTAGE_UNITS_TO_VOLTS
     elif unit_suffix == "h":
         units = INDUCTANCE_UNITS_TO_HENRY
+    elif unit_suffix == "wb":
+        units = {"Wb": 1.0, "mWb": 1e-3, "uWb": 1e-6, "V*s": 1.0, "": 1.0}
     if units is None:
         return 1.0
     try:
@@ -1353,7 +1382,7 @@ def read_report_csv(path: str) -> Any:
 
 
 def series_stats(values: Any) -> dict[str, float]:
-    finite = [float(value) for value in values if value is not None and not math.isnan(float(value))]
+    finite = [float(value) for value in values if value is not None and math.isfinite(float(value))]
     if not finite:
         return {
             "avg": math.nan,
@@ -1398,8 +1427,6 @@ def summarize_metric(
     result: dict[str, float] = {}
     for window_name, mask in windows.items():
         selected = values[mask]
-        if len(selected) == 0:
-            selected = values
         stats = series_stats(selected)
         for stat in TIME_DOMAIN_STATS:
             result[f"{output_prefix}_{window_name}_{stat}_{unit_suffix}"] = stats[stat]
@@ -1428,7 +1455,7 @@ def summarize_sampled_values(
     }
     result: dict[str, float] = {}
     for window_name, selected in windows.items():
-        stats = series_stats(selected or windows["all"])
+        stats = series_stats(selected)
         for stat in TIME_DOMAIN_STATS:
             result[f"{output_prefix}_{window_name}_{stat}_{unit_suffix}"] = stats[stat]
     return result
@@ -1728,9 +1755,8 @@ def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None
 
         core_loss = finite_float(output_summary.get(f"output_coreloss_{window}_avg_w"))
         solid_loss = finite_float(output_summary.get(f"output_solidloss_{window}_avg_w"))
-        total_loss = sum(value for value in (core_loss, solid_loss, copper_loss) if math.isfinite(value))
-        if not any(math.isfinite(value) for value in (core_loss, solid_loss, copper_loss)):
-            total_loss = math.nan
+        losses = (core_loss, solid_loss, copper_loss)
+        total_loss = sum(losses) if all(math.isfinite(value) for value in losses) else math.nan
         output_summary[f"output_total_loss_{window}_avg_w"] = total_loss
 
         mech_power = torque_avg * omega_mech_rad_s
@@ -1825,12 +1851,9 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
     measured_current = False
     if current_path and Path(current_path).exists():
         df = read_report_csv(current_path)
-        data_columns = non_time_columns(list(df.columns))
         phase_columns: list[str | None] = []
         for index, phase in enumerate(("a", "b", "c")):
             column = find_column(list(df.columns), (f"phase{phase}",))
-            if not column and index < len(data_columns):
-                column = data_columns[index]
             phase_columns.append(column)
             if column:
                 result.update(
@@ -2002,7 +2025,10 @@ def export_inductance_matrix_data(m2d: Any, out_path: Path, setup_name: str) -> 
     raise RuntimeError("no transient inductance matrix quantities were available for export")
 
 
-def export_ppt_reports(design: Any, project_path: Path, case_id: str, setup_name: str = "PPT_Transient") -> dict[str, str]:
+def export_ppt_reports(
+    design: Any, project_path: Path, case_id: str, setup_name: str = "PPT_Transient",
+    compute_inductance: bool = True,
+) -> dict[str, str]:
     """Export reports created by configure_ipmsm_from_ppt to per-case CSV files."""
     m2d = getattr(design, "solver_instance", design)
     export_dir = project_path / "exports"
@@ -2010,6 +2036,8 @@ def export_ppt_reports(design: Any, project_path: Path, case_id: str, setup_name
 
     exported = {}
     for report_name in REPORT_NAMES:
+        if report_name == "PPT_Inductance_Matrix" and not compute_inductance:
+            continue
         out_path = export_dir / f"{case_id}_{report_name}.csv"
         try:
             if report_name == "PPT_Inductance_Matrix":
@@ -2061,6 +2089,8 @@ def missing_required_output_metrics(
     *,
     require_v2: bool = False,
     operation: str = "sin_current",
+    require_inductance: bool = True,
+    require_physical_voltage: bool = False,
 ) -> list[str]:
     """Return required transient metrics that were not exported/summarized."""
     required = [
@@ -2075,10 +2105,10 @@ def missing_required_output_metrics(
                 "output_phasea_voltage_last_peak_abs_v",
                 "output_phaseb_voltage_last_peak_abs_v",
                 "output_phasec_voltage_last_peak_abs_v",
-                "output_ld_last_avg_h",
-                "output_lq_last_avg_h",
             ]
         )
+        if require_inductance:
+            required.extend(["output_ld_last_avg_h", "output_lq_last_avg_h"])
         if is_current_driven_operation(operation):
             required.extend(
                 [
@@ -2096,11 +2126,12 @@ def missing_required_output_metrics(
             missing.append(key)
             continue
         try:
-            if math.isnan(float(value)):
+            if not math.isfinite(float(value)):
                 missing.append(key)
         except Exception:
-            pass
-    if require_v2 and output_summary.get("output_phase_voltage_source") != "measured_three_phase":
+            missing.append(key)
+    voltage_sources = {"flux_derivative_three_phase"} if require_physical_voltage else {"measured_three_phase", "flux_derivative_three_phase"}
+    if require_v2 and output_summary.get("output_phase_voltage_source") not in voltage_sources:
         missing.append("output_phase_voltage_source")
     if (
         require_v2
@@ -2197,6 +2228,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     start_dt = datetime.now()
     start = time.time()
     desktop = None
+    project = None
     sim = None
     lease = None
     lease_granted = False
@@ -2229,6 +2261,12 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         )
 
     try:
+        producer_root = Path(__file__).resolve().parent
+        producer_files = ["run_ipmsm_batch.py", "module/ipmsm_geometry.py", "module/ipmsm_ppt_setup.py",
+                          "module/ipmsm_waveform_quality.py", "module/variable.py"]
+        row["input_producer_fingerprint"] = stable_fingerprint("producer_v3", {
+            name: hashlib.sha256((producer_root / name).read_bytes()).hexdigest() for name in producer_files
+        })
         if aedt_backend not in AEDT_BACKENDS:
             raise ValueError("aedt_backend must be standalone or pooled")
         spec = build_spec(
@@ -2432,7 +2470,11 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                     f"state={activation.get('state')!r}"
                 )
 
+        sim.circle_segments = spec.circle_segments
+        row["timing_startup_s"] = round(time.time() - start, 6)
+        geometry_started = time.perf_counter()
         design, input_df, object_groups = create_ipmsm_design(project, sim)
+        row["timing_geometry_s"] = round(time.perf_counter() - geometry_started, 6)
         row.update(prefixed_row(dataframe_first_row(input_df), "input_"))
 
         configure_kwargs: dict[str, Any] = {
@@ -2460,6 +2502,27 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 report_uncertain_pooled_solver
             )
         setup_result = configure_ipmsm_from_ppt(design, **configure_kwargs)
+        for stage, seconds in setup_result.get("timings", {}).items():
+            row["timing_" + stage] = round(seconds, 6)
+        row["input_metric_contract_version"] = "motor_metrics_v3"
+        row["setup_issues"] = ";".join(setup_result.get("setup_issues", []))
+        if project_path.is_dir():
+            def snapshot(value: Any) -> Any:
+                if value is None or isinstance(value, (str, int, float, bool)):
+                    return value
+                if isinstance(value, dict):
+                    return {str(k): snapshot(v) for k, v in value.items()}
+                if isinstance(value, (list, tuple)):
+                    return [snapshot(v) for v in value]
+                props = getattr(value, "props", None)
+                return snapshot(dict(props)) if props is not None else type(value).__name__
+
+            applied = snapshot(setup_result)
+            applied["requested_spec"] = asdict(spec)
+            audit_path = project_path / "setup_audit.json"
+            audit_path.write_text(json.dumps(applied, indent=2, ensure_ascii=False), encoding="utf-8")
+            row["artifact_setup_audit"] = str(audit_path)
+            row["applied_setup_fingerprint"] = stable_fingerprint("applied_setup_v3", applied)
         analysis_returned_false = options.analyze and setup_result.get("analysis") is False
         row.update(
             {
@@ -2483,8 +2546,26 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 f"AEDT analysis returned False; validation={setup_result.get('validation')}"
             )
 
-        exported = export_ppt_reports(design, project_path, case_id, setup_name=spec.setup_name) if options.analyze else {}
+        export_started = time.perf_counter()
+        exported = export_ppt_reports(
+            design, project_path, case_id, setup_name=spec.setup_name,
+            compute_inductance=spec.compute_inductance,
+        ) if options.analyze else {}
         output_summary = summarize_transient_outputs(exported, spec, operation=operation) if options.analyze else {}
+        if options.analyze and any(Path(p).is_file() for p in exported.values() if not p.startswith("skipped:")):
+            from module.ipmsm_waveform_quality import analyze_exported_waveforms
+            output_summary.update(analyze_exported_waveforms(
+                exported, spec, operation,
+                physical_waveform_output=project_path / "exports" / f"{case_id}_Physical_Voltages.csv",
+            ))
+            add_derived_motor_metrics(output_summary, spec)
+            pin = finite_float(output_summary.get("output_electrical_input_last_w"))
+            pout = finite_float(output_summary.get("output_mech_power_last_w"))
+            loss = finite_float(output_summary.get("output_total_loss_last_avg_w"))
+            if all(math.isfinite(v) for v in (pin, pout, loss)):
+                output_summary["output_power_balance_residual_last_w"] = pin - pout - loss
+                output_summary["output_power_balance_residual_last_pct"] = 100 * (pin - pout - loss) / max(abs(pin), 1.0)
+        row["timing_export_s"] = round(time.perf_counter() - export_started, 6)
         row.update(prefixed_row(output_summary, ""))
         row.update(exported)
         missing_outputs = (
@@ -2492,6 +2573,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 output_summary,
                 require_v2=spec.beta_convention == DEFAULT_BETA_CONVENTION,
                 operation=operation,
+                require_inductance=spec.compute_inductance,
+                require_physical_voltage=True,
             )
             if options.analyze
             else []
@@ -2499,7 +2582,9 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         row["missing_required_outputs"] = ";".join(missing_outputs)
         if missing_outputs:
             raise RuntimeError(f"Missing required transient output metrics: {missing_outputs}")
-        physics_issues = output_physics_issues(output_summary, operation=operation)
+        if spec.require_steady_state and options.analyze and not output_summary.get("output_steady_state_passed"):
+            raise RuntimeError("Steady-state validation failed: " + str(output_summary.get("output_steady_state_issues", "missing waveform evidence")))
+        physics_issues = output_physics_issues(output_summary, operation=operation) if options.analyze else []
         if physics_issues:
             raise RuntimeError(f"Transient output physics validation failed: {physics_issues}")
         elapsed = time.time() - start
@@ -2515,6 +2600,11 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     except Exception as exc:
         elapsed = time.time() - start
         logging.exception("Case failed: %s", case_id)
+        if project is not None:
+            try:
+                project.save()
+            except Exception:
+                logging.exception("Could not preserve failed AEDT project for %s", case_id)
         row.update(
             {
                 "status": "failed",
@@ -2647,16 +2737,19 @@ def main() -> int:
         args.beta_convention,
         aedt_backend,
     )
+    failed_cases = 0
     if args.workers <= 1:
         for payload in payloads:
             result = run_one_case(payload)
+            failed_cases += result.get("status") != "ok"
             logging.info("Finished %s: %s", result.get("case_id"), result.get("status"))
     else:
         ctx = mp.get_context("spawn")
         with ctx.Pool(processes=args.workers) as pool:
             for result in pool.imap_unordered(run_one_case, payloads):
+                failed_cases += result.get("status") != "ok"
                 logging.info("Finished %s: %s", result.get("case_id"), result.get("status"))
-    return 0
+    return 1 if failed_cases else 0
 
 
 if __name__ == "__main__":

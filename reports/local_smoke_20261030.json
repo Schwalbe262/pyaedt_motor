@@ -1,0 +1,38 @@
+[
+  {
+    "case_id": "rb3a_local_fea_0001",
+    "status": "ok",
+    "error": "",
+    "elapsed_s": "230.823",
+    "timing_solve_s": "191.969818",
+    "output_torque_last_avg_nm": "32.67408439507513",
+    "output_coreloss_last_avg_w": "47.39419286846234",
+    "output_solidloss_last_avg_w": "7.513733062558941",
+    "output_total_loss_last_avg_w": "300.2721005307199",
+    "output_efficiency_last_pct": "93.18526552964981",
+    "output_torque_cycle_drift_pct": "0.16922908946134357",
+    "output_coreloss_cycle_drift_pct": "41.62333446799519",
+    "output_solidloss_cycle_drift_pct": "0.1470450205235992",
+    "output_steady_state_passed": "False",
+    "output_steady_state_issues": "coreloss_not_periodic",
+    "output_power_balance_residual_last_pct": "5.211371036441022"
+  },
+  {
+    "case_id": "rb3a_local_fea_0002",
+    "status": "ok",
+    "error": "",
+    "elapsed_s": "498.386",
+    "timing_solve_s": "452.452472",
+    "output_torque_last_avg_nm": "32.66079997453753",
+    "output_coreloss_last_avg_w": "47.78945062647243",
+    "output_solidloss_last_avg_w": "7.510580956195413",
+    "output_total_loss_last_avg_w": "300.66420618236646",
+    "output_efficiency_last_pct": "93.17438802296563",
+    "output_torque_cycle_drift_pct": "0.01642867229739799",
+    "output_coreloss_cycle_drift_pct": "0.32369875715809143",
+    "output_solidloss_cycle_drift_pct": "0.010740541074407455",
+    "output_steady_state_passed": "True",
+    "output_steady_state_issues": "",
+    "output_power_balance_residual_last_pct": "5.228546105467775"
+  }
+]

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 import math
 from pathlib import Path
 import re
+import time
 from typing import Any, Callable
 
 
@@ -62,6 +63,7 @@ PPT_REPORT_DEFS = {
         "InducedVoltage(PhaseC)+R_phase*InputCurrent(PhaseC)",
     ],
     "PPT_Losses": ["CoreLoss", "SolidLoss"],
+    "PPT_Flux_Linkages": ["FluxLinkage(PhaseA)", "FluxLinkage(PhaseB)", "FluxLinkage(PhaseC)"],
 }
 
 
@@ -91,6 +93,13 @@ class IPMSMPPTSpec:
     shaft_material: str = "vacuum"
     air_material: str = "air"
     setup_name: str = "PPT_Transient"
+    analysis_purpose: str = "training"
+    compute_inductance: bool = True
+    strict_setup: bool = True
+    require_steady_state: bool = False
+    circle_segments: int = 0
+    loss_policy: str = "laminated_core"
+    mesh_maximum_lengths_mm: dict[str, float] = field(default_factory=dict)
     mesh_elements: dict[str, int] = field(
         default_factory=lambda: {
             "magnet": 50,
@@ -203,6 +212,17 @@ def validate_ppt_spec_contract(
     canonical_dq_current_components(spec.i_peak_a, spec.beta_deg)
     if not math.isfinite(float(spec.electrical_zero_deg)):
         raise ValueError("electrical_zero_deg must be finite")
+    if spec.analysis_purpose not in {"screening", "training", "reference"}:
+        raise ValueError("analysis_purpose must be screening, training, or reference")
+    if not spec.compute_inductance and spec.analysis_purpose != "screening":
+        raise ValueError("only screening may omit inductance; training requires Ld/Lq")
+    if spec.circle_segments != 0 and spec.circle_segments < 12:
+        raise ValueError("circle_segments must be 0 (exact arcs) or at least 12")
+    if spec.loss_policy not in {"laminated_core", "legacy_implicit"}:
+        raise ValueError("unsupported loss_policy")
+    for group, length in spec.mesh_maximum_lengths_mm.items():
+        if group not in spec.mesh_elements or not math.isfinite(length) or length <= 0:
+            raise ValueError(f"invalid local mesh length: {group}={length!r}")
 
 
 DEFAULT_12S8P_SECTOR_COIL_SIDE_MAP = [
@@ -1181,7 +1201,8 @@ def assign_three_phase_windings(
                 name=phase,
             )
             if winding:
-                m2d.add_winding_coils(assignment=phase, coils=phase_coils[phase])
+                if m2d.add_winding_coils(assignment=phase, coils=phase_coils[phase]) is False:
+                    result["errors"].append(f"{phase}: add_winding_coils returned False")
             else:
                 result["errors"].append(f"{phase}: assign_winding returned False")
         except Exception as exc:
@@ -1192,13 +1213,30 @@ def assign_three_phase_windings(
     return result
 
 
-def assign_losses(design: Any, object_groups: dict[str, Any] | None) -> dict[str, Any]:
+def assign_losses(
+    design: Any, object_groups: dict[str, Any] | None, loss_policy: str = "laminated_core"
+) -> dict[str, Any]:
     """Enable magnet eddy-current loss and stator/rotor core loss calculations."""
     m2d = _m2d(design)
     stator = _get_group(m2d, object_groups, "stator", ("stator", "main_stator"))
     rotor = _get_group(m2d, object_groups, "rotor", ("rotator", "rotor"))
     magnets = _get_group(m2d, object_groups, "magnets", ("magnet",))
+    windings = _get_group(m2d, object_groups, "windings", ("winding",))
     result: dict[str, Any] = {"magnet_current_zero": [], "core_losses": None}
+
+    try:
+        objects = stator + rotor + magnets + windings
+        result["eddy_before"] = {
+            name: "on" if m2d.oboundary.GetEddyEffect(name) else "off" for name in objects
+        }
+        if loss_policy == "laminated_core":
+            # Electrical-steel CoreLoss already contains lamination eddy loss.
+            # Do not also solve a solid bulk eddy-current path through the iron.
+            result["eddy_core_disabled"] = m2d.eddy_effects_on(stator + rotor, enable_eddy_effects=False)
+            result["eddy_winding_disabled"] = m2d.eddy_effects_on(windings, enable_eddy_effects=False)
+            result["eddy_magnet_enabled"] = m2d.eddy_effects_on(magnets, enable_eddy_effects=True)
+    except Exception as exc:
+        result["eddy_settings"] = f"skipped: {exc}"
 
     for magnet in magnets:
         try:
@@ -1212,6 +1250,18 @@ def assign_losses(design: Any, object_groups: dict[str, Any] | None) -> dict[str
         result["core_losses"] = m2d.set_core_losses(stator + rotor, core_loss_on_field=True)
     except Exception as exc:
         result["core_losses"] = f"skipped: {exc}"
+
+    try:
+        result["eddy_readback"] = {
+            name: "on" if m2d.oboundary.GetEddyEffect(name) else "off" for name in objects
+        }
+        if loss_policy == "laminated_core":
+            expected = {name: "off" for name in stator + rotor + windings}
+            expected.update({name: "on" for name in magnets})
+            if result["eddy_readback"] != expected:
+                raise RuntimeError("eddy-current setting readback does not match the loss policy")
+    except Exception as exc:
+        result["eddy_readback_error"] = f"skipped: {exc}"
 
     return result
 
@@ -1237,17 +1287,18 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
             # rejects the setup even though ``RestrictLength`` is false. Build
             # the operation with a valid placeholder and disable that limit in
             # the persisted properties; the element-count contract is unchanged.
+            local_length = spec.mesh_maximum_lengths_mm.get(group_name)
             operation = m2d.mesh.assign_length_mesh(
                 assignment=objects,
                 inside_selection=True,
-                maximum_length="1mm",
+                maximum_length=f"{local_length:g}mm" if local_length is not None else "1mm",
                 maximum_elements=spec.mesh_elements[group_name],
                 name=f"Mesh_{group_name}",
             )
             if not operation:
                 raise RuntimeError("length mesh operation was not created")
-            operation.props["RestrictLength"] = False
-            operation.props["MaxLength"] = "1mm"
+            operation.props["RestrictLength"] = local_length is not None
+            operation.props["MaxLength"] = f"{local_length:g}mm" if local_length is not None else "1mm"
             if operation.update() is False:
                 raise RuntimeError("length mesh operation update failed")
             result[group_name] = operation
@@ -1263,11 +1314,14 @@ def create_ppt_transient_setup(design: Any, spec: IPMSMPPTSpec) -> Any:
     try:
         m2d.model_depth = "StackLength"
     except Exception:
-        pass
+        if spec.strict_setup:
+            raise
     try:
-        m2d.change_symmetry_multiplier("SymmetryFactor")
+        if m2d.change_symmetry_multiplier("SymmetryFactor") is False:
+            raise RuntimeError("AEDT rejected the symmetry multiplier")
     except Exception:
-        pass
+        if spec.strict_setup:
+            raise
 
     setup = m2d.create_setup(name=spec.setup_name)
     setup.props["StopTime"] = "StopTime"
@@ -1279,28 +1333,35 @@ def create_ppt_transient_setup(design: Any, spec: IPMSMPPTSpec) -> Any:
     setup.props["OutputPerObjectCoreLoss"] = True
     setup.props["OutputPerObjectSolidLoss"] = True
     setup.props["OutputError"] = True
-    setup.update()
+    if setup.update() is False:
+        raise RuntimeError("AEDT rejected the transient setup")
     return setup
 
 
-def enable_ppt_transient_inductance(design: Any, incremental_matrix: bool = False) -> Any:
+def enable_ppt_transient_inductance(
+    design: Any, incremental_matrix: bool = False, enabled: bool = True
+) -> Any:
     """Enable the transient inductance matrix used by the PPT Ld/Lq workflow."""
     m2d = _m2d(design)
     try:
         return m2d.change_inductance_computation(
-            compute_transient_inductance=True,
+            compute_transient_inductance=enabled,
             incremental_matrix=incremental_matrix,
         )
     except Exception as exc:
         return f"skipped: {exc}"
 
 
-def create_ppt_reports(design: Any, setup_name: str = "PPT_Transient") -> dict[str, Any]:
+def create_ppt_reports(
+    design: Any, setup_name: str = "PPT_Transient", compute_inductance: bool = True
+) -> dict[str, Any]:
     """Create common reports from the deck: currents, torque, voltage, and losses."""
     m2d = _m2d(design)
     setup_sweep = f"{setup_name} : Transient"
     reports: dict[str, Any] = {}
     for plot_name, expressions in PPT_REPORT_DEFS.items():
+        if plot_name == "PPT_Inductance_Matrix" and not compute_inductance:
+            continue
         try:
             reports[plot_name] = m2d.post.create_report(
                 expressions=expressions,
@@ -1312,6 +1373,43 @@ def create_ppt_reports(design: Any, setup_name: str = "PPT_Transient") -> dict[s
         except Exception as exc:
             reports[plot_name] = f"skipped: {exc}"
     return reports
+
+
+def critical_setup_issues(result: dict[str, Any]) -> list[str]:
+    """Find failed essential operations before starting an expensive solve."""
+    issues: list[str] = []
+
+    def inspect(value: Any, path: str) -> None:
+        if isinstance(value, str) and value.lower().startswith("skipped:"):
+            issues.append(f"{path}: {value}")
+        elif value is False or value is None:
+            if not path.endswith(".periodic"):
+                issues.append(f"{path}: operation not applied")
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                if key == "errors" and item:
+                    issues.append(f"{path}.errors: {item}")
+                else:
+                    inspect(item, f"{path}.{key}")
+        elif isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                inspect(item, f"{path}[{index}]")
+
+    for stage in (
+        "geometry_overlap_resolution", "material_definitions", "materials",
+        "magnet_coordinate_systems", "boundaries_motion", "windings", "losses",
+        "mesh", "inductance_computation", "setup", "validation",
+    ):
+        if stage in result:
+            inspect(result[stage], stage)
+    if type(result.get("validation")) is int and result["validation"] != 1:
+        issues.append("validation: AEDT design validation failed")
+    materials = result.get("materials")
+    if isinstance(materials, dict):
+        for group in ("stator_rotor", "magnets", "windings", "air"):
+            if not materials.get(group):
+                issues.append(f"materials.{group}: no assigned objects")
+    return issues
 
 
 def configure_ipmsm_from_ppt(
@@ -1345,6 +1443,7 @@ def configure_ipmsm_from_ppt(
     merged_groups.setdefault("region", created["region"])
     merged_groups.setdefault("band", created["band"])
 
+    setup_started = time.perf_counter()
     result = {
         "variables": "applied",
         "cleanup": cleanup,
@@ -1360,9 +1459,12 @@ def configure_ipmsm_from_ppt(
             use_periodic_boundary=use_periodic_boundary,
         ),
         "windings": assign_three_phase_windings(design, merged_groups, spec),
-        "losses": assign_losses(design, merged_groups),
+        "losses": assign_losses(design, merged_groups, spec.loss_policy),
         "mesh": assign_mesh(design, merged_groups, spec),
-        "inductance_computation": enable_ppt_transient_inductance(design),
+        "inductance_computation": (
+            enable_ppt_transient_inductance(design) if spec.compute_inductance
+            else enable_ppt_transient_inductance(design, enabled=False)
+        ),
         "setup": create_ppt_transient_setup(design, spec),
     }
 
@@ -1372,10 +1474,16 @@ def configure_ipmsm_from_ppt(
     except Exception as exc:
         result["validation"] = f"skipped: {exc}"
 
+    result["setup_issues"] = critical_setup_issues(result)
+    result["timings"] = {"setup_s": time.perf_counter() - setup_started}
+    if spec.strict_setup and result["setup_issues"]:
+        raise RuntimeError("Essential AEDT setup failed: " + "; ".join(result["setup_issues"]))
+
     if create_reports:
-        result["reports"] = create_ppt_reports(design, spec.setup_name)
+        result["reports"] = create_ppt_reports(design, spec.setup_name, spec.compute_inductance)
 
     if analyze:
+        solve_started = time.perf_counter()
         if analysis_error_callback is None:
             result["analysis"] = m2d.analyze(
                 setup=spec.setup_name,
@@ -1392,5 +1500,6 @@ def configure_ipmsm_from_ppt(
             except Exception:
                 analysis_error_callback()
                 raise
+        result["timings"]["solve_s"] = time.perf_counter() - solve_started
 
     return result

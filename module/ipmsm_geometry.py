@@ -18,19 +18,20 @@ def create_ipmsm_design(project: Any, sim: Any, design_name: str = "IPMSM") -> t
     sim.project = project
 
     input_data = sim.set_variable(design1)
+    circle_segments = int(getattr(sim, "circle_segments", 0))
 
 
     # stator modeling
 
-    stator = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_outer_radius", num_sides=72, name="stator", material="copper")
-    stator_sub = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_outer_radius - stator_back_yoke_thick", num_sides=72, name="stator_sub", material="copper")
+    stator = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_outer_radius", num_sides=circle_segments, name="stator", material="copper")
+    stator_sub = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_outer_radius - stator_back_yoke_thick", num_sides=circle_segments, name="stator_sub", material="copper")
     design1.modeler.subtract(blank_list=stator, tool_list=[stator_sub], keep_originals=False)
 
     teeth = design1.modeler.create_rectangle(origin=["stator_outer_radius - stator_back_yoke_thick", "-stator_teeth_width/2", 0], sizes=["-stator_teeth_length", "stator_teeth_width"], name="stator_teeth", material="copper")
     design1.modeler.duplicate_around_axis(assignment=[teeth], axis="Z", angle="(360/slot_num)deg", clones="slot_num", create_new_objects=False)
 
-    stator_gap = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_inner_radius + stator_gap", num_sides=72, name="stator_gap", material="copper")
-    stator_gap_sub = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_inner_radius", num_sides=72, name="stator_gap_sub", material="copper")
+    stator_gap = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_inner_radius + stator_gap", num_sides=circle_segments, name="stator_gap", material="copper")
+    stator_gap_sub = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_inner_radius", num_sides=circle_segments, name="stator_gap_sub", material="copper")
     design1.modeler.subtract(blank_list=stator_gap, tool_list=[stator_gap_sub], keep_originals=False)
 
     slot_opening = design1.modeler.create_rectangle(origin=[0, "-slot_opening/2", 0], sizes=["stator_outer_radius", "slot_opening"], name="slot_opening", material="copper")
@@ -70,7 +71,7 @@ def create_ipmsm_design(project: Any, sim: Any, design_name: str = "IPMSM") -> t
         material="copper"
     )
 
-    stator_gap_sub_temp = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_inner_radius", num_sides=72, name="stator_gap_sub_filler", material="copper")
+    stator_gap_sub_temp = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_inner_radius", num_sides=circle_segments, name="stator_gap_sub_filler", material="copper")
     design1.modeler.subtract(blank_list=stator_gap_filler, tool_list=[stator_gap_sub_temp], keep_originals=False)
     design1.modeler.duplicate_around_axis(assignment=[stator_gap_filler], axis="Z", angle="(360/slot_num)deg", clones="slot_num", create_new_objects=False)
 
@@ -156,8 +157,8 @@ def create_ipmsm_design(project: Any, sim: Any, design_name: str = "IPMSM") -> t
 
     # rotator modeling
 
-    rotator = design1.modeler.create_circle(origin=[0, 0, 0], radius="rotor_radius", num_sides=72, name="rotator", material="copper")
-    shaft = design1.modeler.create_circle(origin=[0, 0, 0], radius="shaft_radius", num_sides=72, name="shaft", material="copper")
+    rotator = design1.modeler.create_circle(origin=[0, 0, 0], radius="rotor_radius", num_sides=circle_segments, name="rotator", material="copper")
+    shaft = design1.modeler.create_circle(origin=[0, 0, 0], radius="shaft_radius", num_sides=circle_segments, name="shaft", material="copper")
     design1.modeler.subtract(blank_list=rotator, tool_list=[shaft], keep_originals=True)
     rotator.color = [156, 156, 156]
     shaft.color = [192, 192, 192]
@@ -190,8 +191,8 @@ def create_ipmsm_design(project: Any, sim: Any, design_name: str = "IPMSM") -> t
         design1.modeler.delete(assignment=others)
     magnet_space = design1.modeler.get_object_from_name(best.name)
 
-    temp = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_outer_radius", num_sides=72, name="temp", material="air")
-    temp_sub = design1.modeler.create_circle(origin=[0, 0, 0], radius="rotor_radius - magnet_shield_thick", num_sides=72, name="temp_sub", material="air")
+    temp = design1.modeler.create_circle(origin=[0, 0, 0], radius="stator_outer_radius", num_sides=circle_segments, name="temp", material="air")
+    temp_sub = design1.modeler.create_circle(origin=[0, 0, 0], radius="rotor_radius - magnet_shield_thick", num_sides=circle_segments, name="temp_sub", material="air")
     design1.modeler.subtract(blank_list=temp, tool_list=[temp_sub], keep_originals=False)
     design1.modeler.subtract(blank_list=magnet_space, tool_list=[temp], keep_originals=False)
 

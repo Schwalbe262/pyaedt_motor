@@ -346,3 +346,32 @@
 - The coordinator now projects path/SHA from the full sealed Stage3 decision while retaining its later exact-proof reconstruction; related104/104 plus compile/diff-check pass. Next: commit/deploy this minimal successor and resume the existing batch1 without regenerating or duplicating tasks.
 - Commit `43a44f6` was deployed5/5 and regenerated the exact300-row/50-group plan, but continuation again stopped before POST because its batch-local completed-Stage1 PID files had no producer; prefix/project queued/running stayed0 and that Task is Disabled.
 - The coordinator now materializes no-replace PID markers from the exact inactive terminal decision owner (live resumed owner62356), rejects active/foreign/tampered evidence, and passes related107/107 plus Ruff/compile/diff-check with independent P0/P1=0; NTFS-portability/test-depth P2s are nonblocking. Next: commit/deploy under a fresh config-bound campaign suffix and submit300.
+
+## 2026-07-19 - Adaptive batch1 failed-geometry recovery
+- Commit `deccea7` is pushed and deployed5/5; related recovery/continuation/coordinator/activation tests pass117/117 plus Ruff/compile/diff-check.
+- Batch1 has294 valid rows; one deterministic geometry failed all six controls after bounded retry. Recovery reuses294 rows and replaces only that geometry with pinned hash `3263dc3e...55f` (zero prior/current/calibration overlap).
+- Original prefix has306 attempts and is draining its final long-running cases under cap300; the disabled `409027e` controller remains the sole live writer until it publishes exact terminal failure evidence.
+- Next: start the clean `deccea7` coordinator on the same campaign identity, submit only six recovery cases, retrain1600, then route automatically to adaptive batch2 or NSGA-II/target-load.
+
+## 2026-07-20 - Final legacy p174 NSGA-II and FEA audit
+- Final root `C:\Users\peets\NEC\pyaedt_motor_blob_lf_325\material\nsga2_draft_20260720\nsga2_final_p174_physical_nominal_20260720` contains 297 strict Pareto designs, 200 rank-1 presentation candidates, and 10 representative FEA cases.
+- Scheduler tasks 63758-63767 completed 10/10 on n116 in 46:35 batch wall time; full-360 symmetry=1 torque was 17.56-20.30 Nm, so 0/10 passed the 65.1 Nm target.
+- Mean surrogate/FEA torque ratio 3.992 and diagnostic 4x-FEA MAE 1.230 Nm identify the legacy symmetry-multiplier target scale; decision is `REJECT_AND_RETRAIN`.
+- `MODEL_NSGA2_VS_FEA_VALIDATION_REPORT.md` and the requested clean Volume-Efficiency scatter are in the final root; next rebuild the physical symmetry=1 surrogate and rerun NSGA-II/FEA.
+- Latest completed surrogate is the 1600-row recovery bundle under `collected\ipmsm_v2_adaptive_combined_v4r10_409027e`; all rows are full-360/symmetry=1/dq-v2, so it removes the p174 systematic x4 contract.
+- It remains preview-only: primary R2 fails 7/8 (torque 0.8457, core 0.9141, solid 0.7548, efficiency 0.6031) with torque conformal error 10.28 Nm; use the v2 optimizer/custom preview adapter and new dq-v2 FEA, not the legacy runner or old legacy-beta FEA.
+
+## 2026-07-20 - Presentation parity plots refreshed
+- `model_actual_vs_predicted` and all eight `by_data_version` sets were regenerated with zero-actual rows omitted from PNG MAPE; each set has eight target PNGs plus one montage.
+- Ld/Lq PNGs exist in the root and every version; p098 solid-loss MAPE now displays 59.84%, and all 8/8 version renders completed with exact R2/MAE/RMSE reproduction.
+- Preserved FEA tasks63768-63777 produced 10/10 AEDT files; local count, byte size, and SHA-256 all validate against `aedt_projects_index.csv`.
+
+## 2026-10-30 - Research rebuild part 1
+- Branch `research/ipmsm-rebuild-20261030`; pre-existing dirty source/notebooks and all Git refs are backed up and verified at `D:\IPMSM_Archive\pre_rebuild_20261030_161616`.
+- User approved 7.5kW at1200/5000rpm, diameter<=300mm, 3000 total FEA attempts incl retries, active cap300, Y source/C runtime/D archive, and local+origin consolidation. Mail-list instruction was withdrawn; do not use those mails.
+- Integrated keepalive/CSV delimiter/Nonemm fixes as02d1cf5,b4db368,319bd52; added strict setup, v3 waveform integration/periodicity, explicit magnet eddy policy, exact arcs, timings, package CLI and audit docs.
+- Runtime is `C:\Users\peets\NEC\pyaedt_motor_runtime\rebuild_20261030`; source and source_v2 are separate immutable running copies; package is editable-installed in pyaedt2026v1.
+- Exact-arc setup passed; first local FEA rb3a_local_fea_0001 was ok in230.823s/solve191.970s, but iron-loss cycle drift41.623% rejects the2-period training profile.
+- FEA2 (4x90, explicit eddy policy) passed steady state in498.386s/solve452.452s; core drift0.3237%, torque32.6608Nm. Before/after solid loss~7.51W does NOT prove old loss omission. Total FEA attempts2/3000.
+- Focused150 tests+syntax pass; Y full1516 had18 failures/100 errors (9 producer path errors fixed); C-native full replay pending. BDF induced-voltage reconstruction cuts measured power residual5.23% to0.0213%; raw exports preserved. Old84-case plan NOT submitted; regenerate for latest contract.
+- Next: verify native CLI, commit/push checkpoint, C-native full tests, new physical-zero calibration and isolated cluster smoke then paired profiles; complete model improvement, actual design FEA and cleanup. v3 training now requires steady state, corrected voltage, <=1% power residual and one producer. Use atomic source replacement on Y (truncate/strict-resolve defects confirmed).

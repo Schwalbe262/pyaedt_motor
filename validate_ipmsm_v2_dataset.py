@@ -243,7 +243,10 @@ def validate_rows(
     group_splits: dict[str, set[str]] = {}
     group_hashes: dict[str, set[str]] = {}
     hash_groups: dict[str, set[str]] = {}
-    for column in FINGERPRINT_COLUMNS:
+    fingerprint_columns = list(FINGERPRINT_COLUMNS)
+    if "input_metric_contract_version" in available:
+        fingerprint_columns += ["input_metric_contract_version", "input_producer_fingerprint"]
+    for column in fingerprint_columns:
         if column in available:
             summary.fingerprint_values[column] = set()
 
@@ -278,6 +281,13 @@ def validate_rows(
             summary.add_issue("status_not_ok")
             continue
         summary.ok_rows += 1
+
+        if "input_metric_contract_version" in available:
+            from module.ipmsm_waveform_quality import v3_training_row_issues
+            if not str(row.get("input_metric_contract_version", "")).strip():
+                summary.add_issue("v3_physics:missing_metric_contract")
+            for issue in v3_training_row_issues(row):
+                summary.add_issue("v3_physics:" + issue)
 
         if str(row.get("input_dataset_schema_version") or "").strip() != SCHEMA_VERSION:
             summary.add_issue("schema_version_mismatch")
@@ -318,7 +328,7 @@ def validate_rows(
         if current_driven:
             if row.get("output_phase_current_source") != "measured_three_phase":
                 summary.add_issue("phase_current_not_measured_three_phase")
-            if row.get("output_phase_voltage_source") != "measured_three_phase":
+            if row.get("output_phase_voltage_source") not in {"measured_three_phase", "flux_derivative_three_phase"}:
                 summary.add_issue("phase_voltage_not_measured_three_phase")
             peak = finite_float(row.get("input_i_peak_a"))
             beta_rad = math.radians(finite_float(row.get("input_beta_dq_deg")))

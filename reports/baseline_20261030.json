@@ -1,0 +1,164 @@
+{
+  "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\collected\\ipmsm_v2_adaptive_combined_v4r10_409027e\\ipmsm_v2_foundation_through_adaptive_batch_0001_1600_recovery\\merged_results.csv",
+  "rows": 1600,
+  "columns": 704,
+  "status": {
+    "unique": 1,
+    "counts": {
+      "ok": 1600
+    }
+  },
+  "geometry_group_id": {
+    "unique": 260,
+    "counts": {
+      "v2s2_geometry_0014_1f487ad1981a": 7,
+      "v2s2_geometry_0011_58755694cd14": 7,
+      "v2s1_geometry_0042_4bdf6c06f0b7": 7,
+      "v2s1_geometry_0043_0579da8e0a69": 7,
+      "v2s1_geometry_0044_689a6c65bf42": 7,
+      "v2s1_geometry_0045_30f01c41784c": 7,
+      "v2s1_geometry_0046_0f86ef2f7c37": 7,
+      "v2s2_geometry_0002_4f6c99e3f3cc": 7
+    }
+  },
+  "doe_split": {
+    "unique": 3,
+    "counts": {
+      "train": 970,
+      "test": 324,
+      "calibration": 306
+    }
+  },
+  "input_model_extent": {
+    "unique": 1,
+    "counts": {
+      "full_360": 1600
+    }
+  },
+  "input_symmetry_factor": {
+    "unique": 1,
+    "counts": {
+      "1": 1600
+    }
+  },
+  "input_beta_convention": {
+    "unique": 1,
+    "counts": {
+      "dq_current_advance_v2": 1600
+    }
+  },
+  "input_setup_fingerprint": {
+    "unique": 1,
+    "counts": {
+      "setup_v2:sha256:82badcd7712d9f4ddfce6e7b46b081e941a6995480f094c8cb9c2001d0847a84": 1600
+    }
+  },
+  "input_quality_profile": {
+    "unique": 1,
+    "counts": {
+      "reference_ultra": 1600
+    }
+  },
+  "input_material_fingerprint": {
+    "unique": 1,
+    "counts": {
+      "materials_v2:sha256:07f6b3fce02dfb83cd79130c472725e185097796949ba34847192bcd848c04ee": 1600
+    }
+  },
+  "elapsed_s": {
+    "min": 1990.678,
+    "median": 4626.996499999999,
+    "p90": 11545.438000000002,
+    "max": 18998.222
+  },
+  "input_base_rpm": {
+    "min": 1200.0,
+    "median": 1200.0,
+    "p90": 5000.0,
+    "max": 5000.0
+  },
+  "input_i_peak_a": {
+    "min": 34.45,
+    "median": 86.1200943628559,
+    "p90": 129.46904672994282,
+    "max": 137.8
+  },
+  "input_beta_dq_deg": {
+    "min": 0.0,
+    "median": 40.41810069233179,
+    "p90": 73.66306730359793,
+    "max": 80.0
+  },
+  "input_transient_periods": {
+    "min": 12.0,
+    "median": 12.0,
+    "p90": 12.0,
+    "max": 12.0
+  },
+  "input_steps_per_period": {
+    "min": 150.0,
+    "median": 150.0,
+    "p90": 150.0,
+    "max": 150.0
+  },
+  "input_stator_outer_radius": {
+    "min": 120.06685992702842,
+    "median": 154.0929359011352,
+    "p90": 176.36308860406282,
+    "max": 179.94802935048938
+  },
+  "diameter_over_300mm_rows": 914,
+  "groups_crossing_splits": 0,
+  "repeat_rows": 40,
+  "test_metrics": [
+    {
+      "target": "output_torque_last_avg_nm",
+      "R2": 0.8456944942791902,
+      "MAE": 3.757774068120272,
+      "RMSE": 5.360049091039485
+    },
+    {
+      "target": "output_torque_last_max_nm",
+      "R2": 0.8068379146745353,
+      "MAE": 4.48199704312682,
+      "RMSE": 6.340359369093256
+    },
+    {
+      "target": "output_solidloss_last_avg_w",
+      "R2": 0.7548467300108519,
+      "MAE": 16.12887165728456,
+      "RMSE": 26.88919930554128
+    },
+    {
+      "target": "output_coreloss_last_avg_w",
+      "R2": 0.9141343402933104,
+      "MAE": 29.43629564126641,
+      "RMSE": 50.53835860132183
+    },
+    {
+      "target": "output_ld_last_avg_h",
+      "R2": 0.746981414212361,
+      "MAE": 0.0001261096596619,
+      "RMSE": 0.000160085787797
+    },
+    {
+      "target": "output_lq_last_avg_h",
+      "R2": 0.9225829617115467,
+      "MAE": 8.382769239386531e-05,
+      "RMSE": 0.0001062544000537
+    },
+    {
+      "target": "output_total_loss_last_avg_w",
+      "R2": 0.9552623626186048,
+      "MAE": 37.08993606481794,
+      "RMSE": 63.37505983619534
+    },
+    {
+      "target": "output_efficiency_last_pct",
+      "R2": 0.6030739428980751,
+      "MAE": 2.563320135178815,
+      "RMSE": 5.152421652575473
+    }
+  ],
+  "primary_r2_failures": 7
+}

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyaedt-motor-research"
+version = "0.3.0"
+description = "Reproducible IPMSM finite-element analysis and validated design"
+requires-python = ">=3.11"
+dependencies = ["numpy", "pandas", "scipy", "scikit-learn", "lightgbm"]
+
+[project.optional-dependencies]
+fea = ["pyaedt>=0.22,<1"]
+optimization = ["pymoo==0.6.2"]
+
+[project.scripts]
+ipmsm = "pyaedt_motor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

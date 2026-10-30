@@ -14,7 +14,7 @@
 - 시뮬레이션 정확도 향상.
 - 시뮬레이션 시간이 크게 증가하는 개선은 피한다.
 - 기존 run path인 `controller.py` -> `simulation1.sh` -> `subprocess_run.py` -> `run_ipmsm_batch.py`를 보존하면서 deterministic 기능, tests, docs, UI/report hooks를 보강한다.
-- Ansys simulation은 한 번에 최대 200개까지 병렬 실행할 수 있고, 검증된 batch를 여러 번 반복할 수 있지만, 각 batch 실행 전에는 setup-only/smoke validation과 명확한 실험 계획을 먼저 통과해야 한다.
+- Approved 2026-10-30: IPMSM queued/running FEA cap is 300; new campaign budget is 3000 attempts including failures/retries (diagnostics300, training2400, design validation300). Each batch requires setup/smoke evidence and a non-overlapping plan.
 
 ## System Roles
 
