@@ -338,3 +338,11 @@ Y:에서 짧아지는 파일을 덮어쓴 뒤 이전 파일의 끝부분이 남�
 근거: 이 문서의 항목별 원본 경로, `R/pc2/independent_100936/{assessment.json,raw_seal.json}`(판정4aa01ea0…/70개 파일 봉인4bde963b…), `R/zero2_12c0271_20261031/parent_execution_state/submission_summary.json`, `R/z12/watch.log`. R은 `C:/Users/peets/NEC/pyaedt_motor_runtime/rebuild_20261030`입니다. 원시 보고서·실패 기록·고정 소스는 보존합니다.
 
 추가 확인: 1200 rpm 작업100937은 공용 `source_seal.json`을 두 작업이 동시에 생성하면서 `FileExistsError`로 중단됐습니다. `if exists` 확인과 `open('xb')` 사이의 경쟁이며 실행 준비 단계에서 발생했습니다. stderr와 스케줄러 실패 메시지가 일치하고, 모터 해석 명령에는 도달하지 않았습니다. 병렬 생성 시 동일한 검증 파일은 안전하게 공유하고 다른 바이트는 거부하도록 별도 C 후보와 동시 실행 검사를 준비 중입니다.
+
+
+## 병렬 검증 파일 게시 경합 수정
+
+- **원인 확인:**100937의 stderr459B와 스케줄러 실패 메시지가 같은 `FileExistsError`를 기록했습니다. 두 요청이 같은 source seal 경로에서 exists 확인 후 xb 생성을 경쟁했습니다. 현재 원격 파일22,775B는 기대 SHA와 같으며 내용 불일치는 없습니다. 원본 실패·요청·실행 중100938을 보존했습니다. 진단 증거 `R/zero2_failure100937_diagnostic_20261031/diagnosis.json` SHA6088bdbf…/10개 파일 봉인df4d685a….
+- **수정:** 각 작업이 같은 디렉터리의 고유 임시 파일에 전체 바이트를 쓰고 flush/fsync 후, 덮어쓰지 않는 hardlink로 게시합니다. 이미 있으면 전체 바이트가 같은 경우만 허용하고, 다르거나 부분 파일이면 보존하며 거부합니다. finally에서는 자신이 만든 임시 파일만 삭제합니다. 다른 오류를 무시하거나 replace로 기존 검증 파일을 덮지 않습니다.
+- **검증:** 동일 내용 동시 생성·다른 내용 경합·부분 쓰기 중단·fsync 실패·link 실패·기존 부분/다른 파일의7개 결정적 검사가 통과했습니다. 부모의279개 literal Git 파일 C 스냅샷에2개 변경을 적용해 관련19개 파일315개 검사도 통과했습니다. 나머지278개 원본 파일과 물리 producer는 그대로입니다. staged2개 바이트는 검토·검증한 C와 같습니다.
+- **다음:** Linux/GPFS의 hardlink 동작은 해석 없는 동시 게시 스모크로 확인한 뒤1200 rpm retry1을 새 식별자·게시 경로로 제출합니다. 현재 새 예약·재제출은 없고 원장은122입니다. 고정 source11은 변경하지 않으며, coordinator가 생성하는 bootstrap만 수정합니다. 기존 사용자 수정2개는 백업과 byte-identical입니다. 근거 `R/ds1/FROZEN.json` 8c5c899b… 및 `R/dispatch_atomic_parent_20261031/{parent_overlay_review.json,parent_test_results.json,parent_promotion.json}`.

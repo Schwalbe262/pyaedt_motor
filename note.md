@@ -4357,3 +4357,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - options/failure/next: 사전 실행 오류와 실제 solver 오류를 구분하도록 Legacy에 GET-only 원인 확인을 맡겼다. 실패 원본을 보존하고 자동 재시도하지 않는다. 영점 완료 뒤 잔차×OutputError 부하4건, 독립 시간/메시 비교, 새 학습 및 두 속도 최적설계 검증 순서. 중간보고는 docs/RESEARCH_AUDIT.md에 추가하고 HANDOFF현재4행 갱신(8 diff lines)했다. Native/FEA를 호출하는 보고 작업은 없다. 토큰샘플러unsupported는 이전 확인을 재사용하고 재시도하지 않았다.
 - part40 추가 확인: 100937의 task.failure_message와 stderr459B가 동일한 FileExistsError를 기록했다.
   공용 remote/dispatch_v1/4fd957063ca5bf03/source_seal.json 생성의 exists→open('xb') 경쟁이며 Native/Analyze 전에 중단됐다. Legacy가 원본 GET 증거를 봉인 중이고 V3가 C-only 수정·동시성 검사를 준비한다. 원본 요청·고정 source11·실행 중5000rpm 작업은 변경하지 않는다.
+
+
+## 2026-10-31T06:08:18.938879+00:00 part41 | 공용 source seal 동시 게시 경합 수정
+- goal/hypothesis:100937의 해석 전 파일 생성 경합을 없애고, 동일 입력의 병렬 실행을 허용하면서 불일치 검증 파일은 거부한다.
+- actions/options: Legacy GET4회로 원본 stderr459B·task failed78·요청 일치·원격22,775B seal561145…를 확인했다(진단6088bdbf…/10개 원본df4d685a…). V3 C후보는 고유 임시 파일 write/flush/fsync→atomic no-clobber os.link→완전 바이트 검증→자기 임시 파일만 삭제. FileExists를 무조건 성공 처리하거나 replace로 덮는 방식은 사용하지 않는다.
+- metrics/result: 기존 같은 바이트 경합은 FileExists1/성공1로 재현, 수정은 같은 바이트2성공. 결정적 새7개PASS; 부모 fresh279literal Git eb1d14e C에dispatch+새test만 overlay, 나머지278개SHA동일/물리producer570불변. 최소7개PASS0.375초 후 관련19파일315PASS40.594초/모든 project import C. 결과77bcca37882f93c87b7cf0321fa908d7b51bf121fe72f0472e68370275779e43. 검토한 코드와 staged2개가 바이트동일, 보호된 사용자 수정2개는 D백업과 동일.
+- failure/next: GPFS 실제 hardlink 스모크는 아직 미실행이므로 준비 후0Native 실행으로 확인한다. Legacy retry1200 새case/input/pub 준비, source11 runtime과5000rpm 원본 작업은 그대로. 새FEA예약0/원장122; 진단300·학습2400·설계300/동시300 기준 유지. 다음 actual filesystem smoke→root one-time retry→freshzero→loaded4. insight는 실제GPFS검증 뒤 판단, 토큰샘플러unsupported 재시도 없음.
