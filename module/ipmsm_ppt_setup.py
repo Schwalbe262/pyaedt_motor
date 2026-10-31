@@ -1806,6 +1806,72 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
     return result
 
 
+def audit_native_model_depth(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
+    """Fail closed on native 2D depth; Python proxy/setter attributes are not evidence."""
+    m2d = _m2d(design)
+    audit: dict[str, Any] = {
+        "source": "native_DesignSettings.GetPropValue/GetPropSIValue_and_StackLength_SI",
+        "passed": False,
+        "declared_stack_length_mm": None,
+        "commanded_stack_length_expression": None,
+        "expected_depth_SI_m": None,
+        "model_units_live": None,
+        "native_depth_property": None,
+        "native_depth_expression": None,
+        "native_depth_SI_m": None,
+        "StackLength_expression_live": None,
+        "StackLength_SI_m": None,
+        "relative_tolerance": 1e-9,
+        "absolute_tolerance_m": 1e-12,
+    }
+
+    def positive(value: Any, label: str) -> float:
+        if isinstance(value, bool) or not math.isfinite(float(value)) or float(value) <= 0:
+            raise ValueError(label + " must be a positive finite number")
+        return float(value)
+
+    try:
+        declared = positive(spec.stack_length_mm, "declared stack_length_mm")
+        # This is the exact command emitted by apply_ppt_design_variables.
+        commanded_mm = f"{declared:g}"
+        expected = float(commanded_mm) * 1e-3
+        audit.update(declared_stack_length_mm=declared,
+                     commanded_stack_length_expression=commanded_mm + "mm", expected_depth_SI_m=expected)
+        units = m2d.modeler.oeditor.GetModelUnits()
+        audit["model_units_live"] = units if isinstance(units, str) else None
+        if not isinstance(units, str) or units.strip() != "mm":
+            raise ValueError("native editor model units must be mm")
+        settings = m2d.odesign.GetChildObject("Design Settings")
+        names = [str(name) for name in settings.GetPropNames()
+                 if re.sub(r"[^a-z]", "", str(name).lower()) == "modeldepth"]
+        if len(names) != 1:
+            raise ValueError("native Model Depth property is unavailable or ambiguous")
+        audit["native_depth_property"] = names[0]
+        expression = settings.GetPropValue(names[0])
+        if not isinstance(expression, str) or not expression.strip():
+            raise ValueError("native Model Depth expression is unavailable")
+        audit["native_depth_expression"] = expression
+        depth_si = positive(settings.GetPropSIValue(names[0]), "native Model Depth")
+        audit["native_depth_SI_m"] = depth_si
+        stack_expression = m2d.odesign.GetVariableValue("StackLength")
+        if not isinstance(stack_expression, str) or not stack_expression.strip():
+            raise ValueError("native StackLength expression is unavailable")
+        audit["StackLength_expression_live"] = stack_expression
+        stack_si = positive(m2d.get_evaluated_value("StackLength"), "native StackLength")
+        audit["StackLength_SI_m"] = stack_si
+        for label, actual in (("native StackLength", stack_si), ("native Model Depth", depth_si)):
+            if not math.isclose(actual, expected, rel_tol=audit["relative_tolerance"],
+                                abs_tol=audit["absolute_tolerance_m"]):
+                raise ValueError(f"{label}={actual:g}m differs from commanded StackLength={commanded_mm}mm")
+    except Exception as exc:
+        audit["error"] = f"{type(exc).__name__}: {exc}"
+        error = ValueError("Native ModelDepth audit failed: " + str(exc))
+        error.native_model_depth_audit = audit
+        raise error from exc
+    audit["passed"] = True
+    return audit
+
+
 def create_ppt_transient_setup(design: Any, spec: IPMSMPPTSpec) -> Any:
     """Create a transient setup with a fixed number of steps per electrical period."""
     validate_ppt_spec_contract(spec)
@@ -1983,6 +2049,7 @@ def configure_ipmsm_from_ppt(
     }
 
     m2d = _m2d(design)
+    result["native_model_depth_audit"] = audit_native_model_depth(design, spec)
     try:
         result["validation"] = m2d.validate_simple()
     except Exception as exc:
@@ -1997,6 +2064,13 @@ def configure_ipmsm_from_ppt(
         result["reports"] = create_ppt_reports(
             design, spec.setup_name, spec.compute_inductance, solver_output_error=spec.solver_output_error
         )
+
+    try:
+        result["native_model_depth_audit_post_validation"] = audit_native_model_depth(design, spec)
+    except ValueError as exc:
+        exc.native_model_depth_audit["stage"] = "after_validation_and_reports"
+        exc.native_model_depth_audit["before_validation"] = result["native_model_depth_audit"]
+        raise
 
     if analyze:
         solve_started = time.perf_counter()

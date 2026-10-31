@@ -2779,6 +2779,17 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                     row["artifact_winding_geometry_failure"] = str(failure_audit)
                 except Exception:
                     logging.exception("Could not preserve winding-geometry failure evidence for %s", case_id)
+        depth_audit = getattr(exc, "native_model_depth_audit", None)
+        if isinstance(depth_audit, dict):
+            row["error_class"] = "native_model_depth_invalid"
+            if project_path is not None:
+                failure_audit = project_path / "native_model_depth_failure.json"
+                try:
+                    with failure_audit.open("x", encoding="utf-8") as stream:
+                        json.dump(depth_audit, stream, ensure_ascii=False, allow_nan=False, indent=2)
+                    row["artifact_native_model_depth_failure"] = str(failure_audit)
+                except Exception:
+                    logging.exception("Could not preserve native-model-depth failure evidence for %s", case_id)
         if project is not None:
             try:
                 project.save()

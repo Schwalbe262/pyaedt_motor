@@ -40,6 +40,18 @@ class IPMSMPPTSetupContractTests(unittest.TestCase):
             "enable_ppt_transient_inductance",
             "create_ppt_transient_setup",
         )
+        # Legitimate native readback capability for the default49.45mm test model.
+        # Existing callback/validation assertions still run after the depth guard.
+        depth = mock.Mock()
+        depth.GetPropNames.return_value = ["Model Depth"]
+        depth.GetPropValue.return_value = "StackLength"
+        depth.GetPropSIValue.return_value = .04945
+        m2d.odesign = mock.Mock()
+        m2d.odesign.GetChildObject.return_value = depth
+        m2d.odesign.GetVariableValue.return_value = "49.45mm"
+        m2d.get_evaluated_value = mock.Mock(return_value=.04945)
+        m2d.modeler = mock.Mock()
+        m2d.modeler.oeditor.GetModelUnits.return_value = "mm"
         with contextlib.ExitStack() as stack:
             patched = {
                 name: stack.enter_context(mock.patch.object(ppt_setup, name, return_value="ok"))

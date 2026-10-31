@@ -1072,3 +1072,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: naive2/N sumcounted bothperiodicendpoints, biasedH1amplitude/phase andsampledensity; inclusive/exclusive analytictraces disagree.
 - After/evidence: DC+signedfundamental+H3/H5 closed/exclusive analyticcoefficients agree1e-12; irregulargridtimeweights recoverknowncoefficientswithin2e-5.49scopedtestsPASS; actualzero2amplitudes corrected-.670683/-.661718%, independentFFTcoeffsmatch1e-10;16raw/proof+oldzero immutable.
 - Remaining risk: finitegridquadratureerror remains; thispostprocessfixdoesnotresolveFEAcoreloss/nonperiodicity. Require reviewednewproducer calibrationprovenance; neverrewriteoldmanifest ormixfrozencomparisons.
+
+
+## 2026-10-31 10:20 KST | Verify native physical settings beyond input variables and AnalysisSetup
+- Source loop: part23; wrongdepthnineAEDT0589b688.../correctedca5rawseal74b00d64.../nativeSIevidence98f9a590...; main169testproofa8e3d20e... .
+- Improvement: forward property setters inprotocoladapters, read actualDesignSettings ModelDepthSI andmodelunits againsttheexactrenderedcommand before/aftervalidation andbeforeSolve. InputStackLengthand32Analysispropertiesalonearenotphysicaldepthproof.
+- Before: newNoAnalyze getter-onlyproxy shadowedmodel_depth='StackLength'; input43.6181mm/Analysis32checks passedwhiletwofullcasesstored1meter. SourceNoLoadwaveformgates alsoPassed despiteinvalidphysicalmodel.
+- After/evidence: proxyfix+actualSIguard metadata100922/23 bothread.0436181m before/AFTERandbothsavedAEDTsDepthStackLength/mm;oldfailed3preserved/neverrescaled.169mainunitchecks rejectshadow1m andlatevalidation/reportmutationbeforeAnalyze; :gcommandquantizationexplicit.
+- Remaining risk: correctedsettingsproofisnotFEAaccuracy/meshconvergence/runtimegain. RequireactualcorrectedfullFEA2andloadedquality; mainfullNativepipelineverificationstillpending.
