@@ -20,6 +20,7 @@ import sys
 import time
 
 SCHEMA = "public_owned_cli_batch_pilot_v1"
+RETAINED_INPUTS_CONTRACT = "public_cli_retained_inputs_v1"
 OWNER_SHA = "9c0a5c364d19e062f40cb6337a0df60b04c8f16eff00f5250245ea82bd7066f5"
 FEATURE = "ANSYSEM_FEATURE_F903567_CONTINUUM_AIR_2D_ENABLE"
 PRODUCER_FILES = ("run_ipmsm_batch.py", "module/ipmsm_geometry.py", "module/ipmsm_ppt_setup.py",
@@ -79,6 +80,20 @@ def write_new(path, value):
         stream.write(canonical_json(value))
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def copy_new_verified(source, target):
+    """Retain an exact quiescent input preimage; never overwrite or save CAD."""
+    source, target = Path(source), Path(target)
+    expected = record(source)
+    with source.open("rb") as original, target.open("xb") as retained:
+        while block := original.read(1024 * 1024):
+            retained.write(block)
+        retained.flush()
+        os.fsync(retained.fileno())
+    if record(target) != expected or record(source) != expected:
+        raise ValueError("prepared input changed while retaining preimage")
+    return {"path": str(target), **expected}
 
 
 def result_json(value):
@@ -381,6 +396,7 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
         raise ValueError("pilot output must be outside immutable source and library")
     output.mkdir(parents=True, exist_ok=False)
     result = {"schema": SCHEMA, "case_id": contract["case_id"], "mode": contract["mode"],
+              "retained_inputs_contract": RETAINED_INPUTS_CONTRACT,
               "status": "failed", "errors": [], "BatchSolve_launch_attempts": 0,
               "solver_state_uncertain": False, "automatic_retry_allowed": False,
               "Native_API_postprocess_calls": 0, "training_allowed": False,
@@ -415,6 +431,9 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
         if Path(runner.__file__).resolve() != (source / "run_ipmsm_batch.py").resolve():
             raise ValueError("public builder import origin mismatch")
         installation = owner.validate_installation(json.loads(read_sealed(contract["installation_binding"])), installation_record)
+        write_new(output / "installation_observed_before.json", installation)
+        result["installation_observation_before"] = {"path": str(output / "installation_observed_before.json"),
+                                                    **record(output / "installation_observed_before.json")}
         options = {**contract["options"], "simulation_dir": str(output / "scene"),
                    "result_csv": str(output / "builder_result.csv"), "analyze": False,
                    "cleanup_linux": False, "prepare_batch_reports": True}
@@ -431,11 +450,15 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
         from module.ipmsm_ppt_setup import PPT_REPORT_DEFS
         required = [k for k in PPT_REPORT_DEFS if not (k == "PPT_EnergyError" and not spec.solver_output_error)
                     and not (k == "PPT_Inductance_Matrix" and not spec.compute_inductance)]
-        saved = reader(project)
+        result["prepared_unsolved_project"] = copy_new_verified(project, output / "prepared_unsolved.aedt")
+        saved = reader(Path(result["prepared_unsolved_project"]["path"]))
         if (saved["solutions"] != {} or set(saved["report_definitions"]) != set(required)
                 or set(saved["actual_reports"]) != set(required)):
             raise ValueError("fresh unsolved public CAD with exact reports required")
-        result["prepared_project"] = {"path": str(project), **record(project)}
+        prepared_record = {k: result["prepared_unsolved_project"][k] for k in ("bytes", "sha256")}
+        if record(project) != prepared_record:
+            raise ValueError("prepared project differs from retained unsolved preimage")
+        result["prepared_project"] = {"path": str(project), **prepared_record}
         write_new(output / "prepared_native_closure.json", saved)
         if verify_inputs(contract)[1] != before:
             raise ValueError("inputs changed before solver launch")
@@ -448,12 +471,22 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
         with (output / "options.txt").open("x", encoding="ascii", newline="\n") as stream:
             stream.write("$begin 'Config'\n'Desktop/Settings/ProjectOptions/NumberOfProcessors'=4\n"
                          "'Maxwell 2D/NumCoresPerDistributedTask'=4\n$end 'Config'\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        result["batch_options"] = {"path": str(output / "options.txt"), **record(output / "options.txt")}
         result["solver_state_uncertain"] = True
         write_new(output / "owned_cli_solver_state.json", {"schema": SCHEMA, "stage": "before_cli_intent",
+                  "retained_inputs_contract": RETAINED_INPUTS_CONTRACT,
                   "case_id": contract["case_id"], "producer": contract["expected_producer"],
                   "solver_state_uncertain": True, "automatic_retry_allowed": False,
                   "command": record(output / "command.json"), "prepared_project": record(project),
+                   "prepared_unsolved_project": result["prepared_unsolved_project"],
+                   "installation_observation_before": result["installation_observation_before"],
+                   "batch_options": result["batch_options"],
                   "reservation_receipt": contract["reservation_receipt"]})
+        read_sealed(result["prepared_unsolved_project"])
+        read_sealed(result["installation_observation_before"])
+        read_sealed(result["batch_options"])
         if verify_inputs(contract)[1] != before or record(project) != {
             k: result["prepared_project"][k] for k in ("bytes", "sha256")
         }:
@@ -468,6 +501,7 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
         result["solver_state_uncertain"] = False
         result["F903_scope"]["solver_observed_environment"] = launched["Native_processes"][0]["selected_environment"][FEATURE]
         write_new(output / "owned_cli_solver_completion.json", {"schema": SCHEMA, "stage": "known_normal_cli_exit",
+                  "retained_inputs_contract": RETAINED_INPUTS_CONTRACT,
                   "case_id": contract["case_id"], "producer": contract["expected_producer"],
                   "intent_record": record(output / "owned_cli_solver_state.json"),
                   "solver_owner_record": record(output / "solver_owner_result.json"),
@@ -494,9 +528,17 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
             if control_record is not None:
                 read_sealed(control_record)
             result["inputs_unchanged"] = verify_inputs(contract)[1] == before
-            result["installation_files_unchanged"] = (
-                owner.validate_installation(json.loads(read_sealed(contract["installation_binding"])), installation_record) == installation
-                if "installation" in locals() else None)
+            if "installation" in locals():
+                installation_after = owner.validate_installation(json.loads(read_sealed(contract["installation_binding"])), installation_record)
+                write_new(output / "installation_observed_after.json", installation_after)
+                result["installation_observation_after"] = {"path": str(output / "installation_observed_after.json"),
+                                                           **record(output / "installation_observed_after.json")}
+                result["installation_files_unchanged"] = installation_after == installation
+            else:
+                result["installation_files_unchanged"] = None
+            for key in ("prepared_unsolved_project", "installation_observation_before", "batch_options"):
+                if key in result:
+                    read_sealed(result[key])
             if not result["inputs_unchanged"] or result["installation_files_unchanged"] is False:
                 raise ValueError("source/library/system/install inputs changed")
         except Exception as exc:

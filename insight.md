@@ -1134,3 +1134,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: UTF-8 ExportProfile 표를 `$begin 'Profile'` 문법 전용 파서에 넣어 리소스 분석이 실패했다. 인코딩을 바꾸는 것으로 해결할 문제가 아니었다.
 - After/evidence: 두 형식에서 기존 코어·비선형 잔차·종료 판정과 literal mesh/Calls/Elapsed가 실제4쌍에서 일치했다. 기존17+신규15개 검사와 실제CLI가 통과했고 원본 오류와 해석 상태는 그대로 남겼다.
 - Remaining risk: 다른 언어/표 형식은 명시 지원 전까지 거부한다. 모르는 시간 단위는 null이며 부모/자식 시간은 합산하지 않는다. Matrix Calls를 비선형 반복수로, 리소스 관측을 물리 정확도 인증으로 해석하지 않는다.
+
+## 2026-11-01T06:02:02+09:00 | 실제 설치 링크·미계산 출력에 맞춘 검증 분리
+- source_loop: part63~65, actualFS100982/publicNative0 100983; Rootindependentf7d2b8d2.
+- improvement: 소스·계약은 엄격한 일반파일 검사를 유지하고, 검증된 벤더 설치 링크만 별도 대상 검사와 전후 전체 링크 검증을 사용한다. 설정 전용 미계산 수치는 메모리NaN을 유지하고 결과JSON에는null과항목경로로 보존한다.
+- before: 같은 파일 검사로 실제ansysedt링크를 거부했고, 실제공개empty-summary22NaN을 중간JSON에 저장하면 실패했다. 작은 가짜builder행만으로는 놓쳤다.
+- after: 실제Linux설치 링크의정상/오류연결을 구분하고, 실제Native0가68초/exit0으로 생성·검증·종료와22null을 통과했다. 원래수치/물리5파일/품질기준은불변이다.
+- evidence: Root33/34·원래코드실패/수정코드통과·독립445e1c53/d5075f14·FS26파일·Native053파일 전체SHA/재파싱.
+- remaining_risk: CLI실제수치·수렴·저장동등성·설계성능은별도증거가필요하다. 이수정만으로학습/최종설계를승인하지않는다.

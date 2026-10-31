@@ -1,0 +1,359 @@
+{
+  "Native_API_POST_Y_changes": 0,
+  "all10_existing_sensitivity_limits_pass": true,
+  "cases": [
+    {
+      "all_matrix_records_match_four_core_request": true,
+      "cycle_means": {
+        "core_W": [
+          14.054153300800095,
+          24.953994996509532,
+          25.110062579265378
+        ],
+        "solid_W": [
+          8.375136836146174,
+          8.36555273062905,
+          8.36602223922749
+        ],
+        "torque_Nm": [
+          20.52663530926412,
+          20.483895233764375,
+          20.48302842572495
+        ]
+      },
+      "dq_last_cycle_mean_h": {
+        "dd": 0.000675182439159752,
+        "dq": 3.548411278630992e-05,
+        "qd": 3.5484112786309915e-05,
+        "qq": 0.0006650839752101205
+      },
+      "global_native_triangles": [
+        9828
+      ],
+      "matrix_records": 901,
+      "metrics": {
+        "output_coreloss_last_avg_w": 25.110062579265374,
+        "output_efficiency_last_pct": 91.93447604411358,
+        "output_ld_last_avg_h": 0.0006751824391597523,
+        "output_lq_last_avg_h": 0.0006650839752101205,
+        "output_phase_voltage_last_peak_abs_v": 27.146165260714472,
+        "output_solidloss_last_avg_w": 8.36602223922749,
+        "output_torque_last_avg_nm": 20.483028425724942,
+        "output_torque_last_max_nm": 25.1035410735446,
+        "output_total_loss_last_avg_w": 225.8178207365594,
+        "output_voltage_span_last_peak_v": 48.38490000039623
+      },
+      "periods": 3,
+      "physical_issues": [],
+      "power_balance_last_pct": 0.0058029731602923535,
+      "raw_report_grid_checks": {
+        "PPT_Back_EMF": {
+          "passed": true,
+          "points": 901,
+          "start_s": 0.0,
+          "stop_s": 0.0375
+        },
+        "PPT_Cogging_Torque": {
+          "passed": true,
+          "points": 901,
+          "start_s": 0.0,
+          "stop_s": 0.0375
+        },
+        "PPT_Flux_Linkages": {
+          "passed": true,
+          "points": 901,
+          "start_s": 0.0,
+          "stop_s": 0.0375
+        },
+        "PPT_Inductance_Matrix": {
+          "passed": true,
+          "points": 901,
+          "start_s": 0.0,
+          "stop_s": 0.0375
+        },
+        "PPT_Losses": {
+          "passed": true,
+          "points": 901,
+          "start_s": 0.0,
+          "stop_s": 0.0375
+        },
+        "PPT_PhaseA_Voltage_Limit": {
+          "passed": true,
+          "points": 901,
+          "start_s": 0.0,
+          "stop_s": 0.0375
+        },
+        "PPT_Phase_Currents": {
+          "passed": true,
+          "points": 901,
+          "start_s": 0.0,
+          "stop_s": 0.0375
+        },
+        "PPT_Phase_Voltages": {
+          "passed": true,
+          "points": 901,
+          "start_s": 0.0,
+          "stop_s": 0.0375
+        },
+        "PPT_Torque": {
+          "passed": true,
+          "points": 901,
+          "start_s": 0.0,
+          "stop_s": 0.0375
+        }
+      },
+      "steady_passed": true,
+      "task_exit_code_preserved": 1,
+      "task_id": 100984,
+      "time_scopes": {
+        "native_solution_process_elapsed_s": 901,
+        "native_transient_elapsed_s": 900,
+        "owned_CLI_load_solve_autoextract_shutdown_wall_s": 959.1266825180501,
+        "publication_wrapper_before_FS_wall_s": 1004.2448506206274,
+        "scheduler_started_to_finished_wall_s": 1036.0,
+        "whole_public_pilot_with_builder_wall_s": 1003.1771271824837
+      },
+      "worker_status_preserved": "solved_saved_closure_unproven"
+    },
+    {
+      "all_matrix_records_match_four_core_request": true,
+      "cycle_means": {
+        "core_W": [
+          14.054153300803888,
+          24.953994996512545,
+          25.110062579266597,
+          25.197944788067836,
+          25.284075082929636,
+          25.284712647707014
+        ],
+        "solid_W": [
+          8.375136836146257,
+          8.365552730628977,
+          8.366022239227574,
+          8.366009012193727,
+          8.366398783641845,
+          8.363632169611078
+        ],
+        "torque_Nm": [
+          20.526635309263963,
+          20.48389523376435,
+          20.48302842572503,
+          20.482582748401782,
+          20.483132475841455,
+          20.481042305919786
+        ]
+      },
+      "dq_last_cycle_mean_h": {
+        "dd": 0.0006751847686258351,
+        "dq": 3.548992763790099e-05,
+        "qd": 3.548992763790099e-05,
+        "qq": 0.0006652461241945865
+      },
+      "global_native_triangles": [
+        9828
+      ],
+      "matrix_records": 1801,
+      "metrics": {
+        "output_coreloss_last_avg_w": 25.284712647707,
+        "output_efficiency_last_pct": 91.92810051670952,
+        "output_ld_last_avg_h": 0.0006751847686258351,
+        "output_lq_last_avg_h": 0.0006652461241945865,
+        "output_phase_voltage_last_peak_abs_v": 27.18789922355866,
+        "output_solidloss_last_avg_w": 8.36363216961108,
+        "output_torque_last_avg_nm": 20.481042305919765,
+        "output_torque_last_max_nm": 25.1006716660251,
+        "output_total_loss_last_avg_w": 225.99008073538454,
+        "output_voltage_span_last_peak_v": 48.297925319700575
+      },
+      "periods": 6,
+      "physical_issues": [],
+      "power_balance_last_pct": 0.010527425007915304,
+      "raw_report_grid_checks": {
+        "PPT_Back_EMF": {
+          "passed": true,
+          "points": 1801,
+          "start_s": 0.0,
+          "stop_s": 0.075
+        },
+        "PPT_Cogging_Torque": {
+          "passed": true,
+          "points": 1801,
+          "start_s": 0.0,
+          "stop_s": 0.075
+        },
+        "PPT_Flux_Linkages": {
+          "passed": true,
+          "points": 1801,
+          "start_s": 0.0,
+          "stop_s": 0.075
+        },
+        "PPT_Inductance_Matrix": {
+          "passed": true,
+          "points": 1801,
+          "start_s": 0.0,
+          "stop_s": 0.075
+        },
+        "PPT_Losses": {
+          "passed": true,
+          "points": 1801,
+          "start_s": 0.0,
+          "stop_s": 0.075
+        },
+        "PPT_PhaseA_Voltage_Limit": {
+          "passed": true,
+          "points": 1801,
+          "start_s": 0.0,
+          "stop_s": 0.075
+        },
+        "PPT_Phase_Currents": {
+          "passed": true,
+          "points": 1801,
+          "start_s": 0.0,
+          "stop_s": 0.075
+        },
+        "PPT_Phase_Voltages": {
+          "passed": true,
+          "points": 1801,
+          "start_s": 0.0,
+          "stop_s": 0.075
+        },
+        "PPT_Torque": {
+          "passed": true,
+          "points": 1801,
+          "start_s": 0.0,
+          "stop_s": 0.075
+        }
+      },
+      "steady_passed": true,
+      "task_exit_code_preserved": 1,
+      "task_id": 100985,
+      "time_scopes": {
+        "native_solution_process_elapsed_s": 1838,
+        "native_transient_elapsed_s": 1836,
+        "owned_CLI_load_solve_autoextract_shutdown_wall_s": 1896.2063851449639,
+        "publication_wrapper_before_FS_wall_s": 1939.4265949875116,
+        "scheduler_started_to_finished_wall_s": 1963.0,
+        "whole_public_pilot_with_builder_wall_s": 1938.4014373235404
+      },
+      "worker_status_preserved": "solved_saved_closure_unproven"
+    }
+  ],
+  "comparison_data_unchanged_after_figure_only_style_fix": {
+    "bytes": 230999,
+    "sha256": "09c846677313b46bba7b5887525d4eff9c2687b85b0294d92cc37ce89cdb8930"
+  },
+  "existing_physical_and_steady_gates_pass": true,
+  "limitations": [
+    "Single matched G1/1200rpm/100A/beta30/300steps/residual1e-5/OutputErrorOFF pair.",
+    "Both use four Native solver cores; this is a period-duration comparison, not a core-scaling result.",
+    "Both original workers remain failed: solved_saved_closure_unproven; no admission or status promotion.",
+    "Exact construction/query/bulk-material evidence is separate from changed serialized geometry-cache/surface channels.",
+    "Prepared closure lacks same-instance before-thermal/surface raw witness; external 100983 is settings evidence only, P3 and a different builder instance.",
+    "No blanket serialization normalization, new tolerance, numerical-L certificate, spatial/profile convergence or training/model/final-design certificate."
+  ],
+  "matched_inputs_only_period_count_and_metadata_ids_differ": true,
+  "metric_deltas_reference_6_periods": {
+    "output_coreloss_last_avg_w": {
+      "candidate": 25.110062579265374,
+      "delta": -0.17465006844162545,
+      "error": 0.6907338472658655,
+      "kind": "relative_pct",
+      "limit": 5.0,
+      "passed": true,
+      "reference": 25.284712647707
+    },
+    "output_efficiency_last_pct": {
+      "candidate": 91.93447604411358,
+      "delta": 0.006375527404060222,
+      "error": 0.006375527404060222,
+      "kind": "absolute_pp",
+      "limit": 0.5,
+      "passed": true,
+      "reference": 91.92810051670952
+    },
+    "output_ld_last_avg_h": {
+      "candidate": 0.0006751824391597523,
+      "delta": -2.329466082810934e-09,
+      "error": 0.00034501164585687606,
+      "kind": "relative_pct",
+      "limit": 2.0,
+      "passed": true,
+      "reference": 0.0006751847686258351
+    },
+    "output_lq_last_avg_h": {
+      "candidate": 0.0006650839752101205,
+      "delta": -1.6214898446598874e-07,
+      "error": 0.024374284729926466,
+      "kind": "relative_pct",
+      "limit": 2.0,
+      "passed": true,
+      "reference": 0.0006652461241945865
+    },
+    "output_phase_voltage_last_peak_abs_v": {
+      "candidate": 27.146165260714472,
+      "delta": -0.04173396284418729,
+      "error": 0.15350197711496694,
+      "kind": "relative_pct",
+      "limit": 2.0,
+      "passed": true,
+      "reference": 27.18789922355866
+    },
+    "output_solidloss_last_avg_w": {
+      "candidate": 8.36602223922749,
+      "delta": 0.0023900696164105284,
+      "error": 0.028576933656823764,
+      "kind": "relative_pct",
+      "limit": 5.0,
+      "passed": true,
+      "reference": 8.36363216961108
+    },
+    "output_torque_last_avg_nm": {
+      "candidate": 20.483028425724942,
+      "delta": 0.0019861198051778217,
+      "error": 0.009697357075444158,
+      "kind": "relative_pct",
+      "limit": 1.0,
+      "passed": true,
+      "reference": 20.481042305919765
+    },
+    "output_torque_last_max_nm": {
+      "candidate": 25.1035410735446,
+      "delta": 0.002869407519501266,
+      "error": 0.011431596563151493,
+      "kind": "relative_pct",
+      "limit": 2.0,
+      "passed": true,
+      "reference": 25.1006716660251
+    },
+    "output_total_loss_last_avg_w": {
+      "candidate": 225.8178207365594,
+      "delta": -0.1722599988251261,
+      "error": 0.07622458395721719,
+      "kind": "relative_pct",
+      "limit": 3.0,
+      "passed": true,
+      "reference": 225.99008073538454
+    },
+    "output_voltage_span_last_peak_v": {
+      "candidate": 48.38490000039623,
+      "delta": 0.08697468069565417,
+      "error": 0.18007953782680902,
+      "kind": "relative_pct",
+      "limit": 2.0,
+      "passed": true,
+      "reference": 48.297925319700575
+    }
+  },
+  "producer": "producer_v3:sha256:307b1fd890dec70f23feb6daa5667a09fad370064de78acf58e66fba64a2beae",
+  "runtime_scopes_overlap_do_not_sum": true,
+  "schema": "public307b_matched_p36_filtered_summary_v1",
+  "short_over_long_runtime_ratios": {
+    "native_solution_process_elapsed_s": 0.49020674646354734,
+    "native_transient_elapsed_s": 0.49019607843137253,
+    "owned_CLI_load_solve_autoextract_shutdown_wall_s": 0.5058134441651115,
+    "publication_wrapper_before_FS_wall_s": 0.5178050322791897,
+    "scheduler_started_to_finished_wall_s": 0.5277636271013755,
+    "whole_public_pilot_with_builder_wall_s": 0.5175280557816891
+  },
+  "source_commit": "224fafd297822072c3b2a5b835d9f7b0aa8443e4"
+}

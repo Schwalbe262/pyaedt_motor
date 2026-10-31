@@ -23,3 +23,6 @@ legacy/replay_analysis/** -text -whitespace
 
 # Cold contracts retain their original LF/CRLF bytes and immutable hash inputs.
 legacy/v4r5_native_contract_2026_07/** -text -whitespace
+
+# Keep the published, SHA-sealed experiment figures byte-identical to their source.
+/docs/experiments/2026-11-01_public_cycles/*.svg -text
