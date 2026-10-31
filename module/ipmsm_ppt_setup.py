@@ -105,6 +105,7 @@ class IPMSMPPTSpec:
     analysis_purpose: str = "training"
     compute_inductance: bool = True
     solver_output_error: bool = True
+    solver_nonlinear_residual: float = 0.005
     strict_setup: bool = True
     require_steady_state: bool = False
     circle_segments: int = 0
@@ -208,6 +209,15 @@ def validate_ppt_spec_contract(
     _validate_core_material_selection(spec)
     if type(spec.solver_output_error) is not bool:
         raise ValueError("solver_output_error must be a boolean")
+    residual = spec.solver_nonlinear_residual
+    if type(residual) not in (int, float):
+        raise ValueError("solver_nonlinear_residual must be finite and positive")
+    try:
+        residual = float(residual)
+    except OverflowError as exc:
+        raise ValueError("solver_nonlinear_residual must be finite and positive") from exc
+    if not math.isfinite(residual) or residual <= 0:
+        raise ValueError("solver_nonlinear_residual must be finite and positive")
     for name, value in (("conductor_area_per_branch_mm2", spec.conductor_area_per_branch_mm2),
                         ("slot_fill_limit", spec.slot_fill_limit)):
         if isinstance(value, bool) or not math.isfinite(float(value)) or float(value) <= 0:
@@ -1898,6 +1908,7 @@ def create_ppt_transient_setup(design: Any, spec: IPMSMPPTSpec) -> Any:
     setup.props["OutputPerObjectCoreLoss"] = True
     setup.props["OutputPerObjectSolidLoss"] = True
     setup.props["OutputError"] = spec.solver_output_error
+    setup.props["NonlinearSolverResidual"] = str(float(spec.solver_nonlinear_residual))
     if setup.update() is False:
         raise RuntimeError("AEDT rejected the transient setup")
     return setup

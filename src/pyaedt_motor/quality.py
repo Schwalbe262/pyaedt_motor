@@ -65,7 +65,7 @@ ALIASES = {"beta_dq_deg": ("beta_deg",), "slot_number": ("slot_num",),
 PROFILE_NUMERIC = ("transient_periods", "steps_per_period", "circle_segments",
                    *("mesh_" + group + "_elements" for group in ("magnet", "rotor", "stator", "winding", "band")),
                    *("mesh_" + group + "_max_length_mm" for group in ("magnet", "rotor", "stator", "winding", "band")),
-                   "band_circle_segments")
+                   "band_circle_segments", "solver_nonlinear_residual")
 PROFILE_BOOLEAN = ("compute_inductance", "strict_setup", "solver_output_error")
 PROFILE_TEXT = ("loss_policy", "analysis_purpose")
 LEGACY_MATERIAL_CONTEXT = {"core_material_model": "legacy_pnf_hybrid_v1",
@@ -85,9 +85,31 @@ def _boolean(row, name):
     raise ValueError("invalid_boolean:" + name)
 
 
+def _solver_nonlinear_residual(row):
+    values = [row[key] for key in ("solver_nonlinear_residual", "input_solver_nonlinear_residual")
+              if key in row and not (type(row[key]) is str and row[key] == "")]
+    numbers = []
+    for value in values:
+        if type(value) not in (int, float, str):
+            raise ValueError("solver_nonlinear_residual must be finite and positive")
+        try:
+            number = float(value)
+        except (ValueError, OverflowError) as exc:
+            raise ValueError("solver_nonlinear_residual must be finite and positive") from exc
+        if not math.isfinite(number) or number <= 0:
+            raise ValueError("solver_nonlinear_residual must be finite and positive")
+        numbers.append(number)
+    if len(set(numbers)) > 1:
+        raise ValueError("conflicting_aliases:solver_nonlinear_residual")
+    return numbers[0] if numbers else 0.005
+
+
 def _profile_settings(row):
     settings = {"quality_profile": _profile(row), "solver_output_error": True}
     for key in PROFILE_NUMERIC:
+        if key == "solver_nonlinear_residual":
+            settings[key] = _solver_nonlinear_residual(row)
+            continue
         if _values(row, key):
             value = _number(row, key)
             settings[key] = int(value) if "max_length" not in key and value.is_integer() else value
@@ -594,6 +616,7 @@ def selected_profile_manifest(report, report_path: Path, profile: str) -> dict:
     settings["solver_output_error"] = flat.get("solver_output_error", True)
     if type(settings["solver_output_error"]) is not bool:
         raise ValueError("solver_output_error must be a boolean")
+    settings["solver_nonlinear_residual"] = _solver_nonlinear_residual(flat)
     settings.update(quality_profile=profile, analysis_purpose="training", require_steady_state=True)
     settings["mesh_elements"] = {group: flat["mesh_" + group + "_elements"] for group in
                                  ("magnet", "rotor", "stator", "winding", "band")}

@@ -384,6 +384,7 @@ INPUT_SPEC_COLUMNS = (
     "input_air_material",
     "input_setup_name",
     "input_solver_output_error",
+    "input_solver_nonlinear_residual",
     "input_mesh_elements",
     *(f"input_mesh_{key}_elements" for key in MESH_ELEMENT_KEYS),
 )
@@ -659,6 +660,27 @@ def case_strict_bool(case: dict[str, Any], *names: str, default: bool) -> bool:
     return parsed[0] if parsed else default
 
 
+def case_strict_positive_float(case: dict[str, Any], *names: str, default: float) -> float:
+    """Parse a finite positive numeric CSV value without hiding alias conflicts."""
+    def parse(value: Any, label: str) -> float:
+        if type(value) not in (int, float, str):
+            raise ValueError(f"{label} must be finite and positive")
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{label} must be finite and positive") from exc
+        if not math.isfinite(number) or number <= 0:
+            raise ValueError(f"{label} must be finite and positive")
+        return number
+
+    fallback = parse(default, "positive float default")
+    parsed = [parse(case[name], name) for name in names
+              if name in case and not (type(case[name]) is str and case[name] == "")]
+    if len(set(parsed)) > 1:
+        raise ValueError("conflicting numeric aliases: " + ", ".join(names))
+    return parsed[0] if parsed else fallback
+
+
 def stable_fingerprint(namespace: str, payload: dict[str, Any]) -> str:
     """Return a deterministic, human-identifiable SHA-256 fingerprint."""
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -693,6 +715,7 @@ def setup_fingerprint(
             "analysis_purpose": spec.analysis_purpose,
             "compute_inductance": spec.compute_inductance,
             "solver_output_error": spec.solver_output_error,
+            "solver_nonlinear_residual": float(spec.solver_nonlinear_residual),
             "circle_segments": spec.circle_segments,
             "band_circle_segments": spec.band_circle_segments,
             "loss_policy": spec.loss_policy,
@@ -1079,6 +1102,10 @@ def build_spec(
         compute_inductance=case_bool(case, "compute_inductance", "input_compute_inductance", default=True),
         solver_output_error=case_strict_bool(
             case, "solver_output_error", "input_solver_output_error", default=defaults.solver_output_error,
+        ),
+        solver_nonlinear_residual=case_strict_positive_float(
+            case, "solver_nonlinear_residual", "input_solver_nonlinear_residual",
+            default=defaults.solver_nonlinear_residual,
         ),
         strict_setup=case_bool(case, "strict_setup", default=True),
         require_steady_state=case_bool(case, "require_steady_state", default=False),

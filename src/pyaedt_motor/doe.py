@@ -247,12 +247,22 @@ def profile_settings(raw: Mapping[str, Any]) -> dict[str, Any]:
     allowed = {"quality_profile", "transient_periods", "steps_per_period", "mesh_elements",
                "mesh_maximum_lengths_mm", "core_material_model", "core_material", "magnet_material", "shaft_material",
                "winding_material", "air_material", "initial_position_deg", "setup_name",
-               "band_circle_segments", "solver_output_error", *CANONICAL_FLAGS}
+               "band_circle_segments", "solver_output_error", "solver_nonlinear_residual", *CANONICAL_FLAGS}
     if set(result) - allowed:
         raise ValueError(f"unsupported profile settings: {sorted(set(result) - allowed)}")
     if "solver_output_error" in result and type(result["solver_output_error"]) is not bool:
         raise ValueError("solver_output_error must be a boolean")
     result.setdefault("solver_output_error", True)
+    residual = result.get("solver_nonlinear_residual", 0.005)
+    if type(residual) not in (int, float):
+        raise ValueError("solver_nonlinear_residual must be finite and positive")
+    try:
+        residual = float(residual)
+    except OverflowError as exc:
+        raise ValueError("solver_nonlinear_residual must be finite and positive") from exc
+    if not math.isfinite(residual) or residual <= 0:
+        raise ValueError("solver_nonlinear_residual must be finite and positive")
+    result["solver_nonlinear_residual"] = residual
     name = result.get("quality_profile")
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name):
         raise ValueError("quality_profile must be an explicit safe identifier")

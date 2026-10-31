@@ -4265,3 +4265,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - metrics/result: 루트9경로 부재/대상9경로 존재/하위구조 일치/파일0개, proofSHA=89da751d633641c9ff538fa38985316678ffe7f3b4289fb2aaf7c0a86e8a432c. 전후계획·검증=C:\Users\peets\NEC\pyaedt_motor_runtime\rebuild_20261030\empty_test_directories_20261031; 파일 내용 변경 없음.
 - failure reason/limits: 실패 없음; 빈 폴더는 Git미추적이므로 README에 재생성 목록 명시. 기존 user/protected2 및 실제 FEA 입력·결과는 수정 없음. 저영향 가역 폴더 이동이므로 구현 테스트 대신 전후경로·구조 검사.
 - next/token: v3 loaded0FEA metadata2와 legacy residual명시필드, surrogate공동controlcoverage 계속; 원장120/새FEA0. token sampler unsupported(existing finding).
+
+## 2026-10-31T02:06:31.147810+00:00 part28 | 비선형 잔차 제어 명시와 전압 이름 구분
+- goal/hypothesis: PyAEDT공통.005와2D공식.0001의 차이를 재현 가능한 비교 입력으로 만들고 전압 요약 의미를 명확히 함.
+- actions/options: root exact4-source hunks+11tests 검토 후5파일 atomic승격. spec/CSV/input/setupFP/profile→DOE→native 문자열 전파; 기존.005 유지, 유한양수·별칭 충돌 검사. 실제2D 기본설정으로 무조건 교체하지 않고 paired FEA로 검증하기로 함.
+- metrics/result: 신규11+기존169 PASS; parent는새inputheader/provenance와 canonical training 연동8개 추가PASS=188. 기존 selectedC259경로 목록에는new speedtest가 없어 첫1개 import실패, 코드미실행; currentY 전체trackedPython/configs+승인5파일의 별도freshC에서8PASS/origin확인. worker동결본/기존tests/assertions/protected2/430소스 유지. Proof=C:\Users\peets\NEC\pyaedt_motor_runtime\rebuild_20261030\nonlinear_residual_control_8e81961_20261031\parent_promotion.json SHA=bf1277253f8435ce9455dc2a2bffb0c2a144273185146800dc2e18387fbde7db.
+- failure reason/limits: 실제Native설정·잔차 민감도·속도효과는 아직 미확인. 잔차 norm/퍼센트 단위 추정 안함; 공식문서의 재시작 특성에 따라 새프로젝트/t0부터 비교. DOE에서값누락·mixedprofile 승격거부를fixture검증.
+- parameter clarification: 지난 수집메시지의generic phasepeak는nativebackEMF와물리단자전압을 혼동; 원시/publictarget은정확. OFF물리phaseabs21.7336533V/nativeEMF21.5603883V, span33.0836141V. doc에exactCSV이름/H1/physicalvoltage/noLoadlossdrag를구분. 원래봉인결과 변경 없음.
+- next/token: 새고정publicsource 배포와0FEA확인, fresh calibration 및 matched loaded .005/.0001 benchmark; v3기존430 full/quarter loaded메타데이터 준비. 원장120/새FEA0. token sampler unsupported(existing finding).

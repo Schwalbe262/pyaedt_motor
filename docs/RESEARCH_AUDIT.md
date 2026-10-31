@@ -211,3 +211,11 @@ Y:에서 짧아지는 파일을 덮어쓴 뒤 이전 파일의 끝부분이 남�
 - **확인된 결과:** 기본파 진폭 차이0.08445%, 철손 차이1.85093%, 전기각 기준 차이0.05902도로 기존 무부하 비교 기준을 통과했습니다. 자석 손실의 절대 차이는0.002149 W이며, 기존1 W floor 판정을 유지했습니다. 이 비교는 고정430 소스의 기존 기본파 계산을 모든 행에 동일하게 사용합니다.
 - **시간·한계:** 전체 OFF 풀이1176.714초에 비해 전체 ON은약2.24% 길었습니다. 부분 ON도이번에는더 빨라지지 않았습니다. 두 전체 모델의 native profile은HPC disabled·행렬1코어·Triangles9828, `current.stats` 지역 합19656을 각각 기록합니다. 서로 다른 제출 시점과 노드 점유가 섞여 있으므로 속도 개선을 인증하지 않습니다.
 - **다음 검증:** 한 속도의 무부하 비교 통과이며 메시·시간 수렴이나 부하·인덕턴스·학습 모델의 정확도 인증은 아닙니다. 다음은 같은 G1 부하 조건의 전체/부분 모델에서 인덕턴스 설정부터 확인하는 단계입니다. 비교 원본은 `R/ca8/comparison.json`, 독립 검증은 `R/ca8/parent_closeout_verification.json`에 있습니다. 누적 시도120건(진단90·설계30·학습0), 두 GET 감시는 종료됐습니다.
+
+
+## 비선형 수렴 기준을 명시적으로 추적
+
+- **문제·근거:** 기존 PyAEDT 경로와 실제32개 설정은 `NonlinearSolverResidual=0.005`를 사용했습니다. 설치된2D 기본 메타데이터와 [공식2D Transient 예제](https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v252/en/PDFs/MaxwellScriptingGuide.pdf#page=1037)는0.0001을 사용합니다. 값의 차이를 확인했으나 철손 불안정의 원인이나 실제 정확도 차이는 아직 입증하지 않았습니다. 잔차의 구체적인 norm·퍼센트 단위는 추정하지 않습니다.
+- **수정:** `solver_nonlinear_residual`을 spec·CSV·입력 기록·setup fingerprint·프로파일 선택·DOE·Native 속성 전송에 추가했습니다. 기존 동작의 기본값0.005를 유지하며,0.0001을 명시할 수 있습니다. 잘못된 숫자·bool·비유한 값·0 이하·상충 별칭은 거부합니다. 출처가 확인되지 않은 상한은 추가하지 않았습니다.
+- **확인된 개선:** 신규11개+기존 관련169개, 별도 현재 소스 스냅샷의 학습 통합8개를 합쳐188개 검사가 통과했습니다. 실제32개 설정의 fixture에서 잔차만 달라지고 나머지31개가 같으며, 선택 프로파일→DOE→CSV→spec→Native 속성 문자열까지 값이 보존됩니다. 이전 C 경로 목록에 새 속도별 테스트가 없어 첫 추가 검사가 import 단계에서 중단됐고, 전체 현재 소스로 만든 별도 스냅샷에서8개를 통과했습니다. 기존 검사 내용은 변경하지 않았습니다.
+- **다음 검증:** 실제 Native 설정 확인 뒤 같은 형상·메시·시간 간격에서0.005/0.0001을 비교합니다. [공식 도움말](https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v252/en/Subsystems/Maxwell/Content/Maxwell/DefiningSettingsontheSolverTabforTransientSolutions.htm)은 잔차 변경만으로 이전 해석이 무효화되지 않는다고 설명하므로, 새 프로젝트에서 처음 시각부터 풉니다. 아직 정확도·시간 개선이나 생산 프로파일 승격을 주장하지 않습니다. 증거는 `R/nonlinear_residual_control_8e81961_20261031/parent_promotion.json`입니다.
