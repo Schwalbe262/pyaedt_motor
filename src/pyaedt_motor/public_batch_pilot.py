@@ -53,6 +53,16 @@ def record(path):
     return {"bytes": after.st_size, "sha256": digest}
 
 
+def installation_record(path):
+    """Follow only vendor paths checked by V6; source/control record stays strict.
+
+    V6 validates the exact wrapper-link chain and within-install known-file
+    targets before this callback. Its /bin/bash and static-resource checks also
+    intentionally resolve installed aliases. This is not a source-file recorder.
+    """
+    return record(Path(path).resolve(strict=True))
+
+
 def read_sealed(item):
     path = Path(item["path"])
     before = record(path)
@@ -404,7 +414,7 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
                 raise ValueError("pinned V6 owner import origin differs")
         if Path(runner.__file__).resolve() != (source / "run_ipmsm_batch.py").resolve():
             raise ValueError("public builder import origin mismatch")
-        installation = owner.validate_installation(json.loads(read_sealed(contract["installation_binding"])), record)
+        installation = owner.validate_installation(json.loads(read_sealed(contract["installation_binding"])), installation_record)
         options = {**contract["options"], "simulation_dir": str(output / "scene"),
                    "result_csv": str(output / "builder_result.csv"), "analyze": False,
                    "cleanup_linux": False, "prepare_batch_reports": True}
@@ -484,7 +494,8 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
             if control_record is not None:
                 read_sealed(control_record)
             result["inputs_unchanged"] = verify_inputs(contract)[1] == before
-            result["installation_files_unchanged"] = (all(record(p) == expected for p, expected in installation["known_file_records"].items())
+            result["installation_files_unchanged"] = (
+                owner.validate_installation(json.loads(read_sealed(contract["installation_binding"])), installation_record) == installation
                 if "installation" in locals() else None)
             if not result["inputs_unchanged"] or result["installation_files_unchanged"] is False:
                 raise ValueError("source/library/system/install inputs changed")

@@ -17,6 +17,8 @@ Linux 공개 API의 CPU 요청과 실제 행렬 코어 수가 달라, 문서화�
 
 Linux/Ansys2025.2·검토한 23파일 라이브러리·full360/Sym1·4CPU·새 출력 폴더를 대상으로 합니다. 계약에는 소스·라이브러리·시스템 재료·설치 바인딩·케이스의 크기/SHA가 필요합니다. 실제 호스트와 Slurm 노드를 각각 확인합니다. solve 예약은 승인 여부·시도 번호·케이스 SHA·예약 참조를 제외한 계약 전체 SHA에 결합합니다.
 
+설치된 벤더 실행기의 심볼릭 링크는 V6 설치 검증기가 링크 연결과 대상 위치를 확인한 후 실제 파일의 크기/SHA를 검사합니다. 종료 후에도 전체 설치 검증을 반복합니다. 소스·케이스·계약 파일의 심볼릭 링크는 허용하지 않습니다.
+
 ```text
 python -I -B SOURCE/src/pyaedt_motor/public_batch_pilot.py --contract ABS.json --contract-sha256 SHA --output-root NEW_ABS
 ```
