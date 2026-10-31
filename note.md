@@ -4426,3 +4426,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - collection: Parent가collector_delta+4tests읽고4purePASS. Source369bfcf8/freeze0b18b847/realreceipt11efe55d로GET-onlysolewatch22528시작/5running1stpoll확인. R/ldt2/actual_ID;30초/8MiB/60분관측상한/ASCIIfallback0/품질거부와Native불확실분리/일시status오류는같은ID계속조회. artifactresume는아직미구현이며관측상한이해석종료나재제출근거가아니다.
 - minor_failure/limits: Root파일목록출력용.NET GetRelativePath는PowerShell5미지원으로읽기출력만실패했고Pathlib목록으로교체했다(파일/API변경0). 관측값은설정의일치이며새5숫자결론없음/생산프로파일·신규모델·최종설계미완료. Source11/zero/현재사용자2수정·원본들불변. Insight에는실제3건으로확인된시간변수검증만추가, codex_ops token sampler unsupported기확인/재시도없음.
 - next/options: 6점분석사양53d338e9의원기준10tol+v3physics로원시재계산/공간메시·다른형상과속도검증→새데이터와모델→최종1200/5000rpm직접FEA. 병렬로readonlyHPC조사중이며실제batch.log의InteractiveSchedulerJob제약과ACF4/실제1core를구분하고license원인으로단정하지않는다. Globalgoal계속active.
+
+## 2026-10-31T20:16:25+09:00 | part49 | first residual/time result
+- goal/hypothesis: verify residual1e-4 vs1e-5 at180steps before selecting production physics; tighter is not automatically necessary.
+- actions: same soleGETwatch22528 collectedactual100952 completed0/solved_diagnostic; root reviewed all337 analyzer lines and ran947+952 once to exclusive actual180_root_comparison.json(823ea75a...,154104B), verified144sealed47tripletransports/raw10reproduction/1081timepoints/liveSI/source/ownerclosure.
+- metrics/result: Core24.249337->24.291578W(.174194%),T20.462017->20.462361Nm(.001684%),power+.227458->+.223080%,all10existinglimitsPASS,solve1122.029->1251.165s(+11.509%);maxNativeResidual9.76201e-5->9.54656e-6/globalN9828/matrix1core. Allrawinputsunchanged.
+- options/limits: retain1e-4aspossiblecostchoiceonlyforthispoint;time/space/othergeometries&speedsunknown. No wholeprofile/training/model/designpromotion. HPCinstalledSDK/actualbatchlog corroboratescheduler-mode mismatch hypothesis; no licensing/speed claim.
+- next: sameIDs953-956collect; independentplainCSV180checkdelegated; observation-onlyHPCprobe&humanprofileparser C-preparation delegated. No extraFEAreservation/POST;ledger132=diag102/design30/train0.
+- validation/failure/token: original2protectedfiles==Dbackup; docs-onlydiffreview required;token sampler unsupported previouslyconfirmed/no retry. Initial broadreadoutputs truncated; targetedranges used; no scientificdecisionfromtruncatedsource.
