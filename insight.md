@@ -1064,3 +1064,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before:2.6MBrawGET504three times; max_bytes/tail returns suffix andtail-lines normalizesCRLF. Rawbinarygzip cannot roundtrip the endpoint's UTF8text contract; bothpartial/reformatted attempts were rejected.
 - After/evidence: actual~1.31MBASCII files traversed the unchangedendpoint, restored both originalCSVbytes/fullhashes, andboth24-channel cyclemeanrecomputations matchedexactly.17puretests+independentactualapply_text_window positive/negative checks; originalCSV/seals/case/source unchanged, no FEA rerun.
 - Remaining risk: networktimeout stillpossible; keepboundedGET andoriginal partialproofs. Losslesscollection is not physicalaccuracy anddoesnotpermitgate/Pin/efficiencychanges.
+
+
+## 2026-10-31 09:09 KST | Complete-cycle harmonic projection must count periodic endpoints once
+- Source loop: part20; R/h1_endpoint_quadrature_fix_20261031/final_proof_v2.json28cd8a7d.../rawrecompute5e9262e1... .
+- Improvement: use trapezoidal timeweights forclosedtraces andperiodicDFTweights onlyforverifieduniform endpoint-exclusive grids; rejectpartialcycles/duplicate times instead offallingback toallreport samples.
+- Before: naive2/N sumcounted bothperiodicendpoints, biasedH1amplitude/phase andsampledensity; inclusive/exclusive analytictraces disagree.
+- After/evidence: DC+signedfundamental+H3/H5 closed/exclusive analyticcoefficients agree1e-12; irregulargridtimeweights recoverknowncoefficientswithin2e-5.49scopedtestsPASS; actualzero2amplitudes corrected-.670683/-.661718%, independentFFTcoeffsmatch1e-10;16raw/proof+oldzero immutable.
+- Remaining risk: finitegridquadratureerror remains; thispostprocessfixdoesnotresolveFEAcoreloss/nonperiodicity. Require reviewednewproducer calibrationprovenance; neverrewriteoldmanifest ormixfrozencomparisons.

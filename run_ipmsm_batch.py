@@ -1569,11 +1569,11 @@ def summarize_last_cycle_harmonics(
     stop_s: float,
     unit_suffix: str,
 ) -> dict[str, float]:
-    """Estimate last-cycle RMS harmonics using sine/cosine projection.
+    """Project a complete last cycle with time weights, counting endpoints once.
 
-    The PPT analysis compares selected Back EMF harmonics.  AEDT exports the
-    waveform as a time trace, so this keeps the post-process local and avoids
-    depending on a separate FFT report object.
+    Closed traces use trapezoidal quadrature, including irregular time grids.
+    Uniform endpoint-exclusive grids retain the periodic DFT weights without
+    inventing closure for an incomplete or irregularly truncated trace.
     """
     pairs = report_time_value_pairs(df, value_column, unit_suffix)
     if not pairs or not math.isfinite(fundamental_hz) or fundamental_hz <= 0:
@@ -1585,18 +1585,37 @@ def summarize_last_cycle_harmonics(
         for time_s, value in pairs
         if stop_s - period_s - eps <= time_s <= stop_s + eps
     ]
+    if not math.isfinite(period_s) or period_s <= 0 or not math.isfinite(stop_s):
+        raise ValueError("harmonics require a finite complete cycle")
     if len(selected) < 3:
-        selected = pairs
+        raise ValueError("harmonics require at least three samples of a complete cycle")
+    selected.sort(key=lambda pair: pair[0])
+    times = [time_s for time_s, _ in selected]
+    if any(right <= left for left, right in zip(times, times[1:])):
+        raise ValueError("harmonics require strictly increasing cycle timestamps")
+
+    start_s = stop_s - period_s
+    if abs(times[0] - start_s) <= eps and abs(times[-1] - stop_s) <= eps:
+        selected[0] = (start_s, selected[0][1])
+        selected[-1] = (stop_s, selected[-1][1])
+        times[0], times[-1] = start_s, stop_s
+        weights = [(times[1] - times[0]) / 2.0]
+        weights.extend((times[index + 1] - times[index - 1]) / 2.0 for index in range(1, len(times) - 1))
+        weights.append((times[-1] - times[-2]) / 2.0)
+    else:
+        step_s = period_s / len(selected)
+        if any(abs(time_s - (times[0] + index * step_s)) > eps for index, time_s in enumerate(times)):
+            raise ValueError("harmonics require a complete closed cycle or a uniform endpoint-exclusive cycle")
+        weights = [step_s] * len(selected)
 
     omega = 2.0 * math.pi * fundamental_hz
-    count = float(len(selected))
     result: dict[str, float] = {}
     harmonic_rms: dict[int, float] = {}
     for harmonic in BACK_EMF_HARMONICS:
-        cos_sum = sum(value * math.cos(harmonic * omega * time_s) for time_s, value in selected)
-        sin_sum = sum(value * math.sin(harmonic * omega * time_s) for time_s, value in selected)
-        cos_peak = 2.0 * cos_sum / count
-        sin_peak = 2.0 * sin_sum / count
+        cos_sum = math.fsum(weight * value * math.cos(harmonic * omega * time_s) for (time_s, value), weight in zip(selected, weights))
+        sin_sum = math.fsum(weight * value * math.sin(harmonic * omega * time_s) for (time_s, value), weight in zip(selected, weights))
+        cos_peak = 2.0 * cos_sum / period_s
+        sin_peak = 2.0 * sin_sum / period_s
         peak = math.hypot(cos_peak, sin_peak)
         rms = peak / math.sqrt(2.0)
         harmonic_rms[harmonic] = rms

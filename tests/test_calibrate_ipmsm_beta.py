@@ -371,6 +371,58 @@ class CalibrateIpmsmBetaTests(unittest.TestCase):
             places=12,
         )
 
+    def test_closed_and_exclusive_cycles_agree_with_dc_and_harmonics(self) -> None:
+        summaries = []
+        for endpoint_included in (False, True):
+            times = [index / 360 for index in range(360 + int(endpoint_included))]
+            values = [2.75 + 3.0 * math.cos(2 * math.pi * t) - 4.0 * math.sin(2 * math.pi * t)
+                      + 0.7 * math.cos(6 * math.pi * t) - 1.2 * math.sin(10 * math.pi * t) for t in times]
+            frame = SimpleFrame({"Time [s]": times, "Ea [V]": values})
+            result = run_ipmsm_batch.summarize_last_cycle_harmonics(frame, "Ea [V]", "emf", 1.0, 1.0, 1.0, "v")
+            summaries.append(result)
+            self.assertAlmostEqual(result["emf_h1_cos_peak_v"], 3.0, places=12)
+            self.assertAlmostEqual(result["emf_h1_sin_peak_v"], -4.0, places=12)
+            self.assertAlmostEqual(result["emf_h3_rms_v"], 0.7 / math.sqrt(2), places=12)
+            self.assertAlmostEqual(result["emf_h5_rms_v"], 1.2 / math.sqrt(2), places=12)
+            self.assertAlmostEqual(result["emf_h1_phase_deg"], math.degrees(math.atan2(3.0, -4.0)), places=12)
+        for key in ("emf_h1_rms_v", "emf_h3_rms_v", "emf_h5_rms_v", "emf_thd_pct"):
+            self.assertAlmostEqual(summaries[0][key], summaries[1][key], places=12)
+
+    def test_shifted_uniform_periodic_grid_preserves_signed_coefficients(self) -> None:
+        times = [(index + 0.5) / 360 for index in range(360)]
+        values = [2.0 - 3.0 * math.cos(2 * math.pi * t) + 4.0 * math.sin(2 * math.pi * t) for t in times]
+        frame = SimpleFrame({"Time [s]": times, "Ea [V]": values})
+        result = run_ipmsm_batch.summarize_last_cycle_harmonics(frame, "Ea [V]", "emf", 1.0, 1.0, 1.0, "v")
+        self.assertAlmostEqual(result["emf_h1_cos_peak_v"], -3.0, places=12)
+        self.assertAlmostEqual(result["emf_h1_sin_peak_v"], 4.0, places=12)
+
+    def test_irregular_closed_cycle_uses_time_not_sample_density(self) -> None:
+        times = [1.0 + (index / 10000) ** 2 for index in range(10001)]
+        values = [8.0 - 3.0 * math.cos(2 * math.pi * t) + 4.0 * math.sin(2 * math.pi * t)
+                  + 0.5 * math.cos(6 * math.pi * t) for t in times]
+        frame = SimpleFrame({"Time [s]": times, "Ea [V]": values})
+        result = run_ipmsm_batch.summarize_last_cycle_harmonics(frame, "Ea [V]", "emf", 1.0, 1.0, 2.0, "v")
+        self.assertAlmostEqual(result["emf_h1_cos_peak_v"], -3.0, delta=2e-5)
+        self.assertAlmostEqual(result["emf_h1_sin_peak_v"], 4.0, delta=2e-5)
+        self.assertAlmostEqual(result["emf_h3_rms_v"], 0.5 / math.sqrt(2), delta=2e-5)
+        self.assertAlmostEqual(result["emf_h1_phase_deg"], math.degrees(math.atan2(-3.0, 4.0)), delta=2e-4)
+
+    def test_incomplete_cycles_cannot_fall_back_to_other_report_samples(self) -> None:
+        for times, stop in (([index / 100 for index in range(41)], 1.0),
+                            ([index / 100 for index in range(41)], 2.0),
+                            ([index / 100 for index in range(20, 101)], 1.0),
+                            ([0.0, 1.0], 1.0)):
+            frame = SimpleFrame({"Time [s]": times, "Ea [V]": [math.cos(2 * math.pi * t) for t in times]})
+            with self.subTest(first=times[0], last=times[-1], stop=stop):
+                with self.assertRaisesRegex(ValueError, "complete"):
+                    run_ipmsm_batch.summarize_last_cycle_harmonics(frame, "Ea [V]", "emf", 1.0, 1.0, stop, "v")
+
+    def test_duplicate_cycle_timestamps_are_rejected(self) -> None:
+        times = [index / 40 for index in range(41)] + [0.5]
+        frame = SimpleFrame({"Time [s]": times, "Ea [V]": [math.cos(2 * math.pi * t) for t in times]})
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            run_ipmsm_batch.summarize_last_cycle_harmonics(frame, "Ea [V]", "emf", 1.0, 1.0, 1.0, "v")
+
     def test_zero_generator_is_no_load_and_full_model(self) -> None:
         rows = calibration.generate_zero_calibration_rows(
             source_row(), speeds_rpm=(600.0, 1200.0)
