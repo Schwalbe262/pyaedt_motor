@@ -4399,3 +4399,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - actualPASS: root submit_loaded4_modelsetup_v3_once.py EXACTONCE→100943, source/Git/capacity/미중복/942ownedexit확인후예약없이metadata만제출. 기존9c1collector에서task/W/request핀만바꾼cdc37fb2…/watch60469가57봉인18ASCII를수집해CLOSED0/1481cc86…. root가준비된assessor77764의V2대비정확hunk를읽고실행하여PASS_SETTINGS_ONLY_FEAs0/c40605ec…. 실제NativeModelSetuprawint1/깊이3/F903False2/Native32/M19BH23/CAD24/owner707646gone/clientretired분리/원본·개인source125-lib23-syslib일치/Analyze0·intent없음통과. worker70.962083/engine68.402254/cleanup5.156274초, FEA속도인증아님.
 - next/options: Source11producer570와실제zero d879/5f664는그대로다. 입력4e602/8233336c는실제metadatac406에결합가능해졌으나아직예산/요청없음. 부모는newsolvepubcc90약160줄을모두읽었고6inert/7877freeze를확인했다; peer검토후실제124–127예약→최종4envelope/request→부하해석으로진행. 수치불합격은rc1그대로보존하되정확True·marker·NativeGone이면known, 불확실/손상은hold/추가NativeAPI나자동retry없음. 이진단은훈련행을발행하지않는다.
 - limits: 전체목표미완료(수렴·새모델10개R²·최종설계·잔여정리). Native설정작업3건은모두FEA예산0, 원장123(진단93/설계30/학습0)불변. Insight에는실제입증된관측receiver/경로prefix정규화범위만기록, 토큰샘플러unsupported재시도없음.
+
+
+## 2026-10-31T18:25:07+09:00 part46 | 중간보고와 부하4건 예약/제출 전 상태 기록
+- goal/hypothesis: 사용자 요청에 따라 기존 문제·시도·확인된 개선·후속 실험을 구분해 보고한다. 메시 단일 원인과 전체 속도/모델 개선을 단정하지 않는다.
+- actions/options: 현재hand-off/정확한감사기록/새zero/실제metadata평가/예약영수증/최종패킷선택필드를대조했다. 별도대규모실행없이 docs/RESEARCH_AUDIT.md에최신표·제한·순서를추가하고hand-off3개라인만갱신한다.
+- metrics/results: 새zero−91.1197245706°/편차0.3035000805°·metadata100943 PASS_SETTINGS_ONLY_FEAs0/c406. root reserve_loaded4_once는실제124–127을한번예약했고receipt9d1ad336, 원장127=diag97/design30/train0(4예약포함)이다. 최초preflight의files KeyError는예약/API전중단이었고file_records정정후성공했다. 예약스크립트재실행금지. Agent final4requests FROZENca9db2cd/manifestf75c967d, 8pure+8Bash+4activation PASS, POST0/FEA0이며root최종정확검토와별도peer검토가남아있다.
+- failure/reason: 전체18건기준/정밀대조3/6만통과; 원인/수렴프로파일미확정·신규학습0/최종설계미합격. 새어댑터오류와SDK회귀는기존연구의원인과구분해보존한다. 시도결과의제한을보고에명시했다.
+- next: 정확한builder/request검토→별도packetpeer→기예약4건각1회POST→결과별10출력/물리/시간비교→메시와시간분리수렴→새모델/두속도설계검증. 자동retry/추가예약없음. Doc-only최소검증/변경hunk검토후closeout; Insight추가없음; codex_ops token sampler unsupported는이미확인/재시도없음.
