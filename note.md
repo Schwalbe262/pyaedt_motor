@@ -4525,3 +4525,23 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - observation: write_stdin68456reportedexit1; authoritative receipt+log shownormal5400swindowexpiry/done0/pending6/errors0 (notremotejobfailure). ReGET actual100964-969allqueued, read/composeunchangedfrozenGETcollector; thirdwindow91068live/sameIDs/priorreceipts preserved. No POST/Native/retry/kill byobserver. SameWindows89020/start stillalive; current140flight noNativequery.
 - memory/validation: publishedstandalonetable docs/experiments/2026-11-01_cycle_duration/README.md. Handoffstartup compacted to3currentbullets; completedoldbullets retainedbelowmovedarchive marker (5add/5delete lines, within10linechange budget). Scientific5/protected2/ledger unchanged. No newinsight fordiagnosticonlycandidate. Samplerunsupported alreadyconfirmed, notqueriedagain.
 - next: complete140/quiet+savedsetupreview; no142reservationduring140; reviewedHPCV3thenhigh141ifready; actualshorterpairedpilot/familyreferencepath arepreparation, notacceptedproduction. Fullmesh/data/models/finaldesign remainactive.
+
+## 2026-11-01T02:37:59+09:00 | part59 | verified interim report and current handoff
+- goal/hypothesis: distinguish observed improvements from pending simulation/model/design acceptance; stale startup must not restore superseded whole-ledger wait.
+- actions: checked current handoff/mission/audit and four actual review statuses; polled existing19189/91068 without new execution; recorded actual142 pre-Native failure, appendV3 adoption, metadata100976 and files-only100977; V4 candidate peer CLEAR remains unexecuted.
+- candidates/options: preserve existing140/141 and six remote IDs; evaluate explicit length mesh, matched3/6cycle FEA, owned4core launch and distinct reference-frame candidate separately.
+- metrics: ledger142=diagnostic112/design30/train0; selected evidence hashes {"append": "e41c01c0a1ae4b490175660ff999b8a260e247fcb4211c87426972e6f3024177", "cached_fs": "1a0688efd72116aa8003259a8078aaad91c61c7630c7515ed73959a6b67d06e9", "period3": "c526fa6ab230d0abcbafb8a3e2a0b326b6aeda2806ddf23e66742f1aa3050ffb", "wrapper_failure": "ec9be1ff43cf8b198ff3d636e60e8c68a9f97ca38bcdfe817d6ac2c8ed42e8b9"}; regression/final-design acceptance still unmet.
+- result/failure: report states limits; HPC142 failed BASH_ENV before Native/BatchSolve, not a physics result; V4 tests/peer do not prove actual launch or speed gain.
+- next: actual140 completion/quiet with appendV3 evidence, root review V4 before a new reservation, real time/space convergence then coverage/data/models/final two-speed design.
+- validation: unique report section; handoff first4 lines replaced (8 changed lines), historical suffix preserved; protected user files unchanged. No raw logs or diagnostic-only insight appended.
+- token usage: sampler unsupported in this environment as previously confirmed; no new sample available.
+
+## 2026-11-01T02:59:19+09:00 | part60 | owned4core V4 actual143 and matched-duration preparation
+- goal/hypothesis: fix proven inherited-shell-hook failure without changing science; obtain actual4core execution and prepare report-complete3/6cycle comparison.
+- actions: root exact V3/V4 runtime delta review;14owner+3actualbootstrap+Bash2/defaultHELD PASS; source/library/seed unchanged; verified append142 index, approved611f6800, reserved143once and extended index monotonically; actualrequest7payload/Bash2/capacity PASS thenPOST100979once; GET92086live. Read full new family core+coordinator hunks and actual Native0 worker/closure; familyfailedrow admission issue found underpeerreview.
+- candidates/options: V4 officialstaticwrapper with child BASH_ENV/ENV removed; new report-ready3 seed via ownedNative0 private950 copy instead of report-empty976; no physics threshold/source changes.
+- metrics/result: ledger143=diagnostic113/design30/training0;100979running n113;140same89020/start live; localintermediate stats only initialglobal4162/currentmaxregional13754, notfinalN. Actual3-period solve/4core/performance/model/finaldesign evidence remains pending.
+- failure reason: original142 preNative failure retained;976 settings-only lacked9reports, so unchanged-autoextract reuse rejected. Newcandidate failure-row frameID admission requiresfix.
+- next: collectsame100979/140; independentlyreviewandrunNative0 reportclosure; fixed familycandidate tests/promotion; actual3/6 andspatialconvergence/coverage then newdata/models/finaltwo-speeddesign.
+- observer: third91068terminal/log+receiptpending6/errors0, revalidatedsame6IDs, fourth30497GETonlylive; nojobrestart/reservation.
+- validation/memory: docs-only part; handoff first4lines replaced, protected2unchanged; no diagnostic-only insight. Token sampler unsupported as previously confirmed, no live sample.
