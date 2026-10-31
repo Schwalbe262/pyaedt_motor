@@ -4500,3 +4500,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - failure/reconciliation: localplanfirstcomparison caughttuple/list JSONserialization difference beforeNative; canonicalJSONspec equalsactualmetadata0 withoutchangingparams/thresholds. Explicitlaunch140only afteractualreservation; no automaticretry.
 - next: assess low onlyafterrealreturn/ownedexit then runreservedhigh141; producefreshpergeometryzero onlyafterbothsignedH1/steady. RemoteNoLoad6 unchangedIDs/GET68456live. Parentarchivescope/README/index updated; wrapper-onlyreadtask Cprep. Full10R2/newtraining/finaldesign remain incomplete.
 - token_usage: unsupported sampler alreadyconfirmed; no redundantquery.
+
+## 2026-11-01T00:44:33+09:00 | part56 | actual installed-loader FS evidence
+- goal/hypothesis: explain actual139 loader failure using installed Linux entrypoints before changing any launch environment or reserving another FEA.
+- actions/options: parent read exact153line FS driver+payload/10file seal;3inert+2BashPASS. Root POSTonce standard1CPU2GB n113 strict task100972; no Native/SDKimport/FEA reservation. GET actual completed0 stdout34753B/stderr0, saved full bounded evidence and root review09a0cd7e.
+- metrics/result: real ansysedt->.runtimeexewrapper->.answrapper17333B, ELF4891104B; source125/library23/observedfiles unchanged. Wrapper head8KB/readelf/ldd truncation explicit. Exact3observeddirs missinglib is limited observation, not globalabsence. Ledger141 unchanged; no 4core/speed/physics claim.
+- parallel validation: exact low140 assessor144lines reviewed/4guardsPASS, actualassessment0. Same Native71096/solver2d89020 verifiedlive viaOS; high141reserved/unexecuted; remote6sameIDs/watcher68456live. No signal/Native read-save-quit/retry.
+- failure reason/next: initial probe insufficient to recover finalsource/exec+allloaderlines; prepare targeted FSv2 and wrapper-aware owner proof, not guessedLD or rerun139. Complete local140/quiet review then reserved141; fullmeshsweep/newdata/model/finaltwo-speeddesign remain.
+- token_usage: sampler unsupported alreadyconfirmed; not re-queried. Insight not appended because no reusable Native-startup fix is yet verified.

@@ -556,3 +556,14 @@ FS 전용100948은exit2로 종료됐습니다.12개 원래 케이스CSV·결과 
 과거생성기와전용테스트2파일은34/36개불변입력·소스핀31개·공유의존성을포함한84파일보관묶음으로정리했습니다. Y의실제보관위치에서해시검증과원래8개테스트가통과했고활성공유코드와사용자수정파일은유지했습니다. 기본테스트수집은활성tests/로지정해C검증사본에서1941개를수집했습니다(전체실행합격을뜻하지않음). 복원경로와검증명령은[보관목록](ARCHIVE_INDEX.md)에있습니다.
 
 근거: `R/length_h0_local_2918cb1` plan1fe8eb4d/실제예약5f0859fc/low1200 launch intent·공개CLI로그; `R/hpc100971_loader_failure_review_20261101/diagnosis.json` SHAa3f997e2; `R/v4r5_native_archive_parent_20261101`의실제이동·84개Git blob 검증·Ycold8tests와`R/ca55`의1941개수집기록. 로컬풀이중에는Native read/save/quit나재시작을추가로호출하지않습니다. 무부하원격6건은원작업ID를유지합니다.
+
+
+## 2026-11-01 읽기 전용 Linux 실행환경 점검
+
+- **문제:** 실제 4코어 진단100971은 내부 ELF를 직접 실행하다 libolepro32.so 검색 실패로 중단됐습니다. 경로를 임의로 추가하거나 같은 FEA를 재시도하기 전에 설치된 공식 래퍼를 확인해야 했습니다.
+- **시도:** 실제100970과 같은 n113 strict/standard1CPU2GB 환경에서 파일·readelf·신뢰된 ELF의 ldd 동적 로더 추적만 수행하는100972를 한 번 제출했습니다. Ansys/래퍼 실행·SDK import·FEA·레지스트리 변경은 없습니다. 원래 요청과 10파일 봉인, 인메모리 payload를 부모가 대조했고 순수검사3개·Bash구문2개가 통과했습니다.
+- **확인:** 100972는 completed/exit0, stdout34,753 bytes·stderr0입니다. ansysedt→.runtimeexewrapper→.answrapper의 실제 링크와 내부 ansysedt.exe를 확인했습니다. 공식 래퍼는17,333 bytes의 셸 스크립트이며, PyAEDT0.22의 실제 Linux 시작 경로도 ansysedt를 선택합니다. Source11 125파일·라이브러리23파일·관측 설치파일의 전후해시는 일치했습니다. 원장은141회로 유지됩니다.
+- **한계와 다음 개선:** 래퍼 본문 첫8KB와 일부 ELF 출력은 명시적으로 잘려 있으므로 실행 마지막 부분과 전체 의존성 판정은 아직 부족합니다. 확인한 세 디렉터리의 libolepro32.so 부재를 전체 설치의 부재로 해석하지 않습니다. 후속 읽기 전용 점검에서 래퍼의 source/exec와 실제 경로 선언을 확인하고, 셸 부모·Native 자식의 소유권 검증을 함께 보완합니다. 병렬 FEA 성공·속도 개선은 아직 없습니다.
+- **병행 상태:** 기존 로컬140은 동일 Native71096/solver2d89020의 생존과 CPU 누적을 OS에서 관찰했습니다. 완료 수신 전 Native read/save/quit·재시작은 하지 않습니다. 예약141은 미실행이며, 완료 후 평가기의 순수 가드4개를 부모도 통과했습니다. 원격 무부하6건은 기존ID/GET관찰을 유지합니다.
+
+근거: `R/node113_loader_fs_diagnostic_20261101/actual_100972/{task_status.json,stdout.txt,stderr.txt,collection_proof.json}` 및 `parent_review_result.json` SHA09a0cd7e…; 요청 f9092d27…/packet seal62a1cb70…. 로컬 완료 후 평가기는 `R/assess_length_h0_2918cb1.py` SHA565798ac…이며 실제 평가는 아직 실행하지 않았습니다.
