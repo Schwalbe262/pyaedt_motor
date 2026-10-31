@@ -346,3 +346,11 @@ Y:에서 짧아지는 파일을 덮어쓴 뒤 이전 파일의 끝부분이 남�
 - **수정:** 각 작업이 같은 디렉터리의 고유 임시 파일에 전체 바이트를 쓰고 flush/fsync 후, 덮어쓰지 않는 hardlink로 게시합니다. 이미 있으면 전체 바이트가 같은 경우만 허용하고, 다르거나 부분 파일이면 보존하며 거부합니다. finally에서는 자신이 만든 임시 파일만 삭제합니다. 다른 오류를 무시하거나 replace로 기존 검증 파일을 덮지 않습니다.
 - **검증:** 동일 내용 동시 생성·다른 내용 경합·부분 쓰기 중단·fsync 실패·link 실패·기존 부분/다른 파일의7개 결정적 검사가 통과했습니다. 부모의279개 literal Git 파일 C 스냅샷에2개 변경을 적용해 관련19개 파일315개 검사도 통과했습니다. 나머지278개 원본 파일과 물리 producer는 그대로입니다. staged2개 바이트는 검토·검증한 C와 같습니다.
 - **다음:** Linux/GPFS의 hardlink 동작은 해석 없는 동시 게시 스모크로 확인한 뒤1200 rpm retry1을 새 식별자·게시 경로로 제출합니다. 현재 새 예약·재제출은 없고 원장은122입니다. 고정 source11은 변경하지 않으며, coordinator가 생성하는 bootstrap만 수정합니다. 기존 사용자 수정2개는 백업과 byte-identical입니다. 근거 `R/ds1/FROZEN.json` 8c5c899b… 및 `R/dispatch_atomic_parent_20261031/{parent_overlay_review.json,parent_test_results.json,parent_promotion.json}`.
+
+
+## 실제 파일시스템 경합 검증과 1200 rpm 재시도
+
+- 수정 코드는main `ab27105`에 반영했습니다. 새 retry 요청에서 추출한 정확한 source-seal 게시 코드를 실제n111에서8개 Python 자식으로 동시에 실행했습니다(100939 completed/exit0, Native0·FEA0).8개 모두exit0/stderr0,22,775B/SHA561145…가 일치하고 임시 파일0개였습니다. 실제 게시 구간0.03917초이며 모터 해석 속도를 의미하지 않습니다. 부모 판정 `R/dispatch_atomic_gpfs_smoke_20261031/parent_actual_verification.json` SHA c25256f6…/원본 결과2e3feefc….
+- 기존5000 rpm100938은completed/exit0이며122개 게시 파일·40개 ASCII/gzip/raw 전송 검증을 마쳤습니다. 행status ok·정상상태True·physical EMF·불확실False, 소유PID573822 종료와 새 SDK client 정리를 확인했습니다. 행전체1089.813초·풀이1019.236128초·정리5.973523초였습니다. 무부하 전력수지 기록368.408%는 그대로 보존하며 부하 전력수지 합격으로 해석하지 않습니다. 한 속도만으로 영점을 발행하거나 수렴·속도 개선을 주장하지 않습니다. 독립 검토에서도126개 입력·40개 삼중 전송을 재검증했습니다. 자속의 독립 FFT 미분과 물리 전압 차이는최대2.12e-11 V이고 기본파 계수도행과약1e-11 이내였습니다. 무부하 전력수지의 절댓값은3.684 W이며입력전력0을기준으로한368.408%를부하판정에사용하지않습니다. 근거 `R/zero5000_100938_independent_20261031/independent_review.json` SHA878ac75f…/raw_input_seal567bf4f7….
+- 실패100937은해석 전 충돌의 원본으로 보존합니다. 새 retry1은CSV의caseID만 변경하고 다른 물리 입력 바이트는 동일합니다. source11 runtime125/library23·producer570·publisherfeeb·명시적252·F903 OFF·공개 remote_case 경로를 유지합니다. 별도 검토6개와 actual GPFS 증거를 검증한 후 부모가 원장123을 예약하고100940을 한 번 제출했습니다. 자동 재시도는 없습니다. 요청SHA570f7462…/workerSeala8bbba43…/peer634eeb39….
+- 현재 원장은123시도(진단93·설계30·학습0)입니다.100940은실행 중이고 GET-only watcher60673이 수집을 맡습니다. 기존 두 케이스 watcher4572는실패100937의수집오류를남기고종료됐습니다. 새 두 속도 영점이 기존 min2speed/3deg 기준을 통과한 뒤에 부하4건의 실험 어댑터 setup-only와 실제 비교를 진행합니다. 신규 모델·최종 설계 승격은 없습니다.

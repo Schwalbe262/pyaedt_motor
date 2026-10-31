@@ -1088,3 +1088,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: 이번 수정에서 도입한 post-Quit SDK detach와 atexit이 PyAEDT0.22의 grpc 재연결을 일으켰다. 실제100935는Native PID가 없어졌어도failed/759초였고 기존elapsed67.494초는정리시간을제외했다.
 - After/evidence: SDK0.22.0 고정·새 클라이언트만 인스턴스 플래그 적용·자동 재연결 억제 후308개 관련 검사 및 실제100936 setup-only PASS_METADATA_ONLY. Native PID562406 종료·client retirement 각각 확인, taskwall96초/cleanup2.473602초/rowelapsed63.15초. 원본70개 파일 해시 봉인, 전역atexit변경0/SDKrelease0.
 - Remaining risk: 설치 SDK의 private field에 의존하므로 버전 불일치는 거부하고 재검증한다. 클라이언트 종료 표시는 Native 종료 증거가 아니며, 불확실한 해석에는 Native API/강제 종료/자동 재시도를 허용하지 않는다. 설정 전용 시간 개선은 FEA 풀이 시간이나 전체 학습 정확도 개선의 증거가 아니다.
+
+
+## 2026-10-31 part42 | 공용 불변 검증 파일은 완성 후 덮어쓰기 없이 게시
+- Source loop: part41/42; R/zero2_failure100937_diagnostic_20261031/diagnosis.json6088bdbf…; R/ds1/FROZEN8c5c899b…; R/dispatch_atomic_gpfs_smoke_20261031/parent_actual_verification.jsonc25256f6….
+- Improvement: 같은 디렉터리의 고유 임시 파일에 전체 바이트를 쓰고 flush/fsync한 뒤 no-clobber os.link로 게시한다. 기존 파일은 전체 바이트가 같을 때만 허용하고, 다른/부분 파일은 보존하며 거부한다. 자기 임시 파일만 정리한다.
+- Before: exists→open('xb') 경합이 실제1200rpm 작업을Native시작전exit78로실패시켰고, finalname을먼저만들어부분바이트가노출될수있었다. 같은입력의결정적재현도1성공/1FileExists였다.
+- After/evidence: 새7동시성/실패검사와관련315통합검사PASS. 정확한새retry게시코드를실제n111 공용파일시스템에서8개자식으로실행해전부exit0/stderr0,22775B/SHA561145동일,임시0개확인. 원래물리runtime125/library23와실패원본은불변이다.
+- Remaining risk: 동일파일시스템hardlink지원이필요하며디렉터리fsync/전원손실내구성은주장하지않는다. 이전부분파일은자동수리하지않는다. 이수정은공용source seal에한정되며케이스입력·출력의중복실행금지와불확실Native보류정책을대신하지않는다.
