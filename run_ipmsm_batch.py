@@ -383,6 +383,7 @@ INPUT_SPEC_COLUMNS = (
     "input_shaft_material",
     "input_air_material",
     "input_setup_name",
+    "input_solver_output_error",
     "input_mesh_elements",
     *(f"input_mesh_{key}_elements" for key in MESH_ELEMENT_KEYS),
 )
@@ -638,6 +639,26 @@ def case_bool(case: dict[str, Any], *names: str, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def case_strict_bool(case: dict[str, Any], *names: str, default: bool) -> bool:
+    """Read a typed bool or an explicit CSV true/false/1/0 token; reject conflicts."""
+    if type(default) is not bool:
+        raise ValueError("strict boolean default must be a boolean")
+    parsed = []
+    for name in names:
+        if name not in case or case[name] == "":
+            continue
+        value = case[name]
+        if type(value) is bool:
+            parsed.append(value)
+        elif isinstance(value, str) and value.strip().lower() in {"true", "false", "1", "0"}:
+            parsed.append(value.strip().lower() in {"true", "1"})
+        else:
+            raise ValueError(f"{name} must be a boolean or an explicit true/false/1/0 CSV token")
+    if len(set(parsed)) > 1:
+        raise ValueError("conflicting boolean aliases: " + ", ".join(names))
+    return parsed[0] if parsed else default
+
+
 def stable_fingerprint(namespace: str, payload: dict[str, Any]) -> str:
     """Return a deterministic, human-identifiable SHA-256 fingerprint."""
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -671,6 +692,7 @@ def setup_fingerprint(
             "metric_contract_version": "motor_metrics_v3",
             "analysis_purpose": spec.analysis_purpose,
             "compute_inductance": spec.compute_inductance,
+            "solver_output_error": spec.solver_output_error,
             "circle_segments": spec.circle_segments,
             "band_circle_segments": spec.band_circle_segments,
             "loss_policy": spec.loss_policy,
@@ -1055,6 +1077,9 @@ def build_spec(
         magnet_material=str(case_value(case, "magnet_material", default=defaults.magnet_material)),
         analysis_purpose=str(case_value(case, "analysis_purpose", "input_analysis_purpose", default="training")),
         compute_inductance=case_bool(case, "compute_inductance", "input_compute_inductance", default=True),
+        solver_output_error=case_strict_bool(
+            case, "solver_output_error", "input_solver_output_error", default=defaults.solver_output_error,
+        ),
         strict_setup=case_bool(case, "strict_setup", default=True),
         require_steady_state=case_bool(case, "require_steady_state", default=False),
         circle_segments=case_int(case, "circle_segments", "input_circle_segments", default=0),
@@ -1939,7 +1964,9 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
         "output_electric_frequency_hz": frq_hz,
         "output_period_s": period_s,
         "output_stop_time_s": stop_s,
-        "output_mesh_energy_error_source": "unavailable",
+        "output_mesh_energy_error_source": (
+            "unavailable" if getattr(spec, "solver_output_error", True) else "intentionally_disabled"
+        ),
         "output_mesh_energy_error_unit": "",
         "output_mesh_energy_error_error": "",
     }
@@ -2079,7 +2106,7 @@ def summarize_transient_outputs(exported_reports: dict[str, str], spec: Any, ope
             result.update(summarize_metric(df, solid_column, "output_solidloss", period_s, stop_s, "w"))
 
     energy_path = exported_reports.get("artifact_report_PPT_EnergyError")
-    if energy_path and Path(energy_path).is_file():
+    if getattr(spec, "solver_output_error", True) and energy_path and Path(energy_path).is_file():
         try:
             result.update(summarize_energy_error_report(read_report_csv(energy_path), period_s, stop_s))
         except Exception as exc:
@@ -2154,15 +2181,20 @@ def export_inductance_matrix_data(m2d: Any, out_path: Path, setup_name: str) -> 
 
 def export_ppt_reports(
     design: Any, project_path: Path, case_id: str, setup_name: str = "PPT_Transient",
-    compute_inductance: bool = True,
+    compute_inductance: bool = True, *, solver_output_error: bool = True,
 ) -> dict[str, str]:
-    """Export reports created by configure_ipmsm_from_ppt to per-case CSV files."""
+    """Export physical reports and any explicitly enabled solver diagnostic."""
+    if type(solver_output_error) is not bool:
+        raise ValueError("solver_output_error must be a boolean")
     m2d = getattr(design, "solver_instance", design)
     export_dir = project_path / "exports"
     export_dir.mkdir(parents=True, exist_ok=True)
 
     exported = {}
     for report_name in REPORT_NAMES:
+        if report_name == "PPT_EnergyError" and not solver_output_error:
+            exported["artifact_report_PPT_EnergyError"] = "skipped: intentionally disabled by solver_output_error=false"
+            continue
         if report_name == "PPT_Inductance_Matrix" and not compute_inductance:
             continue
         out_path = export_dir / f"{case_id}_{report_name}.csv"
@@ -2684,7 +2716,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         export_started = time.perf_counter()
         exported = export_ppt_reports(
             design, project_path, case_id, setup_name=spec.setup_name,
-            compute_inductance=spec.compute_inductance,
+            compute_inductance=spec.compute_inductance, solver_output_error=spec.solver_output_error,
         ) if options.analyze else {}
         output_summary = summarize_transient_outputs(exported, spec, operation=operation) if options.analyze else {}
         if options.analyze and any(Path(p).is_file() for p in exported.values() if not p.startswith("skipped:")):

@@ -104,6 +104,7 @@ class IPMSMPPTSpec:
     setup_name: str = "PPT_Transient"
     analysis_purpose: str = "training"
     compute_inductance: bool = True
+    solver_output_error: bool = True
     strict_setup: bool = True
     require_steady_state: bool = False
     circle_segments: int = 0
@@ -205,6 +206,8 @@ def validate_ppt_spec_contract(
 ) -> None:
     """Fail closed on model-extent, symmetry, periodic, and beta mismatches."""
     _validate_core_material_selection(spec)
+    if type(spec.solver_output_error) is not bool:
+        raise ValueError("solver_output_error must be a boolean")
     for name, value in (("conductor_area_per_branch_mm2", spec.conductor_area_per_branch_mm2),
                         ("slot_fill_limit", spec.slot_fill_limit)):
         if isinstance(value, bool) or not math.isfinite(float(value)) or float(value) <= 0:
@@ -1828,7 +1831,7 @@ def create_ppt_transient_setup(design: Any, spec: IPMSMPPTSpec) -> Any:
     setup.props.pop("Steps To", None)
     setup.props["OutputPerObjectCoreLoss"] = True
     setup.props["OutputPerObjectSolidLoss"] = True
-    setup.props["OutputError"] = True
+    setup.props["OutputError"] = spec.solver_output_error
     if setup.update() is False:
         raise RuntimeError("AEDT rejected the transient setup")
     return setup
@@ -1849,13 +1852,18 @@ def enable_ppt_transient_inductance(
 
 
 def create_ppt_reports(
-    design: Any, setup_name: str = "PPT_Transient", compute_inductance: bool = True
+    design: Any, setup_name: str = "PPT_Transient", compute_inductance: bool = True,
+    *, solver_output_error: bool = True,
 ) -> dict[str, Any]:
-    """Create common reports from the deck: currents, torque, voltage, and losses."""
+    """Create physical reports and the explicitly enabled solver diagnostic."""
+    if type(solver_output_error) is not bool:
+        raise ValueError("solver_output_error must be a boolean")
     m2d = _m2d(design)
     setup_sweep = f"{setup_name} : Transient"
     reports: dict[str, Any] = {}
     for plot_name, expressions in PPT_REPORT_DEFS.items():
+        if plot_name == "PPT_EnergyError" and not solver_output_error:
+            continue
         if plot_name == "PPT_Inductance_Matrix" and not compute_inductance:
             continue
         try:
@@ -1986,7 +1994,9 @@ def configure_ipmsm_from_ppt(
         raise RuntimeError("Essential AEDT setup failed: " + "; ".join(result["setup_issues"]))
 
     if create_reports:
-        result["reports"] = create_ppt_reports(design, spec.setup_name, spec.compute_inductance)
+        result["reports"] = create_ppt_reports(
+            design, spec.setup_name, spec.compute_inductance, solver_output_error=spec.solver_output_error
+        )
 
     if analyze:
         solve_started = time.perf_counter()

@@ -66,7 +66,7 @@ PROFILE_NUMERIC = ("transient_periods", "steps_per_period", "circle_segments",
                    *("mesh_" + group + "_elements" for group in ("magnet", "rotor", "stator", "winding", "band")),
                    *("mesh_" + group + "_max_length_mm" for group in ("magnet", "rotor", "stator", "winding", "band")),
                    "band_circle_segments")
-PROFILE_BOOLEAN = ("compute_inductance", "strict_setup")
+PROFILE_BOOLEAN = ("compute_inductance", "strict_setup", "solver_output_error")
 PROFILE_TEXT = ("loss_policy", "analysis_purpose")
 LEGACY_MATERIAL_CONTEXT = {"core_material_model": "legacy_pnf_hybrid_v1",
                            "core_material": "27PNF1500_CustomCoreLoss"}
@@ -86,7 +86,7 @@ def _boolean(row, name):
 
 
 def _profile_settings(row):
-    settings = {"quality_profile": _profile(row)}
+    settings = {"quality_profile": _profile(row), "solver_output_error": True}
     for key in PROFILE_NUMERIC:
         if _values(row, key):
             value = _number(row, key)
@@ -591,6 +591,9 @@ def selected_profile_manifest(report, report_path: Path, profile: str) -> dict:
         raise ValueError("selected profile is not a canonical loaded training profile")
     settings = {key: flat[key] for key in ["transient_periods", "steps_per_period", "compute_inductance",
                                          "strict_setup", "circle_segments", "loss_policy"]}
+    settings["solver_output_error"] = flat.get("solver_output_error", True)
+    if type(settings["solver_output_error"]) is not bool:
+        raise ValueError("solver_output_error must be a boolean")
     settings.update(quality_profile=profile, analysis_purpose="training", require_steady_state=True)
     settings["mesh_elements"] = {group: flat["mesh_" + group + "_elements"] for group in
                                  ("magnet", "rotor", "stator", "winding", "band")}

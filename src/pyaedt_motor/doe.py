@@ -247,9 +247,12 @@ def profile_settings(raw: Mapping[str, Any]) -> dict[str, Any]:
     allowed = {"quality_profile", "transient_periods", "steps_per_period", "mesh_elements",
                "mesh_maximum_lengths_mm", "core_material_model", "core_material", "magnet_material", "shaft_material",
                "winding_material", "air_material", "initial_position_deg", "setup_name",
-               "band_circle_segments", *CANONICAL_FLAGS}
+               "band_circle_segments", "solver_output_error", *CANONICAL_FLAGS}
     if set(result) - allowed:
         raise ValueError(f"unsupported profile settings: {sorted(set(result) - allowed)}")
+    if "solver_output_error" in result and type(result["solver_output_error"]) is not bool:
+        raise ValueError("solver_output_error must be a boolean")
+    result.setdefault("solver_output_error", True)
     name = result.get("quality_profile")
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name):
         raise ValueError("quality_profile must be an explicit safe identifier")
