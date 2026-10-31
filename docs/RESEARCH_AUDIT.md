@@ -567,3 +567,15 @@ FS 전용100948은exit2로 종료됐습니다.12개 원래 케이스CSV·결과 
 - **병행 상태:** 기존 로컬140은 동일 Native71096/solver2d89020의 생존과 CPU 누적을 OS에서 관찰했습니다. 완료 수신 전 Native read/save/quit·재시작은 하지 않습니다. 예약141은 미실행이며, 완료 후 평가기의 순수 가드4개를 부모도 통과했습니다. 원격 무부하6건은 기존ID/GET관찰을 유지합니다.
 
 근거: `R/node113_loader_fs_diagnostic_20261101/actual_100972/{task_status.json,stdout.txt,stderr.txt,collection_proof.json}` 및 `parent_review_result.json` SHA09a0cd7e…; 요청 f9092d27…/packet seal62a1cb70…. 로컬 완료 후 평가기는 `R/assess_length_h0_2918cb1.py` SHA565798ac…이며 실제 평가는 아직 실행하지 않았습니다.
+
+
+## 2026-11-01 실행 래퍼 전체 확보와 고속 실행 전 검증 보강
+
+- **문제와 시도:** 첫 파일 점검의 앞부분 절단을 해소한 후속100973은 전체 보고서가99KB 상한을 넘어 failed/exit1이 됐습니다. 원본 실패를 보존하고 전송 상한을UTF8 1MiB로 한정해 늘린 별도100974를 제출했습니다. 150KB 완전 보존·마지막 오류 행·정확 상한·UTF8 초과 거부를 포함한5개 검사와 Bash2개를 부모도 통과했습니다.
+- **확인한 결과:** 100974는 completed/exit0·stdout114,284B·stderr0입니다. 설치 ELF의111개 NEEDED/RPATH 선택행과 ldd의329개 오류 선택행을 앞부분 절단 없이 수집했습니다. ldd에서 중복을 제거한 미해결 라이브러리는15종이며 현재 상속 환경의 관측입니다. 설치 전체에서 파일이 없다는 판정은 아닙니다.
+- **전체 실행 코드 확인:** source된 helper의 일부 행만으로 실제 호출 함수를 판단할 수 없어, 같은 검증 코드에서 이미 읽은 helper의 full body를 포함하는 한 줄 변경의100975를 한 번 제출했습니다. completed/exit0·stdout142,702B·stderr0이고, 래퍼·product.info·.setup_runtime·Linux64 setmwruntime·.prodsetup의5개 전체 텍스트를 원본 크기/SHA와 정확히 재구성했습니다. 모든 점검은 Native/FEA/SDK import0이며 Source11 125파일·라이브러리23파일 불변입니다.
+- **다음 실행 수정 근거:** 래퍼는 셸 부모 아래 Native 자식을 실행합니다. .setup_runtime의 RunMainWinProcess에는 초기 설정 결과에 따라 Native를 두 번 호출할 수 있는 분기도 있습니다. 단일 실행 진단을 위해 공식 ANS_MWREG=static 경로의 실제 동작·자원 파일과 부모/자식/PID 재사용/자연 종료 검증을 보완 중입니다. 아직 새 FEA 예약이나 래퍼 실행 성공·4코어 효과는 없습니다.
+- **로컬 결과 검증 준비:** 140번 평가기565798ac 원본은 유지하고, 별도 저장 설정 보완기472f687f와 고속141 실행기47b1841d를 준비했습니다. 부모가 소스 전체와5개 가드 검사를 확인했습니다. 실제 저속 완료·소유 세션 종료·기존 수치 기준 통과 후에만 저장32필드/잔차1e-5/OutputError OFF/시간식/철손 연성 플래그를 직접 대조합니다. 고속은 이 증거와 최종 부모 검토를 요구하며 현재 미실행입니다.
+- **실행 순서:** 진행 중140 실행기는 완료 시 전체 원장 불변도 검사하므로, 새142 예약은140 완료 검토 뒤로 둡니다. 141은 기존 예약을 사용합니다. 원격 무부하6건의 ID와 기존 관찰 세션68456도 유지합니다. 전체 원장은141회이며 학습 생성·새 최종 설계는 아직 없습니다.
+
+근거: `R/node113_loader_fs_diagnostic_20261101_v2/actual_100973`, `_v3/actual_100974`, `_v4/actual_100975`의 전체 출력·작업 상태·수집 증거; V4 collection proof SHA f9ee9633…/request dbffa95c…/packet e159219a…. 고속 준비는 `R/length_h0_high141_preparation_2918cb1/READY.json` SHA73643bcd…입니다. 이 절의 점검 결과를 FEA 정확도·공간 수렴·새 모델 성능의 증거로 사용하지 않습니다.
