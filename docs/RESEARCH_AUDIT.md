@@ -524,3 +524,15 @@ FS 전용100948은exit2로 종료됐습니다.12개 원래 케이스CSV·결과 
 현재 G1/G2/A57×1200/5000 rpm의 새 무부하6건은 설정 검증을 마치고 제출됐으며 모두queued입니다. 단일 GET 수집기64227이 같은 작업ID를 관찰합니다. 읽기 전용 진단에서 n111은alloc 상태이고 부하 기반 가용CPU 상한9개가 설정된64 CPU 풀에 부족했습니다. 작업을 재제출하지 않고 자원 회복을 기다립니다. 이후 형상별 두 속도의 물리 유도전압 기본파·주기성을 확인해 새 영점을 검증합니다.
 
 관련 근거: 위 부하4건/시간6점 절, [시간 민감도 표·그림](experiments/2026-10-31_residual_time/README.md), [정리·보관 내역](ARCHIVE_INDEX.md), `R/zero6_queue_diagnosis_20261031/snapshot_130537/diagnosis.json`(84638a6c…). 원장은138회(진단108/설계30/학습0)이며 총3000회·동시300개 한도를 유지합니다.
+
+## 실제 4코어 진단 제출과 무부하 평가 보강
+
+- **새 노드의 실제 환경 확인:** 읽기 전용100970이n113에서completed/exit0으로 끝났습니다. Source11 125파일·라이브러리23파일의 전후해시, Python3.11.14/PyAEDT0.22.0, v252 ELF 실행파일을 확인했습니다. Native 실행0/FEA0이며 라이선스·실제4코어 사용의 증거는 아닙니다. 환경 확인에는standard/1CPU/2GB를 사용했고 FEA 정책을 바꾸지 않았습니다.
+- **실제 단일 해석 제출:** 미해석950 프로젝트를 그대로 복사하는BatchSolve1건을 예약139·task100971로 각각한번 제출했습니다. explicit `-autoextract reports`, 단일선택setup·4코어상한·실제hostname 바인딩을 검토했습니다. 물리검사와코어관측을분리해 serial/부분병렬도원시관측대로남기며4코어초과만자원상한위반입니다. 기존954와노드/계측범위가달라단순시간차를4코어속도개선으로해석하지않습니다.
+- **제출 전 API 계약 오류 수정:** 새 실험 builder가project에숫자2를넣었으나실제스케줄러는이름으로조회합니다. POST 전에원본a46a7a를보존하고project이름과canonical dedupe만바꾼e417c6 요청을생성했습니다. 실제예약6cee50·core/context·5개전송payload는동일하며추가독립검토1d6e1154를통과했습니다. 수정요청의실제접수task100971/제출영수증4aaaf7ee를확인했습니다. 재예약·재제출은하지않습니다.
+- **정책에 따른 자원 대기:** 최초조회100971은queued이며fea_bursty·4CPU·8GB·timeout0을유지합니다. n113의메모리압박과n111의CPU자원대기로실제실행은스케줄러허용을기다립니다. 단일GET관찰기43073(HPC)·64227(무부하6)을운영하며관찰시간만료를작업실패로간주하거나재제출하지않습니다. 원장은139회(진단109/설계30/학습0),신규FEA7건대기입니다.
+- **무부하 평가기 후보 보강:** 기존c889 평가기는독립H1을기록만하고직접비교하지않았으며일관된marker가있으면Analyze=False행도검사를통과할수있었습니다. 별도v2(d80c3dfe)에signed H1비교·AnalyzeTrue/종료/소유권·실제case와전체setup/깊이대조·모든입력재검사후manifest쓰기를추가했습니다. 실제과거Source11행/메타설정fixture를포함한14개검사를부모도통과했습니다. 실제6건의평가·새영점발행은아직실행하지않았습니다.
+- **공간 메시의 다음 개선 근거:** NumMaxElem은추가요소의제한이며최종요소수나보장된길이가아닙니다. 현재길이를지정해도개수제한이함께적용돼둘중먼저도달한조건에서정교화를멈출수있습니다. [Ansys v252 공식 설명](https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v252/en/Subsystems/Maxwell/Content/Mesh/LengthBasedMeshRefinement.htm)과실제저장950의5개operation을대조했습니다. 명시적length_only와실제설정검사를별도후보로개발하고,같은형상/운전점에서길이3수준을비교할예정입니다. 기본예산모드와실행중인Source11은유지합니다.
+- **메시 관측의 비교 대상 정정:** 과거9828/13158/9364는G1/G2/A57의서로다른candidate관측이며candidate/reference/fine수렴열이아닙니다. G1low의지역합19656/34984/36904는별도통계로유지하고미수집된reference/fine의전역삼각형수로환산하지않습니다. 기존철손65.51/121.14/66.33 W의동일형상비교와도구분합니다.
+
+근거: `R/hpc_batch950_submission_20261031_v2`(frozenb775173f/최종요청e417c6/실제제출4aaaf7ee), `R/hpc950_actual_collection_20261031`(ec886243/3개부모검사), `R/zero6_solve_local_assessment_20261031_v2`(d80c3dfe/14개부모검사/순수source148개사전해시일치), `R/source11_spatial_mesh_semantics_review_20261031/REVIEW.json`(d37c5b15/44개입력불변). HPC후보6개부모검사도통과했습니다. 새전체수렴·학습모델·최종설계합격은미완료입니다.
