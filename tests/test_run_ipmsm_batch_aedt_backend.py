@@ -38,6 +38,7 @@ class FakeProject:
 class FakeDesktop:
     def __init__(self, events: list[tuple[str, object]], kwargs: dict[str, object]) -> None:
         self.events = events
+        self._Desktop__closed = False
         self.events.append(("desktop", kwargs))
         self.aedt_process_id = 9001
         self.identity_epoch = 123.0
@@ -65,6 +66,7 @@ class FakeDesktop:
     def native_quit(self) -> None:
         self.events.append(("native_quit", self.aedt_process_id))
         self.quit_requested = True
+        self.alive = False
 
     def analyze(self, **kwargs: object) -> object:
         self.events.append(("native_analyze", kwargs))
@@ -77,7 +79,7 @@ class FakeDesktop:
     def release_desktop(self, **kwargs: object) -> bool:
         self.events.append(("release_desktop", kwargs))
         if self.quit_requested:
-            self.alive = False
+            raise RuntimeError("Failed to launch EM Desktop application after Native Quit")
         return True
 
 
@@ -516,10 +518,12 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
                 "new_desktop": True,
             },
         )
-        self.assertEqual(
-            next(value for name, value in events if name == "release_desktop"),
-            {"close_projects": False, "close_on_exit": False},
-        )
+        self.assertNotIn("release_desktop", [name for name, _value in events])
+        self.assertIs(self.last_desktops[0]._Desktop__closed, True)
+        cleanup = json.loads(row["standalone_cleanup"])
+        self.assertTrue(cleanup["client_retirement"]["client_retired"])
+        self.assertFalse(cleanup["SDK_release_desktop_called"])
+        self.assertFalse(cleanup["SDK_ReleaseAll_called"])
         self.assertNotIn("close_project", [name for name, _value in events])
         self.assertEqual(len([name for name, _value in events if name == "native_close_project"]), 1)
         self.assertEqual(len([name for name, _value in events if name == "native_quit"]), 1)

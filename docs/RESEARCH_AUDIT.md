@@ -298,3 +298,12 @@ Y:에서 짧아지는 파일을 덮어쓴 뒤 이전 파일의 끝부분이 남�
 - **후속 수정:** 소유한 새 Python 클라이언트의 자동 SDK release를 억제하고, 검증한 프로젝트·Native Quit·PID 종료 확인만 수행하는 C 후보를 준비합니다. 전역 atexit 함수를 후킹하거나 다른 세션을 정리하지 않습니다. 종료 시간과 전체 케이스 시간도 기록합니다. 수정 후 새 소스에서 실제 스모크를 다시 검증하며, source10은 보존합니다.
 - **추가 고정:** 후속 영점 입력은 AEDT2025.2를 명시합니다. 환경에 여러 ANSYSEM_ROOT가 있으면 현재 기본 선택이 최고 버전을 택할 수 있습니다. source10 영점 초안V1·버전 고정V2 모두 미제출 상태로 보존하고, 새 producer에 맞춰 다시 결합합니다. 아직 새 영점·수렴·속도·학습 합격은 없습니다.
 - 근거: `R/pc1/actual_100935/collection_proof.json`, `R/pc1/independent_100935/{assessment.json,raw_seal.json}`. source254·library23·시스템 재료파일 불변은 원격 helper 증거로 남았습니다.
+
+
+## SDK 자동 종료 억제와 종료 시간 계측 수정
+
+- **수정:** PyAEDT0.22.0에서 새로 할당한 Python 클라이언트와 실제 소유 Native PID를 구분합니다. 새 클라이언트의 해당 SDK 인스턴스 종료 플래그로 자동 재연결을 억제하고, 검증한 개인 프로젝트 닫기·직접 Native Quit·PID 종료 확인만 수행합니다. 종료 후 `release_desktop`·`ReleaseAll`을 호출하지 않습니다. 전역 atexit 함수는 그대로이고, 기존 SDK 객체와 다른 세션의 cache entry도 건드리지 않습니다.
+- **불확실한 해석:** 자동 SDK callback만 억제하며, Native 종료·저장·추가 API를 수행하거나 불확실 상태를 해제하지 않습니다. Python 클라이언트의 종료 표시는 Native 프로세스 종료의 증거로 사용하지 않습니다. 프로젝트·설계가 같은 PID의 다른 SDK 객체에 연결돼도 거부합니다.
+- **시간 기록:** `timing_cleanup_s`를 추가하고 `elapsed_s`·`finished_at`를 cleanup 뒤에 갱신합니다. wrapper의 `runner_wall_s`는 Python 시작·종료를 포함한 별도 관측입니다. 기존 결과의 기록값은 바꾸지 않습니다.
+- **검증:** fresh literal Git278개 파일의 C 스냅샷에4개 변경 파일을 합쳐308개 검사 모두 통과했습니다. 설치된 SDK의 실제 종료·캐시 선택 코드를 Native 없는 시험으로 실행했고, 원래 단위 상수와 물리 모듈4개의 바이트를 대조했습니다. 별도 검토에서도28개 순수 검사가 통과했습니다. 반영한4개 Git index 바이트는 검증본과 같습니다.
+- **남은 확인:** 실제 종료 지연의 개선은 새 고정 소스의 public CLI setup-only 재검증으로 확인합니다. source10과100935 실패는 보존하며 FEA 누적120회를 유지합니다. 새 producer는 `570a84cf2f716e5f7bda64dc58dd2315f24ce3c9736728149b8307531d54de5b`입니다. 근거: `R/sdk_retirement_parent_20261031/{combined_validation_result.json,parent_promotion.json}`, 독립 검토 `R/standalone_sdk_retirement_independent_review_20261031/independent_review.json`.

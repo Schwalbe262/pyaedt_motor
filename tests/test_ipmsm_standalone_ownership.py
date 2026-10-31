@@ -30,28 +30,29 @@ class OwnershipTests(unittest.TestCase):
                 return object.__new__(cls)
             def __init__(self,**kwargs):
                 state['init_calls'].append(dict(kwargs))
+                self._Desktop__closed=False
                 if partial_handle:self._odesktop=handle;self.odesktop=handle
                 if reported:self.aedt_process_id=state['pid']
                 if partial:raise RuntimeError('constructor failed after allocation')
             def release_desktop(self,**kwargs):
                 if kwargs!={'close_projects':False,'close_on_exit':False}:raise AssertionError('force-close API forbidden')
                 state['detaches'].append(kwargs)
-                if state.get('quit_requested'):state['alive']=False
+                if state.get('quit_requested'):raise RuntimeError('SDK reconnect after Native Quit forbidden')
                 return True
         identity=lambda pid:state['identity']if state['alive']else None
         return settings,state,handle,Factory,identity
     def assert_restored(self,settings,previous=False):
         self.assertIs(settings.use_multi_desktop,previous);self.assertIs(settings.release_on_exception,True)
-    def test_same_safe_kwargs_to_new_and_init_and_graceful_detach_only(self):
+    def test_same_safe_kwargs_to_new_and_init_and_no_postQuit_SDK_RPC(self):
         for previous in (False,True):
-            settings,state,handle,factory,identity=self.environment(previous_multi=previous);state['detach_before_exit']=True
+            settings,state,handle,factory,identity=self.environment(previous_multi=previous)
             with mock.patch.object(runner,'standalone_existing_pids',return_value={1,2}),mock.patch.object(runner,'standalone_process_identity',side_effect=identity),mock.patch('os.kill')as kill:
                 owner=runner.create_standalone_owned(factory,True,settings,version='2025.2')
                 self.assertEqual(state['new_calls'],state['init_calls'])
                 self.assertEqual(state['new_calls'][0],{'version':'2025.2','non_graphical':True,'close_on_exit':False,'new_desktop':True})
                 audit=runner.safe_release_desktop(owner.desktop,owner)
                 self.assertTrue(audit['process_exited']);self.assertEqual(handle.quits,1);kill.assert_not_called()
-                self.assertEqual(state['detaches'],[{'close_projects':False,'close_on_exit':False}]);self.assert_restored(settings,previous)
+                self.assertEqual(state['detaches'],[]);self.assertIs(owner.desktop._Desktop__closed,True);self.assertTrue(audit['client_retirement']['client_retired']);self.assertFalse(audit['client_retirement']['Native_exit_implied']);self.assert_restored(settings,previous)
     def test_preexisting_nativePID_rejected_without_CAD_or_close(self):
         settings,state,handle,factory,identity=self.environment()
         with mock.patch.object(runner,'standalone_existing_pids',return_value={9010}),mock.patch.object(runner,'standalone_process_identity',side_effect=identity):
@@ -60,13 +61,14 @@ class OwnershipTests(unittest.TestCase):
             runner.safe_release_desktop(owner.desktop,owner)
         self.assertEqual(handle.quits,0);self.assertEqual(state['detaches'],[]);self.assert_restored(settings)
     def test_cached_new_object_refused_before_init_foreign_untouched(self):
-        settings,state,handle,factory,identity=self.environment();foreign=types.SimpleNamespace(_initialized=True,_odesktop=handle,aedt_process_id=9010)
+        settings,state,handle,factory,identity=self.environment();foreign=types.SimpleNamespace(_initialized=True,_odesktop=handle,aedt_process_id=9010,_Desktop__closed=False)
         class CachedFactory:
             def __new__(cls,**kwargs):return foreign
             def __init__(self,**kwargs):raise AssertionError('foreign cached __init__ must never run')
         with mock.patch.object(runner,'standalone_existing_pids',return_value={9010}),mock.patch.object(runner,'standalone_process_identity',side_effect=identity):
             with self.assertRaises(runner.StandaloneOwnershipError)as caught:runner.create_standalone_owned(CachedFactory,True,settings)
             owner=caught.exception.standalone_owner;runner.safe_release_desktop(owner.desktop,owner)
+            self.assertFalse(owner.new_python_client);self.assertIs(foreign._Desktop__closed,False)
         self.assertEqual(handle.quits,0);self.assertEqual(state['detaches'],[]);self.assert_restored(settings)
     def test_partial_constructor_native_owner_cleanup_without_guessing_PID(self):
         for actual_handle in (True,False):

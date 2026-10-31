@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 import hashlib
 import importlib
+import importlib.metadata
 import json
 import logging
 import math
@@ -2341,6 +2342,8 @@ class StandaloneDesktopOwnership:
     identity: tuple | None = None
     verified: bool = False
     constructor_complete: bool = False
+    new_python_client: bool = False
+    sdk_runtime_version: str = ""
     project_name: str | None = None
     project_dir: Path | None = None
     settings: Any = None
@@ -2395,6 +2398,8 @@ def standalone_existing_pids() -> set[int]:
 def assert_standalone_owned(owner: StandaloneDesktopOwnership, desktop: Any = None) -> None:
     if not owner.verified or owner.pid is None or owner.identity is None:
         raise ValueError("standalone Desktop ownership has not been verified")
+    if desktop is not None and desktop is not owner.desktop:
+        raise ValueError("standalone SDK Python client differs from its owned instance")
     observed = standalone_process_identity(owner.pid)
     if observed != owner.identity:
         raise ValueError("standalone Desktop PID/owner/start identity changed")
@@ -2419,6 +2424,9 @@ def create_standalone_owned(factory: Any, non_graphical: bool, settings: Any, ve
             raise ValueError("standalone execution refuses documentation mode that overrides no-close settings")
         if settings is None:
             raise ValueError("standalone Desktop lifecycle settings are unavailable")
+        owner.sdk_runtime_version = importlib.metadata.version("pyaedt")
+        if owner.sdk_runtime_version != "0.22.0":
+            raise ValueError("standalone client retirement supports pinned PyAEDT 0.22.0 only")
         previous = standalone_existing_pids()
         if owner.settings_before is None:
             owner.settings_before = {name: (hasattr(settings, name), getattr(settings, name, None))
@@ -2431,9 +2439,12 @@ def create_standalone_owned(factory: Any, non_graphical: bool, settings: Any, ve
         bound = getattr(owner.desktop, "__dict__", {})
         if bound.get("_initialized") or bound.get("_odesktop") is not None or bound.get("aedt_process_id") is not None:
             raise ValueError("Desktop allocator returned an already-bound session; refuse initialization")
+        owner.new_python_client = True  # Fresh Python allocation; not Native PID ownership.
         try:
             factory.__init__(owner.desktop, **keywords)
             owner.constructor_complete = True
+            if vars(owner.desktop).get("_Desktop__closed") is not False:
+                raise ValueError("fresh PyAEDT 0.22 client retirement flag must be Boolean False before CAD")
         finally:
             handle = getattr(owner.desktop, "_odesktop", None)
             if handle is not None:
@@ -2543,11 +2554,64 @@ def record_standalone_solver_state(owner: StandaloneDesktopOwnership, case_id: s
     return target
 
 
+def retire_standalone_python_client(owner: StandaloneDesktopOwnership) -> dict[str, Any]:
+    """Retire only our new Python client; this is NOT Native exit evidence.
+
+    PyAEDT 0.22 initializes this instance bool before registering its atexit
+    callback. Its release(False, False) reconnects even after Native Quit.
+    No atexit function or SDK method is replaced and no RPC is made here.
+    """
+    audit = {"new_python_client": owner.new_python_client, "sdk_version": owner.sdk_runtime_version,
+             "client_retired": False, "Native_exit_implied": False, "errors": []}
+    if not owner.new_python_client:
+        return audit
+    if owner.sdk_runtime_version != "0.22.0":
+        audit["errors"].append("unsupported SDK client retirement version")
+        return audit
+    state = vars(owner.desktop)
+    if "_Desktop__closed" not in state:
+        # Exact0.22 initializes it at desktop.py453, before registration620.
+        audit["registration_not_reached"] = not owner.constructor_complete
+        if owner.constructor_complete:
+            audit["errors"].append("completed SDK client lacks retirement flag")
+        return audit
+    before = state["_Desktop__closed"]
+    audit["flag_before_type"] = type(before).__name__
+    if type(before) is not bool:
+        audit["errors"].append("SDK client retirement flag is not Boolean")
+    # Suppress automatic RPC even for a corrupt fresh client; reject its contract.
+    state["_Desktop__closed"] = True
+    audit["client_retired"] = True
+    return audit
+
+
+def remove_exited_standalone_client(owner: StandaloneDesktopOwnership) -> str:
+    """Remove only this exact verified, exited instance from the SDK cache."""
+    if not owner.verified or standalone_process_identity(owner.pid) is not None:
+        raise ValueError("SDK cache removal requires verified Native PID exit")
+    module = sys.modules.get("ansys.aedt.core.internal.desktop_sessions")
+    sessions = getattr(module, "_desktop_sessions", None)
+    if sessions is None:
+        return "session_registry_not_loaded"
+    if type(sessions) is not dict:
+        raise ValueError("unexpected SDK session registry type")
+    if sessions.get(owner.pid) is owner.desktop:
+        del sessions[owner.pid]
+        return "only_exact_exited_owned_instance_removed"
+    return "absent_or_foreign_instance_untouched"
+
+
 def safe_release_desktop(desktop: Any, owner: StandaloneDesktopOwnership | None = None) -> dict[str, Any]:
     """No foreign release, project save, OS signal or vendor force-close path."""
     audit = {"verified": bool(owner and owner.verified), "process_exited": False,
-             "native_quit_requested": False, "errors": []}
+             "native_quit_requested": False, "SDK_release_desktop_called": False,
+             "SDK_ReleaseAll_called": False, "atexit_function_replaced": False, "errors": []}
     try:
+        if owner is not None:
+            audit["client_retirement"] = retire_standalone_python_client(owner)
+            if audit["client_retirement"]["errors"]:
+                audit["errors"].extend(audit["client_retirement"]["errors"])
+                return audit
         if owner is None or desktop is not owner.desktop or not owner.verified:
             audit["suppressed"] = "unverified_standalone_owner"
             return audit
@@ -2557,6 +2621,7 @@ def safe_release_desktop(desktop: Any, owner: StandaloneDesktopOwnership | None 
             return audit
         if standalone_process_identity(owner.pid) is None:
             audit["process_exited"] = True
+            audit["SDK_cache"] = remove_exited_standalone_client(owner)
             return audit
         assert_standalone_project(owner, allow_blank=True)
         if list(owner.native_handle.GetProjectList()):
@@ -2566,15 +2631,7 @@ def safe_release_desktop(desktop: Any, owner: StandaloneDesktopOwnership | None 
         assert_standalone_owned(owner)
         owner.native_handle.QuitApplication()
         audit["native_quit_requested"] = True
-        # False/False only detaches this verified session; it never enters the
-        # vendor close-application method with its force-kill fallback.
-        if owner.constructor_complete and standalone_process_identity(owner.pid) == owner.identity:
-            try:
-                detached = desktop.release_desktop(close_projects=False, close_on_exit=False)
-                if detached is not True:
-                    audit["errors"].append("owned SDK detach did not return True")
-            except Exception as exc:
-                audit["errors"].append(f"owned SDK detach: {exc}")
+        # Never SDK-release after Quit: even False/False forces reconnection.
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
             observed = standalone_process_identity(owner.pid)
@@ -2586,6 +2643,7 @@ def safe_release_desktop(desktop: Any, owner: StandaloneDesktopOwnership | None 
             time.sleep(0.1)
         if not audit["process_exited"]:
             raise RuntimeError("owned Desktop remains active after graceful Quit; no forced kill attempted")
+        audit["SDK_cache"] = remove_exited_standalone_client(owner)
     except Exception as exc:
         audit["errors"].append(f"{type(exc).__name__}: {exc}")
     finally:
@@ -3191,6 +3249,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         if isinstance(exc, PooledLeaseUnavailableError):
             row["error_class"] = "pooled_lease_unavailable"
     finally:
+        cleanup_started = time.perf_counter()
         if pooled_backend:
             release_error = ""
             if pooled_solver_uncertain:
@@ -3230,6 +3289,9 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                     row.update(status="failed", error=row["standalone_release_error"], error_class="standalone_cleanup_failed")
         if project_path is not None:
             cleanup_project_folder(project_path, options.cleanup_linux, success)
+        row["timing_cleanup_s"] = round(time.perf_counter() - cleanup_started, 6)
+        row["elapsed_s"] = round(time.time() - start, 3)
+        row["finished_at"] = datetime.now().isoformat(timespec="seconds")
         append_result_row(result_csv, row)
 
     return row
