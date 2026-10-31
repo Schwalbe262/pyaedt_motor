@@ -1,6 +1,7 @@
 """Portable inert public builder/owned CLI separation; no Native constructors."""
 from dataclasses import asdict, replace
 import ast,copy,json,os,sys,tempfile,types,unittest
+import math
 from pathlib import Path
 from unittest.mock import patch
 SOURCE=Path(__file__).resolve().parents[1]
@@ -124,6 +125,34 @@ class Fixture:
 VALIDATE=pilot.validate_execution
 
 class PublicBatchPilotTests(unittest.TestCase):
+    def test_actual_empty_summary_builder_NaNs_saved_as_null_with_paths_live_values_unchanged(self):
+        with tempfile.TemporaryDirectory() as d:
+            fixture=Fixture(Path(d),'setup_only')
+            empty=public.summarize_transient_outputs({},fixture.spec)
+            missing=[key for key,value in empty.items() if isinstance(value,float) and math.isnan(value)]
+            self.assertEqual(len(missing),22)
+            original=fixture.build
+            live=[]
+            def build_with_actual_empty_summary(payload):
+                row=original(payload)
+                row.update(empty)
+                live.append(row)
+                return row
+            fixture.runner.run_one_case=build_with_actual_empty_summary
+            result=fixture.run()
+            self.assertEqual(result['status'],'passed_settings_only',result['errors'])
+            self.assertEqual(result['BatchSolve_launch_attempts'],0)
+            persisted=json.loads((fixture.output/'builder_result.json').read_bytes())
+            final=json.loads((fixture.output/'pilot_result.json').read_bytes())
+            self.assertIs(result['builder_result'],live[0])
+            for key in missing:
+                self.assertTrue(math.isnan(live[0][key]),key)
+                self.assertIsNone(persisted[key],key)
+                self.assertIn([key],persisted['serialization_unavailable_numeric_paths'])
+                self.assertIsNone(final['builder_result'][key],key)
+                self.assertIn(['builder_result',key],final['serialization_unavailable_numeric_paths'])
+            self.assertFalse((fixture.output/'owned_cli_solver_state.json').exists())
+
     def test_actual_public_argparse_requires_explicit_preparation_combination(self):
             with patch.object(sys, "argv", ["run_ipmsm_batch.py", "--prepare-batch-reports", "--setup-only", "--keep-projects", "--aedt-backend", "standalone"]):
                 args = public.parse_args()

@@ -420,7 +420,7 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
                    "cleanup_linux": False, "prepare_batch_reports": True}
         built = runner.run_one_case((case, options))
         result["builder_result"] = built
-        write_new(output / "builder_result.json", built)
+        write_new(output / "builder_result.json", result_json(built))
         project = require_builder_quiet(built, output)
         if built.get("input_producer_fingerprint") != contract["expected_producer"]:
             raise ValueError("actual public builder producer differs")
