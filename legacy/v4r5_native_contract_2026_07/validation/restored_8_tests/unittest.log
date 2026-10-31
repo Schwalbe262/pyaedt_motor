@@ -1,0 +1,13 @@
+test_dry_run_is_zero_write_and_structurally_audited (tests.test_build_ipmsm_v2_c_native_base_v4r5.NativeBaseBuilderTests.test_dry_run_is_zero_write_and_structurally_audited) ... ok
+test_exact_twelve_leaf_revision_and_append_only_provenance (tests.test_build_ipmsm_v2_c_native_base_v4r5.NativeBaseBuilderTests.test_exact_twelve_leaf_revision_and_append_only_provenance) ... ok
+test_fixed_paths_missing_python_and_cli_identity_are_rejected (tests.test_build_ipmsm_v2_c_native_base_v4r5.NativeBaseBuilderTests.test_fixed_paths_missing_python_and_cli_identity_are_rejected) ... ok
+test_foreign_output_is_never_replaced (tests.test_build_ipmsm_v2_c_native_base_v4r5.NativeBaseBuilderTests.test_foreign_output_is_never_replaced) ... ok
+test_import_disables_project_bytecode_writes (tests.test_build_ipmsm_v2_c_native_base_v4r5.NativeBaseBuilderTests.test_import_disables_project_bytecode_writes) ... ok
+test_publish_repeat_and_normal_loader_audit (tests.test_build_ipmsm_v2_c_native_base_v4r5.NativeBaseBuilderTests.test_publish_repeat_and_normal_loader_audit) ... ok
+test_source_identity_workdir_python_and_closure_tamper_fail_closed (tests.test_build_ipmsm_v2_c_native_base_v4r5.NativeBaseBuilderTests.test_source_identity_workdir_python_and_closure_tamper_fail_closed) ... ok
+test_source_toctou_is_detected_before_publication (tests.test_build_ipmsm_v2_c_native_base_v4r5.NativeBaseBuilderTests.test_source_toctou_is_detected_before_publication) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.724s
+
+OK

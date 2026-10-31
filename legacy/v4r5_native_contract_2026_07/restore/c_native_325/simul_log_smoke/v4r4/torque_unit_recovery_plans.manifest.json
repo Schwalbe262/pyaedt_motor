@@ -1,0 +1,125 @@
+{
+  "quarantine": {
+    "records": [
+      {
+        "case_id": "v2s2_0002_rated_torque_03",
+        "reason": "reported_torque_violates_apparent_power_bound",
+        "replacement_case_id": "v2s2_0002_rated_torque_03_torqueunit_fix_v1",
+        "replacement_dedupe_key": "ipmsm-v2-foundation-s2-v2s2_0002_rated_torque_03_torqueunit_fix_v1-1db3cb4f2494ae70",
+        "scheduler_task_id": 28880,
+        "source_dedupe_key": "ipmsm-v2-foundation-s2-v2s2_0002_rated_torque_03-7e21a47aab4a96ca"
+      }
+    ],
+    "scheduler_task_ids": [
+      28880
+    ]
+  },
+  "replacements": [
+    {
+      "only_changed_fields": [
+        "case_id"
+      ],
+      "quarantined_scheduler_task_id": null,
+      "reason": "aedt_millinewtonmeter_parser_recovery_v1",
+      "replay_case_id": "v2s1_0010_rated_torque_01_torqueunit_replay_v1",
+      "replay_line": 2,
+      "replay_role": "suspect",
+      "replay_row_canonical_sha256": "0438b49b3f79e0919abeecfa4acdcdc490a4df5f5feaf533b0e3bf01c9b974c8",
+      "revised_case_id": "v2s1_0010_rated_torque_01_torqueunit_fix_v1",
+      "revised_line": 56,
+      "revised_plan_sha256": "847f1a7a4234e56e9050d96da498a7c944e804e04f053f4870e1a95bca4b7900",
+      "revised_row_canonical_sha256": "f74d8746b308c25d088b3155dddb15af33ae9f0786b02d046bbd6561eb7743be",
+      "source_case_id": "v2s1_0010_rated_torque_01",
+      "source_line": 56,
+      "source_plan_sha256": "ab32f31afbb55c399fe831cf1845f272cacbf921b28f27078fe07823188b2b1e",
+      "source_row_canonical_sha256": "2074226bdc512a45f918ee9276487d98bc75ee2fa15832fd5ccce55a3f5e576d",
+      "stage": "stage1"
+    },
+    {
+      "only_changed_fields": [
+        "case_id"
+      ],
+      "quarantined_scheduler_task_id": 28880,
+      "reason": "aedt_millinewtonmeter_parser_recovery_v1",
+      "replay_case_id": "v2s2_0002_rated_torque_03_torqueunit_replay_v1",
+      "replay_line": 5,
+      "replay_role": "suspect",
+      "replay_row_canonical_sha256": "92bb875d38c838ff4ffe769fd66c3741db534a6c3028625e021a1e1ba400a54d",
+      "revised_case_id": "v2s2_0002_rated_torque_03_torqueunit_fix_v1",
+      "revised_line": 10,
+      "revised_plan_sha256": "b70a8f8652ffd7fbfca0249cbcdbb8f8286db37c5a056611e97b0647a885b708",
+      "revised_row_canonical_sha256": "1c112984e140c348be3c8b74480112eb70c01bebc396994e68f6a93ad095a483",
+      "source_case_id": "v2s2_0002_rated_torque_03",
+      "source_line": 10,
+      "source_plan_sha256": "6b3312b0c6a8c7d8f271dc607303f8474c380adba91647a9ff261dbe49714ffb",
+      "source_row_canonical_sha256": "aedcfc0501b221edab4bc3f63250ee8665bf0918c966bfd36fb5266ae1dd1da9",
+      "stage": "stage2"
+    }
+  ],
+  "revised_plans": {
+    "stage1": {
+      "bytes": 526759,
+      "columns": 45,
+      "path": "simul_log_smoke/v4r4/ipmsm_v2_foundation_stage1_700_cases_torqueunit_fix_v1.csv",
+      "rows": 700,
+      "sha256": "847f1a7a4234e56e9050d96da498a7c944e804e04f053f4870e1a95bca4b7900"
+    },
+    "stage2": {
+      "bytes": 225928,
+      "columns": 45,
+      "path": "simul_log_smoke/v4r4/ipmsm_v2_foundation_stage2_300_cases_torqueunit_fix_v1.csv",
+      "rows": 300,
+      "sha256": "b70a8f8652ffd7fbfca0249cbcdbb8f8286db37c5a056611e97b0647a885b708"
+    }
+  },
+  "schema_version": "ipmsm-torque-unit-recovery-plans-v1",
+  "sealed_replay": {
+    "manifest_path": "simul_log_smoke/v4r4/torque_unit_replay_plan_sealed.manifest.json",
+    "manifest_sha256": "e3e71d27aadb3b422260babb213495d497be9f92e5b18edcfc6d44496f23364a",
+    "plan_path": "simul_log_smoke/v4r4/torque_unit_replay_plan_sealed.csv",
+    "plan_sha256": "16d5730b3f9c1c4f55fc912cf5bf405f3e938df33babd2f66a1a3f45c774fc7a",
+    "validated_case_links": 4
+  },
+  "source_plans": {
+    "stage1": {
+      "bytes": 526741,
+      "columns": 45,
+      "path": "simul_log_smoke/beta_zero_recovery_26092_26093/ipmsm_v2_foundation_stage1_700_cases_r4.csv",
+      "rows": 700,
+      "sha256": "ab32f31afbb55c399fe831cf1845f272cacbf921b28f27078fe07823188b2b1e"
+    },
+    "stage2": {
+      "bytes": 225910,
+      "columns": 45,
+      "path": "simul_log_smoke/beta_zero_recovery_26092_26093/ipmsm_v2_foundation_stage2_300_cases.csv",
+      "rows": 300,
+      "sha256": "6b3312b0c6a8c7d8f271dc607303f8474c380adba91647a9ff261dbe49714ffb"
+    }
+  },
+  "stage2_scheduler_dedupe": {
+    "all_unchanged_dedupe_keys_preserved": true,
+    "identity": {
+      "log_dir": "simul_log_scheduler/ipmsm_v2_foundation_s2_logs",
+      "project": "PYAEDT_MOTOR_IPMSM_V2",
+      "remote_cases_dir": "remote/ipmsm_v2_foundation_s2",
+      "result_dir": "simul_log/ipmsm_v2_foundation_s2",
+      "simulation_dir": "simulation/ipmsm_v2_foundation_s2",
+      "task_prefix": "ipmsm-v2-foundation-s2"
+    },
+    "identity_inputs": [
+      "project",
+      "task_prefix",
+      "safe_case_id",
+      "remote_cases_dir",
+      "result_dir",
+      "canonical_row_json"
+    ],
+    "replacement_revised_dedupe_key": "ipmsm-v2-foundation-s2-v2s2_0002_rated_torque_03_torqueunit_fix_v1-1db3cb4f2494ae70",
+    "replacement_source_dedupe_key": "ipmsm-v2-foundation-s2-v2s2_0002_rated_torque_03-7e21a47aab4a96ca",
+    "revised_unchanged_canonical_sha256": "5fe79d23a5bade7def9b6944e04c5c29b25218950acf9b4d77692b9b2a339748",
+    "schema_version": "ipmsm-v2-stage2-dedupe-preservation-v1",
+    "source_unchanged_canonical_sha256": "5fe79d23a5bade7def9b6944e04c5c29b25218950acf9b4d77692b9b2a339748",
+    "unchanged_case_and_dedupe_canonical_sha256": "5fe79d23a5bade7def9b6944e04c5c29b25218950acf9b4d77692b9b2a339748",
+    "unchanged_rows": 299
+  }
+}

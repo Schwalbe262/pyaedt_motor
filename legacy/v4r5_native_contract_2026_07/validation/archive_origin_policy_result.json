@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "pure_path_cases": 7,
+  "Y_filesystem_writes": false,
+  "cases": [
+    "verified_archive_module",
+    "verified_runner",
+    "case_and_slash_normalization",
+    "active_workspace",
+    "sibling_archive",
+    "unverified_file_under_cold_root",
+    "non_Y_standard_library"
+  ]
+}

@@ -546,3 +546,13 @@ FS 전용100948은exit2로 종료됐습니다.12개 원래 케이스CSV·결과 
 로컬 Windows/Ansys2025.2의 공개 CLI를 `--setup-only`로 한 번 실행해 정상 종료했습니다. G1/1200rpm/전류0/NoL 조건이며 다섯 영역 길이는 magnet1/rotor3/stator3/winding1/band0.5 mm인 설정 검증용 예시입니다. 실제 검증 전후 Native OO와 저장 AEDT에서5개 operation·38개 part의 독립 ID맵·24개 winding·개수 제한OFF/길이 제한ON·mm 단위·비활성 자리값1000을 확인했습니다. 깊이 SI·Analyze0/해석 intent 없음·해 없는 저장파일·소유PID944 종료/SDK client 정리·161개 입력 불변을 독립 평가했습니다. 실제 밀도·수렴·FEA 시간 개선은 아직 측정하지 않았습니다.
 
 근거: `R/mesh_length_only_parent_20261031_v2`의 literal5b86c13+7파일 overlay/12개 검사·승격 증거, 후보V2 READY97dbef38/frozen52348c04/독립검토13837dc7, `R/mesh_length_only_windows_metadata_20261031/independent_native_assessment.json` SHA00405a7884b64fe0df8b307836ce876e26d34408ef2cbc2f1fe14f0672ebbc20. 실제 물리 생산자는18155177…이며 optimizer 보완은 이 지문에 포함된5개 과학 소스를 바꾸지 않습니다. 기존 Source11 실행본·진행중인7개 작업·원장139회는 유지합니다. 사용법과 한계는 [공간 메시 제어](MESH_CONTROLS.md)에 정리했습니다.
+
+## 2026-11-01 로컬 실제 해석 시작과 병렬 진단 실패 원인
+
+길이 모드와 Native 검사를 main `2918cb1`에 반영했습니다. 클러스터 대기와 별개로 로컬 G1 무부하1200/5000rpm 진단2건을 계획하고 예약140/141을 각각한번 기록했습니다. 첫1200rpm의 전체 spec은 실제 설정 전용 검증과 같고,5000rpm은속도만다릅니다. 현재140만실제 Analyze를실행했으며141은결과와종료상태검토전까지미실행입니다. 새모드의실제요소수·파형·수렴·시간은이번결과로확인합니다. 원장은141회(진단111/설계30/학습0)입니다.
+
+기존4코어진단100971은n113에서접수후FAILED/exit127로끝났습니다. 실제수집24파일·7개ASCII전송은정상검증됐으나물리후처리는없습니다. 직접ELF실행이`libolepro32.so`를찾지못해0.298초만에중단됐고,소유PID3921989/UID1455·argv/exe와자연종료는확인했습니다. 원래failed/solver_uncertain=True는보존합니다. PyAEDT0.22의Linux실행경로는`ansysedt`래퍼를선택하며이경로를우회한것이확인됐습니다. 래퍼·라이브러리검색경로를파일로점검한뒤새진단을설계하며139를재실행하지않습니다. 이결과로4코어사용이나속도를판정하지않습니다.
+
+과거생성기와전용테스트2파일은34/36개불변입력·소스핀31개·공유의존성을포함한84파일보관묶음으로정리했습니다. Y의실제보관위치에서해시검증과원래8개테스트가통과했고활성공유코드와사용자수정파일은유지했습니다. 기본테스트수집은활성tests/로지정해C검증사본에서1941개를수집했습니다(전체실행합격을뜻하지않음). 복원경로와검증명령은[보관목록](ARCHIVE_INDEX.md)에있습니다.
+
+근거: `R/length_h0_local_2918cb1` plan1fe8eb4d/실제예약5f0859fc/low1200 launch intent·공개CLI로그; `R/hpc100971_loader_failure_review_20261101/diagnosis.json` SHAa3f997e2; `R/v4r5_native_archive_parent_20261101`의실제이동·84개Git blob 검증·Ycold8tests와`R/ca55`의1941개수집기록. 로컬풀이중에는Native read/save/quit나재시작을추가로호출하지않습니다. 무부하원격6건은원작업ID를유지합니다.

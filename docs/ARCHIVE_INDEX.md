@@ -45,3 +45,11 @@ Y:의 과거 수집·모델·PPT 추출·md 폴더는 각각 D:의 `y0`~`y4`로 
 
 
 2026-10-31 새 검증 후보source9 `PYAEDT_MOTOR_REBUILD_M19_C53D3BA`를 추가했습니다. commit `c53d3ba3101e84e04fc01de78d250db698bdd2e0`에 고정하고 `auto_pull=False`·`max_active_tasks=0`으로 별도 checkout 배포를 시작했습니다. 실제 Native 설정 확인 전의 후보이며 기존source8을 대체하지 않습니다. 새 producer의 영점 보정·품질 검증을 거쳐 사용 범위를 결정합니다. 실행·라이선스project2와 FEA cap300은 유지합니다.
+
+## 2026-11-01 v4r5 생성기와 전용 테스트 보관
+
+현재 CLI에서 사용하지 않는 `build_ipmsm_v2_c_native_base_v4r5.py`와 전용 테스트를 [v4r5 보관 묶음](../legacy/v4r5_native_contract_2026_07/README.md)으로 옮겼습니다. 원래 두 경로는 없어졌고 35,447 bytes의 CRLF 원문은 `original_y/`에 그대로 있습니다. C325의 LF 원문은 별도의 복원 트리에 보관합니다.
+
+묶음은84파일·3,326,134 bytes입니다. 예전34/36개 불변 입력,31개 소스 핀과 공유 코드·Fixture를 함께 복사해 원래 계약을 복원할 수 있게 했습니다. 현재 공유 실행 코드는 이동하지 않았으며 실제 해석 프로젝트·모델 등 대용량 자료는 기존 보관 경로를 참조합니다. 전체 파일을 C staging과 SHA로 대조했고 Y 보관 위치에서도 검증기와 원래8개 테스트가 통과했습니다. Native SDK 로드·활성 작업 폴더에서의 모듈 가져오기·테스트 후 파일 변경은0건입니다.
+
+기본 pytest 수집 범위는 활성 `tests/`입니다. 과거 계약 테스트는 보관 README의 독립 명령으로 실행합니다. Root의 이동 전 원문 백업과 증거는 C 실행 폴더의 `v4r5_native_archive_parent_20261101`에 있습니다. 기존 Source11 실행본·진행 중인 해석·사용자 수정 파일은 유지했습니다.

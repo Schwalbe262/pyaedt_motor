@@ -1,0 +1,154 @@
+{
+  "best_beta_dq_deg": 30.0,
+  "best_torque_nm": 44.96467194520231,
+  "best_torque_per_peak_amp": 0.4496467194520231,
+  "beta_calibration_id": "beta-calibration:sha256:33af20eb4faff7e97342fe3aacadcaf2b64021589645e0d04c8f05f8f83fdce7",
+  "convention": "dq_current_advance_v2",
+  "current_peak_a": 100.0,
+  "electrical_zero_deg": -91.66402010733627,
+  "expected_rows": 10,
+  "gate_failures": [],
+  "homogeneous_identities": {
+    "aedt_version": "2025.2",
+    "design_hash": "6218545c0ab3f73acfb5657698be63430140825b9edf9183d20e279bf09dc460",
+    "geometry_group_id": "beta_source_6218545c0ab3",
+    "material_fingerprint": "materials_v2:sha256:07f6b3fce02dfb83cd79130c472725e185097796949ba34847192bcd848c04ee",
+    "quality_profile": "reference_ultra",
+    "setup_fingerprint": "setup_v2:sha256:82badcd7712d9f4ddfce6e7b46b081e941a6995480f094c8cb9c2001d0847a84"
+  },
+  "max_dq_current_relative_error": 0.02,
+  "max_observed_dq_current_relative_error": 3.509392212415296e-07,
+  "method": "loaded_beta_sweep_v2",
+  "pass": true,
+  "plan_hash": "beta-plan:sha256:6355b39e4b69b3e598efea0d457b414325c9451cb2ea4134bc97cd39f699920d",
+  "points": [
+    {
+      "actual_id_a": 17.364783205925388,
+      "actual_iq_a": 98.48078139521034,
+      "beta_dq_deg": -10.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.5093922105361345e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 34.92258281544704,
+      "torque_per_peak_amp": 0.34922582815447045
+    },
+    {
+      "actual_id_a": -3.509392205947475e-05,
+      "actual_iq_a": 99.99999999999397,
+      "beta_dq_deg": 0.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.509392205947527e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 38.78031593499907,
+      "torque_per_peak_amp": 0.38780315934999066
+    },
+    {
+      "actual_id_a": -17.36485232745846,
+      "actual_iq_a": 98.48076920721915,
+      "beta_dq_deg": 10.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.509392202461864e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 41.873356171666764,
+      "torque_per_peak_amp": 0.41873356171666765
+    },
+    {
+      "actual_id_a": -34.20204731006439,
+      "actual_iq_a": 93.96925007575678,
+      "beta_dq_deg": 20.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.509392209868833e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 44.00626276789715,
+      "torque_per_peak_amp": 0.4400626276789715
+    },
+    {
+      "actual_id_a": -50.00003039222495,
+      "actual_iq_a": 86.60252283147754,
+      "beta_dq_deg": 30.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.5093922057062796e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 44.96467194520231,
+      "torque_per_peak_amp": 0.4496467194520231
+    },
+    {
+      "actual_id_a": -64.27878785215393,
+      "actual_iq_a": 76.60442175395482,
+      "beta_dq_deg": 40.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.509392203548815e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 44.293199206778986,
+      "torque_per_peak_amp": 0.4429319920677899
+    },
+    {
+      "actual_id_a": -76.60446686983137,
+      "actual_iq_a": 64.27873408514598,
+      "beta_dq_deg": 50.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.5093922075515906e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 40.66820408337237,
+      "torque_per_peak_amp": 0.4066820408337237
+    },
+    {
+      "actual_id_a": -86.60255792539962,
+      "actual_iq_a": 49.999969607768875,
+      "beta_dq_deg": 60.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.509392212415296e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 33.17574353635088,
+      "torque_per_peak_amp": 0.33175743536350877
+    },
+    {
+      "actual_id_a": -93.96927408141325,
+      "actual_iq_a": 34.20198135506519,
+      "beta_dq_deg": 70.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.5093922032512176e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 23.70596026642248,
+      "torque_per_peak_amp": 0.2370596026642248
+    },
+    {
+      "actual_id_a": -98.48078139521036,
+      "actual_iq_a": 17.364783205925395,
+      "beta_dq_deg": 80.0,
+      "current_peak_a": 100.0,
+      "dq_current_relative_error": 3.509392210782903e-07,
+      "speed_rpm": 1200.0,
+      "torque_nm": 12.929384730151025,
+      "torque_per_peak_amp": 0.12929384730151025
+    }
+  ],
+  "result_hash": "beta-results:sha256:70795a513684f3052a24a03e1525fbfa6564f585b3b8a14b11808612ce647a1d",
+  "speed_rpm": 1200.0,
+  "stage_beta_bounds_deg": [
+    0.0,
+    80.0
+  ],
+  "status": "passed",
+  "strict_case_plan_validation": true,
+  "successful_rows": 10,
+  "summary_schema_version": "beta_mtpa_summary_v1",
+  "sweep_id": "beta-mtpa:sha256:6507d55e07f4ab19915e0530e922582ff94fbd9fdfc65c9813809c41bdd64119",
+  "tested_beta_bounds_deg": [
+    -10.0,
+    80.0
+  ],
+  "tested_beta_values_deg": [
+    -10.0,
+    0.0,
+    10.0,
+    20.0,
+    30.0,
+    40.0,
+    50.0,
+    60.0,
+    70.0,
+    80.0
+  ],
+  "workflow_version": "beta_calibration_v2"
+}

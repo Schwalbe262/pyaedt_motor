@@ -1,0 +1,84 @@
+{
+  "schema": "v4r5_cold_archive_staging_ready_v2",
+  "status": "VERIFIED_C_STAGING_ONLY_PARENT_OWNS_Y_MOVE",
+  "target": "legacy/v4r5_native_contract_2026_07",
+  "moved_source_files": [
+    "build_ipmsm_v2_c_native_base_v4r5.py",
+    "tests/test_build_ipmsm_v2_c_native_base_v4r5.py"
+  ],
+  "raw_leaf_records": [
+    {
+      "original_relative_path": "build_ipmsm_v2_c_native_base_v4r5.py",
+      "bytes": 23653,
+      "sha256": "512915579f2a29e39d04bc5edfd8637c7d3c407ec012caf44c43a528e54afb84",
+      "crlf_count": 586,
+      "git_blob_sha1": "39bf82e8b7289e469cda50bccccf37bbd368292b",
+      "git_blob_sha256": "fce0c4a32f6afbbb76392a763df2a6666bfc4f2b62b4d3ac5dfcf5be0da9d61f",
+      "worktree_LF_equals_git_blob": true,
+      "existing_raw_backup": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\reference_integration_20261031_025909\\source\\build_ipmsm_v2_c_native_base_v4r5.py",
+      "existing_raw_backup_exact": true
+    },
+    {
+      "original_relative_path": "tests/test_build_ipmsm_v2_c_native_base_v4r5.py",
+      "bytes": 11794,
+      "sha256": "bcdc933bd554da4fb49f389c08cff978091cffaeb3787f07e300acaada00237b",
+      "crlf_count": 265,
+      "git_blob_sha1": "1711db0b01313e81874ec2a9a6f49c4f04e0eb70",
+      "git_blob_sha256": "4dd9265954317471407b559121136beecb39aac2dd409cbf910fedc827c4bdc3",
+      "worktree_LF_equals_git_blob": true,
+      "existing_raw_backup": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\reference_integration_20261031_025909\\source\\tests\\test_build_ipmsm_v2_c_native_base_v4r5.py",
+      "existing_raw_backup_exact": true
+    }
+  ],
+  "source_copy_stats": {
+    "copied_files": 65,
+    "copied_bytes": 3208747,
+    "content_unique_sha256": 64,
+    "content_unique_bytes": 3196953,
+    "source_closure_python_files": 42
+  },
+  "contracts": [
+    {
+      "relative_path": "simul_log_smoke/v4r4/base_v4r4.json",
+      "immutable_count": 34,
+      "all_sha256_match": true,
+      "contract_sha256": "093bdd63dc1cb36fda45bf6534fcc84b6c8f47bb0aed8fbbc8115cffe3be6943"
+    },
+    {
+      "relative_path": "simul_log_smoke/v4r5_native/base_v4r5.json",
+      "immutable_count": 36,
+      "all_sha256_match": true,
+      "contract_sha256": "4e5963a6f7a3ecc7a1ea2926ac40067ae9af6c04d76636dfe2e59d427eaaa7f3"
+    }
+  ],
+  "final_eight_tests": {
+    "path": "validation/v2_restored_8_tests/result.json",
+    "bytes": 6281,
+    "sha256": "ec781f6689498af30b6ed5b1003f7671ae70d821251cf1521aaee72205531af1",
+    "tests": 8,
+    "passed": true,
+    "source_tree_unchanged": true,
+    "active_Y_workspace_modules": {},
+    "Native_SDK_loaded": false
+  },
+  "actions": {
+    "C_copies_only": true,
+    "Y_writes": false,
+    "Native_API": false,
+    "large_scene_or_model_copies": false,
+    "guard_assertion_edits": false
+  },
+  "predecessor": {
+    "old_files": 79,
+    "old_seal": "1a8d0235d76e11a01936aa8cfc3131a469d78364c780414f4f9ad5cfc99754ea",
+    "old79_unchanged": true
+  },
+  "runtime_delta": "Only archive runner import-origin policy: manifest-verified cold modules and the verified runner may originate on Y; all other Y origins remain forbidden. Required five project origins, SDK exclusion and byte checks remain.",
+  "pure_archive_Y_path_policy": {
+    "path": "validation/archive_origin_policy_result.json",
+    "bytes": 316,
+    "sha256": "01da49e9e5d75ad3fbc42a30348a00b39c8fa989e57fd37fb0276cd1cb666524",
+    "cases": 7,
+    "Y_filesystem_writes": false
+  }
+}

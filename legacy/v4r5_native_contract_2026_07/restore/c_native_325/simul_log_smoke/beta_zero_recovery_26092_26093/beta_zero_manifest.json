@@ -1,0 +1,34 @@
+{
+  "calibration_id": "beta-calibration:sha256:33af20eb4faff7e97342fe3aacadcaf2b64021589645e0d04c8f05f8f83fdce7",
+  "circular_resultant": 0.9999996201131311,
+  "convention": "dq_current_advance_v2",
+  "design_hash": "6218545c0ab3f73acfb5657698be63430140825b9edf9183d20e279bf09dc460",
+  "electrical_zero_deg": -91.66402010733627,
+  "initial_position_deg": -22.5,
+  "max_circular_deviation_deg": 0.049941868294467895,
+  "method": "signed_phasea_back_emf_fundamental_v2",
+  "observations": [
+    {
+      "amplitude_peak_v": 19.9080455838547,
+      "cos_peak_v": 19.90014655302013,
+      "inferred_zero_deg": -91.6140782390418,
+      "sin_peak_v": 0.5607549706937069,
+      "speed_rpm": 600.0
+    },
+    {
+      "amplitude_peak_v": 39.81147570188704,
+      "cos_peak_v": 39.79366409937587,
+      "inferred_zero_deg": -91.71396197563074,
+      "sin_peak_v": 1.1907540081756942,
+      "speed_rpm": 1200.0
+    }
+  ],
+  "quality_profile": "reference_ultra",
+  "source_case_id": "beta_source_6218545c0ab3",
+  "successful_rows": 2,
+  "successful_speeds_rpm": [
+    600.0,
+    1200.0
+  ],
+  "workflow_version": "beta_calibration_v2"
+}

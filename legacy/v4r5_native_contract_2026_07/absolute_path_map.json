@@ -1,0 +1,36 @@
+{
+  "schema": "v4r5_original_absolute_path_map_v1",
+  "canonical_C325": {
+    "original_root": "C:/Users/peets/NEC/pyaedt_motor_blob_lf_325",
+    "archive_relative_root": "restore/c_native_325",
+    "content": "Both contracts, 34/36 immutable inputs, historical source-pin31 plus complete local import/Python-path closure, small material CSVs and unchanged ordinary test/Fixture. LF builder matches the v4r5 authority."
+  },
+  "original_Y_leaves": {
+    "original_root": "Y:/git/pyaedt_motor",
+    "archive_relative_root": "original_y",
+    "paths": [
+      "build_ipmsm_v2_c_native_base_v4r5.py",
+      "tests/test_build_ipmsm_v2_c_native_base_v4r5.py"
+    ],
+    "content": "Only the proposed two current raw CRLF leaves; shared active kernels are not moved. Restore over a matching historical Git workspace, never the active workspace."
+  },
+  "fixture": {
+    "original_path": "Y:/git/pyaedt_motor/tests/test_supervise_ipmsm_v2_pipeline.py",
+    "verified_raw_backup": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\reference_integration_20261031_025909\\source\\tests\\test_supervise_ipmsm_v2_pipeline.py",
+    "archive_path": "restore/c_native_325/tests/test_supervise_ipmsm_v2_pipeline.py"
+  },
+  "interpreters_not_copied": {
+    "logical_old_Y": "Y:/git/pyaedt_motor/.venv/Scripts/python.exe",
+    "native_guarded": "C:/Users/peets/anaconda3/envs/pyaedt2026v1/python.exe"
+  },
+  "external_large_artifacts_not_copied": {
+    "Git_history_bundle": "D:/IPMSM_Archive/wb0/repository.bundle",
+    "matching_ref": "b624406b20e779d6409dc191c14ff5c214b1e1dc",
+    "old_simulation_backup_reference": "D:/IPMSM_Archive/s0",
+    "split_archive_references": [
+      "D:/IPMSM_Archive/y5",
+      "legacy/simulation"
+    ],
+    "scope": "Large scenes, models, resumable pipeline outputs and installed Ansys/library software are not copied. Reconstruct any such optional historical resume context separately from its original archive map; this package proves input-contract restoration and ordinary tests, not end-to-end historical FEA."
+  }
+}

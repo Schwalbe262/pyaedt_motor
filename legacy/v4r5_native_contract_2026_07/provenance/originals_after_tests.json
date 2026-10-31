@@ -1,0 +1,330 @@
+{
+  "checks": [
+    {
+      "path": "original_y/build_ipmsm_v2_c_native_base_v4r5.py",
+      "source": "Y:\\git\\pyaedt_motor\\build_ipmsm_v2_c_native_base_v4r5.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "original_y/tests/test_build_ipmsm_v2_c_native_base_v4r5.py",
+      "source": "Y:\\git\\pyaedt_motor\\tests\\test_build_ipmsm_v2_c_native_base_v4r5.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "provenance/root_cleanup_next_v4r5_native_bundle_20261031.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\root_cleanup_next_v4r5_native_bundle_20261031.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/analyze_ipmsm_quality_results.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\analyze_ipmsm_quality_results.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/atomic_publish.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\atomic_publish.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/audit_ipmsm_stage2_v4r3_results.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\audit_ipmsm_stage2_v4r3_results.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/audit_ipmsm_torque_unit_replay.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\audit_ipmsm_torque_unit_replay.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/authorize_ipmsm_v2_optimization_v4.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\authorize_ipmsm_v2_optimization_v4.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/build_ipmsm_v2_c_native_base_v4r5.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\build_ipmsm_v2_c_native_base_v4r5.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/calibrate_ipmsm_beta.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\calibrate_ipmsm_beta.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/collect_ipmsm_v2_campaign.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\collect_ipmsm_v2_campaign.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/confirm_ipmsm_v2_optimization_inputs.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\confirm_ipmsm_v2_optimization_inputs.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/continue_ipmsm_v2_optimization.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\continue_ipmsm_v2_optimization.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/continue_ipmsm_v2_optimization_v4.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\continue_ipmsm_v2_optimization_v4.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/continue_ipmsm_v2_stage2.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\continue_ipmsm_v2_stage2.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/generate_ipmsm_quality_cases.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\generate_ipmsm_quality_cases.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/generate_ipmsm_second_pass_cases.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\generate_ipmsm_second_pass_cases.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/generate_ipmsm_v2_cases.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\generate_ipmsm_v2_cases.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/inspect_ipmsm_scheduler_job.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\inspect_ipmsm_scheduler_job.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/ipmsm_optimization.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\ipmsm_optimization.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/ipmsm_surrogate_bundle.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\ipmsm_surrogate_bundle.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/material/27PNF1500_Pc_200Hz.csv",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\material\\27PNF1500_Pc_200Hz.csv",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/material/27PNF1500_Pc_400Hz.csv",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\material\\27PNF1500_Pc_400Hz.csv",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/material/27PNF1500_Pc_50Hz.csv",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\material\\27PNF1500_Pc_50Hz.csv",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/material/27PNF1500_core_loss_coefficients_W_m3.csv",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\material\\27PNF1500_core_loss_coefficients_W_m3.csv",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/material/30PNF1600_BH.csv",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\material\\30PNF1600_BH.csv",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/merge_ipmsm_v2_case_plans.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\merge_ipmsm_v2_case_plans.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/merge_ipmsm_v2_results.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\merge_ipmsm_v2_results.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/module/ipmsm_geometry.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\module\\ipmsm_geometry.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/module/ipmsm_ppt_setup.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\module\\ipmsm_ppt_setup.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/module/variable.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\module\\variable.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/optimize_ipmsm_nsga2.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\optimize_ipmsm_nsga2.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/prepare_ipmsm_torque_unit_recovery_plans.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\prepare_ipmsm_torque_unit_recovery_plans.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/publish_ipmsm_v2_stage1_official_v4.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\publish_ipmsm_v2_stage1_official_v4.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/rank_ipmsm_quality_profiles.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\rank_ipmsm_quality_profiles.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/rank_ipmsm_second_pass_profiles.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\rank_ipmsm_second_pass_profiles.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/rebuild_ipmsm_v2_stage1_torque_unit_fix.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\rebuild_ipmsm_v2_stage1_torque_unit_fix.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/revise_ipmsm_v2_torque_recovery_base_v4r4.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\revise_ipmsm_v2_torque_recovery_base_v4r4.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/run_ipmsm_batch.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\run_ipmsm_batch.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/run_ipmsm_v2_campaign.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\run_ipmsm_v2_campaign.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/beta_zero_recovery_26092_26093/beta_mtpa_cases.csv",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\beta_zero_recovery_26092_26093\\beta_mtpa_cases.csv",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/beta_zero_recovery_26092_26093/beta_mtpa_collected_26094_26103/beta_mtpa_results.csv",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\beta_zero_recovery_26092_26093\\beta_mtpa_collected_26094_26103\\beta_mtpa_results.csv",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/beta_zero_recovery_26092_26093/beta_mtpa_summary.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\beta_zero_recovery_26092_26093\\beta_mtpa_summary.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/beta_zero_recovery_26092_26093/beta_zero_manifest.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\beta_zero_recovery_26092_26093\\beta_zero_manifest.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/beta_zero_recovery_26092_26093/ipmsm_optimization_spec.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\beta_zero_recovery_26092_26093\\ipmsm_optimization_spec.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/v4r4/base_v4r4.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\v4r4\\base_v4r4.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/v4r4/ipmsm_v2_foundation_stage1_700_cases_torqueunit_fix_v1.csv",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\v4r4\\ipmsm_v2_foundation_stage1_700_cases_torqueunit_fix_v1.csv",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/v4r4/ipmsm_v2_foundation_stage2_300_cases_torqueunit_fix_v1.csv",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\v4r4\\ipmsm_v2_foundation_stage2_300_cases_torqueunit_fix_v1.csv",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/v4r4/stage1_torqueunit_fix_rebuild.receipt.canonical.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\v4r4\\stage1_torqueunit_fix_rebuild.receipt.canonical.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/v4r4/stage2_v4r3_physics_audit_v3/receipt.canonical.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\v4r4\\stage2_v4r3_physics_audit_v3\\receipt.canonical.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/v4r4/torque_unit_recovery_plans.manifest.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\v4r4\\torque_unit_recovery_plans.manifest.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/v4r4/torque_unit_replay_forensics/receipt.canonical.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\v4r4\\torque_unit_replay_forensics\\receipt.canonical.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/simul_log_smoke/v4r5_native/base_v4r5.json",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\simul_log_smoke\\v4r5_native\\base_v4r5.json",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/submit_ipmsm_scheduler_job.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\submit_ipmsm_scheduler_job.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/submit_ipmsm_scheduler_task.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\submit_ipmsm_scheduler_task.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/submit_ipmsm_v2_campaign.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\submit_ipmsm_v2_campaign.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/subprocess_run.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\subprocess_run.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/supervise_ipmsm_v2_pipeline.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\supervise_ipmsm_v2_pipeline.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/supervise_ipmsm_v2_pipeline_v4.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\supervise_ipmsm_v2_pipeline_v4.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/tests/test_build_ipmsm_v2_c_native_base_v4r5.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\reference_integration_20261031_025909\\source\\tests\\test_build_ipmsm_v2_c_native_base_v4r5.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/tests/test_supervise_ipmsm_v2_pipeline.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\reference_integration_20261031_025909\\source\\tests\\test_supervise_ipmsm_v2_pipeline.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/train_ipmsm_lightgbm.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\train_ipmsm_lightgbm.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/validate_ipmsm_pareto_fea.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\validate_ipmsm_pareto_fea.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/validate_ipmsm_v2_dataset.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\validate_ipmsm_v2_dataset.py",
+      "source_and_copy_unchanged": true
+    },
+    {
+      "path": "restore/c_native_325/verify_regression_metrics.py",
+      "source": "C:\\Users\\peets\\NEC\\pyaedt_motor_blob_lf_325\\verify_regression_metrics.py",
+      "source_and_copy_unchanged": true
+    }
+  ],
+  "all_unchanged": true
+}
