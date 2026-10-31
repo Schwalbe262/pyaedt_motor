@@ -307,3 +307,9 @@ Y:에서 짧아지는 파일을 덮어쓴 뒤 이전 파일의 끝부분이 남�
 - **시간 기록:** `timing_cleanup_s`를 추가하고 `elapsed_s`·`finished_at`를 cleanup 뒤에 갱신합니다. wrapper의 `runner_wall_s`는 Python 시작·종료를 포함한 별도 관측입니다. 기존 결과의 기록값은 바꾸지 않습니다.
 - **검증:** fresh literal Git278개 파일의 C 스냅샷에4개 변경 파일을 합쳐308개 검사 모두 통과했습니다. 설치된 SDK의 실제 종료·캐시 선택 코드를 Native 없는 시험으로 실행했고, 원래 단위 상수와 물리 모듈4개의 바이트를 대조했습니다. 별도 검토에서도28개 순수 검사가 통과했습니다. 반영한4개 Git index 바이트는 검증본과 같습니다.
 - **남은 확인:** 실제 종료 지연의 개선은 새 고정 소스의 public CLI setup-only 재검증으로 확인합니다. source10과100935 실패는 보존하며 FEA 누적120회를 유지합니다. 새 producer는 `570a84cf2f716e5f7bda64dc58dd2315f24ce3c9736728149b8307531d54de5b`입니다. 근거: `R/sdk_retirement_parent_20261031/{combined_validation_result.json,parent_promotion.json}`, 독립 검토 `R/standalone_sdk_retirement_independent_review_20261031/independent_review.json`.
+
+
+## SDK 종료 수정본의 새 고정 배포
+
+- 수정 코드를 `12c02716b059ca34e23b6dc16ebacaf194b3754b`로 고정하고 source11 `PYAEDT_MOTOR_REBUILD_M19_12C0271`의 네 계정에 배포했습니다. 각 ref를 GET으로 확인했으며 source8·9·10 설정은 그대로입니다.
+- 새 public CLI setup-only 패킷은 명시적 AEDT2025.2 입력과 클라이언트 종료·정리 시간·저장 버전 검증을 추가했습니다. 실제 재실행 전 검토 중이며, FEA 시도는120회를 유지합니다. 근거: `R/owned_source_12c0271_20261031/{source_creation_verification.json,deployments_readback_v1.json}`.
