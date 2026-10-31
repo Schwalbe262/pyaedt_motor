@@ -1080,3 +1080,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: newNoAnalyze getter-onlyproxy shadowedmodel_depth='StackLength'; input43.6181mm/Analysis32checks passedwhiletwofullcasesstored1meter. SourceNoLoadwaveformgates alsoPassed despiteinvalidphysicalmodel.
 - After/evidence: proxyfix+actualSIguard metadata100922/23 bothread.0436181m before/AFTERandbothsavedAEDTsDepthStackLength/mm;oldfailed3preserved/neverrescaled.169mainunitchecks rejectshadow1m andlatevalidation/reportmutationbeforeAnalyze; :gcommandquantizationexplicit.
 - Remaining risk: correctedsettingsproofisnotFEAaccuracy/meshconvergence/runtimegain. RequireactualcorrectedfullFEA2andloadedquality; mainfullNativepipelineverificationstillpending.
+
+
+## 2026-10-31 part40 | PyAEDT 0.22 종료 후 재연결을 피하고 실제 종료를 따로 증명
+- Source loop: part38/40; R/sdk_retirement_parent_20261031/combined_validation_result.json 및 R/pc2/independent_100936/assessment.json SHA4aa01ea0…/raw_seal4bde963b….
+- Improvement: 검증한 새 Python client의 인스턴스 종료 상태와 실제 Native PID 종료를 분리한다. 소유 프로젝트 닫기·Native Quit·PID 종료 확인 뒤 SDK release_desktop/ReleaseAll을 호출하지 않고, 종료 시간과 cleanup 이후 전체 elapsed를 기록한다.
+- Before: 이번 수정에서 도입한 post-Quit SDK detach와 atexit이 PyAEDT0.22의 grpc 재연결을 일으켰다. 실제100935는Native PID가 없어졌어도failed/759초였고 기존elapsed67.494초는정리시간을제외했다.
+- After/evidence: SDK0.22.0 고정·새 클라이언트만 인스턴스 플래그 적용·자동 재연결 억제 후308개 관련 검사 및 실제100936 setup-only PASS_METADATA_ONLY. Native PID562406 종료·client retirement 각각 확인, taskwall96초/cleanup2.473602초/rowelapsed63.15초. 원본70개 파일 해시 봉인, 전역atexit변경0/SDKrelease0.
+- Remaining risk: 설치 SDK의 private field에 의존하므로 버전 불일치는 거부하고 재검증한다. 클라이언트 종료 표시는 Native 종료 증거가 아니며, 불확실한 해석에는 Native API/강제 종료/자동 재시도를 허용하지 않는다. 설정 전용 시간 개선은 FEA 풀이 시간이나 전체 학습 정확도 개선의 증거가 아니다.

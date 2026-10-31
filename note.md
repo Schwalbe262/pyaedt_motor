@@ -4348,3 +4348,12 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - actions/result: main12c02716b059ca34e23b6dc16ebacaf194b3754b commit/push, root create_owned_source_12c0271_once.py EXACTONCE로 source11 생성과 명시적 네 계정 deploy. GET4deployed ref 모두 exact12c0271; auto_pullFalse/max_active0/runtimeproject2, source8·9·10 API설정 before/after동일/원장120bytes불변/FEA0. R/owned_source_12c0271_20261031/deployments_readback_v1.json SHA2aae102c0b2bab3e22a62ace98a565b158d3a51f10f487b19689a9d46df43463.
 - parallel: Legacy새CLI0패킷 driver e1a9ccd5/8archive d049ec4d/request5a6bb700/255literal+library23/18purePASS 준비, root·peer exactreview중/아직POST0. V3는신source125+새producer570/explicit252/newcaseIDs로zero2준비하되 actualCLI0PASS전HELD. 이전실패100935/Source10·oldzeroV1V2변경0.
 - failure/next: 배포오류0·자동재시도0. 실제Native종료지연개선은미검증이므로새0smoke→확인후freshzero2root121/122예약→부하4비교순서를유지. insight없음/token samplerunsupported재시도없음.
+
+
+## 2026-10-31T05:57:15.805916+00:00 part40 | 실제 SDK 종료 검증·새 영점2건 제출·중간보고
+- goal/hypothesis: source11의 SDK 재연결 수정이 실제 public CLI에서 작동하는지 확인하고 새 producer의 영점을 검증한다. 사용자에게 문제·시도·확인된 효과·다음 개선을 구분해 보고한다.
+- actions: root 100936 실제 setup-only 한 번 제출·GET 수집·독립 판정 완료. 원본70개 파일 봉인/assessment4aa01ea0…/rawseal4bde963b…. root 새zero 패킷과 명령 직전OFF export delta를 검토하고 원장121/122 예약 후100937/100938 각각 한 번 POST. 요청f137f2f1…/a624f422…, parent review1e899078…/peer ee2dd1a1…. collector0d801523… 전체 소스 검토·dry HTTP0 후 sole GETwatch4572 시작.
+- metrics/result: actual100936 PASS_METADATA_ONLY/소유PID562406gone/새Python client retirementTrue/cleanup2.473602s/row63.15s/taskwall96s(이전 실패759s).308개 관련 통합 검사 근거 유지. 현재 원장122=진단92+설계30+학습0.14:54KST100937failed78·게시JSON읽기실패,100938running. 새 영점·FEA시간 단축·수렴·새 모델10개R²·최종 설계 합격은 아직 없음.
+- options/failure/next: 사전 실행 오류와 실제 solver 오류를 구분하도록 Legacy에 GET-only 원인 확인을 맡겼다. 실패 원본을 보존하고 자동 재시도하지 않는다. 영점 완료 뒤 잔차×OutputError 부하4건, 독립 시간/메시 비교, 새 학습 및 두 속도 최적설계 검증 순서. 중간보고는 docs/RESEARCH_AUDIT.md에 추가하고 HANDOFF현재4행 갱신(8 diff lines)했다. Native/FEA를 호출하는 보고 작업은 없다. 토큰샘플러unsupported는 이전 확인을 재사용하고 재시도하지 않았다.
+- part40 추가 확인: 100937의 task.failure_message와 stderr459B가 동일한 FileExistsError를 기록했다.
+  공용 remote/dispatch_v1/4fd957063ca5bf03/source_seal.json 생성의 exists→open('xb') 경쟁이며 Native/Analyze 전에 중단됐다. Legacy가 원본 GET 증거를 봉인 중이고 V3가 C-only 수정·동시성 검사를 준비한다. 원본 요청·고정 source11·실행 중5000rpm 작업은 변경하지 않는다.
