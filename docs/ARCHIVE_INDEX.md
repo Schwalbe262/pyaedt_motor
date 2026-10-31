@@ -39,3 +39,6 @@ Y:의 과거 수집·모델·PPT 추출·md 폴더는 각각 D:의 `y0`~`y4`로 
 이전 replay 분석·계획 도구 4개와 일반 테스트 4개는 `legacy/replay_analysis`에 모았습니다. 원본 8파일(55,649 bytes)은 `D:\IPMSM_Archive\ra0`에 먼저 백업·검증했고, 이동 후 SHA도 대조했습니다. CRLF·코드·테스트 기준을 그대로 보존하며, 보관 폴더 README에 별도 19개 테스트 실행 명령을 남겼습니다. 과거 권위 계약에 묶인 다른 루트 소스·테스트는 유지했습니다.
 
 원격 source 프로젝트4는 기존5914cb3 수렴 실험을 위해 유지합니다. 이전 source 프로젝트5 `PYAEDT_MOTOR_REBUILD_V3B_8BB5216`은8bb5216에 고정하여 보존합니다. 현재 M19 기준 해석은 위 source8의 고정4300668을 사용합니다. 프로젝트5의 max_active_tasks=0은 source 관리 전용이라는 뜻입니다. 실제 해석은 기존 runtime/license 프로젝트2와 승인된 cap300을 사용합니다.
+
+
+2026-10-31 루트의 이전 테스트 임시 폴더9개를 `legacy/empty_test_directories_2026_07`로 같은 볼륨에서 이동했습니다. 숨김 항목 포함 파일0개·빈 하위 폴더2개이며, 기존 루트 부재와 하위 구조 보존을 확인했습니다. 이름과 복원 방법은 해당 README, 전후 증거는 C 실행 폴더의 `empty_test_directories_20261031`에 있습니다.

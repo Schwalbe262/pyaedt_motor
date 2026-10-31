@@ -4258,3 +4258,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - metrics/result: R/ca8/comparison.json SHA8f1476fc8f6783294f2680bcde3c5bc625482a9d166cdbacb9be1aa8809cfb12; ALL3admitted/issues[], fullON-quarterON H1amp0.0844515%/Core1.850928%/PMabs0.00214895W(floor1)/phase0.0590167deg, 단일 속도 무부하 진단PASS. OFF/ON/quarter solve1176.714/1203.057/1264.326s, 속도 개선 인증 없음. Rawpair193files22,631,919B/seal1f6660c4.../parentcaptureff079018...; quarter23seal91c7ab67.../parentae2c7bf6....
 - failure reason/limits: 원래100921 실패 상태 보존. 네 저장본과 세 liveSI 실제 깊이.0436181m 확인/이전1m full 제외. 무부하noL은 all10 학습·메시/시간 수렴 통과가 아님. 기존 파형·물리 허용오차 유지. Proof=R/ca8/parent_closeout_verification.json SHA2870d3a5922b617ab53a1f9729515cce76da179fe804ad0bbf4db5afc918b0ba.
 - next/token: loaded G1low full/quarter apparentL 0FEA native metadata부터 확인; explicit nonlinear residual C후보와 공동 controlcoverage 준비. ledger120=diag90/design30/train0, watch51321/34032 CLOSED. token sampler unsupported(previous finding), routine insight 추가 없음.
+
+## 2026-10-31T01:57:05.113099+00:00 part27 | 이전 빈 임시 폴더 정리
+- goal/hypothesis: 루트에 남은2026-07 tmp폴더9개가 과거 테스트 잔여물인지 확인하고 탐색 위치를 정리.
+- actions/options: 정확9경로·현재 코드 참조·Git추적·hidden files·reparse 검사; 전체 파일0개/빈 하위2개 확인. 삭제 대신 같은 Y볼륨 legacy/empty_test_directories_2026_07로 이동하고 README복원 목록/ArchiveIndex 작성.
+- metrics/result: 루트9경로 부재/대상9경로 존재/하위구조 일치/파일0개, proofSHA=89da751d633641c9ff538fa38985316678ffe7f3b4289fb2aaf7c0a86e8a432c. 전후계획·검증=C:\Users\peets\NEC\pyaedt_motor_runtime\rebuild_20261030\empty_test_directories_20261031; 파일 내용 변경 없음.
+- failure reason/limits: 실패 없음; 빈 폴더는 Git미추적이므로 README에 재생성 목록 명시. 기존 user/protected2 및 실제 FEA 입력·결과는 수정 없음. 저영향 가역 폴더 이동이므로 구현 테스트 대신 전후경로·구조 검사.
+- next/token: v3 loaded0FEA metadata2와 legacy residual명시필드, surrogate공동controlcoverage 계속; 원장120/새FEA0. token sampler unsupported(existing finding).
