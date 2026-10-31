@@ -67,7 +67,7 @@ class PhysicalBundleAdapter:
     """
 
     def __init__(self, bundle: PhysicalMotorBundle, source_spec: Mapping,
-                 expected_fingerprints: Mapping, calibration_manifest: Mapping):
+                 expected_fingerprints: Mapping, calibration_manifest: Mapping, *, frame_evidence=None):
         if set(REQUIRED_FINGERPRINTS) - set(expected_fingerprints):
             raise ValueError("optimization requires the full independent fingerprint context")
         check_fingerprints(bundle.metadata["fingerprints"], expected_fingerprints)
@@ -78,12 +78,12 @@ class PhysicalBundleAdapter:
         self.source_spec = deepcopy(dict(source_spec))
         if bundle.metadata.get("spec_sha256") != _digest(self.source_spec):
             raise ValueError("source spec differs from the surrogate training spec")
-        from calibrate_ipmsm_beta import apply_zero_manifest_to_spec
+        from . import reference_frames as frames
         calibration_manifest = deepcopy(dict(calibration_manifest))
         if (calibration_manifest.get("metric_contract") != "motor_metrics_v3" or
                 calibration_manifest.get("back_emf_source") != "periodic_flux_derivative"):
             raise ValueError("optimization requires a v3 physical flux-derived zero manifest")
-        calibrated = apply_zero_manifest_to_spec(self.source_spec, calibration_manifest)
+        calibrated = frames.apply_reference(self.source_spec, calibration_manifest, frame_evidence)
         if "beta_calibration" in self.source_spec and self.source_spec["beta_calibration"] != calibrated["beta_calibration"]:
             raise ValueError("source spec and calibrated-zero manifest disagree")
         self.spec = optimization_spec_from_mapping(calibrated)
@@ -96,16 +96,19 @@ class PhysicalBundleAdapter:
         self.fingerprints = deepcopy(dict(expected_fingerprints))
         self.domain = deepcopy(bundle.metadata["domain"])
         self.calibration_manifest = calibration_manifest
+        self.frame_evidence = frame_evidence
+        if frames.is_family(calibration_manifest):
+            frames.verify_domain(self.domain, calibration_manifest, frame_evidence)
         self._bind_domain()
         self._metadata_sha256 = _digest(bundle.metadata)
         self.artifact_provenance: dict = {"kind": "in_memory_approved_bundle"}
 
     @classmethod
     def from_directory(cls, directory: Path, source_spec: Mapping,
-                       expected_fingerprints: Mapping, calibration_manifest: Mapping):
+                        expected_fingerprints: Mapping, calibration_manifest: Mapping, *, frame_evidence=None):
         bundle = load_bundle(Path(directory), expected_fingerprints=expected_fingerprints,
                              require_approved=True)
-        result = cls(bundle, source_spec, expected_fingerprints, calibration_manifest)
+        result = cls(bundle, source_spec, expected_fingerprints, calibration_manifest, frame_evidence=frame_evidence)
         result.artifact_provenance = {"kind": "checked_artifact", "path": os.path.abspath(directory),
                                       "manifest_sha256": sha256(Path(directory) / "manifest.json")}
         return result
@@ -448,6 +451,10 @@ def build_fea_validation_rows(adapter: PhysicalBundleAdapter, proposals: Sequenc
     if not adapter.bundle.approved or _digest(adapter.bundle.metadata) != adapter._metadata_sha256:
         raise ValueError("validation plan requires the unchanged approved model")
     profile = doe.load_selected_profile(selected_profile)
+    from . import reference_frames as frames
+    if frames.is_family(adapter.calibration_manifest):
+        frames.validate_reference(adapter.calibration_manifest, adapter.frame_evidence)
+        frames.profile_context(profile, adapter.calibration_manifest)
     fields = fixed_case_context_fields(adapter.spec.material_context, adapter.spec.winding)
     material = {key: fields[key] for key in ("core_material_model", "core_material")}
     winding = {key: fields[key] for key in doe.WINDING_CONTEXT_FIELDS}
@@ -509,6 +516,7 @@ def build_fea_validation_rows(adapter: PhysicalBundleAdapter, proposals: Sequenc
                 "beta_convention": adapter.spec.beta_calibration.convention,
                 "beta_calibration_id": adapter.spec.beta_calibration.calibration_id,
                 "electrical_zero_deg": adapter.spec.beta_calibration.electrical_zero_deg,
+                **frames.frame_fields(adapter.calibration_manifest),
                 "model_extent": "full_360", "symmetry_factor": 1, "use_periodic_boundary": False,
                 "operation": "sin_current", **replay, **fields,
                 "expected_material_fingerprint": adapter.fingerprints["input_material_fingerprint"],
@@ -526,6 +534,8 @@ def build_fea_validation_rows(adapter: PhysicalBundleAdapter, proposals: Sequenc
     if len({row["case_id"] for row in rows}) != len(rows):
         raise ValueError("duplicate validation cases")
     return rows, {"status": "ready_for_independent_fea", "submitted": False,
+                  **({"reference_frame_context": frames.semantic_context(adapter.calibration_manifest)}
+                     if frames.is_family(adapter.calibration_manifest) else {}),
                   "selected_profile_sha256": profile.manifest_sha256,
                   "selected_profile_evidence": list(profile.evidence), "settings": settings,
                   "material_context": material, "winding_context": winding,
@@ -603,6 +613,8 @@ def main(argv=None) -> int:
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--expected-fingerprints", type=Path, required=True)
     parser.add_argument("--calibration-manifest", type=Path, required=True)
+    from . import reference_frames as frames
+    frames.evidence_arguments(parser)
     parser.add_argument("--baseline", type=Path, required=True, help="JSON independent geometry plus stack_length_mm")
     parser.add_argument("--selected-profile", type=Path, help="Sealed approved profile required for runnable FEA validation rows")
     parser.add_argument("--output", type=Path, required=True)
@@ -613,7 +625,8 @@ def main(argv=None) -> int:
     parser.add_argument("--max-design-evaluations", type=int, default=256)
     args = parser.parse_args(argv)
     read = lambda path: json.loads(path.read_text(encoding="utf-8-sig"))
-    adapter = PhysicalBundleAdapter.from_directory(args.bundle, read(args.spec), read(args.expected_fingerprints), read(args.calibration_manifest))
+    adapter = PhysicalBundleAdapter.from_directory(args.bundle, read(args.spec), read(args.expected_fingerprints), read(args.calibration_manifest),
+                                                   frame_evidence=frames.evidence_from_arguments(args))
     plan = generate_design_plan(adapter, read(args.baseline), count=args.count, seed=args.seed, mode=args.mode, variables=args.variables)
     variables = [*ACTIVE_GEOMETRY, "stack_length_mm"] if args.mode == "full_geometry" else (args.variables or ["stator_outer_radius", "stack_length_mm"])
     report = search_designs(adapter, plan, seed=args.seed, search_variables=variables,

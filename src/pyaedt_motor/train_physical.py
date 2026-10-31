@@ -162,7 +162,7 @@ def _outside_support_count(inputs, domain) -> int:
 
 
 def fit_prepared(prepared, spec: dict, destination: Path, *, seed=42, jobs=4,
-                 candidates=CANDIDATES, data_sha256: str | None = None) -> PhysicalMotorBundle:
+                 candidates=CANDIDATES, data_sha256: str | None = None, frame_evidence=None) -> PhysicalMotorBundle:
     """Publish selection before evaluating the full preassigned test cohort."""
     import train_ipmsm_lightgbm as trainer
     runtime_pin = capture_runtime_pin()
@@ -174,6 +174,8 @@ def fit_prepared(prepared, spec: dict, destination: Path, *, seed=42, jobs=4,
     training_hashes = {name: source_payload_sha256(payload) for name, payload in training_payloads.items()}
     def publication_guard():
         assert_runtime_pin(runtime_pin)
+        if frame_evidence is not None:
+            frame_evidence.assert_unchanged()
         if any(source_payload_sha256(path.read_bytes()) != training_hashes[name]
                for name, path in training_paths.items()):
             raise RuntimeError("training/preprocessing code changed during fitting; refusing publication")
@@ -197,7 +199,7 @@ def fit_prepared(prepared, spec: dict, destination: Path, *, seed=42, jobs=4,
         raise ValueError("not enough independent fitting geometries")
     if (set(inner.train_group_ids) | set(inner.val_group_ids)) != set(outer.train_group_ids):
         raise ValueError("inner selection is not confined to the outer training geometries")
-    domain = domain_from_training(outer.x_train, spec, case_frame=prepared.raw_df)
+    domain = domain_from_training(outer.x_train, spec, case_frame=prepared.raw_df, frame_evidence=frame_evidence)
     validate_declared_inputs(prepared.valid_df[list(prepared.input_columns)], domain["declaration"])
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=False)
@@ -260,6 +262,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--spec", type=Path, required=True)
+    from . import reference_frames as frames
+    frames.evidence_arguments(parser)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--jobs", type=int, default=4)
@@ -282,7 +286,8 @@ def main(argv=None):
         validate_new_data(frame)
         prepared = trainer.prepare_training_data(deps, [snapshot], False, False, 1.5, v2=True)
         bundle = fit_prepared(prepared, json.loads(args.spec.read_text(encoding="utf-8-sig")), args.output,
-                              seed=args.seed, jobs=args.jobs, data_sha256=digest)
+                              seed=args.seed, jobs=args.jobs, data_sha256=digest,
+                              frame_evidence=frames.evidence_from_arguments(args))
     atomic_write_bytes(args.output / "source_dataset.csv", payload)
     for target, metric in bundle.metadata["test_metrics"].items():
         print(f"{target}: R2={metric['r2']} MAE={metric['mae']}")

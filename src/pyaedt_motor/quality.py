@@ -397,7 +397,8 @@ def _mesh_count(mesh_counts, case_id):
 def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[Mapping[str, Any]], *,
                      reference_profile: str, refined_reference_profile: str | None = None,
                      tolerances: Sequence[MetricTolerance] = DEFAULT_TOLERANCES,
-                     mesh_counts: Mapping[str, int] | None = None) -> dict:
+                     mesh_counts: Mapping[str, int] | None = None,
+                     frame_manifest: Mapping | None = None, frame_evidence=None) -> dict:
     """Return explicit coverage and diagnostics; absent refinement cannot promote."""
     rules = tuple(tolerances)
     columns = {rule.column for rule in rules}
@@ -411,6 +412,15 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
             raise ValueError("invalid metric denominator floor")
     if not case_plan:
         raise ValueError("case plan must not be empty")
+    from . import reference_frames as frames
+    frame_context = {}
+    if any(str(row.get("input_beta_calibration_id", "")).startswith(frames.PREFIX) for row in results) or frame_manifest is not None:
+        if frame_manifest is None or frame_evidence is None or not frames.is_family(frame_manifest):
+            raise ValueError("family profile comparison requires its explicit manifest and local audits")
+        frame_context = {"reference_frame_context": frames.verify_rows(results, frame_manifest, frame_evidence)}
+        for row in case_plan:
+            if any(row.get(key) != value for key, value in frames.frame_fields(frame_manifest).items()):
+                raise ValueError("quality plan reference-frame declaration differs")
     planned, groups = {}, defaultdict(lambda: defaultdict(list))
     for row in case_plan:
         case = _text(row.get("case_id"))
@@ -554,7 +564,7 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
             "production_metric_contract_complete": modern_contract,
             "planned_reference_groups": len(coverage), "result_rows": len(results),
             "producer_fingerprint": next(iter(producers)) if len(producers) == 1 else None,
-            **context,
+            **context, **frame_context,
             "global_issues": global_issues, "duplicate_result_case_ids": duplicate_results,
             "unplanned_result_case_ids": unplanned, "unpaired_plan_case_ids": sorted(unpaired),
             "reference_coverage": coverage, "reference_certification": certifications,
@@ -657,6 +667,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", type=Path, nargs="+", required=True)
     parser.add_argument("--plan", type=Path, required=True)
+    from . import reference_frames as frames
+    frames.evidence_arguments(parser)
+    parser.add_argument("--reference-frame-manifest", type=Path)
     parser.add_argument("--reference-profile", required=True)
     parser.add_argument("--refined-reference-profile")
     parser.add_argument("--mesh-root", type=Path)
@@ -719,7 +732,9 @@ def main(argv=None):
     results = [row for rows in parsed[1:] for row in rows]
     report = compare_profiles(results, parsed[0], reference_profile=args.reference_profile,
                               refined_reference_profile=args.refined_reference_profile, tolerances=rules,
-                              mesh_counts=mesh_counts)
+                              mesh_counts=mesh_counts,
+                              frame_manifest=json.loads(args.reference_frame_manifest.read_bytes()) if args.reference_frame_manifest else None,
+                              frame_evidence=frames.evidence_from_arguments(args))
     report["case_plan_sha256"] = input_files[0]["sha256"]
     report["case_plan_file"] = input_files[0]
     report["result_files"] = input_files[1:]

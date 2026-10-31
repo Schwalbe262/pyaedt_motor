@@ -132,10 +132,12 @@ class NativeSourceTests(unittest.TestCase):
 class NativeCLITests(unittest.TestCase):
     def test_train_and_optimize_start_fresh_supported_python_with_absolute_argv(self):
         commands = {
-            "train": ["--data", "input cases.csv", "--spec=motor.json", "--output", "model output"],
+            "train": ["--data", "input cases.csv", "--spec=motor.json", "--output", "model output",
+                      "--frame-evidence", "frame evidence/audit map.json", "--frame-evidence-root=collected local evidence"],
             "optimize": ["--bundle", "model/artifact", "--spec=motor.json", "--expected-fingerprints", "expected.json",
                          "--calibration-manifest=zero.json", "--selected-profile", "quality/selected.json",
-                         "--baseline", "baseline.json", "--output=proposals.json"],
+                         "--baseline", "baseline.json", "--output=proposals.json",
+                         "--frame-evidence=frame evidence/audit map.json", "--frame-evidence-root", "collected local evidence"],
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "repo"; root.mkdir(); small_repository(root)

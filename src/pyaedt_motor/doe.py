@@ -398,6 +398,20 @@ def _case_context_fields(material: MaterialContextSpec, winding: WindingSpec) ->
 
 
 def _require_plan_context(rows: list[dict], manifest: Mapping[str, Any]) -> None:
+    frame = manifest.get("reference_frame_context")
+    if frame is not None or any(str(row.get("beta_calibration_id", "")).startswith("family-reference-frame:sha256:") for row in rows):
+        from . import reference_frames as frames
+        if (not isinstance(frame, dict) or frame.get("method") != frames.METHOD or
+                frame.get("reference_frame_id") != manifest.get("calibration_id") or
+                frame.get("protocol_implementation_sha256") != frames.implementation_sha256() or
+                frame.get("renderer_producer_fingerprint") != manifest.get("expected_producer_fingerprint")):
+            raise ValueError("training plan lacks its explicit family reference context")
+        for row in rows:
+            for key, value in {"reference_frame_method": frames.METHOD, "reference_frame_id": frame["reference_frame_id"],
+                               "beta_calibration_id": frame["reference_frame_id"],
+                               "electrical_zero_deg": frame["electrical_zero_deg"],
+                               "initial_position_deg": frame["initial_position_deg"]}.items():
+                frames._equal(row.get(key), value, "plan family reference " + key)
     try:
         material_raw, winding_raw = manifest["material_context"], manifest["winding_spec"]
         material, winding = MaterialContextSpec(**material_raw), WindingSpec(**winding_raw)
@@ -540,10 +554,12 @@ def generate_training_plan(
     geometries: int = 720, seed: int = 20261030, case_prefix: str = "v3train",
     excluded_hashes: Iterable[str] = (), retry_reserve: int = DEFAULT_RETRY_RESERVE,
     current_min_fraction: float = .25, controls_per_geometry: int = 3,
+    frame_evidence=None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build default3 or explicit paired4 rows/geometry, with preassigned group partitions."""
     source_pin = _assert_source_pin()
-    from calibrate_ipmsm_beta import validated_zero_manifest, _require_zero_context
+    from calibrate_ipmsm_beta import _require_zero_context
+    from . import reference_frames as frames
     _production_spec(spec)
     geometries = _integer(geometries, "geometries", 5)
     seed = _integer(seed, "seed")
@@ -561,7 +577,7 @@ def generate_training_plan(
         raise ValueError("loaded-model current_min_fraction must be between0 and1")
     if calibration.get("metric_contract") != METRIC_CONTRACT or calibration.get("back_emf_source") != "periodic_flux_derivative":
         raise ValueError("production DOE requires a v3 physical flux-derived zero manifest")
-    angle, calibration_id = validated_zero_manifest(calibration)
+    angle, calibration_id = frames.resolve_reference(calibration, frame_evidence)
     if spec.beta_calibration.calibration_id != calibration_id or not math.isclose(
             spec.beta_calibration.electrical_zero_deg, angle, rel_tol=0, abs_tol=1e-12):
         raise ValueError("spec and supplied calibrated-zero manifest differ")
@@ -576,6 +592,8 @@ def generate_training_plan(
     for record in profile.evidence:
         if _sha(Path(record["path"]).read_bytes()) != record["sha256"]:
             raise ValueError("profile evidence changed after selection")
+    if frames.is_family(calibration):
+        frames.profile_context(profile, calibration)
     initial = _finite(calibration.get("initial_position_deg"), "calibration initial_position_deg")
     settings = profile_settings(profile.settings)
     context_fields = _case_context_fields(spec.material_context, spec.winding)
@@ -661,6 +679,7 @@ def generate_training_plan(
                          "vdc_v": spec.inverter.vdc_v, "base_rpm": rpm, "i_peak_a": current,
                          "beta_dq_deg": beta, "beta_deg": beta, "beta_convention": "dq_current_advance_v2",
                          "electrical_zero_deg": angle, "beta_calibration_id": calibration_id,
+                         **frames.frame_fields(calibration),
                          "initial_position_deg": initial, "series_turns_per_phase": spec.winding.series_turns_per_phase,
                          "turns_per_coil_side": spec.winding.turns_per_coil_side, "model_extent": "full_360",
                          "symmetry_factor": 1, "use_periodic_boundary": False, "operation": "sin_current",
@@ -708,6 +727,9 @@ def generate_training_plan(
         manifest.update(controls_per_geometry=4, control_protocol=PAIRED_CONTROL_PROTOCOL,
                         support_diagnostics=_paired_support_diagnostics(rows, spec.winding))
         _require_paired_controls(rows, manifest)
+    if frames.is_family(calibration):
+        manifest["reference_frame_context"] = frames.semantic_context(calibration)
+        frame_evidence.assert_unchanged()
     _require_plan_context(rows, manifest)
     _assert_source_pin(source_pin)
     return rows, manifest
@@ -794,6 +816,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--calibration-manifest", type=Path, required=True)
+    from . import reference_frames as frames
+    frames.evidence_arguments(parser)
     parser.add_argument("--profile-manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--exclude", type=Path, action="append", default=[])
@@ -804,16 +828,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--retry-reserve", type=int, default=DEFAULT_RETRY_RESERVE)
     parser.add_argument("--current-min-fraction", type=float, default=.25)
     args = parser.parse_args(argv)
-    from calibrate_ipmsm_beta import apply_zero_manifest_to_spec
     spec_raw = _strict_json(args.spec.read_bytes())
     calibration = _strict_json(args.calibration_manifest.read_bytes())
-    spec = optimization_spec_from_mapping(apply_zero_manifest_to_spec(spec_raw, calibration))
+    frame_evidence = frames.evidence_from_arguments(args)
+    spec = optimization_spec_from_mapping(frames.apply_reference(spec_raw, calibration, frame_evidence))
     profile = load_selected_profile(args.profile_manifest)
     excluded, exclusions = exclusion_hashes(args.exclude)
     rows, manifest = generate_training_plan(spec, calibration, profile, geometries=args.geometries, seed=args.seed,
                                             case_prefix=args.case_prefix, excluded_hashes=excluded,
                                             retry_reserve=args.retry_reserve, current_min_fraction=args.current_min_fraction,
-                                            controls_per_geometry=args.controls_per_geometry)
+                                            controls_per_geometry=args.controls_per_geometry, frame_evidence=frame_evidence)
     manifest.update(excluded_sources=exclusions, spec_file_sha256=_sha(args.spec.read_bytes()),
                     calibration_file_sha256=_sha(args.calibration_manifest.read_bytes()))
     proof = write_training_plan(args.output, rows, manifest)

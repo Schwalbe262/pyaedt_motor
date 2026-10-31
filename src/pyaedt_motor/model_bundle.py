@@ -53,6 +53,10 @@ def sha256(path: Path) -> str:
 def source_files() -> dict[str, Path]:
     root = Path(__file__).resolve().parents[2]
     return {"model_bundle.py": Path(__file__), "surrogate.py": Path(surrogate.__file__),
+            "reference_frames.py": Path(__file__).with_name("reference_frames.py"),
+            "remote_case.py": Path(__file__).with_name("remote_case.py"),
+            "doe.py": Path(__file__).with_name("doe.py"),
+            "calibrate_ipmsm_beta.py": root / "calibrate_ipmsm_beta.py",
             "ipmsm_optimization.py": root / "ipmsm_optimization.py"}
 
 
@@ -308,7 +312,7 @@ def validate_declared_inputs(inputs: pd.DataFrame, declaration: dict) -> None:
     _geometry_checks(inputs, declaration)
 
 
-def domain_from_training(inputs: pd.DataFrame, spec: dict, *, case_frame: pd.DataFrame | None = None) -> dict:
+def domain_from_training(inputs: pd.DataFrame, spec: dict, *, case_frame: pd.DataFrame | None = None, frame_evidence=None) -> dict:
     """Declared engineering limits plus a conservative empirical support box."""
     from dataclasses import asdict
     from ipmsm_optimization import WindingSpec, GEOMETRY_VARIABLE_NAMES
@@ -318,6 +322,8 @@ def domain_from_training(inputs: pd.DataFrame, spec: dict, *, case_frame: pd.Dat
     if not math.isclose(winding.winding_temperature_c, 100):
         raise ValueError("this resistance contract supports 100 degC winding temperature")
     actual_cases = inputs if case_frame is None else case_frame
+    from .reference_frames import verify_spec_rows
+    frame_context = verify_spec_rows(spec, actual_cases.to_dict("records"), frame_evidence)
     study_constants = case_study_context(actual_cases, spec, winding)
     missing = {"input_" + key for key in GEOMETRY_VARIABLE_NAMES} - set(inputs)
     if missing:
@@ -347,6 +353,7 @@ def domain_from_training(inputs: pd.DataFrame, spec: dict, *, case_frame: pd.Dat
     winding_values.update(study_constants)
     observed = {column: [float(inputs[column].min()), float(inputs[column].max())] for column in inputs}
     return {"input_columns": list(inputs.columns), "declaration": declaration, "observed_bounds": observed,
+            **({"reference_frame_context": frame_context} if frame_context is not None else {}),
             "winding_case_constants": winding_values, "winding_case_source": "fea_input_columns",
             "support_note": "Prediction rejects extrapolation beyond training coordinate bounds; a box does not prove dense joint coverage."}
 
