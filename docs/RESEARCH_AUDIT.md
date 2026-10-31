@@ -288,3 +288,13 @@ Y:에서 짧아지는 파일을 덮어쓴 뒤 이전 파일의 끝부분이 남�
 - 통합298개 검사를 통과한 코드와 점검 기록을 `474901f0b3f81761d331c477104af643e40fb7b1`로 고정했습니다. 새 source10 `PYAEDT_MOTOR_REBUILD_M19_474901F`는 자동 갱신을 끄고 네 계정에 배포했으며, 각 배포 ref가 해당 commit과 일치합니다.
 - 기존source8·9 설정과 시도 원장은 그대로입니다. FEA0회 추가·누적120회를 유지하며, 새 공개 CLI 설정 스모크를 준비 중입니다. 새 producer는 `e0fe49f96ec824e695741759e4d3d3420ff0dc482616bbae3296c38491eaf539`이고, 과거 영점 보정의 정체성을 재사용하지 않습니다.
 - 근거: `R/owned_source_474901f_20261031/source_creation_verification.json`, `deployments_readback_v1.json`.
+
+
+## 새 공개 CLI 설정 스모크의 종료 실패
+
+- **실제 결과:** source10의 공개 CLI setup-only 작업100935는 failed/exit2로 끝났습니다. 해석은 수행하지 않았고 FEA 시도 원장은120회를 유지했습니다. 원본 실패 상태를 보존했으며, 로컬 독립 판정도 FAILED입니다.71개 게시 파일·23개 ASCII/gzip/raw 전송을 수집했고, 별도 판정·수집 증거까지76개 파일을 재해시했습니다.
+- **원인:** 이번 소유권 보완에서 도입한 `Native Quit → SDK detach(False,False)` 순서가 문제였습니다. 실제 소유 PID534560은 종료됐지만, PyAEDT0.22의 detach와 atexit 경로가 닫힌 세션에 재연결을 시도했습니다. 원래 데이터 전체의 지연 원인으로 확대하지 않습니다.
+- **시간 관측:** 시작47.679초·형상8.725초, cleanup 전 기록 elapsed67.494초에 비해 실제 작업은759초(12분39초)였습니다. 기존 elapsed 기록이 종료 비용을 포함하지 않는 문제도 확인했습니다.
+- **후속 수정:** 소유한 새 Python 클라이언트의 자동 SDK release를 억제하고, 검증한 프로젝트·Native Quit·PID 종료 확인만 수행하는 C 후보를 준비합니다. 전역 atexit 함수를 후킹하거나 다른 세션을 정리하지 않습니다. 종료 시간과 전체 케이스 시간도 기록합니다. 수정 후 새 소스에서 실제 스모크를 다시 검증하며, source10은 보존합니다.
+- **추가 고정:** 후속 영점 입력은 AEDT2025.2를 명시합니다. 환경에 여러 ANSYSEM_ROOT가 있으면 현재 기본 선택이 최고 버전을 택할 수 있습니다. source10 영점 초안V1·버전 고정V2 모두 미제출 상태로 보존하고, 새 producer에 맞춰 다시 결합합니다. 아직 새 영점·수렴·속도·학습 합격은 없습니다.
+- 근거: `R/pc1/actual_100935/collection_proof.json`, `R/pc1/independent_100935/{assessment.json,raw_seal.json}`. source254·library23·시스템 재료파일 불변은 원격 helper 증거로 남았습니다.
