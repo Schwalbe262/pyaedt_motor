@@ -114,6 +114,7 @@ class IPMSMPPTSpec:
     conductor_area_per_branch_mm2: float = 15.3206469
     slot_fill_limit: float = 0.45
     mesh_maximum_lengths_mm: dict[str, float] = field(default_factory=dict)
+    mesh_refinement_modes: dict[str, str] = field(default_factory=dict)
     mesh_elements: dict[str, int] = field(
         default_factory=lambda: {
             "magnet": 50,
@@ -254,8 +255,17 @@ def validate_ppt_spec_contract(
         raise ValueError("band_circle_segments must be 0 (exact arcs) or at least 12")
     if spec.loss_policy not in {"laminated_core", "legacy_implicit"}:
         raise ValueError("unsupported loss_policy")
+    if not isinstance(spec.mesh_maximum_lengths_mm, dict):
+        raise ValueError("mesh_maximum_lengths_mm must be a group/length mapping")
+    if not isinstance(spec.mesh_refinement_modes, dict):
+        raise ValueError("mesh_refinement_modes must be a group/mode mapping")
+    for group, mode in spec.mesh_refinement_modes.items():
+        if group not in {"magnet", "rotor", "stator", "winding", "band"} or mode != "length_only":
+            raise ValueError(f"unsupported mesh refinement group/mode: {group}={mode!r}")
+        if group not in spec.mesh_maximum_lengths_mm:
+            raise ValueError(f"length_only requires a positive mesh length: {group}")
     for group, length in spec.mesh_maximum_lengths_mm.items():
-        if group not in spec.mesh_elements or not math.isfinite(length) or length <= 0:
+        if group not in spec.mesh_elements or type(length) not in (int, float) or not math.isfinite(length) or length <= 0:
             raise ValueError(f"invalid local mesh length: {group}={length!r}")
 
 
@@ -1801,11 +1811,14 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
                 assignment=objects,
                 inside_selection=True,
                 maximum_length=f"{local_length:g}mm" if local_length is not None else "1mm",
-                maximum_elements=spec.mesh_elements[group_name],
+                maximum_elements=None if spec.mesh_refinement_modes.get(group_name) == "length_only" else spec.mesh_elements[group_name],
                 name=f"Mesh_{group_name}",
             )
             if not operation:
                 raise RuntimeError("length mesh operation was not created")
+            if spec.mesh_refinement_modes.get(group_name) == "length_only":
+                operation.props["RestrictElem"] = False
+                operation.props["NumMaxElem"] = "1000"  # Valid inactive placeholder, not a growth limit.
             operation.props["RestrictLength"] = local_length is not None
             operation.props["MaxLength"] = f"{local_length:g}mm" if local_length is not None else "1mm"
             if operation.update() is False:
@@ -1814,6 +1827,89 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
         except Exception as exc:
             result[group_name] = f"skipped: {exc}"
     return result
+
+
+def audit_mesh_operation_settings(operations: dict[str, Any], objects: dict[str, list], spec: IPMSMPPTSpec, *, source: str) -> dict[str, Any]:
+    """Compare independent native/saved properties; this does not certify mesh sizes."""
+    import re
+    validate_ppt_spec_contract(spec)
+    audit: dict[str, Any] = {"source": source, "passed": False, "groups": {},
+                             "actual_mesh_length_verified": False}
+    try:
+        if source not in {"native_OO", "saved_AEDT"}:
+            raise ValueError("unsupported mesh evidence source")
+        for group in ("magnet", "rotor", "stator", "winding", "band"):
+            prop = operations["Mesh_" + group]
+            assigned = prop["Objects"]
+            expected = objects[group]
+            if not isinstance(assigned, list) or not expected or len(set(assigned)) != len(assigned):
+                raise ValueError(f"invalid mesh assignment: {group}")
+            if set(assigned) != set(expected) or any(type(x) not in (str, int) for x in assigned):
+                raise ValueError(f"mesh object assignment differs: {group}")
+            if prop.get("Type") not in ("LengthBased", "Length Based"):
+                raise ValueError(f"mesh type differs: {group}")
+            length_only = spec.mesh_refinement_modes.get(group) == "length_only"
+            length = spec.mesh_maximum_lengths_mm.get(group)
+            wanted = {"Enabled": True, "RefineInside": True, "RestrictElem": not length_only,
+                      "RestrictLength": length is not None, "ApplyToInitialMesh": False}
+            for key, value in wanted.items():
+                if type(prop.get(key)) is not bool or prop[key] is not value:
+                    raise ValueError(f"mesh flag differs: {group}.{key}")
+            # Disabled fields can be hidden by native OO. The saved-file audit checks them too.
+            count = prop.get("NumMaxElem")
+            if not length_only or source == "saved_AEDT":
+                if type(count) is int:
+                    number = count
+                elif type(count) is str and count.isdecimal():
+                    number = int(count)
+                else:
+                    raise ValueError(f"invalid native mesh count: {group}")
+                if number != (1000 if length_only else spec.mesh_elements[group]):
+                    raise ValueError(f"mesh count differs: {group}")
+            if length is not None:
+                match = re.fullmatch(r"\s*([+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)\s*mm\s*", str(prop.get("MaxLength", "")))
+                if not match or not math.isclose(float(match[1]), float(f"{length:g}"), rel_tol=1e-12, abs_tol=1e-12):
+                    raise ValueError(f"mesh length/mm unit differs: {group}")
+            elif source == "saved_AEDT" and prop.get("MaxLength") != "1mm":
+                raise ValueError(f"inactive mesh length placeholder differs: {group}")
+            audit["groups"][group] = {"mode": "length_only" if length_only else "additional_budget",
+                                      "requested_length_mm": length, "properties": dict(prop)}
+        audit["passed"] = True
+        audit["inactive_placeholders_verified"] = source == "saved_AEDT"
+        return audit
+    except (KeyError, TypeError, ValueError) as exc:
+        audit["error"] = str(exc)
+        error = ValueError("native mesh settings invalid: " + str(exc))
+        error.mesh_refinement_audit = audit
+        raise error from exc
+
+
+def audit_native_mesh_settings(design: Any, object_groups: dict[str, Any], spec: IPMSMPPTSpec) -> dict[str, Any]:
+    """Read actual Mesh child properties, never cached MeshOperation.props."""
+    m2d = _m2d(design)
+    groups = {"magnet": _get_group(m2d, object_groups, "magnets", ("magnet",)),
+              "rotor": _get_group(m2d, object_groups, "rotor", ("rotator", "rotor")),
+              "stator": _get_group(m2d, object_groups, "stator", ("stator", "main_stator")),
+              "winding": _get_group(m2d, object_groups, "windings", ("winding",)),
+              "band": _get_group(m2d, object_groups, "band", ("Band",))}
+    operations = {}
+    try:
+        mesh = m2d.odesign.GetChildObject("Mesh")
+        for group in groups:
+            node = mesh.GetChildObject("Mesh_" + group)
+            names = set(node.GetPropNames())
+            read = lambda name: node.GetPropValue(name) if name in names else None
+            assignment = read("Assignment")
+            operations["Mesh_" + group] = {"Type": read("Type"), "Enabled": read("Enabled"),
+                "Objects": [part.strip() for part in assignment.split(",")] if isinstance(assignment, str) else assignment,
+                "RefineInside": read("Region") == "Inside Selection", "RestrictElem": read("Restrict Max Elems"),
+                "RestrictLength": read("Restrict Length"), "ApplyToInitialMesh": read("Apply To Initial Mesh"),
+                "NumMaxElem": read("Max Elems"), "MaxLength": read("Max Length")}
+    except Exception as exc:
+        error = ValueError("native mesh OO readback failed: " + str(exc))
+        error.mesh_refinement_audit = {"source": "native_OO", "passed": False, "error": str(exc)}
+        raise error from exc
+    return audit_mesh_operation_settings(operations, groups, spec, source="native_OO")
 
 
 def audit_native_model_depth(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
@@ -2060,6 +2156,8 @@ def configure_ipmsm_from_ppt(
     }
 
     m2d = _m2d(design)
+    if spec.mesh_refinement_modes:
+        result["native_mesh_audit"] = audit_native_mesh_settings(design, merged_groups, spec)
     result["native_model_depth_audit"] = audit_native_model_depth(design, spec)
     try:
         result["validation"] = m2d.validate_simple()
@@ -2083,6 +2181,8 @@ def configure_ipmsm_from_ppt(
         exc.native_model_depth_audit["before_validation"] = result["native_model_depth_audit"]
         raise
 
+    if spec.mesh_refinement_modes:
+        result["native_mesh_audit_post_validation"] = audit_native_mesh_settings(design, merged_groups, spec)
     if analyze:
         solve_started = time.perf_counter()
         if analysis_error_callback is None:

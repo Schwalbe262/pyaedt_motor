@@ -246,7 +246,7 @@ def profile_settings(raw: Mapping[str, Any]) -> dict[str, Any]:
     """Validate explicit numerical settings; never infer numerical convergence."""
     result = dict(raw)
     allowed = {"quality_profile", "transient_periods", "steps_per_period", "mesh_elements",
-               "mesh_maximum_lengths_mm", "core_material_model", "core_material", "magnet_material", "shaft_material",
+               "mesh_maximum_lengths_mm", "mesh_refinement_modes", "core_material_model", "core_material", "magnet_material", "shaft_material",
                "winding_material", "air_material", "initial_position_deg", "setup_name",
                "band_circle_segments", "solver_output_error", "solver_nonlinear_residual", *CANONICAL_FLAGS}
     if set(result) - allowed:
@@ -286,6 +286,16 @@ def profile_settings(raw: Mapping[str, Any]) -> dict[str, Any]:
         if value <= 0:
             raise ValueError("local mesh length must be positive")
         result["mesh_maximum_lengths_mm"][key] = value
+    modes = result.get("mesh_refinement_modes", {})
+    if not isinstance(modes, dict) or set(modes) - set(MESH_GROUPS):
+        raise ValueError("mesh_refinement_modes contains unsupported groups")
+    for group, mode in modes.items():
+        if mode != "length_only" or group not in result["mesh_maximum_lengths_mm"]:
+            raise ValueError("length_only requires a positive length and a supported mode/group")
+    if modes:
+        result["mesh_refinement_modes"] = dict(modes)
+    else:
+        result.pop("mesh_refinement_modes", None)
     if "band_circle_segments" in result:
         _integer(result["band_circle_segments"], "band_circle_segments")
     if "initial_position_deg" in result:
@@ -631,9 +641,10 @@ def generate_training_plan(
         controls[2 * first:2 * first + 2] = ((minimum, beta_low), (maximum, beta_high))
         controls[2 * second:2 * second + 2] = ((minimum, beta_high), (maximum, beta_low))
     profile_case = {key: value for key, value in settings.items()
-                    if key not in {"mesh_elements", "mesh_maximum_lengths_mm", "initial_position_deg"}}
+                    if key not in {"mesh_elements", "mesh_maximum_lengths_mm", "mesh_refinement_modes", "initial_position_deg"}}
     for group, count in settings["mesh_elements"].items(): profile_case[f"mesh_{group}_elements"] = count
     for group, length in settings["mesh_maximum_lengths_mm"].items(): profile_case[f"mesh_{group}_max_length_mm"] = length
+    for group, mode in settings.get("mesh_refinement_modes", {}).items(): profile_case[f"mesh_{group}_mode"] = mode
     rows = []
     for index, (design, depth, key) in enumerate(designs):
         resistance = phase_resistance_100c_ohm(design, depth, spec.winding, slot_number=spec.slot_number)

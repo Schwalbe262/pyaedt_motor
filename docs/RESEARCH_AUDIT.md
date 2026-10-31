@@ -536,3 +536,13 @@ FS 전용100948은exit2로 종료됐습니다.12개 원래 케이스CSV·결과 
 - **메시 관측의 비교 대상 정정:** 과거9828/13158/9364는G1/G2/A57의서로다른candidate관측이며candidate/reference/fine수렴열이아닙니다. G1low의지역합19656/34984/36904는별도통계로유지하고미수집된reference/fine의전역삼각형수로환산하지않습니다. 기존철손65.51/121.14/66.33 W의동일형상비교와도구분합니다.
 
 근거: `R/hpc_batch950_submission_20261031_v2`(frozenb775173f/최종요청e417c6/실제제출4aaaf7ee), `R/hpc950_actual_collection_20261031`(ec886243/3개부모검사), `R/zero6_solve_local_assessment_20261031_v2`(d80c3dfe/14개부모검사/순수source148개사전해시일치), `R/source11_spatial_mesh_semantics_review_20261031/REVIEW.json`(d37c5b15/44개입력불변). HPC후보6개부모검사도통과했습니다. 새전체수렴·학습모델·최종설계합격은미완료입니다.
+
+## 길이 기준 메시 모드 구현과 실제 로컬 설정 검증
+
+문제는 기존 개수 예산만으로 길이 목표를 통제할 수 없다는 점이었습니다. 명시적 영역별 `length_only`와 양수 mm 길이를 추가했습니다. 새 모드에서는 개수 제한을 비활성화하고, 검증 전후 실제 Native 객체의 할당·플래그·길이를 대조합니다. 프로파일/DOE/설정 지문/결과 기록까지 전달하며 모드를 생략한 기본 2160행 CSV와 기본 설정 지문은 유지했습니다.
+
+독립 검토에서 최적 후보의 FEA 계획에 모드가 빠지는 연결 누락을 발견했습니다. 최적설계 경로에도 같은 펼침을 적용하고, 승인 프로파일→케이스→실제 spec과 지문을 비교하는 회귀를 추가했습니다. 모드를 버리면 기존 지문 검사가 거부합니다. 최종 신규9개+기존 최적화3개 검사는 별도 literal Git C 사본에서 부모도12/12 통과했습니다. 기존 관련107개 검사도 통과했습니다.
+
+로컬 Windows/Ansys2025.2의 공개 CLI를 `--setup-only`로 한 번 실행해 정상 종료했습니다. G1/1200rpm/전류0/NoL 조건이며 다섯 영역 길이는 magnet1/rotor3/stator3/winding1/band0.5 mm인 설정 검증용 예시입니다. 실제 검증 전후 Native OO와 저장 AEDT에서5개 operation·38개 part의 독립 ID맵·24개 winding·개수 제한OFF/길이 제한ON·mm 단위·비활성 자리값1000을 확인했습니다. 깊이 SI·Analyze0/해석 intent 없음·해 없는 저장파일·소유PID944 종료/SDK client 정리·161개 입력 불변을 독립 평가했습니다. 실제 밀도·수렴·FEA 시간 개선은 아직 측정하지 않았습니다.
+
+근거: `R/mesh_length_only_parent_20261031_v2`의 literal5b86c13+7파일 overlay/12개 검사·승격 증거, 후보V2 READY97dbef38/frozen52348c04/독립검토13837dc7, `R/mesh_length_only_windows_metadata_20261031/independent_native_assessment.json` SHA00405a7884b64fe0df8b307836ce876e26d34408ef2cbc2f1fe14f0672ebbc20. 실제 물리 생산자는18155177…이며 optimizer 보완은 이 지문에 포함된5개 과학 소스를 바꾸지 않습니다. 기존 Source11 실행본·진행중인7개 작업·원장139회는 유지합니다. 사용법과 한계는 [공간 메시 제어](MESH_CONTROLS.md)에 정리했습니다.

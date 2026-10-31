@@ -1,0 +1,171 @@
+{
+  "mesh_elements": {
+    "band": 2000,
+    "magnet": 100,
+    "rotor": 1000,
+    "stator": 1000,
+    "winding": 100
+  },
+  "objects_by_group": {
+    "band": [
+      1855
+    ],
+    "magnet": [
+      1073,
+      1150,
+      1161,
+      1172,
+      1183,
+      1197,
+      1208,
+      1219
+    ],
+    "rotor": [
+      873
+    ],
+    "stator": [
+      6
+    ],
+    "winding": [
+      596,
+      614,
+      848,
+      871,
+      847,
+      870,
+      846,
+      869,
+      845,
+      868,
+      844,
+      867,
+      843,
+      866,
+      842,
+      865,
+      841,
+      864,
+      840,
+      863,
+      839,
+      862,
+      838,
+      861
+    ]
+  },
+  "operations": {
+    "Mesh_band": {
+      "ApplyToInitialMesh": false,
+      "Enabled": true,
+      "ID": 5,
+      "IsComponent": false,
+      "IsGlobal": false,
+      "MaxLength": "1mm",
+      "NumMaxElem": "2000",
+      "Objects": [
+        1855
+      ],
+      "RefineInside": true,
+      "RestrictElem": true,
+      "RestrictLength": false,
+      "Type": "LengthBased"
+    },
+    "Mesh_magnet": {
+      "ApplyToInitialMesh": false,
+      "Enabled": true,
+      "ID": 1,
+      "IsComponent": false,
+      "IsGlobal": false,
+      "MaxLength": "1mm",
+      "NumMaxElem": "100",
+      "Objects": [
+        1073,
+        1150,
+        1161,
+        1172,
+        1183,
+        1197,
+        1208,
+        1219
+      ],
+      "RefineInside": true,
+      "RestrictElem": true,
+      "RestrictLength": false,
+      "Type": "LengthBased"
+    },
+    "Mesh_rotor": {
+      "ApplyToInitialMesh": false,
+      "Enabled": true,
+      "ID": 2,
+      "IsComponent": false,
+      "IsGlobal": false,
+      "MaxLength": "1mm",
+      "NumMaxElem": "1000",
+      "Objects": [
+        873
+      ],
+      "RefineInside": true,
+      "RestrictElem": true,
+      "RestrictLength": false,
+      "Type": "LengthBased"
+    },
+    "Mesh_stator": {
+      "ApplyToInitialMesh": false,
+      "Enabled": true,
+      "ID": 3,
+      "IsComponent": false,
+      "IsGlobal": false,
+      "MaxLength": "1mm",
+      "NumMaxElem": "1000",
+      "Objects": [
+        6
+      ],
+      "RefineInside": true,
+      "RestrictElem": true,
+      "RestrictLength": false,
+      "Type": "LengthBased"
+    },
+    "Mesh_winding": {
+      "ApplyToInitialMesh": false,
+      "Enabled": true,
+      "ID": 4,
+      "IsComponent": false,
+      "IsGlobal": false,
+      "MaxLength": "1mm",
+      "NumMaxElem": "100",
+      "Objects": [
+        596,
+        614,
+        848,
+        871,
+        847,
+        870,
+        846,
+        869,
+        845,
+        868,
+        844,
+        867,
+        843,
+        866,
+        842,
+        865,
+        841,
+        864,
+        840,
+        863,
+        839,
+        862,
+        838,
+        861
+      ],
+      "RefineInside": true,
+      "RestrictElem": true,
+      "RestrictLength": false,
+      "Type": "LengthBased"
+    }
+  },
+  "source": "saved Source11 full G1 Native MeshOperations; CAD tree omitted",
+  "source_project_sha256": "09ec66406d43ef554e359c2dc2202acac620cf27d03b40dbd54072d9907bd3b5",
+  "source_task": 100950
+}

@@ -17,3 +17,6 @@
 legacy/final_design_2026_07/** -text -whitespace
 legacy/reference_artifacts_2026_07/** -text -whitespace
 legacy/replay_analysis/** -text -whitespace
+
+# Preserve the saved Native fixture bytes used in the mesh verification evidence.
+/tests/fixtures/ipmsm_saved950_mesh_operations.json -text -whitespace

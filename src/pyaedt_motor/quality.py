@@ -67,7 +67,7 @@ PROFILE_NUMERIC = ("transient_periods", "steps_per_period", "circle_segments",
                    *("mesh_" + group + "_max_length_mm" for group in ("magnet", "rotor", "stator", "winding", "band")),
                    "band_circle_segments", "solver_nonlinear_residual")
 PROFILE_BOOLEAN = ("compute_inductance", "strict_setup", "solver_output_error")
-PROFILE_TEXT = ("loss_policy", "analysis_purpose")
+PROFILE_TEXT = ("loss_policy", "analysis_purpose", *("mesh_" + group + "_mode" for group in ("magnet", "rotor", "stator", "winding", "band")))
 LEGACY_MATERIAL_CONTEXT = {"core_material_model": "legacy_pnf_hybrid_v1",
                            "core_material": "27PNF1500_CustomCoreLoss"}
 REFERENCE_MATERIAL_CONTEXT = {"core_material_model": "m19_29g_reference_y2_v1",
@@ -624,6 +624,12 @@ def selected_profile_manifest(report, report_path: Path, profile: str) -> dict:
              ("magnet", "rotor", "stator", "winding", "band") if "mesh_" + group + "_max_length_mm" in flat}
     if local:
         settings["mesh_maximum_lengths_mm"] = local
+    modes = {group: flat["mesh_" + group + "_mode"] for group in
+             ("magnet", "rotor", "stator", "winding", "band") if "mesh_" + group + "_mode" in flat}
+    if modes:
+        if any(mode != "length_only" or group not in local for group, mode in modes.items()):
+            raise ValueError("selected length_only mesh mode requires an explicit positive length")
+        settings["mesh_refinement_modes"] = modes
     if "band_circle_segments" in flat:
         settings["band_circle_segments"] = flat["band_circle_segments"]
     selected = {"schema_version": "ipmsm_v3_selected_profile_v1", "metric_contract_version": METRIC_CONTRACT_VERSION,

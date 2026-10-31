@@ -387,6 +387,9 @@ INPUT_SPEC_COLUMNS = (
     "input_solver_output_error",
     "input_solver_nonlinear_residual",
     "input_mesh_elements",
+    "input_mesh_refinement_modes",
+    *(f"input_mesh_{key}_mode" for key in MESH_ELEMENT_KEYS),
+    *(f"input_mesh_{key}_max_length_mm" for key in MESH_ELEMENT_KEYS),
     *(f"input_mesh_{key}_elements" for key in MESH_ELEMENT_KEYS),
 )
 
@@ -722,6 +725,7 @@ def setup_fingerprint(
             "loss_policy": spec.loss_policy,
             "strict_setup": spec.strict_setup,
             "mesh_maximum_lengths_mm": spec.mesh_maximum_lengths_mm,
+            **({"mesh_refinement_modes": spec.mesh_refinement_modes} if spec.mesh_refinement_modes else {}),
         },
     )
 
@@ -778,6 +782,23 @@ def detected_aedt_version(desktop: Any, fallback: str) -> str:
             if value not in (None, ""):
                 return str(value)
     return fallback
+
+
+def build_mesh_refinement_modes(case: dict[str, Any]) -> dict[str, str]:
+    modes = {}
+    for key in case:
+        plain = key.removeprefix("input_")
+        for suffix in ("_mode", "_max_length_mm"):
+            if plain.startswith("mesh_") and plain.endswith(suffix) and plain[5:-len(suffix)] not in MESH_ELEMENT_KEYS:
+                raise ValueError("unknown mesh refinement group: " + plain[5:-len(suffix)])
+    for group in MESH_ELEMENT_KEYS:
+        values = [case[key] for key in (f"mesh_{group}_mode", f"input_mesh_{group}_mode")
+                  if key in case and case[key] != ""]
+        if values:
+            if any(type(value) is not str or value != "length_only" for value in values):
+                raise ValueError("unsupported mesh refinement mode: " + group)
+            modes[group] = "length_only"
+    return modes
 
 
 def build_mesh_elements(case: dict[str, Any], defaults: Any) -> dict[str, int]:
@@ -1114,11 +1135,12 @@ def build_spec(
         band_circle_segments=case_int(case, "band_circle_segments", "input_band_circle_segments", default=144),
         loss_policy=str(case_value(case, "loss_policy", "input_loss_policy", default="laminated_core")),
         mesh_maximum_lengths_mm={
-            key: case_float(case, f"mesh_{key}_max_length_mm", default=0.0)
+            key: case_strict_positive_float(case, f"mesh_{key}_max_length_mm", f"input_mesh_{key}_max_length_mm", default=1.0)
             for key in MESH_ELEMENT_KEYS
-            if case_value(case, f"mesh_{key}_max_length_mm", default="") != ""
+            if case_value(case, f"mesh_{key}_max_length_mm", f"input_mesh_{key}_max_length_mm", default="") != ""
         },
         mesh_elements=build_mesh_elements(case, defaults),
+        mesh_refinement_modes=build_mesh_refinement_modes(case),
     )
     validate_transient_spec(spec)
     validate_ppt_spec_contract(spec)
@@ -2818,6 +2840,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         input_data.update(asdict(spec))
         input_data.update(transient_setup_metadata(spec))
         input_data.update({f"mesh_{key}_elements": spec.mesh_elements.get(key, "") for key in MESH_ELEMENT_KEYS})
+        input_data.update({f"mesh_{key}_mode": mode for key, mode in spec.mesh_refinement_modes.items()})
+        input_data.update({f"mesh_{key}_max_length_mm": length for key, length in spec.mesh_maximum_lengths_mm.items()})
         input_data.update({f"coreloss_{key}": value for key, value in core_loss_coefficients.items()})
         input_data.update({f"core_{key}": value for key, value in core_material_properties.items()})
         input_data["dataset_schema_version"] = DATASET_SCHEMA_VERSION
@@ -3204,6 +3228,17 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                     row["artifact_standalone_solver_uncertain"] = str(artifact)
                 except Exception:
                     logging.exception("Could not preserve standalone uncertainty evidence for %s", case_id)
+        mesh_audit = getattr(exc, "mesh_refinement_audit", None)
+        if isinstance(mesh_audit, dict):
+            row["error_class"] = "native_mesh_settings_invalid"
+            if project_path is not None:
+                failure_audit = project_path / "native_mesh_failure.json"
+                try:
+                    with failure_audit.open("x", encoding="utf-8") as stream:
+                        json.dump(mesh_audit, stream, allow_nan=False, indent=2)
+                    row["artifact_native_mesh_failure"] = str(failure_audit)
+                except Exception:
+                    logging.exception("Could not preserve native mesh failure evidence for %s", case_id)
         winding_audit = getattr(exc, "winding_geometry_audit", None)
         if isinstance(winding_audit, dict):
             row["error_class"] = "winding_geometry_invalid"

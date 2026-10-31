@@ -473,9 +473,10 @@ def build_fea_validation_rows(adapter: PhysicalBundleAdapter, proposals: Sequenc
     if not math.isfinite(initial) or settings.get("initial_position_deg", initial) != initial:
         raise ValueError("validation profile must replay the zero calibration initial position")
     replay = {key: value for key, value in settings.items()
-              if key not in {"mesh_elements", "mesh_maximum_lengths_mm"}}
+              if key not in {"mesh_elements", "mesh_maximum_lengths_mm", "mesh_refinement_modes"}}
     replay.update({f"mesh_{group}_elements": value for group, value in settings["mesh_elements"].items()})
     replay.update({f"mesh_{group}_max_length_mm": value for group, value in settings["mesh_maximum_lengths_mm"].items()})
+    replay.update({f"mesh_{group}_mode": value for group, value in settings.get("mesh_refinement_modes", {}).items()})
     replay["initial_position_deg"] = initial
     # Retain analysis_purpose=training and every numerical flag: changing these
     # at proposal time would no longer replay the approved setup fingerprint.
