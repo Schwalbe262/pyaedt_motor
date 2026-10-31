@@ -44,3 +44,6 @@ CSV 전압 이름은 아래처럼 구분합니다. 현재 학습·설계의 전�
 현재 손실 피드백과 자석 와전류가 켜진 무전류 토크에는 손실에 의한 저항 토크도 포함됩니다. 이를 순수 코깅 토크로 해석하지 않습니다.
 
 해석 설정 `solver_nonlinear_residual`은 기본0.005이며 유한한 양수로 지정합니다. 선택 프로파일·입력 기록·설정 지문에 포함됩니다. `solver_output_error`는 기본True이며,False면 선택적인 EnergyError 보고서만 생략하고 비활성 사유를 남깁니다. 이 설정 변경의 정확도·속도 효과는 같은 조건의 직접 해석으로 확인해야 합니다.
+
+
+[공식 v252 설명](https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v252/en/Subsystems/Maxwell/Content/Maxwell/DefiningSettingsontheSolverTabforTransientSolutions.htm)은 GUI의 Output error를 잔차 에너지/전체 에너지의 백분율로 정의합니다. 현재 수집한 `EnergyError []`의 숫자 내보내기 배율과 그 정의의 직접 연결은 확인되지 않았으므로,31.63823/30.82349 등의 원시값을 보존하고 임의로% 변환하거나 새로운 판정 기준에 사용하지 않습니다. `UseNonLinearIterNum`은 수동 최소·최대 반복수 범위를 지정하는 스위치이며, B–H 곡선은 재료 정의에서 검증합니다.
