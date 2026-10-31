@@ -503,6 +503,17 @@ class RunnerOptions:
     beta_convention: str = DEFAULT_BETA_CONVENTION
     electrical_zero_deg: float = 0.0
     aedt_backend: str = DEFAULT_AEDT_BACKEND
+    prepare_batch_reports: bool = False
+
+
+def validate_batch_report_preparation(options: RunnerOptions) -> None:
+    """Opt-in report-ready build only; this flag never authorizes a solve."""
+    if type(options.prepare_batch_reports) is not bool:
+        raise ValueError("prepare_batch_reports must be a boolean")
+    if options.prepare_batch_reports and (
+        options.analyze or options.aedt_backend != "standalone" or options.cleanup_linux
+    ):
+        raise ValueError("batch report preparation requires standalone --setup-only --keep-projects")
 
 
 class Simulation:
@@ -1877,6 +1888,18 @@ def populate_commanded_current_metrics(output_summary: dict[str, Any], spec: Any
 
 def add_derived_motor_metrics(output_summary: dict[str, Any], spec: Any) -> None:
     """Add optimization-friendly metrics derived from transient report summaries."""
+    output_summary["output_mech_power_scope"] = (
+        "Moving1 electromagnetic torque times speed; before friction/windage; net shaft power unverified"
+    )
+    output_summary["output_efficiency_scope"] = (
+        "Estimated loss-based EM efficiency; excludes mechanical/inverter losses; net shaft efficiency unverified"
+    )
+    output_summary["output_power_balance_residual_normalization"] = (
+        "100*(Pin-P_Tomega-CoreLoss-SolidLoss-CuLoss)/max(abs(Pin),1W); signed residual W retained"
+    )
+    output_summary["output_power_balance_shared_copper_term"] = (
+        "Pin and CuLoss share R_phase*sum(I_phase_rms^2); residual cannot independently validate R_phase or CuLoss"
+    )
     omega_mech_rad_s = 2.0 * math.pi * float(spec.base_rpm) / 60.0
     phase_resistance = float(spec.phase_resistance_ohm)
     vdc = float(spec.vdc_v)
@@ -2793,6 +2816,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         )
 
     try:
+        validate_batch_report_preparation(options)
         producer_root = Path(__file__).resolve().parent
         producer_files = ["run_ipmsm_batch.py", "module/ipmsm_geometry.py", "module/ipmsm_ppt_setup.py",
                           "module/ipmsm_waveform_quality.py", "module/variable.py"]
@@ -3040,7 +3064,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             "use_periodic_boundary": use_periodic_boundary,
             "create_missing_region": True,
             "create_missing_band": True,
-            "create_reports": options.analyze,
+            "create_reports": options.analyze or options.prepare_batch_reports,
             "clear_existing": True,
             "analyze": options.analyze if pooled_backend else False,
             # Passing ``cores=`` asks PyAEDT to mutate and later restore a
@@ -3359,6 +3383,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--result-csv", default=str(BASE_DIR / "ipmsm_simulation_results.csv"), help="Shared CSV result file.")
     parser.add_argument("--analyze", dest="analyze", action="store_true", default=True, help="Run the transient solve.")
     parser.add_argument("--setup-only", dest="analyze", action="store_false", help="Build and validate setup without solving.")
+    parser.add_argument("--prepare-batch-reports", action="store_true", help="With standalone --setup-only --keep-projects, include reports for a later separately owned CLI solve.")
     parser.add_argument("--non-graphical", action="store_true", default=(os.name != "nt"), help="Launch AEDT in non-graphical mode.")
     parser.add_argument("--graphical", dest="non_graphical", action="store_false", help="Launch AEDT with GUI.")
     parser.add_argument("--cleanup-linux", action="store_true", default=(os.name != "nt"), help="Delete successful project folders on Linux.")
@@ -3404,6 +3429,7 @@ def main() -> int:
         beta_convention=args.beta_convention,
         electrical_zero_deg=args.electrical_zero_deg,
         aedt_backend=aedt_backend,
+        prepare_batch_reports=args.prepare_batch_reports,
     )
     payloads = [(case, asdict(options)) for case in cases]
 
