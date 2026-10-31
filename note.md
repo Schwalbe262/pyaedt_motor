@@ -4250,3 +4250,11 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - failure reason/limits: 구현 검사 실패 없음; closeout의 첫 log reader가 PowerShell UTF16을 UTF8로 읽어 중단(Y 변경 전), BOM에 맞춰 수정. 실제 생산 학습·R² 개선·전류β 공동 커버리지 인증은 아직 없음. 기존 승인·물리·소스 gates/원래 tests/protected2 유지.
 - parallel: cached metadata100926 POSTEDONCE/COMPLETED0/0FEA; full100924/25 v3 solewatch51321 유지, ledger120. raw최종증거 대기.
 - next/token: 실제 수정 full2와 quartercached 원본 해시·native 깊이·손실 비교 검토 후 loaded profile 검증; codex_ops token sampler unsupported(existing finding), not repeated.
+
+## 2026-10-31 part26 | 수정된 full2 실제 비교와 quarter 저장 조회
+- goal/hypothesis: 실제 깊이를 맞춘 OFF/ON과 quarter의 진단 등가성을 검증. 잘못된 깊이의 이전 full은 상태 변경·재스케일하지 않음.
+- actions: metadata100926 POSTONCE/0FEA 회수; full100924/25 정상 완료/solewatch51321 종료0. Root 독립 재해시180raw/70삼중변환, quarter23/16maps·2삼중변환, 최종193+23개 rawseal 재해시. 원래 quarter111개 장면 목록·해시 전후 일치/privatecopy/nativeSI/qualifiedquery/ownedPIDgone 확인.
+- candidates/review: 비교 초안의 CQ2 경로가 pin에 연결되지 않아 실행 전에 exactroot+sealSHA/size 검사 추가. 10focusedPASS/root 전체 source·delta 검토 후1회 실행. 독립 verifier는 처음3AEDT를 예상했지만 실제 solved_after 추가로4개였음; 정확한 네 경로 확인 뒤 읽기 전용 verifier 수정. 원시 모델·판정은 유지.
+- metrics/result: R/ca8/comparison.json SHA8f1476fc8f6783294f2680bcde3c5bc625482a9d166cdbacb9be1aa8809cfb12; ALL3admitted/issues[], fullON-quarterON H1amp0.0844515%/Core1.850928%/PMabs0.00214895W(floor1)/phase0.0590167deg, 단일 속도 무부하 진단PASS. OFF/ON/quarter solve1176.714/1203.057/1264.326s, 속도 개선 인증 없음. Rawpair193files22,631,919B/seal1f6660c4.../parentcaptureff079018...; quarter23seal91c7ab67.../parentae2c7bf6....
+- failure reason/limits: 원래100921 실패 상태 보존. 네 저장본과 세 liveSI 실제 깊이.0436181m 확인/이전1m full 제외. 무부하noL은 all10 학습·메시/시간 수렴 통과가 아님. 기존 파형·물리 허용오차 유지. Proof=R/ca8/parent_closeout_verification.json SHA2870d3a5922b617ab53a1f9729515cce76da179fe804ad0bbf4db5afc918b0ba.
+- next/token: loaded G1low full/quarter apparentL 0FEA native metadata부터 확인; explicit nonlinear residual C후보와 공동 controlcoverage 준비. ledger120=diag90/design30/train0, watch51321/34032 CLOSED. token sampler unsupported(previous finding), routine insight 추가 없음.
