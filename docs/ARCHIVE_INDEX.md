@@ -42,3 +42,6 @@ Y:의 과거 수집·모델·PPT 추출·md 폴더는 각각 D:의 `y0`~`y4`로 
 
 
 2026-10-31 루트의 이전 테스트 임시 폴더9개를 `legacy/empty_test_directories_2026_07`로 같은 볼륨에서 이동했습니다. 숨김 항목 포함 파일0개·빈 하위 폴더2개이며, 기존 루트 부재와 하위 구조 보존을 확인했습니다. 이름과 복원 방법은 해당 README, 전후 증거는 C 실행 폴더의 `empty_test_directories_20261031`에 있습니다.
+
+
+2026-10-31 새 검증 후보source9 `PYAEDT_MOTOR_REBUILD_M19_C53D3BA`를 추가했습니다. commit `c53d3ba3101e84e04fc01de78d250db698bdd2e0`에 고정하고 `auto_pull=False`·`max_active_tasks=0`으로 별도 checkout 배포를 시작했습니다. 실제 Native 설정 확인 전의 후보이며 기존source8을 대체하지 않습니다. 새 producer의 영점 보정·품질 검증을 거쳐 사용 범위를 결정합니다. 실행·라이선스project2와 FEA cap300은 유지합니다.

@@ -4273,3 +4273,10 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - failure reason/limits: 실제Native설정·잔차 민감도·속도효과는 아직 미확인. 잔차 norm/퍼센트 단위 추정 안함; 공식문서의 재시작 특성에 따라 새프로젝트/t0부터 비교. DOE에서값누락·mixedprofile 승격거부를fixture검증.
 - parameter clarification: 지난 수집메시지의generic phasepeak는nativebackEMF와물리단자전압을 혼동; 원시/publictarget은정확. OFF물리phaseabs21.7336533V/nativeEMF21.5603883V, span33.0836141V. doc에exactCSV이름/H1/physicalvoltage/noLoadlossdrag를구분. 원래봉인결과 변경 없음.
 - next/token: 새고정publicsource 배포와0FEA확인, fresh calibration 및 matched loaded .005/.0001 benchmark; v3기존430 full/quarter loaded메타데이터 준비. 원장120/새FEA0. token sampler unsupported(existing finding).
+
+## 2026-10-31T02:13:16.509594+00:00 part29 | 새 public source9 등록·배포 시작
+- goal/hypothesis: NativeDepth/H1/OutputError/비선형 잔차 수정이 포함된 commit을 기존430과 별도 검증할 재현 가능한 클러스터 소스로 준비.
+- actions/options: 기존source8 projectrequest와 name/ref만 바꾼 SHA237227d5...를 검토. root 신규projectPOST1회로id9 생성/c53d3ba pin/autopullFalse/maxactive0; source8의4 deployed accounts 대상으로 새 checkout 배포 시작.
+- metrics/result: W=C:\Users\peets\NEC\pyaedt_motor_runtime\rebuild_20261030\public_native_controls_c53d3ba_20261031, parent_project_receipt/parent_deploy_v2_receipt/parent_source_creation_verification 보존, proofSHA=f6fa4d757a490d5ca0e552ebb1934939fd49565297d8473c00073c6e5d2ed88c. 기존source8 name/repos/setup/entrypoints/autoPull/cap 동일; ledger120/새FEA0/새task0.
+- failure reason: 첫 deploy POST는OpenAPI에없는 수동필수body target_accounts를 빠뜨려422. GET로deployment0건 확인 후 backend app3317/project_env134 exactsource 검사, 기존source8 계정4개로 body작성해 수정된v2 POST1회 성공(deploying4). 실패/시도 marker는 보존하며 최초create script는 재실행하지 않음.
+- next/limits/token: legacy GET-only배포 확인·freshcommittedgitcapture·동일G1low4조합0FEA Native packet 준비. 현재source9 실제설정/새producer/영점/profile미인증; metadata검토후root POST. v3 source430 loadedfull/quarter metadata 별도 준비. token sampler unsupported(existing finding).
