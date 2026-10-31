@@ -32,6 +32,46 @@ def score(truth, predictions) -> dict:
             "mae": float(mean_absolute_error(actual, predicted))}
 
 
+def score_by_speed(truth: pd.DataFrame, predictions: pd.DataFrame) -> dict:
+    """Expose operating-point errors after selection, without filtering test rows."""
+    required = {"input_base_rpm", "geometry_group_id", *ALL_TARGETS}
+    if required - set(truth) or set(ALL_TARGETS) - set(predictions):
+        raise ValueError("speed diagnostics require complete test inputs and all targets")
+    if (not len(truth) or not truth.index.is_unique or not predictions.index.is_unique or
+            not truth.index.equals(predictions.index)):
+        raise ValueError("speed diagnostics require nonempty, uniquely aligned test rows")
+    speeds = pd.to_numeric(truth["input_base_rpm"], errors="coerce").to_numpy(float)
+    groups = truth["geometry_group_id"]
+    if (not np.isfinite(speeds).all() or (speeds <= 0).any() or groups.isna().any() or
+            groups.astype(str).str.strip().eq("").any()):
+        raise ValueError("speed diagnostics require finite positive speeds and geometry identities")
+    records = []
+    for speed in np.unique(speeds):
+        positions = np.flatnonzero(speeds == speed)
+        actual = truth.iloc[positions]
+        predicted = predictions.iloc[positions]
+        metrics = {}
+        for target in ALL_TARGETS:
+            y = actual[target].to_numpy(float)
+            p = predicted[target].to_numpy(float)
+            finite = bool(np.isfinite(y).all() and np.isfinite(p).all())
+            reason = ("nonfinite_values" if not finite else
+                      "fewer_than_two_rows" if len(y) < 2 else
+                      "constant_truth" if np.ptp(y) == 0 else None)
+            metrics[target] = {
+                "finite": finite, "r2": float(r2_score(y, p)) if reason is None else None,
+                "r2_undefined_reason": reason,
+                "mae": float(mean_absolute_error(y, p)) if finite else None,
+                "max_abs_error": float(np.max(np.abs(y - p))) if finite else None,
+            }
+        records.append({"speed_rpm": float(speed), "rows": len(positions),
+                        "geometry_groups": int(actual["geometry_group_id"].astype(str).nunique()),
+                        "metrics": metrics})
+    return {"evaluation_scope": "all_preassigned_test_rows_partitioned_by_observed_speed",
+            "used_for_selection": False, "diagnostic_only": True,
+            "rows": len(truth), "by_speed_rpm": records}
+
+
 def validate_new_data(frame: pd.DataFrame) -> None:
     """Reject bad/old rows rather than silently changing the evaluation cohort."""
     required = {"case_id", "geometry_group_id", "design_hash", "input_metric_contract_version", "input_producer_fingerprint",
@@ -187,6 +227,7 @@ def fit_prepared(prepared, spec: dict, destination: Path, *, seed=42, jobs=4,
                 "dataset_sha256": data_sha256 or hashlib.sha256(prepared.raw_df.to_csv(index=False, lineterminator="\n").encode()).hexdigest(),
                 "dataset_hash_kind": "raw_input_csv" if data_sha256 else "canonical_prepared_frame_csv",
                 "test_used_for_selection": False, "test_metrics": metrics,
+                "test_metrics_by_speed": score_by_speed(truth, test_predictions),
                 "test_physics_issues": physics_issues(test_predictions), "r2_threshold": .95,
                 "fit_groups": sorted(outer.train_group_ids), "calibration_groups": sorted(outer.val_group_ids),
                 "test_groups": sorted(outer.test_group_ids),
@@ -204,7 +245,7 @@ def fit_prepared(prepared, spec: dict, destination: Path, *, seed=42, jobs=4,
     bundle = PhysicalMotorBundle(models, metadata)
     save_bundle(bundle, destination / "artifact", runtime_pin=runtime_pin, publication_guard=publication_guard)
     atomic_write_bytes(destination / "report.json", canonical_json({
-        key: metadata[key] for key in ["decision", "promotion_issues", "test_metrics", "test_physics_issues",
+        key: metadata[key] for key in ["decision", "promotion_issues", "test_metrics", "test_metrics_by_speed", "test_physics_issues",
                                       "rows", "test_evaluation_scope", "test_rows_outside_supported_box"]}))
     test_predictions.to_csv(destination / "test_predictions.csv", index_label="source_row")
     atomic_write_bytes(destination / "source_spec.json", canonical_json(spec))
