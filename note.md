@@ -4454,3 +4454,21 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - validation/token: handoff changedlines10;protected2==D;artifact4hashes/6CSVmatchesactualanalysis/fullmeta6assessment/32parserfocusedpreviouslypassed. Reviewdiffstat/exactchangedhunksbeforecommit. Diagnostic-onlynewloops→noinsightappend;token sampler unsupportedpreviouslyconfirmed/noretry.
 - filesystem_recovery: Y virtual drive nested mkdir with absent parent returned WinError5 before any file write; created docs/experiments as one verified level, then retried the unchanged publication script. No Native/API action or raw data change.
 - SVG_format_closeout: generated Matplotlib path-data trailing spaces caused diff-check output overrun; captured/filtered checks henceforth. Removed trailing whitespace only after parsed SVG geometry/content equivalence, kept original C SVG/PNG immutable and updated publication derivation SHA.
+
+## 2026-10-31T21:49:16+09:00 | part52 pending | actual NoLoad6 reservations and rendering
+- goal/hypothesis: measure three-geometry/two-speed electrical zero with actualpassed settings before loadedspace/modelcampaign.
+- actions: rootexactreviewed heldrenderer/pinnedcoordinator/routeexplicitSource11seal561+lib23/e657;4purePASS; readactual6metadata/sourceAPI/capacity/holds andlockedledger132 beforeappend. Actualreserve133-138 once=>ledger138=diag108/design30/train0/receipt5a2387a1. Actualpositivepure renderonce=>6UNEXECUTEDrequestscb0707d1/encodedCRLFcases;HTTP/Native0/renderledgerwrites0.
+- metrics/result: oneNoLoadpergeometry/rpm/newcaseIDs/6x300/res1e-5/EEOFF/I0/noL/zero0/blankcalID; actualmetadata958-963 andindexaa23/58a6bound. SixrequestAPI/module252/envOFF/rootresourcechecksPASS. Finalpeer/encodedseed+sourceproofreviewpending; POST0/Native0/nodataangleclaim.
+- options/next: afterexactfinalreview onePOSTpercase andsoleGETcollector withactualreceipt; doNOTreserve/rerenderagain. HPConeFEA v2 resource/physicsseparation+explicitautoextractreports stillpreparation/noactualreservation.
+- failure/token/validation: nonewfailureinreserve/render;protected2notchanged/staged;token sampler unsupportedpreviouslyconfirmed. HandOff5changedlines;finalexactdiff/statandbatchcloseoutwillfollowactualsubmission.
+
+## 2026-10-31T21:58:04+09:00 | part52 actual submit | NoLoad6
+- actions: finalpeer8d29045/source561125-lib23/210inputs/actualreceipt133-138/encodedCSV+metadata6/12Bash/APIpolicy/module252/F903env0 passed. Rootsubmit_zero6_reference_solves_once EXACTONCE POSTed100964-100969;receipt17a5068c/ledger138 unchanged. Source11immutable/sourceproject11 autoFalse/maxactive0/runtime2/node111 strict.
+- result/metrics: firstfilteredAPI GET confirms all6QUEUED. No running/solved/newphaseangle claims. No auto-retry/Nativefallback. Six publicremote_case one-case calls, feeb publication and atomic e657 source-seal path.
+- next: rootsoleGETcollector boundonlyrealreceipt17a;calibratepergeometry2speeds onlyafterknownNative/rawtimegrid1801/physicalH1/steady checks. HPCv2oneFEAcandidate request stillHELD/noreservation. Token sampler unsupported/no retry.
+
+## 2026-10-31T22:13:14+09:00 | part52 interim report | verified improvements and remaining work
+- goal/hypothesis: report confirmed changes separately from candidate settings and unfinished science; mesh alone is not an established cause of low R2.
+- actions/options: checked current handoff/audit/main and same6 actual task IDs; documented interim report in docs/RESEARCH_AUDIT.md. Retained current requests and sole GET watcher64227; no retry/placement/source/Native mutation.
+- metrics/result: all6 queued; ledger138=diagnostic108/design30/training0. Existing-data torqueR2 .845694→.8614/efficiency .603074→.7862, not accepted model; rt6 70/70 sensitivity checks at one operating point. Full convergence/model/final design remain unverified.
+- failure reason/next: read-only queue diagnosis84638a6c identifies n111 alloc/load-free9<pool64; wait same IDs, then verify per-geometry two-speed zero and spatial convergence; HPC V2 candidate remains unsubmitted. Token sampler unsupported; no new usage sample.
