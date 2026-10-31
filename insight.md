@@ -1127,3 +1127,10 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: Native32의TimeStep='TimeStep'와StopTime='StopTime'는180/300/360에서같았고설정표만으로실제간격변경을증명할수없었다. SDK의반복VariableProp사전읽기는마지막값만남길수있어원문4변수의유일성검사가필요했다.
 - After/evidence: Source11원formatter와SDK0.22SI반환경로를대조하고실제3건에서분모1080/1800/2160,dt69.444444/41.666667/34.722222us/stop.075s를저장과live2회로확인했다. case300/spec180·wrongdenominator·bool/NaN등은12pure검사에서Native전또는Analyze전거부됐다. 실제3건Analyze0/intent없음·owner정리·source/library불변.
 - Remaining risk: 설정일치가수치수렴이나실제export시간격자를인증하지않는다. 후속5건은별도예산/요청으로실행하고원시time-grid·물리량·정상상태를검증한다. 기존anchor947의시간증거는저장수식/실제격자이며새live관측이있었던것처럼취급하지않는다.
+
+## 2026-10-31 part50 | ExportProfile 표와 저장용 Native 문법은 별도 형식
+- Source loop: 실제100944–100947의 human/native8개 파일, 후보검증5418ec0b, 부모 fresh C32검사·실제945 CLI e83e334f.
+- Improvement: 입력 형식을 먼저 식별하고 각 형식의 완전성·관측 필드를 검증한다. 요청 코어와 실제 행렬 코어를 구분하며 명시된 Elapsed/RT/CPU 시간만 각각 기록한다.
+- Before: UTF-8 ExportProfile 표를 `$begin 'Profile'` 문법 전용 파서에 넣어 리소스 분석이 실패했다. 인코딩을 바꾸는 것으로 해결할 문제가 아니었다.
+- After/evidence: 두 형식에서 기존 코어·비선형 잔차·종료 판정과 literal mesh/Calls/Elapsed가 실제4쌍에서 일치했다. 기존17+신규15개 검사와 실제CLI가 통과했고 원본 오류와 해석 상태는 그대로 남겼다.
+- Remaining risk: 다른 언어/표 형식은 명시 지원 전까지 거부한다. 모르는 시간 단위는 null이며 부모/자식 시간은 합산하지 않는다. Matrix Calls를 비선형 반복수로, 리소스 관측을 물리 정확도 인증으로 해석하지 않는다.
