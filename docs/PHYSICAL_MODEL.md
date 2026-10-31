@@ -26,6 +26,15 @@ relative paths are normalized against the invoking directory before freezing.
 
 인덕턴스의 기본 주기 통계는 경계 시각을 보간하고 시간 적분해 구합니다. 마지막 주기가 불완전하거나 비유한 값을 포함하면 필수 Ld·Lq는 NaN으로 남겨 후속 품질 검사가 거부하도록 합니다. `summarize_inductance_matrix(..., integrate_cycles=False)`는 단일 시점 등 샘플 진단에 명시적으로 사용하는 옵션입니다. 기존 고정 실행본과 원시 결과는 보존하며 새 통계 코드의 지문을 구분합니다.
 
+저장된9개 행렬은 `pyaedt_motor.inductance_diagnostics`의 API나 CLI로 추가 진단합니다. dq의 네 성분(Ldd/Ldq/Lqd/Lqq)과 마지막주기 적분, 행렬 상호성 노름·실수 대칭부 고유값, 원시SHA를 기록합니다. 이 도구의 `complete_evidence`는 입력 증거의 완전성을 뜻하며 수치해석 정확도나 학습 합격을 판정하지 않습니다. Lq>Ld 또는 교차항0을 강제하지 않습니다. Imag 열이 없으면 측정된0으로 취급하지 않고, 존재하면 별도 크기를 기록합니다.
+
+프로젝트 루트의 Python3.11 환경에서 다음과 같이 실행합니다. 아래 속도·주기·영점은 Source11 G1 부하진단 예시이며 다른 결과에는 그 결과에 고정된 값을 입력합니다. 출력 경로는 새 파일이어야 합니다.
+
+```powershell
+python -m pyaedt_motor.inductance_diagnostics --report C:/motor_run/matrix.csv --rpm 1200 --poles 8 --periods 6 --electrical-zero-deg=-91.11972457057757 --output C:/motor_run/inductance_diagnostics.json
+```
+
+
 `output_voltage_span_last_peak_v`는 각 시각의 세 상전압 최댓값과 최솟값 차이를 구한 뒤 마지막 주기에서 취한 피크입니다. 양수·유한값과 `span <= 2 × 상전압 절대 피크`를 검사합니다. min-max PWM의 인버터 전압 판정에는 이 span의 불확실성 상한과 `utilization × Vdc`를 비교합니다. 예를 들어 200 V·0.95이면 한계는 190 V입니다. 상전압 절대 피크도 별도 출력으로 유지합니다. 기존의 7개 기본 출력만 가진 아티팩트는 새 계약에서 사용할 수 없습니다. 생산 출력 계약은 `model_bundle.PRODUCTION_TARGETS`와 `ALL_TARGETS`에 정의되며 아티팩트 스키마는 `ipmsm_physical_surrogate_v2`입니다.
 
 불확실성은 학습 데이터만으로 정한 출력 변환·표준화에 적용합니다. 보정 형상마다 모든 운전점·8개 출력의 최대 오차를 하나의 점수로 만들고, 형상 수를 기준으로 95% 유한표본 순서통계량을 선택합니다. 총손실과 효율 구간은 기본 출력 구간으로부터 보수적으로 전파합니다. 일반 split-conformal의 순서통계량과 교환가능성 조건은 [Angelopoulos·Bates의 설명](https://arxiv.org/html/2107.07511v6)을 참고했습니다. 형상 전체를 하나의 점수 단위로 묶는 것은 본 구현의 설계입니다. 이 값은 형상 그룹의 교환가능성을 전제로 한 명목상 주변 보장이고, 최적화가 선택한 입력이나 분포가 달라진 입력에 대한 정확도 보장은 아닙니다.

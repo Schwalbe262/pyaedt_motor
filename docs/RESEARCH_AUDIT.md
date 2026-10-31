@@ -402,3 +402,33 @@ Y:에서 짧아지는 파일을 덮어쓴 뒤 이전 파일의 끝부분이 남�
 순서는 부하4건 비교 → 메시/시간 간격 분리 수렴 검증과 실행 시간 비교 → 전류·β 운전 범위 소규모 검증 → 새 데이터/모델 평가 → 최적 후보1200/5000 rpm 직접 검증입니다. 승인된 총3000회·동시300개 한도를 유지합니다.
 
 최신 근거: R/ldm1/independent_100943.json(c40605ec…), R/source11_two_speed_zero_20261031/zero_manifest.json(5f664901…), R/loaded4_solve_submission_20261031/parent_reservations/reservation_receipt.json(9d1ad336…), R/loaded4_solve_submission_20261031/FROZEN_UNEXECUTED.json(ca9db2cd…). 마지막 자료는8개 순수 검사·8개Bash 구문 검사와4개 입력 결합을 확인한 제출 전 자료입니다. 실제4건의 수치 품질·속도는 아직 측정하지 않았습니다.
+
+
+## 부하4건 완료: 비선형 잔차의 철손 민감도와 OutputError 비용
+
+- **문제와 분리 실험:** Source11/M19의 동일 G1 형상·1200 rpm·상전류100 A peak·β30°·전체모델·공극 기능OFF·6주기/주기당180단계에서 비선형 잔차와OutputError만 바꿨습니다. 실제32개 설정과 두 비교축 외30개 동일성, 깊이·권선·재료·영점·소스 및 소유 프로세스 종료를 확인했습니다. OutputError는 solver의 오류추정량 출력 옵션이며 전력수지·주기성·필수출력 검사는 별도로 그대로 적용했습니다.
+
+| task | 잔차 | OutputError | 철손(W) | 전력수지 잔차(%) | 해석 호출(s) | 원래 수치 판정 |
+|---|---:|---|---:|---:|---:|---|
+|100944|0.005|ON|63.32937|−1.07766|1338.89347|품질 불합격|
+|100945|0.005|OFF|63.32937|−1.07766|1096.03964|품질 불합격|
+|100946|0.0001|ON|24.24934|+0.22746|1339.26126|진단 통과|
+|100947|0.0001|OFF|24.24934|+0.22746|1122.02944|진단 통과|
+
+- **확인된 개선과 범위:** 같은 잔차의ON/OFF 쌍에서10개 출력의float 표현과 주요8개 원시 파형CSV의SHA가 정확히 같았습니다. 진단을 통과한0.0001 조건에서OFF의 해석 호출 시간은ON보다약16.22% 짧았습니다. OFF끼리 잔차를 강화하면 시간은약2.37% 늘었고, 철손은63.33→24.25 W, 전력수지는−1.078→+0.227%로 변했습니다. 한 형상·저속점의 관측이며 반복 시간측정이나 전체 운전영역 속도 인증은 아닙니다. 엄격한 값24.25 W의 수렴도 아직 확정하지 않습니다.
+- **실제 결과 보존:** 네 건 모두 Analyze1회/정확True/정상상태True/누락 출력0이고 Native 종료와 SDK client 정리를 확인했습니다. 기본 잔차 두 건은 기존1% 전력수지 기준에 따라failed/exit1·solved_quality_rejected로 보존했습니다. 엄격한 잔차 두 건은completed/exit0·solved_diagnostic입니다. 전체582개 봉인 파일·190개 raw/gzip/base64 전송을 검증했으며 독립 재계산도 원시 파형에서10개 출력과 전력수지를 재현했습니다. 수집watch27454는exit0으로 종료됐고 원장은127회(진단97·설계30·학습0)입니다.
+- **시간·메시 관측 보완:** ExportProfile이 만든 human-readable 표를 저장용native 문법 파서에 넘겨 resource 진단 오류가 발생했습니다. 원래 오류를 유지하면서 이미 수집한saved native profile을 기존 파서로 읽어 전역 삼각형9828개·실제 행렬1코어·HPC Disabled를 확인했습니다. 지역통계 합19656개는 별도 지표입니다. 실제 ACF 파일에는NumCores4가 있지만 이것이 실제4코어 사용을 보장하지는 않았습니다.
+- **다음 개선 방법:** 통과한100947을 기존 기준점으로 재사용하고0.00001/180,0.0001/300,0.00001/300,0.0001/360,0.00001/360의 새5조건을 준비합니다. 주기수·메시·운전점·영점·OutputError OFF는 고정합니다. 새 잔차와 세 시간 간격의 실제 변수/평가SI 값을 설정 전용 검증으로 확인한 뒤 예약·해석합니다. 이후 공간 메시·다른 형상/속도를 검증하고 새 데이터/모델·최종 두 속도 설계로 진행합니다.
+
+근거: `R/loaded4_solve_submission_20261031/parent_execution_state/submission_summary.json`, `R/lds1/actual_100944`~`actual_100947`, `R/loaded4_actual_synthesis_20261031/full4_synthesis.json` SHAbf75ab93…, `R/profile_export_format_diagnostic_20261031/task100945_format_and_native_evidence.json` SHA05ce53a6…. Source11/producer570/zero5f·기존실패·판정기준은 그대로입니다.
+
+## 저장 인덕턴스 행렬의 dq 교차항·상호성 진단 추가
+
+- **문제:** 기존 Ld/Lq는 frozen 겉보기 행렬의 dq 대각 성분 평균입니다. 제어용 증분 인덕턴스와 구분해야 하며, 두 대각 평균만으로는 교차 성분이나 행렬의 상호성을 살펴볼 수 없습니다.
+- **구현:** `pyaedt_motor.inductance_diagnostics`에 저장된9개 행렬의 단위·시간·프레임 확인, dq4항의 마지막주기 적분, 비대칭/상호성 노름, 실수 대칭부 고유값, 원시파일SHA를 기록하는 API/CLI를 추가했습니다. 비유한·모호한 열/단위·불완전주기·여러variation 혼입을 명시합니다. 새 물리 허용치를 만들어 학습 판정에 쓰지는 않습니다.
+- **검증과 확인:** 새21개·관련86개 검사, 기존Source8 실제6행렬 재계산, 최신Source11의100947 원시행렬을 사용한 실제 CLI 실행이 통과했습니다. 기존6건 dq 교차 평균은0.0309~0.1346 mH로 비영이었고,100947의Ld/Lq는worker와 일치했으며Ldq≈Lqd≈0.0347582 mH였습니다. 영점/프레임·시간/메시 정확도가 이 상호성 검사만으로 인증되는 것은 아닙니다.
+- **범위와 다음:** 기존 public FEA 과학코드5개의producer570은 변하지 않았고, 진단 결과는 새 학습 자료가 아닙니다. 현재4건과 이후 수렴 비교의 행렬을 같은 방법으로 검토합니다. 제어기용 미분L/포화·교차포화 맵은 별도 연구 항목입니다. 공식 계산 정의는 [Ansys v252](https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v252/en/Subsystems/Maxwell/Content/Maxwell/InductanceComputationfor2Dand3DTransientSolutions.htm)를 대조했습니다. 근거: `R/idp1/{validation_result.json,actual6_validation.json,cli_actual_100947.json,promotion_receipt.json}`.
+
+## 과거12건 프로파일의 파일 수집 결과
+
+FS 전용100948은exit2로 종료됐습니다.12개 원래 케이스CSV·결과 신원과Source8/library 불변은 확인했으나 지정한경로/패턴에서는 프로파일0개가 발견됐습니다.3개 제어 자료를 손실 없이 수집했고 선택 패턴의 미발견을 삭제로 해석하지 않습니다. Native/FEA·예산 예약은0이며 재제출하지 않았습니다. 누락12건의 전역 메시 수와 세부 시간은 미확인으로 유지하고 현재4건의 직접 저장profile을 사용합니다. 근거: `R/sp12/actual_100948_assessment.json` SHA0e49e65a….

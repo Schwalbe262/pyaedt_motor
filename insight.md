@@ -1104,3 +1104,18 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: ancestry검사는실제별칭을거부해Native전실패했고, 잘못된odesign수신객체는gRPC호출시점에만실패했다. 가짜객체가어느receiver의같은이름메서드도허용하면순수시험만으로이차이를찾지못한다.
 - After/evidence: 새100943은정확한원래int1, 두NativeFeatureFalse·깊이3·저장32설정·NativePID종료를통과했다. 독립평가기57원본/18삼중전송·실제AEDT파싱확인, 기존실패는유지. 부모29+10검사와별도검토통과. 물리소스/영점/기존수치판정불변, Analyze0.
 - Remaining risk: trustedbase범위와하위symlink거부를분리해명시해야한다. 서로다른Native모듈의동명이름API를추측하지말고실제지원SDK/Native설정으로대조한다. 설정검증은수치해석·인덕턴스유효성·속도·학습성능인증이아니다.
+
+
+## 2026-10-31 part47 | 철손은 메시와 함께 비선형 잔차를 분리 검증
+- Source loop: 실제100944–100947; R/loaded4_actual_synthesis_20261031/full4_synthesis.json bf75ab93…;582봉인/190삼중전송·원시10출력독립재계산.
+- Improvement: 동일형상/메시/시간간격에서비선형잔차와OutputError만분리하고전력수지·주기성·출력동일성과호출시간을함께비교한다. solver오류추정량출력과물리품질판정의역할을구분한다.
+- Before: G1/1200/100A/β30/6x180/M19의잔차.005는EE와무관하게철손63.32937W·전력수지−1.07766%로기존1%판정을실패했다.
+- After/evidence: .0001은철손24.24934W·전력수지+.22746%로진단통과했다. 각잔차ON/OFF쌍은10출력float와주요8개원시CSV SHA가정확히동일했고, 통과한strict쌍OFF의solve호출1122.029s는ON1339.261s보다16.22%짧았다. OFF끼리strict추가비용은2.37%였다. Native32/30동일·source125/lib23·depth/F903·owner종료도실제확인했다.
+- Remaining risk: 한운전점/각1회시간측정이며전체속도인증이나24.25W의정답/수렴을증명하지않는다. 더엄격한잔차·시간간격·공간메시·다른형상/속도검증후생산프로파일을선정한다. 원래qualityreject2건과EEraw단위를보존하고목표를낮추지않는다.
+
+## 2026-10-31 part47 | Ld/Lq 대각 평균과 dq 교차항의 역할을 구분
+- Source loop: Ld_Lq_review0935dc71…/Ansys v252계산정의; R/idp1/actual6_validation.json 및cli_actual_100947.json.
+- Improvement: 저장9행렬에같은Park프레임/시간적분을적용해dq4항·상호성·고유값을진단하고rawSHA·단위·완전성·원래정의를보존한다. 모델/제어미분L이나새허용치로자동승격하지않는다.
+- Before: public Ld/Lq 대각평균은있었지만cross항을출력하지않았고수치행렬진단은별도없었다.
+- After/evidence: 새21+관련86검사와기존6실제행렬재계산통과, public정의일치/원본불변. 기존6건Ldq평균.0309~.1346mH, 최신100947 .0347582mH로비영; 실제CLI가worker대각평균을재현했다. .0001현재raw상호성상대노름약2.73e-15, 새물리판정없음.
+- Remaining risk: 상호성은프레임정확도·메시수렴·실측정확도를증명하지않는다. 현재행렬은frozen apparent이고제어기의incremental/포화map과구분해야한다. 원래PM포화상태와auxiliary1A단계PMsource제외도구분한다.
