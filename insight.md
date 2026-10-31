@@ -1096,3 +1096,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: exists→open('xb') 경합이 실제1200rpm 작업을Native시작전exit78로실패시켰고, finalname을먼저만들어부분바이트가노출될수있었다. 같은입력의결정적재현도1성공/1FileExists였다.
 - After/evidence: 새7동시성/실패검사와관련315통합검사PASS. 정확한새retry게시코드를실제n111 공용파일시스템에서8개자식으로실행해전부exit0/stderr0,22775B/SHA561145동일,임시0개확인. 원래물리runtime125/library23와실패원본은불변이다.
 - Remaining risk: 동일파일시스템hardlink지원이필요하며디렉터리fsync/전원손실내구성은주장하지않는다. 이전부분파일은자동수리하지않는다. 이수정은공용source seal에한정되며케이스입력·출력의중복실행금지와불확실Native보류정책을대신하지않는다.
+
+
+## 2026-10-31 part45 | Native 관측은 실제 SDK 수신 객체와 지원 경로를 대조
+- Source loop: actual100941/942 failures and100943 settings PASS; R/loaded4_symmetry_receiver_diagnosis_20261031/diagnosis.json73d1336f…; R/ldm1/independent_100943.jsonc40605ec….
+- Improvement: 명명된 사용자metadata base의기존prefix별칭을먼저해석하고그canonical base아래의새bundle에링크/덮어쓰기/이탈검사를유지한다. Native 대칭 배수는설치SDK가실제로사용하는ModelSetup.GetSymmetryMultiplier에서읽고원래타입·값·단위를보존한다. 요청값이나저장표현식으로라이브관측을대체하지않는다.
+- Before: ancestry검사는실제별칭을거부해Native전실패했고, 잘못된odesign수신객체는gRPC호출시점에만실패했다. 가짜객체가어느receiver의같은이름메서드도허용하면순수시험만으로이차이를찾지못한다.
+- After/evidence: 새100943은정확한원래int1, 두NativeFeatureFalse·깊이3·저장32설정·NativePID종료를통과했다. 독립평가기57원본/18삼중전송·실제AEDT파싱확인, 기존실패는유지. 부모29+10검사와별도검토통과. 물리소스/영점/기존수치판정불변, Analyze0.
+- Remaining risk: trustedbase범위와하위symlink거부를분리해명시해야한다. 서로다른Native모듈의동명이름API를추측하지말고실제지원SDK/Native설정으로대조한다. 설정검증은수치해석·인덕턴스유효성·속도·학습성능인증이아니다.
