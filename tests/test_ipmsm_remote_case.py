@@ -17,6 +17,7 @@ from pyaedt_motor import remote_case as remote
 
 
 RUNNER = r'''
+STANDALONE_SOLVER_STATE_CONTRACT = "ipmsm_standalone_solver_state_v1"
 import argparse,csv,hashlib,json,os,sys,time
 from pathlib import Path
 p=argparse.ArgumentParser()
@@ -48,6 +49,8 @@ solution=project/'simulation0.aedtresults';solution.mkdir()
 print('fixture runner, not an FEA',flush=True)
 if behavior=='missing':sys.exit(2)
 output={'case_id':row['case_id'],'status':'failed' if behavior=='failed' else 'ok',
+        'standalone_solver_state_contract':STANDALONE_SOLVER_STATE_CONTRACT,
+        'standalone_solver_uncertain':False,'standalone_analyze_return_received':False,
         'input_producer_fingerprint':producer,'input_setup_fingerprint':'same-setup',
         'input_source_result_path':'/original/reference.csv','output_torque_last_avg_nm':'123.45600000000001',
         'output_voltage_span_last_peak_v':'188.760','project_path':str(project),

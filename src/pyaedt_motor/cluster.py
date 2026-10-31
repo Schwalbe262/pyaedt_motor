@@ -26,6 +26,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from .io import atomic_write_bytes
+from .remote_case import SOLVER_CONTRACT, SCHEMA as REMOTE_CASE_SCHEMA, solver_row_context
 
 STAGE_LIMITS = {"diagnostic": 300, "training": 2400, "design": 300}
 TOTAL_LIMIT = 3000
@@ -283,6 +284,47 @@ class Controller:
     def _save(self) -> None:
         _write(self.root / "state.json", _json(self.state))
 
+    def _solver_hold_file(self) -> Path:
+        return self.ledger.with_name(self.ledger.name + ".solver_holds.json")
+
+    def _solver_holds(self, persist=False) -> dict:
+        """Shared-ledger holds survive route/coordinator restart; quarantine never auto-clears."""
+        path = self._solver_hold_file()
+        value = _strict(path.read_bytes()) if path.exists() else {"schema": "ipmsm_solver_holds_v1", "cases": {}}
+        if value.get("schema") != "ipmsm_solver_holds_v1" or not isinstance(value.get("cases"), dict):
+            raise ValueError("invalid shared solver hold evidence")
+        for case, record in value["cases"].items():
+            if record.get("case_id") != case or record.get("status") not in {"pending", "quarantined", "resolved_context"}:
+                raise ValueError("invalid shared solver hold record")
+        for case, entry in self.state["cases"].items():
+            previous = value["cases"].get(case, {})
+            if previous and previous.get("campaign_id") != self.campaign:
+                raise ValueError("solver hold case belongs to a different campaign")
+            if previous.get("status") == "quarantined":
+                entry["solver_quarantined"] = True
+                entry["solver_context_reason"] = previous.get("reason", "persisted unresolved Native solver quarantine")
+            status = "quarantined" if entry.get("solver_quarantined") else "pending" if entry.get("solver_context_pending") else "resolved_context" if previous else None
+            if status:
+                value["cases"][case] = {"case_id": case, "campaign_id": self.campaign, "task_id": entry.get("task_id"),
+                    "status": status, "reason": entry.get("solver_context_reason", previous.get("reason")),
+                    "producer_fingerprint": self.config.expected_producer_fingerprint,
+                    "result_sha256": entry.get("result_sha256"), "execution_sha256": entry.get("solver_execution_sha256")}
+        if persist and (value["cases"] or path.exists()):
+            atomic_write_bytes(path, _json(value))
+        return value
+
+    def _runtime_context(self, case: str, request: dict) -> dict | None:
+        return None
+
+    @staticmethod
+    def _apply_solver_context(entry: dict, context: dict) -> None:
+        if not entry.get("solver_quarantined"):
+            entry["solver_context_reason"] = context["solver_context_reason"]
+        if not context["solver_context_known"] or context["solver_state_uncertain"]:
+            entry["solver_quarantined"] = True
+        entry["solver_context_known"] = context["solver_context_known"]
+        entry["solver_state_uncertain"] = bool(entry.get("solver_quarantined"))
+
     def _load_state(self, execute: bool) -> None:
         manifest = self.root / "manifest.json"
         if manifest.exists():
@@ -488,41 +530,69 @@ class Controller:
         if status not in TERMINAL:
             return
         entry["phase"] = "terminal"
-        if not execute:
-            return
         key, _, _ = self._identity({"case_id": case})
         folder = self.root / "collected" / key
-        folder.mkdir(exist_ok=True)
-        _write(folder / "task.json", _json(task))
-        if entry.get("collection_complete"):
-            result_path = folder / "result.csv"
-            if not result_path.is_file() or _sha(result_path.read_bytes()) != entry.get("result_sha256"):
-                raise ValueError("collected immutable result changed: " + case)
-            return
+        if execute:
+            folder.mkdir(exist_ok=True)
+            _write(folder / "task.json", _json(task))
+        runtime = self._runtime_context(case, request)
+        runtime_known = False
+        metadata_pending = False
+        if runtime:
+            try:
+                raw = _content(self._get("/api/tasks/" + str(entry["task_id"]) + "/remote-file", base="remote_cwd", path=runtime["path"])).encode()
+                evidence = _strict(raw)
+                if (evidence.get("schema") != REMOTE_CASE_SCHEMA or evidence.get("case_id") != case or
+                        evidence.get("producer_fingerprint") != self.config.expected_producer_fingerprint or
+                        evidence.get("source_sha256") != runtime["source_sha256"] or evidence.get("cases_sha256") != runtime["cases_sha256"] or
+                        type(evidence.get("solver_context_known")) is not bool or type(evidence.get("solver_state_uncertain")) is not bool):
+                    raise ValueError("execution solver context identity/contract differs")
+                entry["solver_execution_sha256"] = _sha(raw)
+                if execute:
+                    _write(folder / "execution.json", raw)
+                self._apply_solver_context(entry, evidence)
+                runtime_known = evidence["solver_context_known"] and not evidence["solver_state_uncertain"]
+            except (HTTPError, TimeoutError, OSError) as exc:
+                metadata_pending = True
+                entry["solver_context_reason"] = "terminal task execution context pending: " + str(exc)
+            except ValueError as exc:
+                self._apply_solver_context(entry, {"solver_context_known": False, "solver_state_uncertain": True, "solver_context_reason": str(exc)})
         try:
-            text = _content(self._get("/api/tasks/" + str(entry["task_id"]) + "/remote-file", base="remote_cwd", path=request["result_path"]))
+            if entry.get("collection_complete"):
+                result_path = folder / "result.csv"
+                if not result_path.is_file() or _sha(result_path.read_bytes()) != entry.get("result_sha256"):
+                    raise ValueError("collected immutable result changed: " + case)
+                text = result_path.read_bytes().decode("utf-8")
+            else:
+                text = _content(self._get("/api/tasks/" + str(entry["task_id"]) + "/remote-file", base="remote_cwd", path=request["result_path"]))
             payload = text.encode()
             result = folder / "result.csv"
             if result.exists() and result.read_bytes() != payload:
                 raise ValueError("remote result changed after collection: " + case)
-            _write(result, payload)
+            if execute:
+                _write(result, payload)
             entry["result_sha256"] = _sha(payload)
             rows = list(csv.DictReader(io.StringIO(text.removeprefix("\ufeff"))))
             if len(rows) != 1 or rows[0].get("case_id") != case:
                 raise ValueError("terminal result identity/row count differs: " + case)
             row = rows[0]
-            entry.update(result_status=row.get("status"), result_error=row.get("error"), collection_complete=True)
+            entry.update(result_status=row.get("status"), result_error=row.get("error"), collection_complete=execute or entry.get("collection_complete", False))
             if row.get("input_metric_contract_version") != "motor_metrics_v3" or row.get("input_producer_fingerprint") != self.config.expected_producer_fingerprint:
                 entry["contract_error"] = "result producer/metric contract differs from sealed campaign"
                 raise ValueError(entry["contract_error"])
+            self._apply_solver_context(entry, solver_row_context(row, self.config.expected_producer_fingerprint))
             from module.ipmsm_waveform_quality import v3_training_row_issues
             entry["training_row_issues"] = v3_training_row_issues(row)
             # Collection labels evidence only; it cannot certify a profile/model.
         except (HTTPError, TimeoutError, OSError) as exc:
             entry["collection_error"] = type(exc).__name__ + ": " + str(exc)
+            if not runtime_known:
+                metadata_pending = True
+                entry["solver_context_reason"] = "terminal task result context pending: " + str(exc)
         finally:
+            entry["solver_context_pending"] = metadata_pending
             # Preserve bounded terminal failure text, including a missing result.
-            if status != "completed" or entry.get("collection_error") or entry.get("result_status") not in ("ok", "success", "completed"):
+            if execute and (status != "completed" or entry.get("collection_error") or entry.get("result_status") not in ("ok", "success", "completed")):
                 for stream in ("stdout", "stderr"):
                     destination = folder / (stream + ".txt")
                     if not destination.exists():
@@ -531,16 +601,36 @@ class Controller:
                             _write(destination, value[-32000:].encode())
                         except (HTTPError, TimeoutError, OSError, ValueError) as exc:
                             entry[stream + "_collection_error"] = str(exc)
-            self._save()
+            if execute:
+                self._save()
 
-    def tick(self, *, execute: bool = False) -> dict:
+    def _reconcile_result(self, case, entry, task, request, execute):
+        terminal = str(task.get("status", "")).lower() in TERMINAL
+        if terminal:
+            entry["solver_context_pending"] = True
+            if not entry.get("solver_quarantined"):
+                entry["solver_context_reason"] = "terminal task solver context has not yet been verified"
+        try:
+            self._collect(case, entry, task, request, execute)
+        except Exception as exc:
+            if terminal:
+                entry.update(solver_quarantined=True, solver_context_pending=False, solver_context_known=False,
+                             solver_state_uncertain=True, solver_context_reason="terminal context reconciliation failed: " + str(exc))
+            raise
+        finally:
+            if terminal and execute:
+                # Later cases may fail identity/receipt checks before _tick reaches its final save.
+                self._solver_holds(persist=True)
+                self._save()
+
+    def tick(self, *, execute: bool = False, refill: bool = True) -> dict:
         """One reconciliation/refill pass. The execute lock covers every reservation/POST."""
         if execute:
             with host_lock(self.ledger):
-                return self._tick(True)
-        return self._tick(False)
+                return self._tick(True, refill)
+        return self._tick(False, refill)
 
-    def _tick(self, execute: bool) -> dict:
+    def _tick(self, execute: bool, refill: bool = True) -> dict:
         self._unchanged_plan()
         self._load_state(execute)
         records, counts = read_ledger(self.ledger)
@@ -588,16 +678,17 @@ class Controller:
                 entry.update(phase="submitted", task_id=identifier)
                 if str(task.get("status", "")).lower() not in TERMINAL:
                     self.observed_inflight.add(identifier)
-                self._collect(case, entry, task, request, execute)
+                self._reconcile_result(case, entry, task, request, execute)
             elif entry and entry.get("task_id"):
                 # History omission cannot authorize a second task. Verify the receipt directly.
                 task = self._get("/api/tasks/" + str(entry["task_id"]))
                 self._verify_task(task, request["payload"])
                 if str(task.get("status", "")).lower() not in TERMINAL:
                     self.observed_inflight.add(entry["task_id"])
-                self._collect(case, entry, task, request, execute)
+                self._reconcile_result(case, entry, task, request, execute)
             if entry and entry.get("contract_error"):
                 raise ValueError(entry["contract_error"])
+        holds = self._solver_holds(persist=execute)
         if execute:
             self._save()
         active, family = self._family_active()
@@ -616,11 +707,16 @@ class Controller:
                    "terminal_missing_results": sum(entry.get("phase") == "terminal" and not entry.get("collection_complete") for entry in self.state["cases"].values()),
                    "collected_results": sum(bool(entry.get("collection_complete")) for entry in self.state["cases"].values()),
                    "row_physics_rejections": sum(bool(entry.get("training_row_issues")) for entry in self.state["cases"].values())}
+        summary["solver_quarantines"] = sum(row["status"] == "quarantined" for row in holds["cases"].values())
+        summary["solver_context_pending"] = sum(row["status"] == "pending" for row in holds["cases"].values())
         slots = max(0, min(self.config.max_active, self.project_cap) - active - uncertain)
         summary["available_slots"] = slots
         if uncertain:
             summary["stopped_reason"] = "unresolved POST outcome requires historical reconciliation; no new submissions"
-        if not execute or uncertain or capacity["response"].get("queue_state") not in {"ready", "opening"}:
+        if summary["solver_quarantines"] or summary["solver_context_pending"]:
+            summary["stopped_reason"] = "Native solver state is quarantined or pending; no new submissions"
+            summary["available_slots"] = 0
+        if not execute or not refill or summary.get("stopped_reason") or capacity["response"].get("queue_state") not in {"ready", "opening"}:
             return summary
         additions = 0
         for row in pending:

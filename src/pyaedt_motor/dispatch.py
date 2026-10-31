@@ -119,6 +119,13 @@ class SealedController(cluster.Controller):
         self.execution, self.seal_bytes = execution, seal_bytes
         super().__init__(*args, **kwargs)
 
+    def _runtime_context(self, case, request):
+        if self.execution["mode"] != "node_local":
+            return None
+        row = next(row for row in self.plan.rows if row["case_id"] == case)
+        return {"path": "simulation/rebuild_v3/" + case + "/execution.json",
+                "source_sha256": self.execution["source_sha256"], "cases_sha256": _sha(_case_bytes(self, row))}
+
     def payload(self, row):
         payload = super().payload(row)
         options = self.execution
@@ -388,12 +395,15 @@ class Dispatcher:
     def tick(self, *, execute=False):
         self._check_inputs()
         self.transport.capture()
-        checks = [controller.tick(execute=False) for controller in self.controllers]
+        if execute:
+            self._snapshot()
+            # Reconcile and durably hold EVERY route before allowing ANY refill.
+            checks = [controller.tick(execute=True, refill=False) for controller in self.controllers]
+        else:
+            checks = [controller.tick(execute=False) for controller in self.controllers]
         blocked = next((route.identifier for route, summary in zip(self.routes, checks)
                         if summary["uncertain_posts"] or summary.get("stopped_reason")), None)
         summaries = list(checks)
-        if execute:
-            self._snapshot()
         if execute and blocked is None:
             for index, (route, controller) in enumerate(zip(self.routes, self.controllers)):
                 self._check_inputs()
@@ -409,6 +419,8 @@ class Dispatcher:
                      for route, row in zip(self.routes, summaries))
         result = {"schema_version": SCHEMA, "mode": "execute" if execute else "dry_run", "routes": records,
                   "terminal": terminal, "failed_cases_present": failed, "uncertain_posts": uncertain,
+                  "solver_quarantines": max((row["solver_quarantines"] for row in summaries), default=0),
+                  "solver_context_pending": max((row["solver_context_pending"] for row in summaries), default=0),
                   "stopped_route": blocked, "submitted_this_tick": sum(row["submitted_this_tick"] for row in summaries),
                   "exit_code": 2 if uncertain else 3 if blocked else 4 if terminal and failed else 0}
         if execute:

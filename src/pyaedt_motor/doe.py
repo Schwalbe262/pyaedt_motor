@@ -39,6 +39,7 @@ WINDING_CONTEXT_FIELDS = ("series_turns_per_phase", "turns_per_coil_side",
                           "conductor_area_per_branch_mm2", "slot_fill_limit")
 TRAINING_ATTEMPT_BUDGET = 2400
 DEFAULT_RETRY_RESERVE = 240
+PAIRED_CONTROL_PROTOCOL = "paired_two_controls_two_speeds_v1"
 CANONICAL_FLAGS = {"circle_segments": 0, "loss_policy": "laminated_core", "strict_setup": True,
                    "require_steady_state": True, "compute_inductance": True, "analysis_purpose": "training"}
 _GENERATOR_NAME = "src/pyaedt_motor/doe.py"
@@ -428,20 +429,120 @@ def _production_spec(spec: OptimizationSpec) -> None:
     _case_context_fields(spec.material_context, spec.winding)
 
 
+def _controls_per_geometry(manifest: Mapping[str, Any]) -> int:
+    count = _integer(manifest.get("controls_per_geometry", 3), "controls_per_geometry")
+    if count not in (3, 4):
+        raise ValueError("controls_per_geometry must be3 or4")
+    if count == 3 and any(name in manifest for name in ("control_protocol", "support_diagnostics")):
+        raise ValueError("three-control legacy plan cannot contain paired-only metadata")
+    if count == 4 and manifest.get("control_protocol") != PAIRED_CONTROL_PROTOCOL:
+        raise ValueError("four-control plan requires the paired control protocol")
+    return count
+
+
+def _paired_support_diagnostics(rows: list[dict], winding: WindingSpec) -> dict:
+    """Input-only feasibility and raw17 box diagnostics, never certification.
+
+    Bounds come only from the preassigned training partition. Derived model
+    features can exclude more rows; these counts never filter/reassign them.
+    """
+    names = (*ACTIVE_GEOMETRY, "stack_length_mm", "i_peak_a", "beta_dq_deg")
+    values = [{name: _finite(row[name], name) for name in names} for row in rows]
+    training = [value for row, value in zip(rows, values) if row["doe_split"] == "train"]
+    if not training:
+        raise ValueError("paired support diagnostics require training groups")
+    bounds = {name: [min(row[name] for row in training), max(row[name] for row in training)] for name in names}
+    outside = {}
+    for label in ("train", "calibration", "test"):
+        selected = [(row, value) for row, value in zip(rows, values) if row["doe_split"] == label]
+        rejected = [row for row, value in selected if any(
+            value[name] < bounds[name][0] or value[name] > bounds[name][1] for name in names)]
+        outside[label] = {"rows": len(rejected), "groups": len({row["design_hash"] for row in rejected}),
+                          "total_rows": len(selected)}
+    unique = {row["design_hash"]: row for row in rows}
+    fills = []
+    for row in unique.values():
+        metrics = geometry_metrics(row, _finite(row["stack_length_mm"], "stack_length_mm"), winding)
+        if metrics.slot_fill_ratio > winding.fill_factor:
+            raise ValueError("paired plan contains an infeasible slot fill")
+        fills.append(metrics.slot_fill_ratio)
+    return {"schema_version": "paired_raw17_support_diagnostics_v1", "coverage_certified": False,
+            "scope": "active14+stack+I+beta; derived model features not evaluated",
+            "raw_feature_names": list(names), "training_bounds": bounds, "outside_training_box": outside,
+            "feasible_geometry_groups": len(unique), "maximum_slot_fill_ratio": max(fills),
+            "slot_fill_limit": winding.fill_factor, "geometry_partition_changed": False,
+            "rows_filtered": 0, "test_targets_used": False}
+
+
+def _require_paired_controls(rows: list[dict], manifest: Mapping[str, Any]) -> None:
+    if _controls_per_geometry(manifest) != 4:
+        return
+    if (manifest.get("profile_convergence_certified_by_generator") is not False
+            or manifest.get("numpy_version") != np.__version__ or manifest.get("scipy_version") != scipy.__version__):
+        raise ValueError("paired plan certification/dependency contract differs")
+    reserve = _integer(manifest.get("retry_attempt_reserve"), "retry_attempt_reserve")
+    if (manifest.get("training_attempt_budget") != TRAINING_ATTEMPT_BUDGET
+            or manifest.get("nominal_attempts") != len(rows) or manifest.get("cases") != len(rows)
+            or len(rows) + reserve > TRAINING_ATTEMPT_BUDGET
+            or manifest.get("unallocated_attempts") != TRAINING_ATTEMPT_BUDGET - len(rows) - reserve
+            or manifest.get("concurrency_cap") != 300 or manifest.get("submission_performed") is not False
+            or manifest.get("bounded_refill_required") is not (len(rows) > 300)
+            or manifest.get("planned_wave_sizes") != [min(300, len(rows) - start) for start in range(0, len(rows), 300)]):
+        raise ValueError("paired plan attempt budget/wave metadata differs")
+    for name in ("current_domain_a", "beta_domain_deg"):
+        if not isinstance(manifest.get(name), list) or len(manifest[name]) != 2:
+            raise ValueError("paired current/beta domains must contain two endpoints")
+    current_domain = [_finite(value, "current_domain_a") for value in manifest["current_domain_a"]]
+    beta_domain = [_finite(value, "beta_domain_deg") for value in manifest["beta_domain_deg"]]
+    if len(current_domain) != 2 or len(beta_domain) != 2 or not (0 < current_domain[0] < current_domain[1]
+            and 0 <= beta_domain[0] < beta_domain[1] <= 80):
+        raise ValueError("paired current/beta domains are invalid")
+    observations = {}
+    training_controls = {1200.: set(), 5000.: set()}
+    for row in rows:
+        observations.setdefault(row["design_hash"], []).append(row)
+        current, beta = _finite(row["i_peak_a"], "i_peak_a"), _finite(row["beta_dq_deg"], "beta_dq_deg")
+        if (_finite(row["beta_deg"], "beta_deg") != beta or not current_domain[0] <= current <= current_domain[1]
+                or not beta_domain[0] <= beta <= beta_domain[1]):
+            raise ValueError("paired control value/alias is outside the declared domain")
+        if row["doe_split"] == "train" and _finite(row["base_rpm"], "base_rpm") in training_controls:
+            training_controls[float(row["base_rpm"])].add((current, beta))
+    for group_rows in observations.values():
+        by_speed = {speed: [(_finite(row["i_peak_a"], "i_peak_a"), _finite(row["beta_dq_deg"], "beta_dq_deg"))
+                            for row in group_rows if _finite(row["base_rpm"], "base_rpm") == speed]
+                    for speed in (1200., 5000.)}
+        if (len(group_rows) != 4 or any(len(values) != 2 or len(set(values)) != 2 for values in by_speed.values())
+                or set(by_speed[1200.]) != set(by_speed[5000.])):
+            raise ValueError("each geometry requires two distinct matched controls at each speed")
+    corners = {(current, beta) for current in current_domain for beta in beta_domain}
+    if any(not corners <= controls for controls in training_controls.values()):
+        raise ValueError("paired training controls lack the four I/beta corner anchors at both speeds")
+    expected_speeds = dict(Counter(str(int(_finite(row["base_rpm"], "base_rpm"))) for row in rows))
+    if manifest.get("speed_rows") != expected_speeds:
+        raise ValueError("paired speed row counts differ from manifest")
+    expected_diagnostics = _paired_support_diagnostics(rows, WindingSpec(**manifest["winding_spec"]))
+    if manifest.get("support_diagnostics") != expected_diagnostics:
+        raise ValueError("paired input-only support diagnostics differ from rows")
+
+
 def generate_training_plan(
     spec: OptimizationSpec, calibration: Mapping[str, Any], profile: SelectedProfile, *,
     geometries: int = 720, seed: int = 20261030, case_prefix: str = "v3train",
     excluded_hashes: Iterable[str] = (), retry_reserve: int = DEFAULT_RETRY_RESERVE,
-    current_min_fraction: float = .25,
+    current_min_fraction: float = .25, controls_per_geometry: int = 3,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Build three controls/geometry with independent preassigned group partitions."""
+    """Build default3 or explicit paired4 rows/geometry, with preassigned group partitions."""
     source_pin = _assert_source_pin()
     from calibrate_ipmsm_beta import validated_zero_manifest, _require_zero_context
     _production_spec(spec)
     geometries = _integer(geometries, "geometries", 5)
     seed = _integer(seed, "seed")
     retry_reserve = _integer(retry_reserve, "retry_reserve")
-    if 3 * geometries + retry_reserve > TRAINING_ATTEMPT_BUDGET:
+    control_contract = {"controls_per_geometry": controls_per_geometry}
+    if controls_per_geometry == 4:
+        control_contract["control_protocol"] = PAIRED_CONTROL_PROTOCOL
+    controls_per_geometry = _controls_per_geometry(control_contract)
+    if controls_per_geometry * geometries + retry_reserve > TRAINING_ATTEMPT_BUDGET:
         raise ValueError("nominal cases plus retry reserve exceed the2400-attempt training budget")
     if not isinstance(case_prefix, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", case_prefix):
         raise ValueError("case_prefix must be a safe identifier of at most32 characters")
@@ -501,24 +602,34 @@ def generate_training_plan(
     maximum = spec.effective_peak_current_limit_a
     minimum = maximum * fraction
     beta_low, beta_high = spec.beta_bounds_deg
-    controls = qmc.LatinHypercube(2, seed=seed + 1).random(3 * geometries)
-    controls[:, 0] = minimum + (maximum - minimum) * controls[:, 0]
-    controls[:, 1] = beta_low + (beta_high - beta_low) * controls[:, 1]
-    # Boundary anchors belong to training groups; calibration/test are not used
-    # to choose domains or models. Both speeds have beta/current boundary data.
-    first, second = train_indices[:2]
-    for offset in (0, 1):
-        controls[3 * first + offset, 1] = beta_low
-        controls[3 * second + offset, 1] = beta_high
-    controls[3 * first + 1, 0] = minimum
-    controls[3 * second + 1, 0] = maximum
-    third_speeds = [1200 if index % 2 == 0 else 5000 for index in range(geometries)]
-    rated_low = next((index for index in train_indices if third_speeds[index] == 1200), None)
-    if rated_low is None:
-        rated_low = first
-        swap = next(index for index, rpm in enumerate(third_speeds) if rpm == 1200)
-        third_speeds[rated_low], third_speeds[swap] = third_speeds[swap], third_speeds[rated_low]
-    controls[3 * rated_low + 2, 0] = minimum
+    if controls_per_geometry == 3:
+        controls = qmc.LatinHypercube(2, seed=seed + 1).random(3 * geometries)
+        controls[:, 0] = minimum + (maximum - minimum) * controls[:, 0]
+        controls[:, 1] = beta_low + (beta_high - beta_low) * controls[:, 1]
+        # Boundary anchors belong to training groups; calibration/test are not used
+        # to choose domains or models. Both speeds have beta/current boundary data.
+        first, second = train_indices[:2]
+        for offset in (0, 1):
+            controls[3 * first + offset, 1] = beta_low
+            controls[3 * second + offset, 1] = beta_high
+        controls[3 * first + 1, 0] = minimum
+        controls[3 * second + 1, 0] = maximum
+        third_speeds = [1200 if index % 2 == 0 else 5000 for index in range(geometries)]
+        rated_low = next((index for index in train_indices if third_speeds[index] == 1200), None)
+        if rated_low is None:
+            rated_low = first
+            swap = next(index for index, rpm in enumerate(third_speeds) if rpm == 1200)
+            third_speeds[rated_low], third_speeds[swap] = third_speeds[swap], third_speeds[rated_low]
+        controls[3 * rated_low + 2, 0] = minimum
+    else:
+        controls = qmc.LatinHypercube(2, seed=seed + 1).random(2 * geometries)
+        controls[:, 0] = minimum + (maximum - minimum) * controls[:, 0]
+        controls[:, 1] = beta_low + (beta_high - beta_low) * controls[:, 1]
+        # Four joint I/beta corners, using two distinct settings in each of
+        # two training geometries. Every setting is repeated at both speeds.
+        first, second = train_indices[:2]
+        controls[2 * first:2 * first + 2] = ((minimum, beta_low), (maximum, beta_high))
+        controls[2 * second:2 * second + 2] = ((minimum, beta_high), (maximum, beta_low))
     profile_case = {key: value for key, value in settings.items()
                     if key not in {"mesh_elements", "mesh_maximum_lengths_mm", "initial_position_deg"}}
     for group, count in settings["mesh_elements"].items(): profile_case[f"mesh_{group}_elements"] = count
@@ -526,9 +637,11 @@ def generate_training_plan(
     rows = []
     for index, (design, depth, key) in enumerate(designs):
         resistance = phase_resistance_100c_ohm(design, depth, spec.winding, slot_number=spec.slot_number)
-        for point, rpm in enumerate((1200, 5000, third_speeds[index])):
-            current, beta = map(float, controls[3 * index + point])
-            if point == 0: current = maximum
+        speeds = (1200, 5000, third_speeds[index]) if controls_per_geometry == 3 else (1200, 5000, 1200, 5000)
+        for point, rpm in enumerate(speeds):
+            control_index = 3 * index + point if controls_per_geometry == 3 else 2 * index + point // 2
+            current, beta = map(float, controls[control_index])
+            if controls_per_geometry == 3 and point == 0: current = maximum
             rows.append({"case_id": f"{case_prefix}_{key[:20]}_p{point}_{rpm}", "geometry_group_id": "v3geo_" + key,
                          "design_hash": key, "doe_split": labels[index], "repeat_of_case_id": "",
                          "operating_point_id": f"map_{rpm}_p{point}", "dataset_schema_version": "ipmsm_v2",
@@ -554,7 +667,7 @@ def generate_training_plan(
     for key, value in context_fields.items():
         if getattr(applied, key, None) != value:
             raise ValueError(f"runner does not apply declared material/winding field {key!r}")
-    groups = {label: sorted(row["design_hash"] for row in rows[::3] if row["doe_split"] == label)
+    groups = {label: sorted(row["design_hash"] for row in rows[::controls_per_geometry] if row["doe_split"] == label)
               for label in ("train", "calibration", "test")}
     manifest = {"schema_version": PLAN_SCHEMA, "seed": seed, "cases": len(rows), "geometries": geometries,
                 "case_prefix": case_prefix, "group_counts": {key: len(values) for key, values in groups.items()},
@@ -580,6 +693,10 @@ def generate_training_plan(
                 **source_pin, "generator_sha256": source_pin["source_sha256"][_GENERATOR_NAME],
                 "geometry_helper_sha256": source_pin["source_sha256"][_HELPER_NAME], "numpy_version": np.__version__,
                 "scipy_version": scipy.__version__, "submission_performed": False}
+    if controls_per_geometry == 4:
+        manifest.update(controls_per_geometry=4, control_protocol=PAIRED_CONTROL_PROTOCOL,
+                        support_diagnostics=_paired_support_diagnostics(rows, spec.winding))
+        _require_paired_controls(rows, manifest)
     _require_plan_context(rows, manifest)
     _assert_source_pin(source_pin)
     return rows, manifest
@@ -589,6 +706,7 @@ def write_training_plan(path: Path, rows: list[dict], manifest: Mapping[str, Any
     source_pin = _assert_source_pin()
     _require_manifest_sources(manifest, source_pin)
     _require_plan_context(rows, manifest)
+    _require_paired_controls(rows, manifest)
     path = Path(path)
     proof_path = path.with_suffix(".manifest.json")
     if path.suffix.lower() != ".csv": raise ValueError("plan output must have a .csv suffix")
@@ -651,9 +769,11 @@ def verify_training_plan(path: Path) -> dict:
         raise ValueError("preassigned geometry partitions differ from manifest")
     if proof.get("geometries") != len(observations) or proof.get("group_counts") != {label: len(values) for label, values in groups.items()}:
         raise ValueError("geometry group count differs from manifest")
+    controls_per_geometry = _controls_per_geometry(proof)
     for group_rows in observations.values():
-        if len(group_rows) != 3 or {_finite(row["base_rpm"], "base_rpm") for row in group_rows} != {1200., 5000.}:
-            raise ValueError("each geometry requires three controls covering both speeds")
+        if len(group_rows) != controls_per_geometry or {_finite(row["base_rpm"], "base_rpm") for row in group_rows} != {1200., 5000.}:
+            raise ValueError(f"each geometry requires {controls_per_geometry} controls covering both speeds")
+    _require_paired_controls(rows, proof)
     proof["manifest_id"] = identifier
     _assert_source_pin(source_pin)
     return proof
@@ -667,6 +787,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--exclude", type=Path, action="append", default=[])
     parser.add_argument("--geometries", type=int, default=720)
+    parser.add_argument("--controls-per-geometry", type=int, choices=(3, 4), default=3)
     parser.add_argument("--seed", type=int, default=20261030)
     parser.add_argument("--case-prefix", default="v3train")
     parser.add_argument("--retry-reserve", type=int, default=DEFAULT_RETRY_RESERVE)
@@ -680,7 +801,8 @@ def main(argv: list[str] | None = None) -> int:
     excluded, exclusions = exclusion_hashes(args.exclude)
     rows, manifest = generate_training_plan(spec, calibration, profile, geometries=args.geometries, seed=args.seed,
                                             case_prefix=args.case_prefix, excluded_hashes=excluded,
-                                            retry_reserve=args.retry_reserve, current_min_fraction=args.current_min_fraction)
+                                            retry_reserve=args.retry_reserve, current_min_fraction=args.current_min_fraction,
+                                            controls_per_geometry=args.controls_per_geometry)
     manifest.update(excluded_sources=exclusions, spec_file_sha256=_sha(args.spec.read_bytes()),
                     calibration_file_sha256=_sha(args.calibration_manifest.read_bytes()))
     proof = write_training_plan(args.output, rows, manifest)

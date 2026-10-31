@@ -2328,13 +2328,277 @@ def missing_required_output_metrics(
     return missing
 
 
-def safe_release_desktop(desktop: Any) -> None:
-    if desktop is None:
-        return
+STANDALONE_SOLVER_STATE_CONTRACT = "ipmsm_standalone_solver_state_v1"
+STANDALONE_LIFECYCLE_SETTINGS = ("use_multi_desktop", "release_on_exception", "enable_error_handler",
+                                 "skip_license_check", "wait_for_license")
+
+
+@dataclass
+class StandaloneDesktopOwnership:
+    desktop: Any = None
+    native_handle: Any = None
+    pid: int | None = None
+    identity: tuple | None = None
+    verified: bool = False
+    constructor_complete: bool = False
+    project_name: str | None = None
+    project_dir: Path | None = None
+    settings: Any = None
+    settings_before: dict | None = None
+    solver_uncertain: bool = False
+    analysis_return_received: bool = False
+    analysis_return_type: str = ""
+    analysis_return_repr: str = "not_returned"
+
+
+class StandaloneOwnershipError(RuntimeError):
+    def __init__(self, message: str, owner: StandaloneDesktopOwnership):
+        super().__init__(message)
+        self.standalone_owner = owner
+
+
+def standalone_process_identity(pid: int) -> tuple | None:
+    """Portable owner/start identity; AccessDenied is never treated as exit."""
+    import psutil
+    if type(pid) is not int or pid <= 0:
+        raise ValueError("native Desktop PID must be a positive integer")
     try:
-        desktop.release_desktop(close_projects=True, close_on_exit=True)
-    except Exception:
-        logging.exception("Desktop release failed")
+        process = psutil.Process(pid)
+        if not process.is_running() or process.status() in {psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD}:
+            return None
+        name = process.name().casefold()
+        if name not in {"ansysedt", "ansysedt.exe"}:
+            raise ValueError("native PID is not an AEDT process")
+        started = float(process.create_time())
+        if not math.isfinite(started) or started <= 0:
+            raise ValueError("native process start identity is invalid")
+        current = psutil.Process()
+        if os.name == "posix":
+            observed, expected = process.uids(), current.uids()
+            principal = (observed.real, observed.effective)
+            if principal != (expected.real, expected.effective):
+                raise ValueError("native process UID differs from the current process")
+        else:
+            principal = process.username().casefold()
+            if principal != current.username().casefold():
+                raise ValueError("native process username differs from the current process")
+        return pid, started, os.name, principal, name
+    except psutil.NoSuchProcess:
+        return None
+
+
+def standalone_existing_pids() -> set[int]:
+    import psutil
+    return set(psutil.pids())
+
+
+def assert_standalone_owned(owner: StandaloneDesktopOwnership, desktop: Any = None) -> None:
+    if not owner.verified or owner.pid is None or owner.identity is None:
+        raise ValueError("standalone Desktop ownership has not been verified")
+    observed = standalone_process_identity(owner.pid)
+    if observed != owner.identity:
+        raise ValueError("standalone Desktop PID/owner/start identity changed")
+    handle = owner.native_handle if desktop is None else desktop.odesktop
+    native_pid = handle.GetProcessID()
+    reported = getattr(owner.desktop if desktop is None else desktop, "aedt_process_id", None)
+    if (type(native_pid) is not int or native_pid != owner.pid
+            or (reported is not None and (type(reported) is not int or reported != owner.pid))
+            or (owner.constructor_complete and reported is None)):
+        raise ValueError("standalone native/reported Desktop PID differs from its owner")
+
+
+def create_standalone_owned(factory: Any, non_graphical: bool, settings: Any, version: str | None = None,
+                            previous_settings: dict | None = None) -> StandaloneDesktopOwnership:
+    owner = StandaloneDesktopOwnership(settings=settings, settings_before=previous_settings)
+    try:
+        if os.environ.get("PYAEDT_SCRIPT_PROCESS_ID"):
+            raise ValueError("standalone execution refuses a forced embedded Desktop PID")
+        if os.environ.get("PYAEDT_SCRIPT_VERSION"):
+            raise ValueError("standalone execution refuses a forced toolkit Desktop version")
+        if os.environ.get("PYAEDT_DOC_GENERATION", "").lower() in {"true", "1", "t"}:
+            raise ValueError("standalone execution refuses documentation mode that overrides no-close settings")
+        if settings is None:
+            raise ValueError("standalone Desktop lifecycle settings are unavailable")
+        previous = standalone_existing_pids()
+        if owner.settings_before is None:
+            owner.settings_before = {name: (hasattr(settings, name), getattr(settings, name, None))
+                                     for name in STANDALONE_LIFECYCLE_SETTINGS}
+        settings.use_multi_desktop = True
+        settings.release_on_exception = False
+        keywords = dict(version=version, non_graphical=non_graphical, close_on_exit=False, new_desktop=True)
+        # Supply the same explicit fresh/no-atexit options to allocation AND init.
+        owner.desktop = factory.__new__(factory, **keywords)
+        bound = getattr(owner.desktop, "__dict__", {})
+        if bound.get("_initialized") or bound.get("_odesktop") is not None or bound.get("aedt_process_id") is not None:
+            raise ValueError("Desktop allocator returned an already-bound session; refuse initialization")
+        try:
+            factory.__init__(owner.desktop, **keywords)
+            owner.constructor_complete = True
+        finally:
+            handle = getattr(owner.desktop, "_odesktop", None)
+            if handle is not None:
+                native_pid = handle.GetProcessID()
+                reported = getattr(owner.desktop, "aedt_process_id", None)
+                if (type(native_pid) is int and native_pid > 0 and native_pid not in previous
+                        and (reported is None or type(reported) is int and reported == native_pid)):
+                    identity = standalone_process_identity(native_pid)
+                    if identity is not None:
+                        owner.native_handle, owner.pid, owner.identity, owner.verified = handle, native_pid, identity, True
+        assert_standalone_owned(owner)
+        if list(owner.native_handle.GetProjectList()):
+            raise ValueError("fresh standalone Desktop already contains an unknown project")
+        return owner
+    except Exception as exc:
+        message = str(exc)
+        if isinstance(exc, AttributeError) and "EnableAutoSave" in message:
+            message = "AEDT desktop startup failed before project creation; pyDesktop did not expose a usable desktop instance."
+        raise StandaloneOwnershipError(message, owner) from exc
+
+
+def standalone_project_directory(path: Path) -> Path:
+    """Compare literal absolute paths after refusing symlink/reparse ancestry."""
+    path = Path(os.path.abspath(path))
+    for node in (path, *path.parents):
+        try:
+            info = node.lstat()
+        except FileNotFoundError:
+            continue
+        if node.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("standalone private project path contains a symlink/reparse point")
+    return path
+
+
+def bind_standalone_project(owner: StandaloneDesktopOwnership, directory: Path, name: str) -> None:
+    assert_standalone_owned(owner)
+    path = standalone_project_directory(directory / name)
+    if path.exists():
+        raise ValueError("standalone project directory already exists; refuse reuse")
+    owner.project_dir, owner.project_name = path, name
+
+
+def assert_standalone_project(owner: StandaloneDesktopOwnership, allow_blank: bool = False) -> None:
+    assert_standalone_owned(owner)
+    names = list(owner.native_handle.GetProjectList())
+    if not names and allow_blank:
+        return
+    if owner.project_name is None or names != [owner.project_name] or owner.project_dir is None:
+        raise ValueError("owned Desktop contains an unexpected project; refuse save/close")
+    project = owner.native_handle.GetActiveProject()
+    if (project.GetName() != owner.project_name
+            or standalone_project_directory(Path(project.GetPath())) != owner.project_dir):
+        raise ValueError("native project is not the planned private project")
+
+
+class StandaloneDesignProject:
+    """One-shot owned blank-design protocol for the unchanged geometry builder."""
+    def __init__(self, project: Any, design: Any):
+        self.project, self.design, self.used = project, design, False
+
+    def create_design(self, *, name: str, solver: str, solution: str) -> Any:
+        if self.used or (name, solver, solution) != ("IPMSM", "Maxwell 2D", "Transient"):
+            raise ValueError("unexpected/repeated standalone design creation")
+        self.used = True
+        return self.design
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.project, name)
+
+
+def standalone_geometry(project: Any, sim: Any, owner: StandaloneDesktopOwnership, factory: Any) -> tuple:
+    assert_standalone_owned(owner, project.desktop)
+    assert_standalone_project(owner)
+    design = project.create_design(name="IPMSM", solver="Maxwell 2D", solution="Transient")
+    app = getattr(design, "solver_instance", design)
+    assert_standalone_owned(owner, app.desktop_class)
+    protocol = StandaloneDesignProject(project, design)
+    built, inputs, groups = factory(protocol, sim)
+    if built is not design or not protocol.used:
+        raise ValueError("standalone geometry did not reuse the verified blank design")
+    assert_standalone_owned(owner, app.desktop_class)
+    assert_standalone_project(owner)
+    sim.project = project
+    return built, inputs, groups
+
+
+def record_standalone_solver_state(owner: StandaloneDesktopOwnership, case_id: str, producer: str, stage: str) -> Path:
+    """Persist an uncertainty intent before entering the possibly blocking API."""
+    if owner.project_dir is None:
+        raise ValueError("private project directory is required for solver-state evidence")
+    target = owner.project_dir / "standalone_solver_state.json"
+    temporary = owner.project_dir / (".standalone_solver_state_" + uuid.uuid4().hex + ".tmp")
+    payload = {"schema": STANDALONE_SOLVER_STATE_CONTRACT, "case_id": case_id,
+               "stage": stage, "owned_pid": owner.pid, "owner_identity": owner.identity,
+               "solver_state_uncertain": owner.solver_uncertain, "producer_fingerprint": producer,
+               "Analyze_return_received": owner.analysis_return_received,
+               "Analyze_return_type": owner.analysis_return_type, "Analyze_return_repr": owner.analysis_return_repr,
+               "automatic_retry_allowed": False, "NativeQuit_allowed": not owner.solver_uncertain}
+    try:
+        with temporary.open("x", encoding="ascii") as stream:
+            json.dump(payload, stream, ensure_ascii=True, allow_nan=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
+def safe_release_desktop(desktop: Any, owner: StandaloneDesktopOwnership | None = None) -> dict[str, Any]:
+    """No foreign release, project save, OS signal or vendor force-close path."""
+    audit = {"verified": bool(owner and owner.verified), "process_exited": False,
+             "native_quit_requested": False, "errors": []}
+    try:
+        if owner is None or desktop is not owner.desktop or not owner.verified:
+            audit["suppressed"] = "unverified_standalone_owner"
+            return audit
+        audit["owned_pid"] = owner.pid
+        if owner.solver_uncertain:
+            audit["suppressed"] = "solver_state_uncertain"
+            return audit
+        if standalone_process_identity(owner.pid) is None:
+            audit["process_exited"] = True
+            return audit
+        assert_standalone_project(owner, allow_blank=True)
+        if list(owner.native_handle.GetProjectList()):
+            owner.native_handle.CloseProject(owner.project_name)  # Native no-save close.
+            if list(owner.native_handle.GetProjectList()):
+                raise ValueError("owned private project did not close without saving")
+        assert_standalone_owned(owner)
+        owner.native_handle.QuitApplication()
+        audit["native_quit_requested"] = True
+        # False/False only detaches this verified session; it never enters the
+        # vendor close-application method with its force-kill fallback.
+        if owner.constructor_complete and standalone_process_identity(owner.pid) == owner.identity:
+            try:
+                detached = desktop.release_desktop(close_projects=False, close_on_exit=False)
+                if detached is not True:
+                    audit["errors"].append("owned SDK detach did not return True")
+            except Exception as exc:
+                audit["errors"].append(f"owned SDK detach: {exc}")
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            observed = standalone_process_identity(owner.pid)
+            if observed is None:
+                audit["process_exited"] = True
+                break
+            if observed != owner.identity:
+                raise ValueError("PID/start identity changed during cleanup; no further close")
+            time.sleep(0.1)
+        if not audit["process_exited"]:
+            raise RuntimeError("owned Desktop remains active after graceful Quit; no forced kill attempted")
+    except Exception as exc:
+        audit["errors"].append(f"{type(exc).__name__}: {exc}")
+    finally:
+        if owner is not None and owner.settings_before is not None:
+            for name, (existed, value) in owner.settings_before.items():
+                try:
+                    if existed:
+                        setattr(owner.settings, name, value)
+                    elif hasattr(owner.settings, name):
+                        delattr(owner.settings, name)
+                except Exception as exc:
+                    audit["errors"].append(f"settings restore {name}: {exc}")
+    return audit
 
 
 def safe_close_pooled_project(simulation: Simulation | None) -> None:
@@ -2414,6 +2678,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     start_dt = datetime.now()
     start = time.time()
     desktop = None
+    standalone_owner = None
     project = None
     sim = None
     lease = None
@@ -2427,6 +2692,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
 
     row: dict[str, Any] = {
         "case_id": case_id,
+        "standalone_solver_state_contract": STANDALONE_SOLVER_STATE_CONTRACT if not pooled_backend else "",
         "status": "started",
         "started_at": start_dt.isoformat(timespec="seconds"),
         "execution_host": (
@@ -2536,11 +2802,17 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         from pyaedt_module.core import pyDesktop
 
         from module.ipmsm_geometry import create_ipmsm_design
-        from module.ipmsm_ppt_setup import configure_ipmsm_from_ppt
+        from module.ipmsm_ppt_setup import audit_native_model_depth, configure_ipmsm_from_ppt
 
+        aedt_settings = None
+        aedt_settings_before = None
         try:
             from ansys.aedt.core import settings
 
+            aedt_settings = settings
+            if not pooled_backend:
+                aedt_settings_before = {name: (hasattr(settings, name), getattr(settings, name, None))
+                                        for name in STANDALONE_LIFECYCLE_SETTINGS}
             settings.enable_error_handler = False
             settings.skip_license_check = True
             settings.wait_for_license = False
@@ -2636,25 +2908,31 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             row["input_aedt_version"] = detected_aedt_version(desktop, aedt_version)
         else:
             try:
-                desktop = pyDesktop(
-                    version=None,
-                    non_graphical=options.non_graphical,
-                    close_on_exit=True,
-                    new_desktop=True,
+                standalone_owner = create_standalone_owned(
+                    pyDesktop, options.non_graphical, aedt_settings,
+                    version=None if aedt_version == "auto" else aedt_version,
+                    previous_settings=aedt_settings_before,
                 )
-                row["input_aedt_version"] = detected_aedt_version(desktop, aedt_version)
-            except AttributeError as exc:
-                if "EnableAutoSave" in str(exc):
-                    raise RuntimeError(
-                        "AEDT desktop startup failed before project creation; "
-                        "pyDesktop did not expose a usable desktop instance."
-                    ) from exc
+            except StandaloneOwnershipError as exc:
+                standalone_owner = exc.standalone_owner
+                desktop = standalone_owner.desktop
                 raise
+            desktop = standalone_owner.desktop
+            row["standalone_owned_pid"] = standalone_owner.pid
+            row["input_aedt_version"] = detected_aedt_version(desktop, aedt_version)
             sim = Simulation(desktop=desktop, cores=options.cores)
             sim.fixed_geometry = fixed_geometry
             sim.create_simulation_name(simulation_dir)
+            bind_standalone_project(standalone_owner, simulation_dir, sim.PROJECT_NAME)
+            project_path = standalone_owner.project_dir
         project = sim.create_project(simulation_dir)
-        project_path = Path(project.path)
+        if pooled_backend:
+            project_path = Path(project.path)
+        else:
+            assert_standalone_owned(standalone_owner, project.desktop)
+            assert_standalone_project(standalone_owner)
+            if standalone_project_directory(Path(project.path)) != project_path:
+                raise ValueError("standalone project wrapper path differs from the private project")
         if pooled_backend:
             activation = lease.activate(project_name=sim.PROJECT_NAME)
             if str(activation.get("state") or "") != "active":
@@ -2666,7 +2944,10 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
         sim.circle_segments = spec.circle_segments
         row["timing_startup_s"] = round(time.time() - start, 6)
         geometry_started = time.perf_counter()
-        design, input_df, object_groups = create_ipmsm_design(project, sim)
+        if pooled_backend:
+            design, input_df, object_groups = create_ipmsm_design(project, sim)
+        else:
+            design, input_df, object_groups = standalone_geometry(project, sim, standalone_owner, create_ipmsm_design)
         row["timing_geometry_s"] = round(time.perf_counter() - geometry_started, 6)
         row.update(prefixed_row(dataframe_first_row(input_df), "input_"))
 
@@ -2679,7 +2960,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             "create_missing_band": True,
             "create_reports": options.analyze,
             "clear_existing": True,
-            "analyze": options.analyze,
+            "analyze": options.analyze if pooled_backend else False,
             # Passing ``cores=`` asks PyAEDT to mutate and later restore a
             # Desktop-global DSO registry entry. The pooled session host owns
             # the immutable profile, so None deliberately reuses that default.
@@ -2694,7 +2975,48 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             configure_kwargs["analysis_error_callback"] = (
                 report_uncertain_pooled_solver
             )
+        if not pooled_backend:
+            assert_standalone_owned(standalone_owner, getattr(design, "solver_instance", design).desktop_class)
+            assert_standalone_project(standalone_owner)
         setup_result = configure_ipmsm_from_ppt(design, **configure_kwargs)
+        if not pooled_backend:
+            row["validation"] = str(setup_result.get("validation", ""))
+            app = getattr(design, "solver_instance", design)
+            assert_standalone_owned(standalone_owner, app.desktop_class)
+            assert_standalone_project(standalone_owner)
+            if options.analyze:
+                setup_result["native_model_depth_audit_pre_analysis"] = audit_native_model_depth(design, spec)
+                assert_standalone_owned(standalone_owner, app.desktop_class)
+                assert_standalone_project(standalone_owner)
+                standalone_owner.solver_uncertain = True
+                try:
+                    state = record_standalone_solver_state(standalone_owner, case_id, row["input_producer_fingerprint"], "pre_analyze_intent")
+                    row["artifact_standalone_solver_state"] = str(state)
+                except Exception:
+                    standalone_owner.solver_uncertain = False  # Analyze has not been entered.
+                    raise
+                assert_standalone_owned(standalone_owner, app.desktop_class)
+                assert_standalone_project(standalone_owner)
+                solve_started = time.perf_counter()
+                setup_result["analysis"] = app.analyze(setup=spec.setup_name, cores=options.cores, use_auto_settings=False)
+                returned = setup_result["analysis"]
+                solve_seconds = time.perf_counter() - solve_started
+                standalone_owner.analysis_return_received = True
+                standalone_owner.analysis_return_type = type(returned).__module__ + "." + type(returned).__qualname__
+                standalone_owner.analysis_return_repr = repr(returned)
+                row["standalone_analyze_return_received"] = True
+                row["standalone_analyze_return_type"] = standalone_owner.analysis_return_type
+                row["standalone_analyze_return_repr"] = standalone_owner.analysis_return_repr
+                row["analysis_returned_false"] = returned is False
+                if returned is False:
+                    raise RuntimeError("AEDT analysis returned False; standalone solver state is uncertain")
+                if returned is not True:
+                    raise RuntimeError("standalone Analyze did not return exact True; solver state is uncertain")
+                standalone_owner.solver_uncertain = False
+                record_standalone_solver_state(standalone_owner, case_id, row["input_producer_fingerprint"], "analyze_returned_true")
+                setup_result.setdefault("timings", {})["solve_s"] = solve_seconds
+                assert_standalone_owned(standalone_owner, app.desktop_class)
+                assert_standalone_project(standalone_owner)
         row.update(winding_geometry_summary(setup_result.get("winding_geometry_audit")))
         for stage, seconds in setup_result.get("timings", {}).items():
             row["timing_" + stage] = round(seconds, 6)
@@ -2794,6 +3116,36 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     except Exception as exc:
         elapsed = time.time() - start
         logging.exception("Case failed: %s", case_id)
+        if not pooled_backend and standalone_owner is not None and standalone_owner.solver_uncertain:
+            row["error_class"] = "standalone_solver_uncertain"
+            row["standalone_solver_uncertain"] = True
+            row["standalone_owned_pid"] = standalone_owner.pid or ""
+            row["standalone_analyze_return_received"] = standalone_owner.analysis_return_received
+            row["standalone_analyze_return_type"] = standalone_owner.analysis_return_type
+            row["standalone_analyze_return_repr"] = standalone_owner.analysis_return_repr
+            if project_path is not None:
+                uncertainty = {
+                    "case_id": case_id, "solver_state_uncertain": True,
+                    "owned_pid": standalone_owner.pid, "owner_identity": standalone_owner.identity,
+                    "private_project": str(standalone_owner.project_dir),
+                    "Analyze_return_received": standalone_owner.analysis_return_received,
+                    "Analyze_return_type": standalone_owner.analysis_return_type,
+                    "Analyze_return_repr": standalone_owner.analysis_return_repr,
+                    "error": repr(exc), "automatic_retry_allowed": False,
+                    "NativeQuit_allowed": False, "normal_export_allowed": False,
+                    "producer_fingerprint": row.get("input_producer_fingerprint"),
+                    "requested_spec": asdict(spec),
+                    "depth_audits": {key: setup_result.get(key) for key in (
+                        "native_model_depth_audit", "native_model_depth_audit_post_validation",
+                        "native_model_depth_audit_pre_analysis")},
+                }
+                try:
+                    artifact = project_path / "standalone_solver_uncertain.json"
+                    with artifact.open("x", encoding="ascii") as stream:
+                        json.dump(uncertainty, stream, ensure_ascii=True, allow_nan=False, indent=2)
+                    row["artifact_standalone_solver_uncertain"] = str(artifact)
+                except Exception:
+                    logging.exception("Could not preserve standalone uncertainty evidence for %s", case_id)
         winding_audit = getattr(exc, "winding_geometry_audit", None)
         if isinstance(winding_audit, dict):
             row["error_class"] = "winding_geometry_invalid"
@@ -2819,6 +3171,11 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                     logging.exception("Could not preserve native-model-depth failure evidence for %s", case_id)
         if project is not None:
             try:
+                if not pooled_backend:
+                    if standalone_owner is None or standalone_owner.solver_uncertain:
+                        raise ValueError("standalone project save refused while ownership/solver state is uncertain")
+                    assert_standalone_owned(standalone_owner, project.desktop)
+                    assert_standalone_project(standalone_owner)
                 project.save()
             except Exception:
                 logging.exception("Could not preserve failed AEDT project for %s", case_id)
@@ -2858,8 +3215,19 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                             "finished_at": datetime.now().isoformat(timespec="seconds"),
                         }
                     )
-        else:
-            safe_release_desktop(desktop)
+        elif standalone_owner is not None:
+            cleanup = safe_release_desktop(desktop, standalone_owner)
+            row["standalone_cleanup"] = json.dumps(cleanup, sort_keys=True, allow_nan=False)
+            row["standalone_owned_pid"] = standalone_owner.pid or ""
+            row["standalone_owner_identity"] = json.dumps(standalone_owner.identity, allow_nan=False)
+            row["standalone_solver_uncertain"] = standalone_owner.solver_uncertain
+            if cleanup.get("suppressed"):
+                row["standalone_release_suppressed"] = cleanup["suppressed"]
+            if not cleanup["process_exited"] or cleanup["errors"]:
+                row["standalone_release_error"] = "; ".join(cleanup["errors"]) or cleanup.get("suppressed", "owned process exit not proved")
+                if row.get("status") == "ok":
+                    success = False
+                    row.update(status="failed", error=row["standalone_release_error"], error_class="standalone_cleanup_failed")
         if project_path is not None:
             cleanup_project_folder(project_path, options.cleanup_linux, success)
         append_result_row(result_csv, row)

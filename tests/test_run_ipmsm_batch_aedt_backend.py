@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 from pathlib import Path
 import sys
@@ -14,28 +15,70 @@ import run_ipmsm_batch as runner
 
 
 class FakeProject:
-    def __init__(self, path: str, events: list[tuple[str, object]]) -> None:
-        self.path = path
-        self.events = events
+    def __init__(self, path: str, events: list[tuple[str, object]], desktop: object, name: str) -> None:
+        self.path, self.events, self.desktop, self.name = path, events, desktop, name
+
+    def GetPath(self) -> str:
+        return self.path
+
+    def GetName(self) -> str:
+        return self.name
+
+    def create_design(self, **kwargs: object) -> object:
+        return types.SimpleNamespace(desktop_class=self.desktop, analyze=self.desktop.analyze)
 
     def save(self) -> None:
         self.events.append(("save", self.path))
 
     def close(self) -> None:
         self.events.append(("close_project", self.path))
+        self.desktop.project = None
 
 
 class FakeDesktop:
     def __init__(self, events: list[tuple[str, object]], kwargs: dict[str, object]) -> None:
         self.events = events
         self.events.append(("desktop", kwargs))
+        self.aedt_process_id = 9001
+        self.identity_epoch = 123.0
+        self.alive, self.quit_requested, self.project = True, False, None
+        self.analysis_return, self.analysis_error = True, None
+        self.aedt_version = "2025.2"
+        self._odesktop = types.SimpleNamespace(
+            GetProcessID=lambda: self.aedt_process_id,
+            GetProjectList=lambda: [self.project.name] if self.project is not None else [],
+            GetActiveProject=lambda: self.project,
+            CloseProject=self.native_close_project,
+            QuitApplication=self.native_quit,
+        )
+        self.odesktop = self._odesktop
 
     def create_project(self, path: str, name: str) -> FakeProject:
         self.events.append(("create_project", name))
-        return FakeProject(path, self.events)
+        self.project = FakeProject(path, self.events, self, name)
+        return self.project
 
-    def release_desktop(self, **kwargs: object) -> None:
+    def native_close_project(self, name: str) -> None:
+        self.events.append(("native_close_project", name))
+        self.project = None
+
+    def native_quit(self) -> None:
+        self.events.append(("native_quit", self.aedt_process_id))
+        self.quit_requested = True
+
+    def analyze(self, **kwargs: object) -> object:
+        self.events.append(("native_analyze", kwargs))
+        state = Path(self.project.path) / "standalone_solver_state.json"
+        self.state_at_analyze_entry = json.loads(state.read_text(encoding="ascii")) if state.is_file() else None
+        if self.analysis_error is not None:
+            raise self.analysis_error
+        return self.analysis_return
+
+    def release_desktop(self, **kwargs: object) -> bool:
         self.events.append(("release_desktop", kwargs))
+        if self.quit_requested:
+            self.alive = False
+        return True
 
 
 class FakeLease:
@@ -149,6 +192,11 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
         configure_error_is_solver: bool = True,
         analysis_returns_false: bool = False,
         acquire_error: Exception | None = None,
+        standalone_analyze_return: object = True,
+        standalone_analyze_error: Exception | None = None,
+        standalone_depth_error: Exception | None = None,
+        case_id: str = "case-001",
+        configure_validation: bool = True,
     ) -> dict[str, object]:
         core_module = types.ModuleType("pyaedt_module.core")
         ansys_core_module = types.ModuleType("ansys.aedt.core")
@@ -156,19 +204,31 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
             enable_error_handler=True,
             skip_license_check=False,
             wait_for_license=True,
+            use_multi_desktop=False,
+            release_on_exception=True,
         )
 
-        def desktop_factory(**kwargs: object) -> FakeDesktop:
-            return FakeDesktop(events, kwargs)
+        desktops = []
 
-        core_module.pyDesktop = desktop_factory
+        class DesktopFactory(FakeDesktop):
+            def __init__(self, **kwargs: object) -> None:
+                super().__init__(events, kwargs)
+                self.analysis_return, self.analysis_error = standalone_analyze_return, standalone_analyze_error
+                desktops.append(self)
+
+        def identity(pid: int) -> tuple | None:
+            alive = next((d for d in desktops if d.aedt_process_id == pid and d.alive), None)
+            return (pid, alive.identity_epoch, os.name, (1000, 1000) if os.name == "posix" else "lab\\user", "ansysedt.exe") if alive is not None else None
+
+        core_module.pyDesktop = DesktopFactory
+        self.last_settings, self.last_desktops = settings, desktops
         package_module = types.ModuleType("pyaedt_module")
         package_module.core = core_module
         ansys_core_module.settings = settings
 
         def create_design(_project: object, _sim: object) -> tuple[object, None, dict[str, object]]:
             events.append(("create_design", None))
-            return object(), None, {}
+            return _project.create_design(name="IPMSM", solver="Maxwell 2D", solution="Transient"), None, {}
 
         def configure(*_args: object, **_kwargs: object) -> dict[str, object]:
             events.append(("configure", _kwargs))
@@ -178,7 +238,7 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
                     callback()
                 raise configure_error
             analysis = False if analysis_returns_false else (True if analyze else None)
-            return {"analysis": analysis, "validation": True}
+            return {"analysis": analysis, "validation": configure_validation}
 
         with tempfile.TemporaryDirectory() as tmp:
             base_dir = Path(tmp) / "base"
@@ -200,6 +260,7 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
                 "MFT_AEDT_RELEASE_WAIT_SECONDS": "42",
                 "SLURM_SCHED_TASK_ID": "321",
                 "SLURMD_NODENAME": "n114",
+                "AEDT_VERSION": "2025.2",
             }
 
             def acquire(*args: object, **kwargs: object) -> FakeLease:
@@ -236,10 +297,21 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
                 runner,
                 "output_physics_issues",
                 return_value=[],
+            ), mock.patch.object(
+                runner, "standalone_existing_pids", return_value={10, 20}
+            ), mock.patch.object(
+                runner, "standalone_process_identity", side_effect=identity
             ), mock.patch(
+                "module.ipmsm_ppt_setup.audit_native_model_depth", return_value={"passed": True}, side_effect=standalone_depth_error
+            ) as depth_audit, mock.patch(
                 "logging.exception"
             ):
-                row = runner.run_one_case(({"case_id": "case-001"}, options.__dict__))
+                row = runner.run_one_case(({"case_id": case_id}, options.__dict__))
+            self.last_depth_calls = depth_audit.call_count
+            artifact = row.get("artifact_standalone_solver_uncertain")
+            self.preserved_uncertainty = json.loads(Path(artifact).read_text(encoding="ascii")) if artifact else None
+            state_artifact = row.get("artifact_standalone_solver_state")
+            self.preserved_solver_state = json.loads(Path(state_artifact).read_text(encoding="ascii")) if state_artifact else None
             with Path(options.result_csv).open("r", encoding="utf-8-sig", newline="") as file:
                 self.persisted_rows = list(csv.DictReader(file))
             return row
@@ -425,7 +497,7 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
         self.assertNotIn("desktop", names)
         self.assertNotIn("release_desktop", names)
 
-    def test_standalone_lifecycle_kwargs_remain_unchanged(self) -> None:
+    def test_standalone_uses_fresh_no_atexit_and_verified_no_save_cleanup(self) -> None:
         events: list[tuple[str, object]] = []
 
         row = self._run_case(
@@ -438,17 +510,24 @@ class RunIpmsmBatchAedtBackendTests(unittest.TestCase):
         self.assertEqual(
             next(value for name, value in events if name == "desktop"),
             {
-                "version": None,
+                "version": "2025.2",
                 "non_graphical": True,
-                "close_on_exit": True,
+                "close_on_exit": False,
                 "new_desktop": True,
             },
         )
         self.assertEqual(
             next(value for name, value in events if name == "release_desktop"),
-            {"close_projects": True, "close_on_exit": True},
+            {"close_projects": False, "close_on_exit": False},
         )
         self.assertNotIn("close_project", [name for name, _value in events])
+        self.assertEqual(len([name for name, _value in events if name == "native_close_project"]), 1)
+        self.assertEqual(len([name for name, _value in events if name == "native_quit"]), 1)
+        self.assertFalse(self.last_settings.use_multi_desktop)
+        self.assertTrue(self.last_settings.release_on_exception)
+        self.assertTrue(self.last_settings.enable_error_handler)
+        self.assertFalse(self.last_settings.skip_license_check)
+        self.assertTrue(self.last_settings.wait_for_license)
 
 
 if __name__ == "__main__":

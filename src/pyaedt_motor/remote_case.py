@@ -6,10 +6,12 @@ or decide whether an FEA result is physically acceptable.
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -28,6 +30,132 @@ PRODUCER_FILES = ("run_ipmsm_batch.py", "module/ipmsm_geometry.py", "module/ipms
 HEX = re.compile(r"[0-9a-f]{64}")
 CASE = re.compile(r"[A-Za-z0-9_-]{1,128}")
 EVIDENCE_SUFFIXES = {".aedt", ".csv", ".json", ".stats", ".log", ".out", ".err", ".txt"}
+SOLVER_CONTRACT = "ipmsm_standalone_solver_state_v1"
+
+
+def _flag(value):
+    if type(value) is bool:
+        return value
+    if isinstance(value, str) and value.strip().lower() in {"true", "false", "1", "0"}:
+        return value.strip().lower() in {"true", "1"}
+    return None
+
+
+def _valid_owner(identity, pid):
+    if (type(pid) is not int or pid <= 0 or not isinstance(identity, list) or len(identity) != 5 or
+            type(identity[0]) is not int or identity[0] != pid or type(identity[1]) not in (int, float) or
+            not math.isfinite(identity[1]) or identity[1] <= 0 or identity[2] not in {"nt", "posix"} or
+            not isinstance(identity[4], str) or identity[4] not in {"ansysedt", "ansysedt.exe"}):
+        return False
+    principal = identity[3]
+    return (isinstance(principal, str) and bool(principal) and principal == principal.casefold()) if identity[2] == "nt" else (
+        isinstance(principal, list) and len(principal) == 2 and all(type(value) is int and value >= 0 for value in principal))
+
+
+def solver_row_context(row: dict | None, producer: str) -> dict:
+    """Only a reviewed, producer-bound standalone contract can prove quiescence."""
+    result = {"solver_context_known": False, "solver_state_uncertain": True,
+              "solver_context_reason": "standalone solver context is missing"}
+    if not row:
+        return result
+    if row.get("input_producer_fingerprint") != producer or row.get("standalone_solver_state_contract") != SOLVER_CONTRACT:
+        result["solver_context_reason"] = "producer-bound standalone contract is missing"
+        return result
+    if row.get("error_class") == "standalone_solver_uncertain" or row.get("standalone_release_suppressed") == "solver_state_uncertain":
+        result["solver_context_reason"] = "runner retained an uncertain solver"
+        return result
+    uncertain = _flag(row.get("standalone_solver_uncertain"))
+    if (row.get("standalone_solver_uncertain") in (None, "") and not row.get("artifact_standalone_solver_state") and
+            _flag(row.get("standalone_analyze_return_received")) is not True and row.get("error_class") != "standalone_solver_uncertain"):
+        result.update(solver_context_known=True, solver_state_uncertain=False, solver_context_reason="reviewed contract result precedes any Analyze")
+        return result
+    if uncertain is not False:
+        result["solver_context_reason"] = "runner explicitly retained an uncertain solver" if uncertain is True else "invalid/missing solver uncertainty flag"
+        return result
+    received = _flag(row.get("standalone_analyze_return_received"))
+    if received is True and not row.get("artifact_standalone_solver_state"):
+        result["solver_context_reason"] = "Analyze result lacks its durable intent artifact"
+        return result
+    if row.get("artifact_standalone_solver_state") or received is True:
+        if received is not True or row.get("standalone_analyze_return_type") != "builtins.bool" or row.get("standalone_analyze_return_repr") != "True":
+            result["solver_context_reason"] = "Analyze did not return exact True"
+            return result
+        try:
+            cleanup = json.loads(row.get("standalone_cleanup") or "null")
+            raw_pid = row.get("standalone_owned_pid") or ""
+            pid = int(raw_pid) if isinstance(raw_pid, str) and raw_pid.isdigit() else None
+            identity = json.loads(row.get("standalone_owner_identity") or "null")
+            if (not _valid_owner(identity, pid) or not isinstance(cleanup, dict) or cleanup.get("verified") is not True or
+                    type(cleanup.get("owned_pid")) is not int or cleanup["owned_pid"] != pid or
+                    cleanup.get("process_exited") is not True or cleanup.get("errors") != []):
+                raise ValueError("owned cleanup is not proved")
+        except (ValueError, TypeError):
+            result["solver_context_reason"] = "owned process cleanup is not proved"
+            return result
+    result.update(solver_context_known=True, solver_state_uncertain=False,
+                  solver_context_reason="reviewed contract proves no Analyze" if received is not True else "exact True and owned cleanup proved")
+    return result
+
+
+def _runner_solver_contract(path: Path) -> bool:
+    tree = ast.parse(path.read_bytes())
+    declarations = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(x, ast.Name) and x.id == "STANDALONE_SOLVER_STATE_CONTRACT" for x in node.targets):
+            declarations.append(node.value)
+    return len(declarations) == 1 and isinstance(declarations[0], ast.Constant) and declarations[0].value == SOLVER_CONTRACT
+
+
+def _source_solver_context(simulation: Path, raw_result: Path, case: str, producer: str, contract: bool) -> dict:
+    evidence = {"solver_contract": SOLVER_CONTRACT if contract else "", "solver_markers": {}}
+    row = None
+    if raw_result.is_file():
+        rows = list(csv.DictReader(io.StringIO(raw_result.read_text(encoding="utf-8-sig"))))
+        if len(rows) != 1 or rows[0].get("case_id") != case:
+            return {**evidence, "solver_context_known": False, "solver_state_uncertain": True, "solver_context_reason": "invalid solver CSV identity"}
+        row = rows[0]
+    context = solver_row_context(row, producer)
+    if not contract:
+        context = {"solver_context_known": False, "solver_state_uncertain": True, "solver_context_reason": "sealed runner does not declare the reviewed solver-state contract"}
+    paths = [p for p in _files(simulation) if p.name == "standalone_solver_state.json"] if simulation.exists() else []
+    retained = [p for p in _files(simulation) if p.name == "standalone_solver_uncertain.json"] if simulation.exists() else []
+    for path in retained:
+        evidence["solver_markers"][path.relative_to(simulation).as_posix()] = _record(path)
+    if retained:
+        context = {"solver_context_known": False, "solver_state_uncertain": True, "solver_context_reason": "explicit retained-solver artifact exists"}
+    if not paths and not retained and contract and (row is None or ((_flag(row.get("standalone_solver_uncertain")) is False or row.get("standalone_solver_uncertain") in (None, "")) and
+                                                  _flag(row.get("standalone_analyze_return_received")) is not True and
+                                                  not row.get("artifact_standalone_solver_state") and row.get("error_class") != "standalone_solver_uncertain")):
+        context = {"solver_context_known": True, "solver_state_uncertain": False,
+                   "solver_context_reason": "sealed fsync-before-Analyze contract and absent intent prove no Analyze"}
+    elif not paths and contract and row and (row.get("artifact_standalone_solver_state") or _flag(row.get("standalone_analyze_return_received")) is True):
+        context = {"solver_context_known": False, "solver_state_uncertain": True, "solver_context_reason": "durable intent marker is missing after reported Analyze"}
+    if len(paths) > 1:
+        context = {"solver_context_known": False, "solver_state_uncertain": True, "solver_context_reason": "multiple solver state markers"}
+    for path in paths:
+        try:
+            raw = path.read_bytes(); marker = json.loads(raw)
+            if not isinstance(marker, dict):
+                raise ValueError("solver marker is not an object")
+            evidence["solver_markers"][path.relative_to(simulation).as_posix()] = {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+            identity = marker.get("owner_identity")
+            if (not contract or marker.get("schema") != SOLVER_CONTRACT or marker.get("case_id") != case or
+                    marker.get("producer_fingerprint") != producer or not _valid_owner(identity, marker.get("owned_pid")) or
+                    type(marker.get("solver_state_uncertain")) is not bool):
+                raise ValueError("marker contract/case/producer/owner binding differs")
+            if marker["solver_state_uncertain"] is not False:
+                raise ValueError("durable pre-Analyze/uncertain intent remains unresolved")
+            if (marker.get("stage") != "analyze_returned_true" or marker.get("Analyze_return_received") is not True or
+                    marker.get("Analyze_return_type") != "builtins.bool" or marker.get("Analyze_return_repr") != "True"):
+                raise ValueError("marker does not prove exact True")
+            if not row or row.get("standalone_owned_pid") != str(marker["owned_pid"]) or json.loads(row.get("standalone_owner_identity") or "null") != identity:
+                raise ValueError("marker and result owner identities differ")
+            # A False marker alone permits cleanup; only the result can prove it happened.
+            if context["solver_state_uncertain"]:
+                raise ValueError(context["solver_context_reason"])
+        except (ValueError, TypeError, KeyError, OSError) as exc:
+            context = {"solver_context_known": False, "solver_state_uncertain": True, "solver_context_reason": str(exc)}
+    return {**evidence, **context}
 
 
 def json_bytes(value) -> bytes:
@@ -247,6 +375,7 @@ def execute_case(*, source_root: Path, library_root: Path, source_manifest: Path
              "slurm_job_id": os.environ.get("SLURM_JOB_ID"), "runner_exit_code": None,
              "storage_devices": {"scratch": scratch_root.stat().st_dev, "durable": durable_root.stat().st_dev},
              "python_executable": sys.executable}
+    state.update(solver_context_known=True, solver_state_uncertain=False, solver_context_reason="runner not started")
     status = durable_case / "execution.json"
     try:
         _state(status, state)
@@ -258,12 +387,14 @@ def execute_case(*, source_root: Path, library_root: Path, source_manifest: Path
         _write_new(scratch / "case.csv", case_bytes)
         simulation = scratch / "simulation"
         raw_result = scratch / "result.csv"
+        contract = _runner_solver_contract(staged / "run_ipmsm_batch.py")
         command = [sys.executable, str(staged / "run_ipmsm_batch.py"), "--cases", str(scratch / "case.csv"),
                    "--max-cases", "1", "--workers", "1", "--cores", str(cores), "--simulation-dir", str(simulation),
                    "--result-csv", str(raw_result), "--keep-projects", "--non-graphical", "--aedt-backend", "standalone"]
         environment = dict(os.environ, PYAEDT_LIBRARY_ROOT=str(scratch / "library"),
                            PYTHONPATH=str(staged / "src"), TMPDIR=str(scratch), TMP=str(scratch), TEMP=str(scratch))
-        state.update(phase="running", command=command, staging_wall_s=time.monotonic() - execution_started)
+        state.update(phase="running", command=command, staging_wall_s=time.monotonic() - execution_started,
+                     solver_context_known=False, solver_state_uncertain=True, solver_context_reason="runner active; terminal solver context pending")
         _state(status, state)
         started = time.monotonic()
         with (scratch / "runner.log").open("xb") as log:
@@ -274,6 +405,10 @@ def execute_case(*, source_root: Path, library_root: Path, source_manifest: Path
             except subprocess.TimeoutExpired:
                 state["runner_error"] = "timeout; AEDT descendants may remain active; scratch retained"
         state.update(runner_wall_s=time.monotonic() - started, phase="copying")
+        try:
+            state.update(_source_solver_context(simulation, raw_result, case_id, state["producer_fingerprint"], contract))
+        except Exception as exc:
+            state.update(solver_context_known=False, solver_state_uncertain=True, solver_context_reason="solver-state readback failed: " + repr(exc))
         export_started = time.monotonic()
         _state(status, state)
         # Frozen producer/library bytes must still match after the runner exits.
@@ -317,7 +452,9 @@ def execute_case(*, source_root: Path, library_root: Path, source_manifest: Path
             raise RuntimeError("runner did not finish; raw artifacts preserved without publishing a result")
         relocated = relocate_result(payload, case_id, simulation, durable_case)
         row = next(csv.DictReader(io.StringIO(relocated.decode("utf-8"))))
-        runner_ok = state["runner_exit_code"] == 0 and row.get("status") == "ok"
+        runner_ok = state["runner_exit_code"] == 0 and row.get("status") == "ok" and not state["solver_state_uncertain"]
+        if state["solver_state_uncertain"] and row.get("status") == "ok":
+            raise RuntimeError("unresolved solver state cannot publish a successful result")
         if state["runner_exit_code"] != 0 and row.get("status") == "ok":
             raise RuntimeError("runner exit code contradicts successful result; refusing publication")
         if row.get("input_producer_fingerprint") not in {None, "", state["producer_fingerprint"]}:
@@ -333,14 +470,16 @@ def execute_case(*, source_root: Path, library_root: Path, source_manifest: Path
         inventory = {path.relative_to(durable_case).as_posix(): _record(path) for path in _files(durable_case)
                      if path != status}
         manifest = {"schema": SCHEMA, "case_id": case_id, "retention": retention, "files": inventory,
-                    "omitted_solution_files": omitted, "runner_success": runner_ok}
+                    "omitted_solution_files": omitted, "runner_success": runner_ok,
+                    "solver_context_known": state["solver_context_known"], "solver_state_uncertain": state["solver_state_uncertain"]}
         _write_new(durable_case / "manifest.json", json_bytes(manifest))
         for name, expected in inventory.items():
             if _record(durable_case / _relative(name)) != expected:
                 raise RuntimeError("durable artifacts changed before completion")
         _write_new(result, relocated)
-        _write_new(durable_case / "COMPLETE", digest(durable_case / "manifest.json").encode("ascii"))
-        state.update(phase="complete" if runner_ok else "preserved_failure", success=runner_ok,
+        if not state["solver_state_uncertain"]:
+            _write_new(durable_case / "COMPLETE", digest(durable_case / "manifest.json").encode("ascii"))
+        state.update(phase="solver_quarantined" if state["solver_state_uncertain"] else "complete" if runner_ok else "preserved_failure", success=runner_ok,
                      copied_files=len(inventory), omitted_files=len(omitted),
                      copied_bytes=sum(record["bytes"] for record in inventory.values()),
                      omitted_bytes=sum(record["bytes"] for record in omitted.values()),
@@ -394,7 +533,7 @@ def main(argv=None) -> int:
         print(hashlib.sha256(payload).hexdigest())
         return 0
     result = execute_case(**args)
-    print(json.dumps({key: result.get(key) for key in ["case_id", "phase", "success", "durable_case", "error"]}))
+    print(json.dumps({key: result.get(key) for key in ["case_id", "phase", "success", "durable_case", "error", "solver_state_uncertain", "solver_context_reason"]}))
     return 0 if result["success"] else 1
 
 

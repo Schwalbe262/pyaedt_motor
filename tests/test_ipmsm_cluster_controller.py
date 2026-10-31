@@ -110,10 +110,11 @@ def fake_training_verifier(monkeypatch):
 
 def row_csv(case, *, producer=PRODUCER, status="ok"):
     stream = io.StringIO()
-    writer = csv.DictWriter(stream, ["case_id", "status", "error", "input_metric_contract_version", "input_producer_fingerprint"])
+    writer = csv.DictWriter(stream, ["case_id", "status", "error", "input_metric_contract_version", "input_producer_fingerprint", "standalone_solver_state_contract", "standalone_solver_uncertain", "standalone_analyze_return_received"])
     writer.writeheader()
     writer.writerow({"case_id": case, "status": status, "error": "failed physical validation" if status == "failed" else "",
-                     "input_metric_contract_version": "motor_metrics_v3", "input_producer_fingerprint": producer})
+                     "input_metric_contract_version": "motor_metrics_v3", "input_producer_fingerprint": producer,
+                     "standalone_solver_state_contract": "ipmsm_standalone_solver_state_v1", "standalone_solver_uncertain": False, "standalone_analyze_return_received": False})
     return stream.getvalue()
 
 
@@ -152,16 +153,18 @@ def test_more_than_300_bounded_refill_history_pagination_and_no_failure_retry(tm
     assert len(http.posts) == 300 and summary["pending"] == 315
     for identifier in range(1, 21):
         http.tasks[identifier].update(status="failed", failure_message="solver error", exit_code=1)
+        # These fake jobs never call Analyze; an absent result cannot prove that.
+        http.results[identifier] = row_csv(controller.plan.rows[identifier - 1]["case_id"], status="failed")
     resumed = Controller(controller.plan.path, controller.config, controller.root, controller.ledger, http, plan_sha256=controller.seal)
     summary = resumed.tick(execute=True)
     assert len(http.posts) == 315 and summary["submitted_this_tick"] == 15
     assert len({p["dedupe_key"] for p in http.posts}) == 315
     assert read_ledger(controller.ledger)[1]["training"] == 315
     assert summary["terminal_cases"] == 20 and verification
-    assert summary["scheduler_failures"] == 20 and summary["terminal_missing_results"] == 20
+    assert summary["scheduler_failures"] == 20 and summary["terminal_missing_results"] == 0
     for identifier in range(1, 21):
         entry = next(v for v in resumed.state["cases"].values() if v["task_id"] == identifier)
-        assert entry["task_status"] == "failed" and "collection_error" in entry
+        assert entry["task_status"] == "failed" and entry["collection_complete"]
     assert len(list((controller.root / "collected").glob("*/stderr.txt"))) == 20
 
 

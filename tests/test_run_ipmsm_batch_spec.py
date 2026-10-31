@@ -586,10 +586,11 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
         ansys_core_module = types.ModuleType("ansys.aedt.core")
         settings = types.SimpleNamespace(enable_error_handler=True, skip_license_check=False, wait_for_license=True)
 
-        def fail_desktop_startup(**_kwargs: object) -> object:
-            raise AttributeError("'NoneType' object has no attribute 'EnableAutoSave'")
+        class FailDesktopStartup:
+            def __init__(self, **_kwargs: object) -> None:
+                raise AttributeError("'NoneType' object has no attribute 'EnableAutoSave'")
 
-        core_module.pyDesktop = fail_desktop_startup
+        core_module.pyDesktop = FailDesktopStartup
         package_module = types.ModuleType("pyaedt_module")
         package_module.core = core_module
         ansys_core_module.settings = settings
@@ -621,73 +622,18 @@ class RunIpmsmBatchSpecTests(unittest.TestCase):
         self.assertEqual(row["case_id"], "desktop_none")
         self.assertEqual(row["status"], "failed")
         self.assertIn("AEDT desktop startup failed before project creation", row["error"])
-        self.assertFalse(settings.enable_error_handler)
-        self.assertTrue(settings.skip_license_check)
-        self.assertFalse(settings.wait_for_license)
+        self.assertTrue(settings.enable_error_handler)
+        self.assertFalse(settings.skip_license_check)
+        self.assertTrue(settings.wait_for_license)
 
     def test_run_one_case_reports_analysis_false_before_missing_reports(self) -> None:
-        core_module = types.ModuleType("pyaedt_module.core")
-        ansys_core_module = types.ModuleType("ansys.aedt.core")
-        settings = types.SimpleNamespace(enable_error_handler=True, skip_license_check=False, wait_for_license=True)
-
-        class FakeProject:
-            def __init__(self, path: Path) -> None:
-                self.path = str(path)
-
-            def save(self) -> None:
-                return None
-
-        class FakeDesktop:
-            def create_project(self, path: str, name: str) -> FakeProject:
-                return FakeProject(Path(path) / name)
-
-            def release_desktop(self, **_kwargs: object) -> None:
-                return None
-
-        core_module.pyDesktop = lambda **_kwargs: FakeDesktop()
-        package_module = types.ModuleType("pyaedt_module")
-        package_module.core = core_module
-        ansys_core_module.settings = settings
-
-        def fake_create_ipmsm_design(_project: object, _sim: object) -> tuple[object, None, dict[str, object]]:
-            return object(), None, {}
-
-        def fake_configure_ipmsm_from_ppt(*_args: object, **_kwargs: object) -> dict[str, object]:
-            return {"analysis": False, "validation": False}
-
-        with tempfile.TemporaryDirectory() as tmp:
-            result_csv = Path(tmp) / "results.csv"
-            options = run_ipmsm_batch.RunnerOptions(
-                simulation_dir=str(Path(tmp) / "simulation"),
-                result_csv=str(result_csv),
-                analyze=True,
-                non_graphical=True,
-                cleanup_linux=False,
-                symmetry_factor=1,
-                use_periodic_boundary=False,
-                cores=1,
-            )
-
-            with mock.patch.dict(
-                sys.modules,
-                {
-                    "pyaedt_module": package_module,
-                    "pyaedt_module.core": core_module,
-                    "ansys.aedt.core": ansys_core_module,
-                },
-            ), mock.patch(
-                "module.ipmsm_geometry.create_ipmsm_design",
-                side_effect=fake_create_ipmsm_design,
-            ), mock.patch(
-                "module.ipmsm_ppt_setup.configure_ipmsm_from_ppt",
-                side_effect=fake_configure_ipmsm_from_ppt,
-            ), mock.patch(
-                "logging.exception"
-            ):
-                row = run_ipmsm_batch.run_one_case(({"case_id": "analysis_false"}, options.__dict__))
-
-            with result_csv.open("r", encoding="utf-8-sig", newline="") as file:
-                rows = list(csv.DictReader(file))
+        from tests import test_run_ipmsm_batch_aedt_backend as backend_fixtures
+        fixture = backend_fixtures.RunIpmsmBatchAedtBackendTests()
+        row = fixture._run_case(
+            backend="standalone", analyze=True, events=[], case_id="analysis_false",
+            standalone_analyze_return=False, configure_validation=False,
+        )
+        rows = fixture.persisted_rows
 
         self.assertEqual(row["case_id"], "analysis_false")
         self.assertEqual(row["status"], "failed")
