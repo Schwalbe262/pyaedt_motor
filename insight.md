@@ -1119,3 +1119,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - Before: public Ld/Lq 대각평균은있었지만cross항을출력하지않았고수치행렬진단은별도없었다.
 - After/evidence: 새21+관련86검사와기존6실제행렬재계산통과, public정의일치/원본불변. 기존6건Ldq평균.0309~.1346mH, 최신100947 .0347582mH로비영; 실제CLI가worker대각평균을재현했다. .0001현재raw상호성상대노름약2.73e-15, 새물리판정없음.
 - Remaining risk: 상호성은프레임정확도·메시수렴·실측정확도를증명하지않는다. 현재행렬은frozen apparent이고제어기의incremental/포화map과구분해야한다. 원래PM포화상태와auxiliary1A단계PMsource제외도구분한다.
+
+
+## 2026-10-31 part48 | solver 설정의 변수 이름과 실제 시간 간격을 구분
+- Source loop: 실제설정전용100949/950/951, R/ldt1/metadata3_actual_index.json484d2cd5…;각57seal/18ASCII와독립평가a068/a1c7/d5b1.
+- Improvement: 저장된유일한StepsPerPeriod/TransientPeriods/StopTime/TimeStep수식과Native GetVariableValue/get_evaluated_value의typedSI를같이검사하고입력case/spec의단계수도Native전에대조한다. 같은step의실제설정증거만후속해석에연결한다.
+- Before: Native32의TimeStep='TimeStep'와StopTime='StopTime'는180/300/360에서같았고설정표만으로실제간격변경을증명할수없었다. SDK의반복VariableProp사전읽기는마지막값만남길수있어원문4변수의유일성검사가필요했다.
+- After/evidence: Source11원formatter와SDK0.22SI반환경로를대조하고실제3건에서분모1080/1800/2160,dt69.444444/41.666667/34.722222us/stop.075s를저장과live2회로확인했다. case300/spec180·wrongdenominator·bool/NaN등은12pure검사에서Native전또는Analyze전거부됐다. 실제3건Analyze0/intent없음·owner정리·source/library불변.
+- Remaining risk: 설정일치가수치수렴이나실제export시간격자를인증하지않는다. 후속5건은별도예산/요청으로실행하고원시time-grid·물리량·정상상태를검증한다. 기존anchor947의시간증거는저장수식/실제격자이며새live관측이있었던것처럼취급하지않는다.
