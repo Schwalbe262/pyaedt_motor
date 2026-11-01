@@ -35,3 +35,7 @@ legacy/v4r5_native_contract_2026_07/** -text -whitespace
 /tests/fixtures/install_vector307b/** -text -whitespace
 /tests/fixtures/owned_cli_upstream/** -text -whitespace
 /tests/fixtures/public_cli_p3_numeric/** -text -whitespace
+
+# Preserve the exact measured diagnostic CSV and generated figure bytes.
+/docs/experiments/2026-11-01_energy_balance/*.csv -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/docs/experiments/2026-11-01_energy_balance/*.svg -text -whitespace

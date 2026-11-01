@@ -1142,3 +1142,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - after: 실제Linux설치 링크의정상/오류연결을 구분하고, 실제Native0가68초/exit0으로 생성·검증·종료와22null을 통과했다. 원래수치/물리5파일/품질기준은불변이다.
 - evidence: Root33/34·원래코드실패/수정코드통과·독립445e1c53/d5075f14·FS26파일·Native053파일 전체SHA/재파싱.
 - remaining_risk: CLI실제수치·수렴·저장동등성·설계성능은별도증거가필요하다. 이수정만으로학습/최종설계를승인하지않는다.
+
+## 2026-11-01 part72 | 비싼 해석의 읽기 기록을 후속 요약보다 먼저 저장
+- source_loop: 실제158 캐시 회수r1/r2, R/energy158_readback_packet_20261101_v2 및 energy158_balance_assessment_20261101.
+- improvement: 엄격한 ID/시간 다중 쌍 매퍼로 검증한 별도 사본에서 읽고, 전체 Native 읽기 기록을 요약 전에 저장한다. JSON의 미정의값은 명시적 nonfinite_repr로 남기며0으로 치환하지 않는다.
+- before: 단일 쌍 파서가 실제5쌍을 거부했다. 수정 회수r1도10개 값·8보고서를 읽은 뒤 무부하 효율NaN의 최종 JSON 저장이 실패해 전체 읽기 호출 기록이 유실됐다.
+- after: 같은 원본195파일의 새 사본에서 r2가10개 측정값·121회 호출·8보고서와 완전한 결과 JSON을 남겼다. 재해석 없이 같은 실행의 전력·에너지 비교를 마쳤다.
+- evidence: 두 write만 달라진 전체 AST 동등성, 저장 회귀3개·평가12개, 실제평가53fa1d8c/봉인b8dd95a3, 실제 깊이·변화량·원본973개 검증.
+- remaining_risk: 실제15초 종료 확인은 여전히 실패했다. 이후 PID 부재는 별도 증거이며 원래 실패·학습/생산 미승인을 유지한다. 저장 에너지 변화는 전력수지 차이를 설명하지 못했고 원인은 미확정이다.
