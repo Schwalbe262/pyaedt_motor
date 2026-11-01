@@ -25,10 +25,18 @@
 - 원래158은 캐시 파서 오류로 `failed_diagnostic`입니다. 회수r2도15초 종료 확인이 늦어 `failed_readback`이며, 이후 소유 PID 부재는 별도 Root 관찰로만 확인했습니다. 원래 실패는 유지합니다. 불완전한r1 JSON은 계산에 쓰지 않았습니다.
 - 진단 수치 비교입니다. 학습·생산 프로파일·새 영점·전체 수렴을 승인한 결과는 아닙니다.
 
+## 같은 캐시의 13채널 손실 분해
+
+추가 FEA 없이 같은 실행의 캐시에서 실제 지원이 확인된 손실 13채널을 읽었습니다. 읽기 기록 132회와 보고서 8개의 바이트 일치를 대조했습니다. 마지막 주기(0.0625–0.075 s)는 Core **16.866374 W = Hysteresis 12.954909 W + Eddy 3.911465 W + Excess 0 W**이며, 회전자 Core는 **0.009465 W**, 전역 SolidLoss는 **0.088055 W**입니다. 전역 성분합과 고정자·회전자 합의 차이는 최대 **7.11×10⁻¹⁵ W**였습니다. 보고된 손실의 집계 오류는 관측되지 않았지만, 약 −6.3 W 차이의 물리적 원인은 여전히 미확정입니다. 손실이나 잔차를 보정하지 않았습니다. [네 주기·13채널 손실 분해 CSV](loss_partition.csv)
+
+이번 읽기 세션의 소유 PID 8560은 기존 15초 기한 안에 종료되고 SDK 클라이언트도 정상 정리되었습니다. 이 결과는 원래 해석 158과 회수 r2의 실패 상태를 바꾸지 않습니다. 손실은 이미 모델 깊이가 포함된 SI W이므로 깊이를 다시 곱하지 않았으며, 학습·생산 프로파일 승인은 여전히 없습니다.
+
 ## 문제 → 수정 → 확인 → 다음 작업
 
 기존 파서가 ID/시간 한 쌍만 가정해 실제5쌍의 저장 형식을 거부했습니다. 엄격한 다중 쌍 파서로 사본을 검증한 뒤 별도 읽기 전용 Native 세션에서 회수했습니다. 이어 무부하 효율의 미정의값 때문에 JSON 저장이 실패한 경로를 수정해, 미정의값을 명시하고 전체 읽기 기록을 먼저 저장하도록 했습니다. 과거 패킷과 실패 파일은 보존했습니다.
 
-순수 평가12개 검사가 통과했고 입력973개를 전후 검증했습니다. 저장 에너지 변화 가설은 위 측정으로 설명력이 부족함을 확인했습니다. 다음은 같은 캐시의 고정자·회전자 손실 성분과 토크 정의를 대조하는 것입니다. 저장 파일에는 철손의 자계 반영이 켜져 있어 단순히 반영 누락이라고 판단할 수 없습니다. [Ansys 철손 설정 설명](https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v251/en/Subsystems/Maxwell/Content/Maxwell/SettingCoreLossforTransientandEddyCurrentSolvers.htm)
+순수 평가12개 검사가 통과했고 입력973개를 전후 검증했습니다. 저장 에너지 변화 가설은 위 측정으로 설명력이 부족함을 확인했습니다. 같은 캐시의 고정자·회전자 손실 집계는 일치했으며, 다음은 철손 자계 반영의 추정 방식과 토크 정의·수치오차를 구분할 관측을 검토하는 것입니다. 저장 파일에는 철손의 자계 반영이 켜져 있어 단순히 반영 누락이라고 판단할 수 없습니다. [Ansys 철손 설정 설명](https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v251/en/Subsystems/Maxwell/Content/Maxwell/SettingCoreLossforTransientandEddyCurrentSolvers.htm)
 
 원본 근거는 `C:/Users/peets/NEC/pyaedt_motor_runtime/rebuild_20261030/energy158_balance_assessment_20261101/`입니다. 평가 SHA256 `53fa1d8c68f0a459896f03a8fd5116e6aa6b0859bed8fb00d9f7e3b51d2f95b9`, 최종 봉인 `b8dd95a31c6d2102aed213366734a534b7edb32446d1c21b773c2699759d5886`. 보고서의 CSV는 봉인된 원본과 바이트가 같습니다.
+
+추가 손실 평가는 같은 실행 폴더의 `energy158_loss_partition_assessment_20261101/`에 있으며, 평가 SHA256은 `96a5f1acd89814120703cc5c0e6900122fe2d0e32989eaafbaeb0c6c190bf35a`, 봉인은 `eb15ce96dc0fd92d2044dc9affc911b975599409b658989d231c6de3983ce060`입니다. 순수 평가6개와 입력1,042개 대조를 통과했고 배포한 손실 CSV도 봉인 원본과 바이트가 같습니다.
