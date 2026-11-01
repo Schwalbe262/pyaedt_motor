@@ -1150,3 +1150,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - after: 같은 원본195파일의 새 사본에서 r2가10개 측정값·121회 호출·8보고서와 완전한 결과 JSON을 남겼다. 재해석 없이 같은 실행의 전력·에너지 비교를 마쳤다.
 - evidence: 두 write만 달라진 전체 AST 동등성, 저장 회귀3개·평가12개, 실제평가53fa1d8c/봉인b8dd95a3, 실제 깊이·변화량·원본973개 검증.
 - remaining_risk: 실제15초 종료 확인은 여전히 실패했다. 이후 PID 부재는 별도 증거이며 원래 실패·학습/생산 미승인을 유지한다. 저장 에너지 변화는 전력수지 차이를 설명하지 못했고 원인은 미확정이다.
+
+## 2026-11-01 19:13 KST | model-mm sample input with verified SI output
+- source_loop: part76 public airgap diagnostic implementation, corrected actual B2 and refinement reads.
+- improvement: generate sample point files in the verified model-mm convention and independently compare returned SI positions before using B; expose the pure parser/quadrature/CLI without Native dependencies.
+- before: the actual Unit=m/SI-number request returned all720 positions at exact1e-3 scale; fields were sampled at the wrong location and were rejected, not rescaled.
+- after: model-mm point writer plus the unchanged5e-10m formatting check reproduced8genuine exports/38880SI positions and bit-exact torque values; public25tests passed.
+- evidence: src/pyaedt_motor/airgap_diagnostics.py, tests/test_ipmsm_airgap_diagnostics.py, R/part76/PUBLIC_ACTUAL8_REPLAY.json and published CSV/SVG/PNG.
+- remaining_risk: scoped to observed Windows/v252/SDK0.22 six-column full-circle output and separately declared Tesla/time/depth provenance; no universal Unit=m failure claim, spatial accuracy, mean correction or training admission.
