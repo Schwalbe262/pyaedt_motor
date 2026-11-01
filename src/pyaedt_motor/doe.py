@@ -558,15 +558,124 @@ def _require_paired_controls(rows: list[dict], manifest: Mapping[str, Any]) -> N
         raise ValueError("paired input-only support diagnostics differ from rows")
 
 
+# Explicit input-only policy for NEW plans; omitted keeps the historical split.
+TRAIN_AXIS_ANCHOR_POLICY = "model_input_axes_train_v1"
+STATIC_MODEL_AXES = (*ACTIVE_GEOMETRY, "stack_length_mm", "stator_back_yoke_thick",
+                     "stator_inner_radius", "stator_teeth_length", "stator_teeth_width",
+                     "rotor_radius", "shaft_radius", "phase_resistance_ohm")
+
+
+def _anchor_axis_values(designs, winding):
+    """Exact builder-derived inputs, without targets, models or Native objects."""
+    from types import SimpleNamespace
+    from module import variable
+    expected = Path(__file__).resolve().parents[2] / "module/variable.py"
+    if (sys.modules.get(variable.__name__) is not variable
+            or Path(variable.__file__).resolve() != expected
+            or Path(variable.__spec__.origin).resolve() != expected):
+        raise RuntimeError("anchor derived-geometry helper import origin differs")
+    digest = _sha(expected.read_bytes())
+    values, seen = [], set()
+    for design, depth, key in designs:
+        if set(design) != set(GEOMETRY_VARIABLE_NAMES) or design["stator_shoe_thick"] != 1.5:
+            raise ValueError("anchors require the original input-only geometry pool")
+        clean = {name: _finite(value, name) for name, value in design.items()}
+        depth = _finite(depth, "stack_length_mm")
+        if key != physical_geometry_hash(clean, depth) or key in seen:
+            raise ValueError("anchors require unique exact physical geometry identities")
+        seen.add(key)
+        simulation = SimpleNamespace(**clean, slot_num=12, pole_num=8)
+        variable._populate_derived_geometry(simulation, {})
+        value = {name: _finite(getattr(simulation, name), name)
+                 for name in STATIC_MODEL_AXES if name not in {"stack_length_mm", "phase_resistance_ohm"}}
+        value.update(stack_length_mm=depth,
+                     phase_resistance_ohm=phase_resistance_100c_ohm(clean, depth, winding, slot_number=12))
+        values.append(value)
+    if _sha(expected.read_bytes()) != digest:
+        raise RuntimeError("anchor derived-geometry source changed while reading inputs")
+    return values, digest
+
+
+def _train_axis_anchor_partition(designs, order, winding, controls_per_geometry):
+    """Only assign a fresh feasible pool; no existing rows/results/plans accepted."""
+    count = len(designs)
+    if (any(type(index) is not int for index in order) or sorted(order) != list(range(count))
+            or type(controls_per_geometry) is not int or controls_per_geometry not in (3, 4)):
+        raise ValueError("anchors require the existing complete seeded permutation and control protocol")
+    held_count = max(1, round(count * .2))
+    original_training = sorted(order[2 * held_count:])
+    if len(original_training) < 2:
+        raise ValueError("anchor partition needs two original control-anchor groups")
+    mandatory = set(original_training[:2])
+    if controls_per_geometry == 3:
+        mandatory.add(next((index for index in original_training if index % 2 == 0), original_training[0]))
+    values, helper_sha = _anchor_axis_values(designs, winding)
+    anchors, reasons = set(mandatory), {}
+    for name in STATIC_MODEL_AXES:
+        column = [value[name] for value in values]
+        for side, extreme in (("min", min(column)), ("max", max(column))):
+            index = next(index for index in order if column[index] == extreme)
+            anchors.add(index)
+            reasons[name + ":" + side] = {"index": index, "design_hash": designs[index][2], "value": extreme}
+    if len(anchors) > count - 2 * held_count:
+        raise ValueError("anchor union exceeds fixed train capacity; increase a NEW pool, never filter held-out groups")
+    remaining = [index for index in order if index not in anchors]
+    labels = ["train"] * count
+    for index in remaining[:held_count]: labels[index] = "calibration"
+    for index in remaining[held_count:2 * held_count]: labels[index] = "test"
+    bounds = {name: [min(value[name] for index, value in enumerate(values) if labels[index] == "train"),
+                     max(value[name] for index, value in enumerate(values) if labels[index] == "train")]
+              for name in STATIC_MODEL_AXES}
+    if any(not bounds[name][0] <= value[name] <= bounds[name][1] for value in values for name in STATIC_MODEL_AXES):
+        raise RuntimeError("input axis anchor coverage failed")
+    return labels, {"policy": TRAIN_AXIS_ANCHOR_POLICY, "covered_static_input_axes": list(STATIC_MODEL_AXES),
+                    "mandatory_original_control_anchor_indices": sorted(mandatory), "anchor_indices": sorted(anchors),
+                    "anchor_reasons": reasons, "training_bounds": bounds,
+                    "derived_geometry_helper_sha256": helper_sha,
+                    "pool_input_sha256": _sha(_json_bytes(designs)),
+                    "split_counts": dict(Counter(labels)), "split_rule": "60/20/20; held counts round(n*.2), train remainder",
+                    "tie_break": "first in original seeded permutation", "all_pool_groups_retained": True,
+                    "sampling_controls_and_row_order_changed": False, "targets_or_results_read": False,
+                    "published_data_repartitioned": False, "joint_coverage_or_accuracy_certified": False}
+
+
+def _require_anchor_partition(rows, manifest):
+    metadata = manifest.get("partition_policy")
+    if metadata is None:
+        return
+    if not isinstance(metadata, dict) or metadata.get("policy") != TRAIN_AXIS_ANCHOR_POLICY:
+        raise ValueError("unknown explicit input partition policy")
+    controls = _controls_per_geometry(manifest)
+    required = {*ACTIVE_GEOMETRY, "stack_length_mm", "phase_resistance_ohm"}
+    if any(required - set(row) for row in rows):
+        raise ValueError("anchor rows lack required explicit static inputs, including phase_resistance_ohm")
+    groups = rows[::controls]
+    designs = [({name: _finite(row[name], name) for name in GEOMETRY_VARIABLE_NAMES},
+                _finite(row["stack_length_mm"], "stack_length_mm"), row["design_hash"]) for row in groups]
+    order = np.random.default_rng(np.random.SeedSequence(_integer(manifest["seed"], "seed")).spawn(1)[0]).permutation(len(groups)).tolist()
+    winding = WindingSpec(**manifest["winding_spec"])
+    labels, expected = _train_axis_anchor_partition(designs, order, winding, controls)
+    values, _ = _anchor_axis_values(designs, winding)
+    for index, row in enumerate(rows):
+        for name in STATIC_MODEL_AXES:
+            if name in row and _finite(row[name], name) != values[index // controls][name]:
+                raise ValueError("anchor row static input differs from reconstructed input: " + name)
+    if (_json_bytes(metadata) != _json_bytes(expected)
+            or any(row["doe_split"] != labels[index // controls] for index, row in enumerate(rows))):
+        raise ValueError("input anchor metadata or preassigned partitions differ from deterministic fresh-pool policy")
+
+
 def generate_training_plan(
     spec: OptimizationSpec, calibration: Mapping[str, Any], profile: SelectedProfile, *,
     geometries: int = 720, seed: int = 20261030, case_prefix: str = "v3train",
     excluded_hashes: Iterable[str] = (), retry_reserve: int = DEFAULT_RETRY_RESERVE,
     current_min_fraction: float = .25, controls_per_geometry: int = 3,
-    frame_evidence=None,
+    frame_evidence=None, partition_policy: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build default3 or explicit paired4 rows/geometry, with preassigned group partitions."""
     source_pin = _assert_source_pin()
+    if partition_policy not in (None, TRAIN_AXIS_ANCHOR_POLICY):
+        raise ValueError("unknown explicit input partition policy")
     from calibrate_ipmsm_beta import _require_zero_context
     from . import reference_frames as frames
     _production_spec(spec)
@@ -667,6 +776,9 @@ def generate_training_plan(
         first, second = train_indices[:2]
         controls[2 * first:2 * first + 2] = ((minimum, beta_low), (maximum, beta_high))
         controls[2 * second:2 * second + 2] = ((minimum, beta_high), (maximum, beta_low))
+    partition_metadata = None
+    if partition_policy is not None:
+        labels, partition_metadata = _train_axis_anchor_partition(designs, order.tolist(), spec.winding, controls_per_geometry)
     profile_case = {key: value for key, value in settings.items()
                     if key not in {"mesh_elements", "mesh_maximum_lengths_mm", "mesh_refinement_modes", "initial_position_deg"}}
     for group, count in settings["mesh_elements"].items(): profile_case[f"mesh_{group}_elements"] = count
@@ -732,6 +844,8 @@ def generate_training_plan(
                 **source_pin, "generator_sha256": source_pin["source_sha256"][_GENERATOR_NAME],
                 "geometry_helper_sha256": source_pin["source_sha256"][_HELPER_NAME], "numpy_version": np.__version__,
                 "scipy_version": scipy.__version__, "submission_performed": False}
+    if partition_metadata is not None:
+        manifest["partition_policy"] = partition_metadata
     if controls_per_geometry == 4:
         manifest.update(controls_per_geometry=4, control_protocol=PAIRED_CONTROL_PROTOCOL,
                         support_diagnostics=_paired_support_diagnostics(rows, spec.winding))
@@ -740,6 +854,7 @@ def generate_training_plan(
         manifest["reference_frame_context"] = frames.semantic_context(calibration)
         frame_evidence.assert_unchanged()
     _require_plan_context(rows, manifest)
+    _require_anchor_partition(rows, manifest)
     _assert_source_pin(source_pin)
     return rows, manifest
 
@@ -749,6 +864,7 @@ def write_training_plan(path: Path, rows: list[dict], manifest: Mapping[str, Any
     _require_manifest_sources(manifest, source_pin)
     _require_plan_context(rows, manifest)
     _require_paired_controls(rows, manifest)
+    _require_anchor_partition(rows, manifest)
     path = Path(path)
     proof_path = path.with_suffix(".manifest.json")
     if path.suffix.lower() != ".csv": raise ValueError("plan output must have a .csv suffix")
@@ -827,6 +943,7 @@ def verify_training_plan(path: Path) -> dict:
         if len(group_rows) != controls_per_geometry or {_finite(row["base_rpm"], "base_rpm") for row in group_rows} != {1200., 5000.}:
             raise ValueError(f"each geometry requires {controls_per_geometry} controls covering both speeds")
     _require_paired_controls(rows, proof)
+    _require_anchor_partition(rows, proof)
     proof["manifest_id"] = identifier
     _assert_source_pin(source_pin)
     return proof
@@ -844,6 +961,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--exclude", type=Path, action="append", default=[])
     parser.add_argument("--geometries", type=int, default=720)
     parser.add_argument("--controls-per-geometry", type=int, choices=(3, 4), default=3)
+    parser.add_argument("--partition-policy", choices=(TRAIN_AXIS_ANCHOR_POLICY,),
+                        help="NEW plans only: train anchors for all22 static model-input axes; no accuracy certificate")
     parser.add_argument("--seed", type=int, default=20261030)
     parser.add_argument("--case-prefix", default="v3train")
     parser.add_argument("--retry-reserve", type=int, default=DEFAULT_RETRY_RESERVE)
@@ -859,7 +978,8 @@ def main(argv: list[str] | None = None) -> int:
     rows, manifest = generate_training_plan(spec, calibration, profile, geometries=args.geometries, seed=args.seed,
                                             case_prefix=args.case_prefix, excluded_hashes=excluded,
                                             retry_reserve=args.retry_reserve, current_min_fraction=args.current_min_fraction,
-                                            controls_per_geometry=args.controls_per_geometry, frame_evidence=frame_evidence)
+                                            controls_per_geometry=args.controls_per_geometry, frame_evidence=frame_evidence,
+                                            partition_policy=args.partition_policy)
     manifest.update(excluded_sources=exclusions, spec_file_sha256=_sha(args.spec.read_bytes()),
                     calibration_file_sha256=_sha(args.calibration_manifest.read_bytes()))
     if args.execution_backend == "public_owned_cli_v1":
