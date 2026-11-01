@@ -313,7 +313,7 @@ CASE_WINDING_FIELDS = (
 
 
 def _case_fixed_context(row: Mapping[str, Any], *, legacy_defaults: bool = False,
-                        actual_only: bool = False) -> dict[str, Any]:
+                        actual_only: bool = False, _research_context=None) -> dict[str, Any]:
     """Read fixed case metadata without treating a reference as legacy.
 
     Historical legacy source CSVs may lack wire metadata. Only that source
@@ -358,17 +358,21 @@ def _case_fixed_context(row: Mapping[str, Any], *, legacy_defaults: bool = False
             raise ValueError(f"invalid calibration {key}")
         if key in CASE_WINDING_FIELDS[:2]:
             expected = 48 if key == "series_turns_per_phase" else 12
+            if _research_context is not None:
+                from research_ns40_zero import require_context
+                require_context(_research_context)
+                expected = 40 if key == "series_turns_per_phase" else 10
             if value != expected:
                 raise ValueError(f"calibration requires {key}={expected}")
             result[key] = int(value)
     return result
 
 
-def _actual_fixed_context(row: Mapping[str, Any], expected: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    declared = _case_fixed_context(row)
+def _actual_fixed_context(row: Mapping[str, Any], expected: Mapping[str, Any] | None = None, *, _research_context=None) -> dict[str, Any]:
+    declared = _case_fixed_context(row, _research_context=_research_context)
     reference = (declared["core_material_model"] != "legacy_pnf_hybrid_v1" or
                  (expected or {}).get("core_material_model", "legacy_pnf_hybrid_v1") != "legacy_pnf_hybrid_v1")
-    actual = _case_fixed_context(row, actual_only=reference)
+    actual = _case_fixed_context(row, actual_only=reference, _research_context=_research_context)
     if reference and actual["core_material_model"] == "legacy_pnf_hybrid_v1":
         raise ValueError("reference calibration result lacks explicit actual input material context")
     return actual
@@ -668,12 +672,20 @@ def analyze_zero_calibration_rows(
     *,
     max_circular_deviation_deg: float = 3.0,
     min_distinct_speeds: int = 2,
+    _research_context=None,
 ) -> dict[str, Any]:
     """Infer physical ElectricalZero from signed no-load Phase-A back EMF."""
     if not math.isfinite(max_circular_deviation_deg) or max_circular_deviation_deg < 0.0:
         raise ValueError("max_circular_deviation_deg must be finite and nonnegative")
     if type(min_distinct_speeds) is not int or min_distinct_speeds < 1:
         raise ValueError("min_distinct_speeds must be a positive integer")
+    if _research_context is not None:
+        from research_ns40_zero import require_context
+        require_context(_research_context)
+        rows = list(rows)
+        _research_context.verify_rows(rows)
+        if min_distinct_speeds != 2 or max_circular_deviation_deg != 3.0:
+            raise ValueError("Ns40 research requires the existing two-speed/max3deg policy")
     successful = [row for row in rows if str(row.get("status") or "").strip().lower() == "ok"]
     if not successful:
         raise ValueError("zero calibration needs at least one successful no-load speed")
@@ -695,7 +707,7 @@ def analyze_zero_calibration_rows(
         homogeneous["input_metric_contract_version"] = set()
         homogeneous["input_producer_fingerprint"] = set()
     for row in successful:
-        fixed_contexts.append(_actual_fixed_context(row))
+        fixed_contexts.append(_actual_fixed_context(row, _research_context=_research_context))
         if metric_versions != {""}:
             if row.get("input_metric_contract_version") != "motor_metrics_v3":
                 raise ValueError("zero calibration requires supported physical EMF contract")
@@ -809,8 +821,12 @@ def analyze_zero_calibration_rows(
         payload["metric_contract"] = first["input_metric_contract_version"]
         payload["producer_fingerprint"] = first["input_producer_fingerprint"]
         payload["back_emf_source"] = first["output_back_emf_source"]
+    if _research_context is not None:
+        _research_context.verify_rows(successful)
+        payload["research_context"] = _research_context.scope
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-    payload["calibration_id"] = f"beta-calibration:sha256:{hashlib.sha256(encoded).hexdigest()}"
+    prefix = "beta-calibration" if _research_context is None else "research-ns40-zero"
+    payload["calibration_id"] = f"{prefix}:sha256:{hashlib.sha256(encoded).hexdigest()}"
     return payload
 
 
