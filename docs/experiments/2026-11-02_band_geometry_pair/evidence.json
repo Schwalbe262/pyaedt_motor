@@ -1,0 +1,475 @@
+{
+  "Native_API_FEA_reservations_Y_original_changes": 0,
+  "actuals": {
+    "164": {
+      "ASOL_fields": 51,
+      "BH23_exact": true,
+      "Band_actual_CAD_edges": 144,
+      "Band_requested_CAD_segments": 144,
+      "Native_field_time_readback_observed": false,
+      "actual_solution_context": {
+        "setup_id": 141,
+        "solution_block": "SolutionBlock1",
+        "solution_id": 142,
+        "variation_id": 189,
+        "variation_literal_record": {
+          "bytes": 1751,
+          "sha256": "c00beffe31bc503a9b62e8da5aec0e6f4cfd402f6f5df588c088a5e2c919ba31"
+        },
+        "version": 0
+      },
+      "cache_raw_minus_requested_rational_s": [
+        "-1.5E-16",
+        "-1.6E-16",
+        "-1.7E-16",
+        "-1.7E-16",
+        "-1.8E-16",
+        "-1.9E-16",
+        "-2E-16",
+        "-2E-16",
+        "-2.1E-16",
+        "-2.2E-16",
+        "-2.2E-16",
+        "-2.3E-16",
+        "-2.4E-16",
+        "-2.4E-16",
+        "-2.5E-16",
+        "-2.6E-16",
+        "-2.6E-16",
+        "-2.7E-16",
+        "-2.8E-16",
+        "-2.8E-16",
+        "-2.9E-16",
+        "-3E-16",
+        "-3E-16",
+        "-3.1E-16",
+        "-3.2E-16",
+        "-3.2E-16",
+        "-3.1E-16",
+        "-3E-16",
+        "-2.8E-16",
+        "-2.7E-16",
+        "-2.6E-16",
+        "-2.4E-16",
+        "-2.3E-16",
+        "-2.1E-16",
+        "-2E-16",
+        "-1.9E-16",
+        "-1.7E-16",
+        "-1.6E-16",
+        "-1.4E-16",
+        "-1.3E-16",
+        "-1.1E-16",
+        "-1E-16",
+        "-9E-17",
+        "-7E-17",
+        "-6E-17",
+        "-4E-17",
+        "-3E-17",
+        "-2E-17",
+        "0.000",
+        "1E-17",
+        "0.0000"
+      ],
+      "cache_raw_time_tokens": [
+        "0.02499999999999985",
+        "0.02524999999999984",
+        "0.02549999999999983",
+        "0.02574999999999983",
+        "0.02599999999999982",
+        "0.02624999999999981",
+        "0.0264999999999998",
+        "0.0267499999999998",
+        "0.02699999999999979",
+        "0.02724999999999978",
+        "0.02749999999999978",
+        "0.02774999999999977",
+        "0.02799999999999976",
+        "0.02824999999999976",
+        "0.02849999999999975",
+        "0.02874999999999974",
+        "0.02899999999999974",
+        "0.02924999999999973",
+        "0.02949999999999972",
+        "0.02974999999999972",
+        "0.02999999999999971",
+        "0.0302499999999997",
+        "0.0304999999999997",
+        "0.03074999999999969",
+        "0.03099999999999968",
+        "0.03124999999999968",
+        "0.03149999999999969",
+        "0.0317499999999997",
+        "0.03199999999999972",
+        "0.03224999999999973",
+        "0.03249999999999974",
+        "0.03274999999999976",
+        "0.03299999999999977",
+        "0.03324999999999979",
+        "0.0334999999999998",
+        "0.03374999999999981",
+        "0.03399999999999983",
+        "0.03424999999999984",
+        "0.03449999999999986",
+        "0.03474999999999987",
+        "0.03499999999999989",
+        "0.0352499999999999",
+        "0.03549999999999991",
+        "0.03574999999999993",
+        "0.03599999999999994",
+        "0.03624999999999996",
+        "0.03649999999999997",
+        "0.03674999999999998",
+        "0.037",
+        "0.03725000000000001",
+        "0.0375"
+      ],
+      "cache_time_tolerance_or_remapping_issued": false,
+      "case_id": "h859_g1_noload_p3s300_fields51_band144_fea_50dff039493a",
+      "coils24": true,
+      "comparison_last_cycle_rows": 301,
+      "comparison_raw_rows": 901,
+      "efficiency_raw_nonfinite_values": {
+        "output_efficiency_all_pct": "nan",
+        "output_efficiency_first_pct": "nan",
+        "output_efficiency_last_pct": "nan"
+      },
+      "field_directories": 51,
+      "field_files": 510,
+      "full_ModelSetup_equivalence_certified": false,
+      "input_evidence": {
+        "ASSESSMENT.json": {
+          "bytes": 4562,
+          "sha256": "29767aa9d5fcc7a9f69fb801e867053b36844317860edc6c926934dd70f67172"
+        },
+        "FIELD51_INVENTORY.json": {
+          "bytes": 179051,
+          "sha256": "6e42401fe09184949fac90104bc1e63fa3dac6ba0b658daa1cc7d71bfbd8516a"
+        },
+        "FINAL_SEAL.json": {
+          "bytes": 5114,
+          "sha256": "6b56a2d29790c177a6c49ca0b4cdef0d3d1b986f88442a28812122f5c5fa6751"
+        },
+        "MATERIAL_RAW_DIFFERENCES.json": {
+          "bytes": 1036,
+          "sha256": "0b973e7db9d10fe3bb75716ffbff4f3c94c5d2479403a83fa90f8bb7d3e99751"
+        },
+        "PROFILE_AUDIT.json": {
+          "bytes": 2495,
+          "sha256": "ef4a7d73e9c7068dcc6fd486643b9a73d12050eaff731accb541f222b0fa5fed"
+        },
+        "RAW9_REPLAY.json": {
+          "bytes": 5181,
+          "sha256": "b7d6f3cac5d5bc2b4679c9ae2b1915ed00849233f9bcb40e975838b9dd021c20"
+        }
+      },
+      "material_raw_differences": [
+        {
+          "after": [
+            "int",
+            1793555226
+          ],
+          "before": [
+            "int",
+            1793551741
+          ],
+          "path": [
+            "M19_29G_reference_y2",
+            "ModTime"
+          ]
+        },
+        {
+          "after": [
+            "int",
+            1793555227
+          ],
+          "before": [
+            "int",
+            1793551742
+          ],
+          "path": [
+            "NdFeB_1.25T",
+            "ModTime"
+          ]
+        }
+      ],
+      "original15s_Quit_exit_client_retired": true,
+      "owned_PID": 39292,
+      "production_training_admitted": false,
+      "raw_report_records": {
+        "PPT_Losses.csv": {
+          "bytes": 46897,
+          "sha256": "53a0983741cc3fa79660da46c3e903b2260175936af38d57818cfd95168177a3"
+        },
+        "PPT_Torque.csv": {
+          "bytes": 30812,
+          "sha256": "712fc67e8f6cb9e000195507c74a2e89f1f85b7e4d32cecd50289e0de91ad178"
+        }
+      },
+      "report_time_first_raw_ms": "24.9999999999998",
+      "report_time_last_raw_ms": "37.5",
+      "saved35_typed_exact": true,
+      "variables52_exact": true,
+      "wrapper_auxiliary_exit_certificate": false
+    },
+    "166": {
+      "ASOL_fields": 51,
+      "BH23_exact": true,
+      "Band_actual_CAD_edges": 1,
+      "Band_requested_CAD_segments": 0,
+      "Native_field_time_readback_observed": false,
+      "actual_solution_context": {
+        "setup_id": 141,
+        "solution_block": "SolutionBlock1",
+        "solution_id": 142,
+        "variation_id": 189,
+        "variation_literal_record": {
+          "bytes": 1751,
+          "sha256": "c00beffe31bc503a9b62e8da5aec0e6f4cfd402f6f5df588c088a5e2c919ba31"
+        },
+        "version": 0
+      },
+      "cache_raw_minus_requested_rational_s": [
+        "-1.5E-16",
+        "-1.6E-16",
+        "-1.7E-16",
+        "-1.7E-16",
+        "-1.8E-16",
+        "-1.9E-16",
+        "-2E-16",
+        "-2E-16",
+        "-2.1E-16",
+        "-2.2E-16",
+        "-2.2E-16",
+        "-2.3E-16",
+        "-2.4E-16",
+        "-2.4E-16",
+        "-2.5E-16",
+        "-2.6E-16",
+        "-2.6E-16",
+        "-2.7E-16",
+        "-2.8E-16",
+        "-2.8E-16",
+        "-2.9E-16",
+        "-3E-16",
+        "-3E-16",
+        "-3.1E-16",
+        "-3.2E-16",
+        "-3.2E-16",
+        "-3.1E-16",
+        "-3E-16",
+        "-2.8E-16",
+        "-2.7E-16",
+        "-2.6E-16",
+        "-2.4E-16",
+        "-2.3E-16",
+        "-2.1E-16",
+        "-2E-16",
+        "-1.9E-16",
+        "-1.7E-16",
+        "-1.6E-16",
+        "-1.4E-16",
+        "-1.3E-16",
+        "-1.1E-16",
+        "-1E-16",
+        "-9E-17",
+        "-7E-17",
+        "-6E-17",
+        "-4E-17",
+        "-3E-17",
+        "-2E-17",
+        "0.000",
+        "1E-17",
+        "0.0000"
+      ],
+      "cache_raw_time_tokens": [
+        "0.02499999999999985",
+        "0.02524999999999984",
+        "0.02549999999999983",
+        "0.02574999999999983",
+        "0.02599999999999982",
+        "0.02624999999999981",
+        "0.0264999999999998",
+        "0.0267499999999998",
+        "0.02699999999999979",
+        "0.02724999999999978",
+        "0.02749999999999978",
+        "0.02774999999999977",
+        "0.02799999999999976",
+        "0.02824999999999976",
+        "0.02849999999999975",
+        "0.02874999999999974",
+        "0.02899999999999974",
+        "0.02924999999999973",
+        "0.02949999999999972",
+        "0.02974999999999972",
+        "0.02999999999999971",
+        "0.0302499999999997",
+        "0.0304999999999997",
+        "0.03074999999999969",
+        "0.03099999999999968",
+        "0.03124999999999968",
+        "0.03149999999999969",
+        "0.0317499999999997",
+        "0.03199999999999972",
+        "0.03224999999999973",
+        "0.03249999999999974",
+        "0.03274999999999976",
+        "0.03299999999999977",
+        "0.03324999999999979",
+        "0.0334999999999998",
+        "0.03374999999999981",
+        "0.03399999999999983",
+        "0.03424999999999984",
+        "0.03449999999999986",
+        "0.03474999999999987",
+        "0.03499999999999989",
+        "0.0352499999999999",
+        "0.03549999999999991",
+        "0.03574999999999993",
+        "0.03599999999999994",
+        "0.03624999999999996",
+        "0.03649999999999997",
+        "0.03674999999999998",
+        "0.037",
+        "0.03725000000000001",
+        "0.0375"
+      ],
+      "cache_time_tolerance_or_remapping_issued": false,
+      "case_id": "h859_g1_noload_p3s300_fields51_band0_fea_d2e437ad4334",
+      "coils24": true,
+      "comparison_last_cycle_rows": 301,
+      "comparison_raw_rows": 901,
+      "efficiency_raw_nonfinite_values": {
+        "output_efficiency_all_pct": "nan",
+        "output_efficiency_first_pct": "nan",
+        "output_efficiency_last_pct": "nan"
+      },
+      "field_directories": 51,
+      "field_files": 510,
+      "full_ModelSetup_equivalence_certified": false,
+      "input_evidence": {
+        "ASSESSMENT.json": {
+          "bytes": 4562,
+          "sha256": "949a5c9cde77e4107fc48ae871132b751ca0fae96c12f8158fc31027b9b48e06"
+        },
+        "FIELD51_INVENTORY.json": {
+          "bytes": 179153,
+          "sha256": "c19f7f8141fb9f3abfe8d71c7fc3a07831c7beeef4384303c5cb11415589f1e7"
+        },
+        "FINAL_SEAL_v2.json": {
+          "bytes": 4222,
+          "sha256": "5a68a17c36009708507969a19d439247ec62d488ef3a925e0a73ad2ff30c2892"
+        },
+        "MATERIAL_RAW_DIFFERENCES.json": {
+          "bytes": 1032,
+          "sha256": "fa6d84a3aa5708be81b68c414486248129e106d743c01aefcd8ac189c8c375a1"
+        },
+        "PROFILE_AUDIT.json": {
+          "bytes": 2501,
+          "sha256": "078dfa63287fc778348d489f893b2e76c00210c2a43d7a626b8eb4615f60795b"
+        },
+        "RAW9_REPLAY.json": {
+          "bytes": 5184,
+          "sha256": "8c623a6282e6fc1386e00774057fa9ac85f8325f0d4acc2393119ec8cccfa70c"
+        }
+      },
+      "material_raw_differences": [
+        {
+          "after": [
+            "int",
+            1793558089
+          ],
+          "before": [
+            "int",
+            1793552221
+          ],
+          "path": [
+            "M19_29G_reference_y2",
+            "ModTime"
+          ]
+        },
+        {
+          "after": [
+            "int",
+            1793558089
+          ],
+          "before": [
+            "int",
+            1793552222
+          ],
+          "path": [
+            "NdFeB_1.25T",
+            "ModTime"
+          ]
+        }
+      ],
+      "original15s_Quit_exit_client_retired": true,
+      "owned_PID": 53672,
+      "production_training_admitted": false,
+      "raw_report_records": {
+        "PPT_Losses.csv": {
+          "bytes": 46876,
+          "sha256": "31b6a72727eb5b1af67d649fb4b550d29a282f73a736d375ac008d300604aa0b"
+        },
+        "PPT_Torque.csv": {
+          "bytes": 30818,
+          "sha256": "52811dc819aaef30e54783e7bec7b9df01ad7becb74275b83300eb3ca9d1de15"
+        }
+      },
+      "report_time_first_raw_ms": "24.9999999999998",
+      "report_time_last_raw_ms": "37.5",
+      "saved35_typed_exact": true,
+      "variables52_exact": true,
+      "wrapper_auxiliary_exit_certificate": false
+    }
+  },
+  "delta_166_minus164": {
+    "actual_mesh_pct": 35.61253561253561,
+    "residual_W": 0.07442688310411505,
+    "solve_pct": 41.72501275166327
+  },
+  "no_interpolation_phase_alignment_fit_rescale_or_new_calID": true,
+  "package_input_records": {
+    "comparison.csv": {
+      "bytes": 1085,
+      "sha256": "916c4f9dfc63974f1a752858fac00578dc3baae6de01af739def0692b9c3c722"
+    },
+    "last_cycle.csv": {
+      "bytes": 49596,
+      "sha256": "c1618f10dd5d9a5cde8aa5aeded6488af99be146b2b8c4a1cc023a23bd6d89ef"
+    },
+    "regenerate.py": {
+      "bytes": 3010,
+      "sha256": "c8d8bceac3f863546d68ca47fe6118e45992cc07bb3835a004d6394225d2c1e9"
+    }
+  },
+  "point": {
+    "ConsiderCoreLossEffectOnField": true,
+    "GeometryMode": "XY",
+    "SymmetryFactor": 1,
+    "beta_deg": 0,
+    "current_A": 0,
+    "depth_m": 0.0436181,
+    "geometry": "G1",
+    "material": "M19_29G_reference_y2",
+    "mesh_request": "M1",
+    "operation": "no_load",
+    "periods": 3,
+    "rpm": 1200,
+    "steps_per_period": 300
+  },
+  "producer": "43067e07896226c2e078d0060361d899aa75c0998c24935fe1a9c1d4b59c3061",
+  "raw_report_time_tokens_exactly_common_301": true,
+  "schema": "closed_NoLoad_Band_CAD_pair_public_evidence_v1",
+  "source_commit": "859318df3f722e91237cb12e1196cb9477a725d5",
+  "status": "ROOT_REVIEW_HELD_PUBLICATION_NOT_YET_AUTHORIZED_BY_THIS_ARTIFACT",
+  "units": {
+    "ModelDepth_multiplier_added": false,
+    "plotted_torque": "Nm",
+    "raw_loss_and_plotted_loss": "W",
+    "raw_torque": "mNewtonMeter",
+    "report_time": "ms",
+    "torque_unit_conversion": 0.001
+  }
+}

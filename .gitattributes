@@ -43,3 +43,6 @@ legacy/v4r5_native_contract_2026_07/** -text -whitespace
 # Preserve measured air-gap diagnostics and their standalone figure bytes.
 /docs/experiments/2026-11-01_airgap_stress/*.csv -text -whitespace
 /docs/experiments/2026-11-01_airgap_stress/*.svg -text -whitespace
+
+# Preserve the SHA-bound band comparison inputs, script, and standalone figures.
+/docs/experiments/2026-11-02_band_geometry_pair/** -text -whitespace
