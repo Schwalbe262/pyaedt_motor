@@ -106,6 +106,9 @@ class IPMSMPPTSpec:
     compute_inductance: bool = True
     solver_output_error: bool = True
     solver_nonlinear_residual: float = 0.005
+    save_fields_start_step: int | None = None
+    save_fields_stop_step: int | None = None
+    save_fields_every_n_steps: int | None = None
     strict_setup: bool = True
     require_steady_state: bool = False
     circle_segments: int = 0
@@ -124,6 +127,41 @@ class IPMSMPPTSpec:
             "band": 1000,
         }
     )
+
+
+def field_save_schedule(spec: IPMSMPPTSpec) -> dict[str, Any] | None:
+    """Validate an optional final-cycle solver-grid schedule, not Native retention."""
+    values = (spec.save_fields_start_step, spec.save_fields_stop_step, spec.save_fields_every_n_steps)
+    if all(value is None for value in values):
+        return None
+    if any(type(value) is not int for value in values):
+        raise ValueError("save_fields start/stop/every_n_steps must all be integers, not bool or missing")
+    start, stop, count = values
+    periods, steps = spec.transient_periods, spec.steps_per_period
+    if type(periods) is not int or periods <= 0 or type(steps) is not int or steps <= 0:
+        raise ValueError("save_fields requires positive integer periods and steps_per_period")
+    if start < 0 or stop <= start or stop > periods * steps:
+        raise ValueError("save_fields step bounds are outside the solver grid")
+    if start != (periods - 1) * steps or stop != periods * steps:
+        raise ValueError("save_fields bounds must cover exactly the final electrical period")
+    if count <= 0 or count > steps or steps % count:
+        raise ValueError("save_fields every_n_steps must positively and evenly divide steps_per_period")
+    if type(spec.base_rpm) not in (int, float) or type(spec.pole_number) is not int or spec.pole_number <= 0:
+        raise ValueError("save_fields requires positive finite rpm and positive integer pole_number")
+    try:
+        # Match apply_ppt_design_variables' actual commanded BaseRPM, not an unrounded input.
+        rpm = float(f"{spec.base_rpm:g}")
+        start_s = (periods - 1) * 120 / (rpm * spec.pole_number)
+        stop_s = periods * 120 / (rpm * spec.pole_number)
+    except (ValueError, OverflowError, ZeroDivisionError) as exc:
+        raise ValueError("save_fields time bounds must be finite and positive") from exc
+    if (not math.isfinite(rpm) or rpm <= 0 or not math.isfinite(start_s) or not math.isfinite(stop_s)
+            or start_s < 0 or stop_s <= start_s):
+        raise ValueError("save_fields time bounds must be finite and positive")
+    return {"range_type": "Every N Steps", "start_step": start, "stop_step": stop,
+            "every_n_steps": count, "start_time_s": start_s, "stop_time_s": stop_s,
+            "expected_endpoint_snapshots": 1 + steps // count, "units": "s",
+            "Native_endpoint_inclusion_verified": False}
 
 
 def canonical_dq_current_components(i_peak_a: float, beta_dq_deg: float) -> tuple[float, float]:
@@ -219,6 +257,7 @@ def validate_ppt_spec_contract(
         raise ValueError("solver_nonlinear_residual must be finite and positive") from exc
     if not math.isfinite(residual) or residual <= 0:
         raise ValueError("solver_nonlinear_residual must be finite and positive")
+    field_save_schedule(spec)
     for name, value in (("conductor_area_per_branch_mm2", spec.conductor_area_per_branch_mm2),
                         ("slot_fill_limit", spec.slot_fill_limit)):
         if isinstance(value, bool) or not math.isfinite(float(value)) or float(value) <= 0:
@@ -1995,12 +2034,23 @@ def create_ppt_transient_setup(design: Any, spec: IPMSMPPTSpec) -> Any:
             raise
 
     setup = m2d.create_setup(name=spec.setup_name)
+    schedule = field_save_schedule(spec)
+    if schedule is not None:
+        # SetupProps writes call Native update unless disabled, as in SDK set_save_fields.
+        setup.auto_update = False
     setup.props["StopTime"] = "StopTime"
     setup.props["TimeStep"] = "TimeStep"
     setup.props["SaveFieldsType"] = "None"
     setup.props.pop("N Steps", None)
     setup.props.pop("Steps From", None)
     setup.props.pop("Steps To", None)
+    if schedule is not None:
+        # Exact PyAEDT 0.22 SetupMaxwell.set_save_fields Every-N-Steps properties.
+        setup.props["SaveFieldsType"] = "Every N Steps"
+        setup.props.pop("SweepRanges", None)
+        setup.props["N Steps"] = str(schedule["every_n_steps"])
+        setup.props["Steps From"] = f"{schedule['start_time_s']}s"
+        setup.props["Steps To"] = f"{schedule['stop_time_s']}s"
     setup.props["OutputPerObjectCoreLoss"] = True
     setup.props["OutputPerObjectSolidLoss"] = True
     setup.props["OutputError"] = spec.solver_output_error

@@ -1158,3 +1158,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - after: model-mm point writer plus the unchanged5e-10m formatting check reproduced8genuine exports/38880SI positions and bit-exact torque values; public25tests passed.
 - evidence: src/pyaedt_motor/airgap_diagnostics.py, tests/test_ipmsm_airgap_diagnostics.py, R/part76/PUBLIC_ACTUAL8_REPLAY.json and published CSV/SVG/PNG.
 - remaining_risk: scoped to observed Windows/v252/SDK0.22 six-column full-circle output and separately declared Tesla/time/depth provenance; no universal Unit=m failure claim, spatial accuracy, mean correction or training admission.
+
+## 2026-11-01 22:52 KST | part78 SDK setup property batching
+- source loop: part78 selective final-cycle field retention review.
+- improvement: when constructing an enabled Every-N transient field-save schedule, disable setup.auto_update before assigning any properties and call update after the complete setup is populated.
+- before: installed SDK SetupProps.__setitem__ updates immediately when auto_update isTrue; controlled SDK-behavior regression observed12 partial updates.
+- after: enabled branch submits1 complete update; disabled/default Native32 and existing setup fingerprint remain unchanged.
+- evidence: installedSDK solve_sweeps.py999-1023 and solve_setup.py3800-3900; failing pre-fix regression then Root10 focused/75 related PASS; part78/ROOT_FIELD_RETENTION_REVIEW.json.
+- remaining risk: Native endpoint inclusion, actual field cache and runtime benefit are unverified; this confirms configuration construction behavior only.

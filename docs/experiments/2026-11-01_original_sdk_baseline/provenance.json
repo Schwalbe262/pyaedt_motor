@@ -1,0 +1,107 @@
+{
+  "Root_proof": {
+    "bytes": 3085,
+    "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\part78\\ROOT_ACTUAL_101031_FULL_REVIEW.json",
+    "sha256": "2bd226db40d97c1c0af658a269cfc42ab81ecf349674f0e411ca9a9dbd2b9416"
+  },
+  "actual_OS_argv": [
+    "/opt/ohpc/pub/Electronics/v252/AnsysEM/ansysedt.exe",
+    "-grpcsrv",
+    "49383",
+    "-ng"
+  ],
+  "actual_solver_cores_proven": false,
+  "evidence": {
+    "ACTUAL101031_TERMINAL_ASSESSMENT.json": {
+      "bytes": 9807,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\source17_original_SDK_save_Native0_actual_101031_part78_20261101\\ACTUAL101031_TERMINAL_ASSESSMENT.json",
+      "sha256": "2f20905eab8a1aca83a7d390c3cf3eb1009f032bf3ebf993e85913b1648bc363"
+    },
+    "COLLECTION_PROOF.json": {
+      "bytes": 389,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\source17_original_SDK_save_Native0_actual_101031_part78_20261101\\COLLECTION_PROOF.json",
+      "sha256": "2927ce1537534b229272b9b9a2e62ecd2f369f167ec559b223e5cc4a3cdf771b"
+    },
+    "COLLECTOR_CLOSED.json": {
+      "bytes": 97,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\source17_original_SDK_save_Native0_actual_101031_part78_20261101\\COLLECTOR_CLOSED.json",
+      "sha256": "ffc69dec3687e82ec7caca6268b53db50d34ea9495d34dd9c82249d3e2eb24fc"
+    },
+    "EVIDENCE_REVIEW.json": {
+      "bytes": 1085852,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\source17_original_SDK_save_Native0_actual_101031_part78_20261101\\EVIDENCE_REVIEW.json",
+      "sha256": "157281cae75522fe832b6b4f2c86576af66aec14819c994591dac251f2d94fd9"
+    },
+    "FINAL_COLLECTION_SEAL.json": {
+      "bytes": 7530,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\source17_original_SDK_save_Native0_actual_101031_part78_20261101\\FINAL_COLLECTION_SEAL.json",
+      "sha256": "51438b404fce559795d6fc5357ee4ffb8653d53a703bc6bb166b0343df7e0747"
+    },
+    "collection_seal.json": {
+      "bytes": 2902,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\source17_original_SDK_save_Native0_actual_101031_part78_20261101\\collection_seal.json",
+      "sha256": "20c2f606e58a0d1cef57c8b06b57cc30e5ac4530088d560257b3b01b1551c546"
+    }
+  },
+  "execution_route": "unchanged_Source17_factory_original_pyDesktop_and_safe_release",
+  "full_FEA": false,
+  "lifecycle_scope": "Original SDK positively owned Native main-PID exit within15s plus Python-client retirement; no Native exit code or wrapper/aux certificate",
+  "public_metrics": {
+    "bytes": 665,
+    "sha256": "0b3d22a33d30be9fd699c12673afd16c2fe70dfd61badad5b4b03f981f7eeb52"
+  },
+  "requested_spec": {
+    "air_material": "air",
+    "analysis_purpose": "reference",
+    "band_circle_segments": 144,
+    "base_rpm": 1200.0,
+    "beta_convention": "dq_current_advance_v2",
+    "beta_deg": 30.0,
+    "circle_segments": 0,
+    "compute_inductance": true,
+    "conductor_area_per_branch_mm2": 15.320646925709,
+    "core_material": "M19_29G_reference_y2",
+    "core_material_fallbacks": [],
+    "core_material_model": "m19_29g_reference_y2_v1",
+    "electrical_zero_deg": -91.11972457057757,
+    "i_peak_a": 100.0,
+    "initial_position_deg": -22.5,
+    "loss_policy": "laminated_core",
+    "magnet_material": "NdFeB_1.25T",
+    "mesh_elements": {
+      "band": 2000,
+      "magnet": 100,
+      "rotor": 1000,
+      "stator": 1000,
+      "winding": 100
+    },
+    "mesh_maximum_lengths_mm": {},
+    "mesh_refinement_modes": {},
+    "model_extent": "full_360",
+    "phase_resistance_ohm": 0.012822782394537768,
+    "pole_number": 8,
+    "require_steady_state": true,
+    "series_turns_per_phase": 48,
+    "setup_name": "PPT_Transient",
+    "shaft_material": "vacuum",
+    "slot_fill_limit": 0.45,
+    "slot_number": 12,
+    "solver_nonlinear_residual": 1e-05,
+    "solver_output_error": false,
+    "stack_length_mm": 43.61808465793729,
+    "steps_per_period": 300,
+    "strict_setup": true,
+    "symmetry_factor": 1,
+    "transient_periods": 3,
+    "turns_per_coil_side": 12,
+    "vdc_v": 200.0,
+    "winding_material": "copper"
+  },
+  "scientific_producer": "producer_v3:sha256:307b1fd890dec70f23feb6daa5667a09fad370064de78acf58e66fba64a2beae",
+  "source_project": {
+    "commit": "98ed58a824509ca517280017a49059b35aa56f0d",
+    "id": 17,
+    "name": "PYAEDT_MOTOR_PUBLIC_307B_OBS98ED58A_20261101"
+  },
+  "training_admission": false
+}

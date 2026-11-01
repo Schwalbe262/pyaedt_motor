@@ -386,6 +386,9 @@ INPUT_SPEC_COLUMNS = (
     "input_setup_name",
     "input_solver_output_error",
     "input_solver_nonlinear_residual",
+    "input_save_fields_start_step",
+    "input_save_fields_stop_step",
+    "input_save_fields_every_n_steps",
     "input_mesh_elements",
     "input_mesh_refinement_modes",
     *(f"input_mesh_{key}_mode" for key in MESH_ELEMENT_KEYS),
@@ -696,6 +699,24 @@ def case_strict_positive_float(case: dict[str, Any], *names: str, default: float
     return parsed[0] if parsed else fallback
 
 
+def case_optional_strict_int(case: dict[str, Any], *names: str) -> int | None:
+    """Read an optional integer/CSV integer token without truncation or alias conflicts."""
+    parsed = []
+    for name in names:
+        value = case.get(name)
+        if value is None or type(value) is str and value == "":
+            continue
+        if type(value) is int:
+            parsed.append(value)
+        elif type(value) is str and re.fullmatch(r"[+-]?[0-9]+", value.strip()):
+            parsed.append(int(value.strip()))
+        else:
+            raise ValueError(f"{name} must be an integer or CSV integer token, not bool/fractional")
+    if len(set(parsed)) > 1:
+        raise ValueError("conflicting integer aliases: " + ", ".join(names))
+    return parsed[0] if parsed else None
+
+
 def stable_fingerprint(namespace: str, payload: dict[str, Any]) -> str:
     """Return a deterministic, human-identifiable SHA-256 fingerprint."""
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -737,6 +758,10 @@ def setup_fingerprint(
             "strict_setup": spec.strict_setup,
             "mesh_maximum_lengths_mm": spec.mesh_maximum_lengths_mm,
             **({"mesh_refinement_modes": spec.mesh_refinement_modes} if spec.mesh_refinement_modes else {}),
+            **({"save_fields_start_step": spec.save_fields_start_step,
+                "save_fields_stop_step": spec.save_fields_stop_step,
+                "save_fields_every_n_steps": spec.save_fields_every_n_steps}
+               if spec.save_fields_every_n_steps is not None else {}),
         },
     )
 
@@ -1077,6 +1102,18 @@ def build_spec(
     core_name = str(case_value(
         case, "core_material", "input_core_material", default=model_core_name
     )).strip()
+    save_keys = ("save_fields_start_step", "save_fields_stop_step", "save_fields_every_n_steps")
+    for key in case:
+        plain = key.removeprefix("input_")
+        if plain.startswith("save_fields_") and plain not in save_keys:
+            raise ValueError("unsupported field-retention option: " + plain)
+    save_fields = {key: case_optional_strict_int(case, key, "input_" + key) for key in save_keys}
+    if any(value is not None for value in save_fields.values()):
+        # Do not let the legacy numeric parser truncate a grid used for field retention.
+        case_optional_strict_int(case, "transient_periods", "periods")
+        case_optional_strict_int(case, "steps_per_period")
+        case_optional_strict_int(case, "pole_number", "pole_num")
+        case_strict_positive_float(case, "base_rpm", "rpm", default=1200.0)
     spec = IPMSMPPTSpec(
         pole_number=case_int(case, "pole_number", "pole_num", default=8),
         slot_number=case_int(case, "slot_number", "slot_num", default=12),
@@ -1140,6 +1177,7 @@ def build_spec(
             case, "solver_nonlinear_residual", "input_solver_nonlinear_residual",
             default=defaults.solver_nonlinear_residual,
         ),
+        **save_fields,
         strict_setup=case_bool(case, "strict_setup", default=True),
         require_steady_state=case_bool(case, "require_steady_state", default=False),
         circle_segments=case_int(case, "circle_segments", "input_circle_segments", default=0),
