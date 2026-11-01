@@ -1,0 +1,60 @@
+{
+  "FEAs": 0,
+  "producer": "producer_v3:sha256:307b1fd890dec70f23feb6daa5667a09fad370064de78acf58e66fba64a2beae",
+  "reviews": {
+    "1200": {
+      "actual_review": {
+        "bytes": 4226,
+        "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\a40n0_assessor_v2_20261101\\actual_settings_review_r1200_v2.json",
+        "sha256": "5c04ef82720e96f6d78f129613b81e8c466393c6d13b6f28617268eaea002a41"
+      },
+      "completion": {
+        "bytes": 497,
+        "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\a40r1200_root_v1\\completion_receipt.json",
+        "sha256": "b3fd68537f68f1115647f51cc29f9d45eaa67ff1568c7463c6f861c8d2c58c6f"
+      },
+      "owner_identity": [
+        52292,
+        1793532891.6260238,
+        "nt",
+        "peets9950x\\peets",
+        "ansysedt.exe"
+      ],
+      "producer": "producer_v3:sha256:307b1fd890dec70f23feb6daa5667a09fad370064de78acf58e66fba64a2beae",
+      "saved_AEDT": {
+        "bytes": 1176741,
+        "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\a40r1200_root_v1\\projects\\simulation1\\simulation1.aedt",
+        "sha256": "93a6dbde055e2154c5681df7ad044f1577b13c2df30cff6890dfe99e01791bf1"
+      },
+      "source_commit": "98ed58a824509ca517280017a49059b35aa56f0d"
+    },
+    "5000": {
+      "actual_review": {
+        "bytes": 4235,
+        "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\a40r5000_root_v1\\independent_settings_review_v2.json",
+        "sha256": "abee76b731fd3cd8fdb63ca60201d1274b80cb83ff7c9257dea345dc08891007"
+      },
+      "completion": {
+        "bytes": 497,
+        "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\a40r5000_root_v1\\completion_receipt.json",
+        "sha256": "0d3dfa62cd418a3b120bb6568a529e291201b60fec3b7a945c5d2e439535db7c"
+      },
+      "owner_identity": [
+        86952,
+        1793533852.1853342,
+        "nt",
+        "peets9950x\\peets",
+        "ansysedt.exe"
+      ],
+      "producer": "producer_v3:sha256:307b1fd890dec70f23feb6daa5667a09fad370064de78acf58e66fba64a2beae",
+      "saved_AEDT": {
+        "bytes": 1176912,
+        "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\a40r5000_root_v1\\projects\\simulation1\\simulation1.aedt",
+        "sha256": "8282efb2532d8dc66349bcae2b3fdb377f6f218e625e73dca15d2694f79db299"
+      },
+      "source_commit": "98ed58a824509ca517280017a49059b35aa56f0d"
+    }
+  },
+  "source_commit": "98ed58a824509ca517280017a49059b35aa56f0d",
+  "training_admitted": false
+}
