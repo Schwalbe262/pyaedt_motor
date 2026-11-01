@@ -3,6 +3,7 @@
 
 # Preserve executable source bytes in Windows and nested validation clones.
 *.py text eol=lf
+/src/pyaedt_motor/diagnostic_batch_ownership.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 *.sh text eol=lf
 /configs/ipmsm_7p5kw.json text eol=lf
 /configs/material_m19_29g_reference_y2.json text eol=lf

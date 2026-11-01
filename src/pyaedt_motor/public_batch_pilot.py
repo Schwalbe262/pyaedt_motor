@@ -20,6 +20,7 @@ import sys
 import time
 
 SCHEMA = "public_owned_cli_batch_pilot_v1"
+OBSERVATION_SCHEMA = "public_owned_cli_observation_diagnostic_v1"
 RETAINED_INPUTS_CONTRACT = "public_cli_retained_inputs_v1"
 OWNER_SHA = "9c0a5c364d19e062f40cb6337a0df60b04c8f16eff00f5250245ea82bd7066f5"
 FEATURE = "ANSYSEM_FEATURE_F903567_CONTINUUM_AIR_2D_ENABLE"
@@ -135,7 +136,10 @@ def verify_inputs(contract):
         observed.update({key: contract[key] for key in ("case", "installation_binding", "reservation_receipt")})
         observed["production_launch"] = authority
         return json.loads(read_sealed(contract["case"])), observed
-    if contract["schema"] != SCHEMA or contract["mode"] not in {"setup_only", "solve"}:
+    observation = contract.get("schema") == OBSERVATION_SCHEMA
+    if not observation and "diagnostic_observation" in contract:
+        raise ValueError("observation policy requires its explicit diagnostic schema")
+    if contract["schema"] not in {SCHEMA, OBSERVATION_SCHEMA} or contract["mode"] not in {"setup_only", "solve"}:
         raise ValueError("unknown explicit pilot contract/mode")
     source, library = Path(contract["source_root"]), Path(contract["library_root"])
     if not set(REQUIRED_SOURCE).issubset(contract["source_files"]) or len(contract["library_files"]) != 23:
@@ -171,7 +175,22 @@ def verify_inputs(contract):
         raise ValueError("public producer mismatch")
     if contract["source_files"]["src/pyaedt_motor/batch_ownership.py"]["sha256"] != OWNER_SHA:
         raise ValueError("reviewed V6 owner bytes required")
+    if observation:
+        observed["diagnostic_observation"] = observation_module(contract).validate_contract(contract)
     return case, observed
+
+
+def observation_module(contract):
+    """Explicit diagnostic code, separately pinned; no default/production waiver."""
+    name = "src/pyaedt_motor/diagnostic_observation.py"
+    path = _relative(Path(contract["source_root"]), name)
+    if record(path) != contract["source_files"][name]:
+        raise ValueError("diagnostic verifier source differs")
+    sys.path[:0] = [str(Path(contract["source_root"]) / "src")]
+    module = importlib.import_module("pyaedt_motor.diagnostic_observation")
+    if Path(module.__file__).resolve() != path.resolve():
+        raise ValueError("diagnostic verifier import origin differs")
+    return module
 
 
 def execution_contract_sha256(contract):
@@ -219,6 +238,8 @@ def validate_execution(contract, *, platform_name=None, environ=None, hostname=N
                 or receipt.get("case_sha256") != contract["case"]["sha256"]
                 or receipt.get("execution_contract_sha256") != execution_contract_sha256(contract)):
             raise ValueError("reservation is not bound to case / producer")
+    if contract.get("schema") == OBSERVATION_SCHEMA:
+        observation_module(contract).validate_runtime(contract, platform_name=platform_name)
     return node
 
 
@@ -412,6 +433,7 @@ def semantic_input_check(contract, before_path, after_path, prepared_record, sol
 
 def execute(contract, output, *, runner=None, owner=None, reader=saved_native, processor=postprocess, control_record=None):
     production = contract.get("schema") == "public_owned_cli_execution_contract_v2"
+    observation = contract.get("schema") == OBSERVATION_SCHEMA
     if production and runner is None:
         from .execution_contracts import cohort_fingerprint
         if "run_ipmsm_batch" in sys.modules:
@@ -442,6 +464,10 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
               "F903_scope": {"builder_requested_environment": "0", "builder_live_feature_query": False,
                              "solver_observed_environment": None, "solver_live_feature_query": False},
               "builder_PID_is_solver_PID": False, "standalone_Analyze_return_ABI_claimed": False}
+    if observation:
+        result["schema"] = OBSERVATION_SCHEMA
+        result["diagnostic_scope"] = "controlled_observation_not_established_physics_compatibility"
+        result["execution_code_identity"]["OS_owner"] = contract["source_files"]["src/pyaedt_motor/diagnostic_batch_ownership.py"]
     if production:
         result["production_launch"] = before["production_launch"]
         result["execution_contract_schema"] = contract["schema"]
@@ -465,12 +491,17 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
             raise ValueError("fresh pilot process required; public runner already imported")
         runner = runner or importlib.import_module("run_ipmsm_batch")
         if owner is None:
-            owner = importlib.import_module("pyaedt_motor.batch_ownership")
-            if Path(owner.__file__).resolve() != source / "src/pyaedt_motor/batch_ownership.py":
+            owner_name = "diagnostic_batch_ownership" if observation else "batch_ownership"
+            owner = importlib.import_module("pyaedt_motor." + owner_name)
+            if Path(owner.__file__).resolve() != source / ("src/pyaedt_motor/" + owner_name + ".py"):
                 raise ValueError("pinned V6 owner import origin differs")
         if Path(runner.__file__).resolve() != (source / "run_ipmsm_batch.py").resolve():
             raise ValueError("public builder import origin mismatch")
         installation = owner.validate_installation(json.loads(read_sealed(contract["installation_binding"])), installation_record)
+        owner_observation = {}
+        if observation:
+            observation_api = observation_module(contract)
+            result["diagnostic_observation"], owner_observation = observation_api.launch_policy(contract, output, owner)
         write_new(output / "installation_observed_before.json", installation)
         result["installation_observation_before"] = {"path": str(output / "installation_observed_before.json"),
                                                     **record(output / "installation_observed_before.json")}
@@ -513,23 +544,38 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
             return result
         environment, env_proof = owner.prepare_environment(output, installation)
         command = batch_command(installation["wrapper_path"], project, output, node, spec.setup_name)
-        write_new(output / "command.json", command)
+        if observation:
+            intended_command = observation_api.intended_json_bytes(command)
+            result["diagnostic_expected_launch_records"] = {"command": {
+                "path": str(output / "command.json"), **observation_api.record(intended_command)}}
+            write_new(output / "command.json", json.loads(intended_command))
+        else:
+            write_new(output / "command.json", command)
         with (output / "options.txt").open("x", encoding="ascii", newline="\n") as stream:
-            stream.write("$begin 'Config'\n'Desktop/Settings/ProjectOptions/NumberOfProcessors'=4\n"
+            stream.write(observation_api.options_bytes(result["diagnostic_observation"]["temp_directory_requested"]).decode("ascii")
+                         if observation else "$begin 'Config'\n'Desktop/Settings/ProjectOptions/NumberOfProcessors'=4\n"
                          "'Maxwell 2D/NumCoresPerDistributedTask'=4\n$end 'Config'\n")
             stream.flush()
             os.fsync(stream.fileno())
         result["batch_options"] = {"path": str(output / "options.txt"), **record(output / "options.txt")}
         result["solver_state_uncertain"] = True
-        write_new(output / "owned_cli_solver_state.json", {"schema": SCHEMA, "stage": "before_cli_intent",
+        intent = {"schema": result["schema"], "stage": "before_cli_intent",
                   "retained_inputs_contract": RETAINED_INPUTS_CONTRACT,
                   "case_id": contract["case_id"], "producer": contract["expected_producer"],
                   "solver_state_uncertain": True, "automatic_retry_allowed": False,
-                  "command": record(output / "command.json"), "prepared_project": record(project),
+                   "command": observation_api.record(intended_command) if observation else record(output / "command.json"), "prepared_project": record(project),
                    "prepared_unsolved_project": result["prepared_unsolved_project"],
                    "installation_observation_before": result["installation_observation_before"],
                    "batch_options": result["batch_options"],
-                  "reservation_receipt": contract["reservation_receipt"]})
+                   "reservation_receipt": contract["reservation_receipt"]}
+        if observation:
+            intent["diagnostic_observation"] = result["diagnostic_observation"]
+            intended_intent = observation_api.intended_json_bytes(intent)
+            result["diagnostic_expected_launch_records"]["intent"] = {
+                "path": str(output / "owned_cli_solver_state.json"), **observation_api.record(intended_intent)}
+            write_new(output / "owned_cli_solver_state.json", json.loads(intended_intent))
+        else:
+            write_new(output / "owned_cli_solver_state.json", intent)
         read_sealed(result["prepared_unsolved_project"])
         read_sealed(result["installation_observation_before"])
         read_sealed(result["batch_options"])
@@ -537,19 +583,28 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
             k: result["prepared_project"][k] for k in ("bytes", "sha256")
         }:
             raise ValueError("inputs/prepared project changed immediately before CLI")
+        if observation:
+            observation_api.verify_launch_artifacts(contract, intended_command, intended_intent)
+            command = json.loads(intended_command)
         result["BatchSolve_launch_attempts"] = 1
         launched = owner.owned_batch(command, output, installation=installation,
-                                   environment=environment, environment_proof=env_proof)
+                                   environment=environment, environment_proof=env_proof, **owner_observation)
         result["solver_owner_result"] = launched
         write_new(output / "solver_owner_result.json", launched)
-        if not owner.known_normal_exit(launched):
+        known_normal = owner.known_normal_exit(launched)
+        if observation:
+            result["diagnostic_owner_context_known"] = known_normal is True
+            if known_normal is True:
+                result["solver_state_uncertain"] = False
+            observation_api.verify_launch_artifacts(contract, intended_command, intended_intent)
+        if not known_normal:
             raise RuntimeError("owned CLI exit unknown: FS-only partial retention, no Native fallback")
         result["solver_state_uncertain"] = False
         result["F903_scope"]["solver_observed_environment"] = launched["Native_processes"][0]["selected_environment"][FEATURE]
-        write_new(output / "owned_cli_solver_completion.json", {"schema": SCHEMA, "stage": "known_normal_cli_exit",
+        write_new(output / "owned_cli_solver_completion.json", {"schema": result["schema"], "stage": "known_normal_cli_exit",
                   "retained_inputs_contract": RETAINED_INPUTS_CONTRACT,
                   "case_id": contract["case_id"], "producer": contract["expected_producer"],
-                  "intent_record": record(output / "owned_cli_solver_state.json"),
+                   "intent_record": observation_api.record(intended_intent) if observation else record(output / "owned_cli_solver_state.json"),
                   "solver_owner_record": record(output / "solver_owner_result.json"),
                   "solver_state_uncertain": False, "SDK_Analyze_return_claimed": False})
         after = reader(project)
@@ -562,6 +617,8 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
                 {k: result["prepared_unsolved_project"][k] for k in ("bytes", "sha256")}, record(project))
             write_new(output / "same_instance_semantic_comparison.json", result["same_instance_semantic_comparison"])
             result["saved_serialization_comparison"]["semantic_equivalence_proven"] = result["same_instance_semantic_comparison"]["semantic_equivalence_proven"]
+        if observation:
+            observation_api.verify_launch_artifacts(contract, intended_command, intended_intent)
         result["postprocess"] = processor(project, output, runner, spec, str(case.get("operation", "sin_current")), required, built)
         post = result["postprocess"]
         result["physical_quality_rejected"] = not post["physical_passed"]
@@ -577,6 +634,12 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
     except Exception as exc:
         result["errors"].append({"type": type(exc).__name__, "message": str(exc)})
     finally:
+        if observation and "intended_intent" in locals():
+            try:
+                observation_api.verify_launch_artifacts(contract, intended_command, intended_intent)
+            except Exception as exc:
+                result["status"] = "failed"
+                result["errors"].append({"type": type(exc).__name__, "message": str(exc)})
         try:
             if control_record is not None:
                 read_sealed(control_record)
@@ -613,7 +676,7 @@ def main(argv=None):
     if sealed["sha256"] != args.contract_sha256:
         raise ValueError("explicit contract SHA mismatch")
     contract = json.loads(read_sealed(sealed))
-    if not args.execute or contract.get("schema") == SCHEMA:
+    if not args.execute or contract.get("schema") in {SCHEMA, OBSERVATION_SCHEMA}:
         verify_inputs(contract)
     if not args.execute:
         print(json.dumps({"status": "PREPARED_DRY", "mode": contract["mode"], "Native_calls": 0, "BatchSolve_calls": 0}))
