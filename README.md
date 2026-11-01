@@ -53,6 +53,8 @@ Windows의 새 `simulate` 명령은 코드와 보조 라이브러리를 C:에 �
 python -m pyaedt_motor.solver_profile <실행.profile> --requested-cores 4 --acf <실행.acf> --output <C의점검결과.json>
 ```
 
+검증한 수정 SDK 사본으로 단일 Linux 진단을 실행하는 선택 경로는 [SDK 시작·실제 코어 검사](docs/PUBLIC_SDK_LAUNCH.md)를 참고합니다. [같은 운전점의 실제 1/4코어 비교](docs/experiments/2026-11-02_actual_resource4/README.md)는 완료했으며, 새 공개 CAD 생성 경로의 실제 통합 검증은 이어서 진행합니다.
+
 ## 품질과 실험 한도
 
 - 신규 FEA는 실패·재시도를 포함해 총 3,000회 이내이며 진단 300회, 학습 데이터 2,400회, 최종 설계 검증 300회를 배정합니다.

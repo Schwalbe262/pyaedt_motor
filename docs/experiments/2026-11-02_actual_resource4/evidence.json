@@ -1,0 +1,67 @@
+{
+  "Root_rehashed_comparison_and_failed_collector_refs": 10,
+  "Root_rehashed_independent_files": 41,
+  "Root_rehashed_original_recovered_refs": 371,
+  "actual_cores": {
+    "machine": 4,
+    "matrix": 4,
+    "matrix_records": 901
+  },
+  "full_saved_semantic_decision_exact": true,
+  "new_FEA_POSTs_or_reservations_by_publication": 0,
+  "original163_165_status_preserved": "failed1",
+  "original167_status": "completed0",
+  "private_SDK_modified_backport_not_upstream": true,
+  "published_numeric_file": {
+    "bytes": 1182,
+    "normalization": "CRLF to LF only; CSV numeric strings unchanged",
+    "path": "ten_outputs.csv",
+    "sha256": "14a49a28e201b49c68bf05aa587fbe95d794790230997a31cce643abf055398a"
+  },
+  "scope": "actual167 diagnostic Source17 resource4 and same-physical-point comparison; no training/production approval",
+  "single_comparison_not_general_speed_benchmark": true,
+  "source_records": [
+    {
+      "bytes": 2849,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\part81\\ROOT_ACTUAL_101037_FULL_REVIEW.json",
+      "sha256": "6aa828b5bf7331d3a896fbcaf0319b127007ca0aaf866fb70b93a09d83b57639"
+    },
+    {
+      "bytes": 64799,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\fa167\\FINAL_INDEPENDENT_SEAL.json",
+      "sha256": "d1d099e0dc75336908428236e7e6388fea6660feb4052fd6cfb5046a737462c8"
+    },
+    {
+      "bytes": 9207,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\fa167\\ACTUAL167_INDEPENDENT_ASSESSMENT.json",
+      "sha256": "ac56d0fb7055c7e489ff85ed1509d21059661d9619290242c8a078182f82c4b1"
+    },
+    {
+      "bytes": 4362,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\fa167\\COMPARE_163_165_167.json",
+      "sha256": "6819640e3339b2ba5e1017f75432fef2179bd35c9cecaa4c2fd39bdc8cf6687a"
+    },
+    {
+      "bytes": 440,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\f167_recovered\\actual_101037\\COLLECTION_PROOF.json",
+      "sha256": "fa163bf031ab91d6202f099ea690c626d09380c5212ab492aefe9a549bf3734e"
+    },
+    {
+      "bytes": 48870,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\f167_recovered\\actual_101037\\GET_RECEIPT.json",
+      "sha256": "9be3254ab5b3a081f5ba394c9d00739165efa075e9054f636c86dfd0303705f9"
+    },
+    {
+      "bytes": 1193,
+      "path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\fa167\\TEN_OUTPUT_COMPARISON.csv",
+      "sha256": "2e18b13236680aa269ee60268ab49846cd771ce2fecac772830bd1f2e4b0b00b"
+    }
+  ],
+  "ten_output_replay_bit_exact": false,
+  "ten_output_replay_max_absolute_difference": 8.739675649849232e-13,
+  "time_reduction_165_to_167_pct": {
+    "API_task_wall": 12.48730964467005,
+    "Solution_Process": 12.64864864864865
+  },
+  "training_or_production_admission": false
+}

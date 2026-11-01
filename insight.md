@@ -1174,3 +1174,19 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - After: standalone False/None/int1/exception and pooled False/exception produce failed rows and zero exports/reSave, with original owned15s cleanup/PID-reuse safety preserved.
 - Evidence: six focused plus26 existing checks PASS, exactHEAD counterexample RED, Root exact hunk review and14-file seal51b451f3d9bf07a8cf8b5f9b4823a62befea63a3a9b16d4e2a3e3af6c787f27f.
 - Remaining risk: actual new-main FEA integration is pending; a True SDK return alone does not prove full saved physics or cache availability.
+
+## 2026-11-02 part81 | Prove effective FEA cores from the Native profile
+- Source loop: actual163/165/167; Root part81/ROOT_ACTUAL_101037_FULL_REVIEW.json (6aa828b5).
+- Improvement: bind the supported Ansys task-count input to the observed current job/step bounds, preserve Slurm values, and require saved-native Machine and complete Matrix core records.
+- Before: requested4 and launch-only backport still produced Machine1/Matrix1x901; the two original failed states remain preserved.
+- After: actual167 completed0, Machine4/Matrix4x901, raw9-report/10-output physical replay and full saved semantic decision passed; original15s owner exit/retirement passed. The recorded Solution Process was925->808s versus165 for the same physical point.
+- Evidence: independent41-file seal d1d099e0; Root rehashed371 recovered files plus10 comparison/failed-observer references; direct raw profile replay matched. Diagnostic SDK copy is explicitly modified0.22, with original installed package retained.
+- Remaining risk: one comparison is not a repeated speed benchmark; fresh public CAD, production profiles, mesh/time accuracy and model/training approval require separate evidence.
+
+## 2026-11-02 part81 | Recover the same completed task with a bounded persistent GET client
+- Source loop: original collector93491 and terminal-only recovery44945 for task101037.
+- Improvement: preserve the failed observer, verify it closed, then fetch only the same completed task into a new directory using one verified byte stream and persistent HTTP; carry the original GET/byte budget forward.
+- Before: the original32-GET observer stopped on Windows10048 after completed0; raw publication collection was incomplete.
+- After: recovery97GET/1,114,327B/errors0 reused its connection96 times, closed cleanly, and verified269 publication SHA files with an unchanged two-pass seal. No FEA/POST/reservation was repeated; aggregate129GET/1,142,071B stayed within240GET/16MiB.
+- Evidence: f167_recovered/actual_101037 receipts and Root full review6aa828b5; client8cebd615 applies remaining-time chunk reads, bounded10048-only retries, and rejects changed or late input.
+- Remaining risk: the source of10048 was not proven; connection reuse is measured, and this case does not establish recovery from every HTTP or backend failure.

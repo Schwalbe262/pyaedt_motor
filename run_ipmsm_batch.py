@@ -2811,6 +2811,8 @@ def cleanup_project_folder(project_path: Path, cleanup_linux: bool, success: boo
 def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, Any]:
     """Run one IPMSM case. Designed to be called by multiprocessing workers."""
     case, option_dict = payload
+    launch_module = sys.modules.get("pyaedt_motor.sdk_launch")
+    launch_context = launch_module.current() if launch_module is not None else None
     options = RunnerOptions(**option_dict)
     simulation_dir = Path(options.simulation_dir)
     result_csv = Path(options.result_csv)
@@ -3053,6 +3055,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             row["input_aedt_version"] = detected_aedt_version(desktop, aedt_version)
         else:
             try:
+                if launch_context is not None:
+                    launch_context.before_factory(aedt_settings, aedt_version)
                 standalone_owner = create_standalone_owned(
                     pyDesktop, options.non_graphical, aedt_settings,
                     version=None if aedt_version == "auto" else aedt_version,
@@ -3063,6 +3067,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 desktop = standalone_owner.desktop
                 raise
             desktop = standalone_owner.desktop
+            if launch_context is not None:
+                launch_context.verify_owned(standalone_owner, standalone_process_identity)
             row["standalone_owned_pid"] = standalone_owner.pid
             row["input_aedt_version"] = detected_aedt_version(desktop, aedt_version)
             sim = Simulation(desktop=desktop, cores=options.cores)
@@ -3392,6 +3398,14 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 if row.get("status") == "ok":
                     success = False
                     row.update(status="failed", error=row["standalone_release_error"], error_class="standalone_cleanup_failed")
+        if launch_context is not None:
+            try:
+                launch_context.after_cleanup(row, analyze=options.analyze, project_dir=project_path)
+            except Exception as exc:
+                success = False
+                row["sdk_launch_scope_error"] = repr(exc)
+                if row.get("status") != "failed":
+                    row.update(status="failed", error=repr(exc), error_class="sdk_launch_scope_failed")
         if project_path is not None:
             cleanup_project_folder(project_path, options.cleanup_linux, success)
         row["timing_cleanup_s"] = round(time.perf_counter() - cleanup_started, 6)
@@ -3462,6 +3476,10 @@ def main() -> int:
         default_use_periodic_boundary=args.periodic_boundary,
     )
 
+    launch_module = sys.modules.get("pyaedt_motor.sdk_launch")
+    launch_context = launch_module.current() if launch_module is not None else None
+    if launch_context is not None:
+        launch_context.validate_cases(args, cases, aedt_backend, planned_aedt_version)
     options = RunnerOptions(
         simulation_dir=args.simulation_dir,
         result_csv=args.result_csv,

@@ -26,6 +26,9 @@ def main(argv: list[str] | None = None) -> int:
     if not (root / "run_ipmsm_batch.py").is_file():
         raise RuntimeError(f"Cannot locate repository source: {root}")
     sys.path.insert(0, str(root))
+    if command == 'simulate' and any(arg.startswith(('--sdk-launch-profile', '--sdk-launch-profile-sha256')) for arg in args[1:]):
+        from .sdk_launch import spawn_child
+        return spawn_child(args[1:], root)
     if command in {"train", "optimize", "simulate"} and os.name == "nt" and not any(arg in {"-h", "--help"} for arg in args):
         from .runtime import require_supported_python
         require_supported_python()

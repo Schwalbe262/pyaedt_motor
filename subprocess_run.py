@@ -225,6 +225,16 @@ def build_command(args: argparse.Namespace, process_index: int, count: int | Non
     else:
         raise RuntimeError(f"Process {process_index} has neither cases nor count.")
 
+    profile = getattr(args, 'sdk_launch_profile', None)
+    digest = getattr(args, 'sdk_launch_profile_sha256', None)
+    if profile or digest:
+        if not profile or not digest or args.cores_per_process != 4:
+            raise ValueError('paired explicit launch profile/SHA and cores4 required')
+        expected = (BASE_DIR / 'tools/run_private_sdk_simulate.py').resolve()
+        if args.script.resolve() != expected:
+            raise ValueError('private launch profile requires the reviewed isolated child script')
+        command[1:1] = ['-I', '-B']
+        command.extend(['--sdk-launch-profile', str(profile), '--sdk-launch-profile-sha256', digest])
     return command
 
 
@@ -236,6 +246,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run run_ipmsm_batch.py in parallel subprocesses.")
     parser.add_argument("--script", type=Path, default=BASE_DIR / "run_ipmsm_batch.py")
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument('--sdk-launch-profile')
+    parser.add_argument('--sdk-launch-profile-sha256')
     parser.add_argument("--processes", type=int, default=processes_default)
     parser.add_argument("--cores-per-process", type=int, default=cores_default)
     parser.add_argument("--count-per-process", "--loops-per-process", dest="count_per_process", type=int, default=loops_default)

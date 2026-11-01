@@ -15,7 +15,7 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shlex
 import stat
@@ -152,6 +152,8 @@ class Config:
     max_active: int = 300
     timeout_seconds: int = 0
     partition: str = "auto"
+    sdk_launch_profile: str | None = None
+    sdk_launch_profile_sha256: str | None = None
 
     def validate(self) -> None:
         if self.stage not in STAGE_LIMITS or not re.fullmatch(r"[0-9a-f]{40}", self.source_commit):
@@ -171,6 +173,13 @@ class Config:
             _integer(value, label, 1)
         if self.max_active > 300:
             raise ValueError("queued+running motor-family cap cannot exceed 300")
+        if self.sdk_launch_profile is not None or self.sdk_launch_profile_sha256 is not None:
+            if not self.sdk_launch_profile or not self.sdk_launch_profile_sha256 or not HEX.fullmatch(self.sdk_launch_profile_sha256):
+                raise ValueError("paired explicit launch profile and SHA required")
+            if self.stage != "diagnostic" or self.node_name != "n116" or self.cpus != 4:
+                raise ValueError("first opt-in route is diagnostic/n116/cores4 only")
+            if not re.fullmatch(r"/[A-Za-z0-9_./-]+", self.sdk_launch_profile) or ".." in PurePosixPath(self.sdk_launch_profile).parts:
+                raise ValueError("safe absolute remote launch profile required")
         _integer(self.timeout_seconds, "timeout_seconds")
         if self.max_workers_per_node is not None:
             _integer(self.max_workers_per_node, "max_workers_per_node", 1)
@@ -268,6 +277,9 @@ class Controller:
         # max_active is operational; lowering it does not alter an existing request.
         settings = asdict(config)
         settings.pop("max_active")
+        if config.sdk_launch_profile is None and config.sdk_launch_profile_sha256 is None:
+            settings.pop("sdk_launch_profile")
+            settings.pop("sdk_launch_profile_sha256")
         self.manifest = {"schema_version": SCHEMA, "plan_sha256": self.plan.sha256,
                          "training_proof_sha256": _sha(self.plan.proof_bytes) if self.plan.proof_bytes else None,
                          "scheduler_identity": getattr(transport, "base_url", "injected-test-transport"),
@@ -397,6 +409,9 @@ class Controller:
                    "--max-cases", "1", "--stagger-seconds", "0", "--simulation-dir", "simulation/cluster_v3/" + self.campaign[:16] + "/" + key,
                    "--result-csv", result, "--log-dir", "simul_log_scheduler/cluster_v3/" + self.campaign[:16],
                    "--log-prefix", key + "_", "--keep-projects"]
+        if cfg.sdk_launch_profile is not None:
+            command.extend(["--script", "tools/run_private_sdk_simulate.py", "--sdk-launch-profile", cfg.sdk_launch_profile,
+                            "--sdk-launch-profile-sha256", cfg.sdk_launch_profile_sha256])
         payload = {"project": cfg.project, "name": name, "dedupe_key": dedupe,
                    "account_name": cfg.account_name, "node_name": cfg.node_name, "node_name_policy": "strict",
                    "remote_cwd": cfg.remote_cwd, "entrypoint": "subprocess_run.py", "env_setup": bootstrap,
@@ -784,6 +799,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cpus", type=int, default=4)
     parser.add_argument("--memory-mb", type=int, default=8192)
     parser.add_argument("--partition", default="auto")
+    parser.add_argument("--sdk-launch-profile")
+    parser.add_argument("--sdk-launch-profile-sha256")
     parser.add_argument("--timeout-seconds", type=int, default=0)
     parser.add_argument("--execute", action="store_true", help="explicitly enable durable reservations and POSTs")
     parser.add_argument("--watch", action="store_true", help="repeat execute/refill until terminal or blocked; requires --execute")
@@ -796,7 +813,8 @@ def main(argv: list[str] | None = None) -> int:
     config = Config(args.stage, args.source_commit, args.expected_producer_fingerprint, args.account, args.node,
                     args.remote_cwd, project=args.project, max_active=args.max_active,
                     max_workers_per_node=args.max_workers_per_node, cpus=args.cpus, memory_mb=args.memory_mb,
-                    partition=args.partition, timeout_seconds=args.timeout_seconds)
+                    partition=args.partition, timeout_seconds=args.timeout_seconds,
+                    sdk_launch_profile=args.sdk_launch_profile, sdk_launch_profile_sha256=args.sdk_launch_profile_sha256)
     controller = Controller(args.plan, config, args.state_dir, args.ledger, HTTPTransport(args.scheduler_url), plan_sha256=args.plan_sha256)
     while True:
         result = controller.tick(execute=args.execute)

@@ -46,3 +46,6 @@ legacy/v4r5_native_contract_2026_07/** -text -whitespace
 
 # Preserve the SHA-bound band comparison inputs, script, and standalone figures.
 /docs/experiments/2026-11-02_band_geometry_pair/** -text -whitespace
+
+# The diagnostic comparison hashes this published LF-normalized numeric input.
+/docs/experiments/2026-11-02_actual_resource4/*.csv text eol=lf
