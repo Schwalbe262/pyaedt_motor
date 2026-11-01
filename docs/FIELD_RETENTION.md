@@ -14,6 +14,6 @@
 
 PyAEDT0.22의 SetupMaxwell.set_save_fields Every N Steps 분기와 같은 속성을 사용합니다. 선택 기능을 켜면 SDK 자동 갱신을 먼저 끄고 모든 설정을 구성한 뒤 명시적으로 한 번 갱신합니다. 자동 갱신을 재현한 회귀검사는 수정 전12회에서 수정 후 완성된 설정1회로 바뀌었습니다. 이는 단위검사의 관측이며 실제 Native 실행시간 측정은 아닙니다.
 
-현재 검증은 기본32개 속성 보존, CSV→spec→기록→설정 전달, 잘못된 입력 거부와 SDK 속성 대조까지입니다. **실제 Native의 끝점 포함 여부와 자계 cache 생성은 아직 미검증입니다.** 실제 비교 전 새 소스·producer로 두 회전 경계 조건을 함께 다시 생성하고, 저장 설정·재료·깊이·시간·경계·프로세스 정리를 확인해야 합니다. 기존 Source17의 자료·교정·모델 승인을 옮기지 않습니다.
+기본32개 속성 보존, CSV→spec→기록→설정 전달과 잘못된 입력 거부를 검사했습니다. 2026-11-02의 실제 로컬 Native0 두 건에서35개 저장 설정·M19 BH23·깊이·권선24개·정상 종료도 확인했습니다. Band144와 정확한 원의 edge는 각각144와1이었고, 나머지 Spec과 저장 변수52개는 같았습니다. **실제 Native의 끝점 포함 여부와 자계 cache 생성은 아직 미검증입니다.** 다음은 검증한 두 조건에서 실제 자계 cache와 시간점별 독립 토크를 확인하는 단계입니다. [두 실행의 저장 설정과 확인 범위](experiments/2026-11-02_field_retention_settings/README.md)를 참고합니다. 기존 Source17의 자료·교정·모델 승인을 옮기지 않습니다.
 
 구현: [설정·검증](../module/ipmsm_ppt_setup.py) · [CSV·fingerprint](../run_ipmsm_batch.py) · [회귀검사](../tests/test_ipmsm_field_retention.py)

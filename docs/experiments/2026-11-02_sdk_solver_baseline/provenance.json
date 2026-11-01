@@ -1,0 +1,308 @@
+{
+  "HPC_request_vs_actual": {
+    "SDK_call": {
+      "cores": 4,
+      "setup": "PPT_Transient",
+      "use_auto_settings": false
+    },
+    "actual_machine_cores": 1,
+    "actual_matrix_cores": 1,
+    "actual_matrix_records": 901,
+    "after_ACF_record": {
+      "bytes": 967,
+      "sha256": "d7ecb5ebf49ad47c5da0e7f0be17b0994e0a22aa1e65da0b5eb46559d4ce8595"
+    },
+    "after_ACF_selected_literals": {
+      "ConfigName": [
+        "'pyaedt_config'"
+      ],
+      "DesignType": [
+        "'Maxwell 2D'"
+      ],
+      "NumCores": [
+        "4"
+      ],
+      "NumEngines": [
+        "1"
+      ],
+      "UseAutoSettings": [
+        "False"
+      ]
+    },
+    "after_active_DSO": "pyaedt_config",
+    "before_ACF_exists": false,
+    "before_active_DSO": "",
+    "cause_claimed": false
+  },
+  "execution": {
+    "SDK_Analyze_reported_seconds": 923,
+    "accuracy_approved": false,
+    "budget_attempt": 163,
+    "case_id": "single_stock_sdk_s17_dw16_n116_g1_i100_b30_rpm1200_p3s300m1_diag_v5",
+    "existing_physical_checks_passed": true,
+    "exit_code": 1,
+    "finished_utc": "2026-11-01T14:47:56Z",
+    "full_convergence_proven": false,
+    "normal_v252_completion": true,
+    "postprocess_status": "solved_resource_evidence_incomplete",
+    "previous_actual162_failure_preserved": true,
+    "production_allowed": false,
+    "profile_machine_core_counts": {
+      "1": 1
+    },
+    "profile_matrix_core_counts": {
+      "1": 901
+    },
+    "requested_cores": 4,
+    "resource_4core_proven": false,
+    "same_instance_saved_semantics_passed": true,
+    "started_utc": "2026-11-01T14:31:55Z",
+    "task_id": 101033,
+    "task_status": "failed",
+    "task_wall_seconds": 961,
+    "timing_scope": "SDK reported elapsed includes its Analyze path; no solver-only or speedup claim",
+    "training_allowed": false,
+    "worker_status": "solved_postprocess_or_quality_rejected"
+  },
+  "lifecycle": {
+    "Analyze_calls": 1,
+    "Analyze_return_repr": "True",
+    "Analyze_return_type": "builtins.bool",
+    "Native_exit_code_proven": false,
+    "Python_client_retired": true,
+    "Quit_requested": true,
+    "SDK_ReleaseAll_called": false,
+    "SDK_release_desktop_called": false,
+    "cleanup_errors": [],
+    "original_graceful_wait_bound_seconds": 15,
+    "owned_Native_PID": 4021407,
+    "owned_main_PID_exited": true,
+    "solver_uncertain": false,
+    "wrapper_auxiliary_exit_certified": false
+  },
+  "private_evidence_refs": {
+    "assessment": {
+      "bytes": 7455,
+      "ref": "R/f163/ACTUAL101033_TERMINAL_ASSESSMENT.json",
+      "sha256": "c7f27a1ab031e3f521f4ade32fc141d8f724326e805234e134f1b43cdd982bf2"
+    },
+    "builder_context": {
+      "bytes": 36684,
+      "sha256": "46063554237ddf230a9d12e42216a7e023766302e348e26d7f5ab57174b24367"
+    },
+    "final_collection_seal": {
+      "bytes": 57919,
+      "ref": "R/f163/FINAL_COLLECTION_SEAL.json",
+      "sha256": "5862c96a035d0cb13a3d065f9d10b97c524f3d1bd88f83147d02cd60355c09d7"
+    },
+    "original_SDK_9_CSV_records": {
+      "PPT_Back_EMF": {
+        "mirror_record": {
+          "bytes": 61521,
+          "sha256": "3297fd55306716422f7a973ba4854203f1b1886cbd785a5058c713a97a96a45c"
+        },
+        "source_record": {
+          "bytes": 61521,
+          "sha256": "3297fd55306716422f7a973ba4854203f1b1886cbd785a5058c713a97a96a45c"
+        }
+      },
+      "PPT_Cogging_Torque": {
+        "mirror_record": {
+          "bytes": 29650,
+          "sha256": "8ffeecc97263114db5abd3df45b8366701b9791ce0fb28a5cb343ee97085622f"
+        },
+        "source_record": {
+          "bytes": 29650,
+          "sha256": "8ffeecc97263114db5abd3df45b8366701b9791ce0fb28a5cb343ee97085622f"
+        }
+      },
+      "PPT_Flux_Linkages": {
+        "mirror_record": {
+          "bytes": 67345,
+          "sha256": "98a138dfcc6e5ff2049ee6c709c25645069ff6d6c77e31c088ca45bee485e5a3"
+        },
+        "source_record": {
+          "bytes": 67345,
+          "sha256": "98a138dfcc6e5ff2049ee6c709c25645069ff6d6c77e31c088ca45bee485e5a3"
+        }
+      },
+      "PPT_Inductance_Matrix": {
+        "mirror_record": {
+          "bytes": 199319,
+          "sha256": "943dfcee5f02e0c4957d13727b362a39823bf8b82ef9808f9c13ab779939ae73"
+        },
+        "source_record": {
+          "bytes": 199319,
+          "sha256": "943dfcee5f02e0c4957d13727b362a39823bf8b82ef9808f9c13ab779939ae73"
+        }
+      },
+      "PPT_Losses": {
+        "mirror_record": {
+          "bytes": 44853,
+          "sha256": "622fcf83822d95ab10fe85dfe9e439c62c0b4d72560866255b53615b0017e4a8"
+        },
+        "source_record": {
+          "bytes": 44853,
+          "sha256": "622fcf83822d95ab10fe85dfe9e439c62c0b4d72560866255b53615b0017e4a8"
+        }
+      },
+      "PPT_PhaseA_Voltage_Limit": {
+        "mirror_record": {
+          "bytes": 29725,
+          "sha256": "a5c1caf22ebd185e419c47f31e561fe0a7a43df7c52fb1f38923157d6b673177"
+        },
+        "source_record": {
+          "bytes": 29725,
+          "sha256": "a5c1caf22ebd185e419c47f31e561fe0a7a43df7c52fb1f38923157d6b673177"
+        }
+      },
+      "PPT_Phase_Currents": {
+        "mirror_record": {
+          "bytes": 61514,
+          "sha256": "24c56074be5fc954d9dc9ec6baa0b849d989b7c7a502da9ad8835a9e6cbb6c95"
+        },
+        "source_record": {
+          "bytes": 61514,
+          "sha256": "24c56074be5fc954d9dc9ec6baa0b849d989b7c7a502da9ad8835a9e6cbb6c95"
+        }
+      },
+      "PPT_Phase_Voltages": {
+        "mirror_record": {
+          "bytes": 61666,
+          "sha256": "1ae0a3c5b889edfb727f14bababd00eee626c521137614173f101849e5778f48"
+        },
+        "source_record": {
+          "bytes": 61666,
+          "sha256": "1ae0a3c5b889edfb727f14bababd00eee626c521137614173f101849e5778f48"
+        }
+      },
+      "PPT_Torque": {
+        "mirror_record": {
+          "bytes": 29650,
+          "sha256": "8ffeecc97263114db5abd3df45b8366701b9791ce0fb28a5cb343ee97085622f"
+        },
+        "source_record": {
+          "bytes": 29650,
+          "sha256": "8ffeecc97263114db5abd3df45b8366701b9791ce0fb28a5cb343ee97085622f"
+        }
+      }
+    },
+    "original_case": {
+      "bytes": 2062,
+      "sha256": "4459c81d79db03fc0e62210f3f55712c1d02cabdc353b507fae3789e31533f2d"
+    },
+    "publication_seal": {
+      "bytes": 28904,
+      "sha256": "4f68ec116776b6579cbc4822052a4964016b26725dedfcbf4c51b99d9640db3b"
+    },
+    "pure_postprocess_result": {
+      "bytes": 618482,
+      "sha256": "f4f600bb06e86878b1374214c09719bfbc0a2c90c4ae60b348ea0995d5d35a98"
+    },
+    "pure_replay": {
+      "bytes": 1115575,
+      "ref": "R/f163/PURE_PROFILE_METRICS_REPLAY.json",
+      "sha256": "35a7113f37594191b2e6afde6b9f3241ea4df7ef2d75080bec70f327f8adece5"
+    },
+    "raw_Native_profile": {
+      "bytes": 596908,
+      "sha256": "b75aa19fda0ec65531d7ea805f05d0240543a6334f84cc355c1a3489712d8a26"
+    },
+    "root_alias": "R = private rebuild_20261030 runtime; raw evidence is not copied here",
+    "root_contract": {
+      "bytes": 115511,
+      "sha256": "a1f8e8e934d2cb6ea66149ee36db55ea5ee3f064b32eae82d912de18faf192d1"
+    },
+    "root_request": {
+      "bytes": 1069035,
+      "sha256": "a4a6ad6ac11a418961bfe9719b351b4caf0d25500afc628f984898f741e5eaa2"
+    },
+    "saved_solved_project": {
+      "bytes": 1158570,
+      "sha256": "ae5aeefd51008d82dd506bde0e967f444a1da4f42d680e8f458dcb7e938d2b2d"
+    },
+    "sdk_owner_result": {
+      "bytes": 580613,
+      "sha256": "afc6df2e9e1419e08509567c6b2dabc424993c6cc63f0127aa4a6f997c02adb0"
+    },
+    "seed_preimage": {
+      "bytes": 1151698,
+      "sha256": "ce28f6701b8ae1699ab058af79eb322fcbac21186fe0b50c33b337e7d5d92ea9"
+    }
+  },
+  "public_artifact_links": {
+    "README": "README.md",
+    "metrics": "metrics.csv",
+    "output_definitions": "../../MOTOR_OUTPUT_DEFINITIONS.md",
+    "provenance": "provenance.json",
+    "selected_inputs": "case_inputs.json"
+  },
+  "public_artifact_records": {
+    "README.md": {
+      "bytes": 5183,
+      "sha256": "2e5cfce4ced075bd0b12200686945f52e6e5dc33645eed88708643af0535346a"
+    },
+    "case_inputs.json": {
+      "bytes": 3742,
+      "sha256": "6b26f1be6e96c37a992f353df1cacb5a75e38cf44abe655b1a3d862651af5d10"
+    },
+    "metrics.csv": {
+      "bytes": 1552,
+      "sha256": "5bc0a3cbbbc41a542eef31ae2dfb2663f7f95fde066002a51155be420461bc58"
+    }
+  },
+  "schema": "public_actual163_provenance_v1",
+  "source": {
+    "PyAEDT_version": "0.22.0",
+    "SDK_source_files": 7,
+    "commit": "98ed58a824509ca517280017a49059b35aa56f0d",
+    "commit_url": "https://github.com/Schwalbe262/pyaedt_motor/commit/98ed58a824509ca517280017a49059b35aa56f0d",
+    "deployment_id": 148,
+    "installed_files": 11,
+    "library_files": 23,
+    "producer_fingerprint": "producer_v3:sha256:307b1fd890dec70f23feb6daa5667a09fad370064de78acf58e66fba64a2beae",
+    "project_id": 17,
+    "solver_version": "2025.2",
+    "source_files": 653,
+    "source_links": {
+      "run_ipmsm_batch.py": "https://github.com/Schwalbe262/pyaedt_motor/blob/98ed58a824509ca517280017a49059b35aa56f0d/run_ipmsm_batch.py",
+      "src/pyaedt_motor/native_state_semantics.py": "https://github.com/Schwalbe262/pyaedt_motor/blob/98ed58a824509ca517280017a49059b35aa56f0d/src/pyaedt_motor/native_state_semantics.py",
+      "src/pyaedt_motor/public_batch_pilot.py": "https://github.com/Schwalbe262/pyaedt_motor/blob/98ed58a824509ca517280017a49059b35aa56f0d/src/pyaedt_motor/public_batch_pilot.py",
+      "src/pyaedt_motor/solver_profile.py": "https://github.com/Schwalbe262/pyaedt_motor/blob/98ed58a824509ca517280017a49059b35aa56f0d/src/pyaedt_motor/solver_profile.py"
+    },
+    "source_records": {
+      "run_ipmsm_batch.py": {
+        "bytes": 150155,
+        "sha256": "f324592ad44299ed0c1c8169092630db7d09550335715b8dd51babf9c5678479"
+      },
+      "src/pyaedt_motor/native_state_semantics.py": {
+        "bytes": 28106,
+        "sha256": "5241c30567f4b63f7f0ec58dc86dfad94a72c13e5c0de41e38e6a8991da7a579"
+      },
+      "src/pyaedt_motor/public_batch_pilot.py": {
+        "bytes": 42888,
+        "sha256": "eff1de83d26e02147e01193bce53525841060d7cf946de1697d52c9c31ed13bf"
+      },
+      "src/pyaedt_motor/solver_profile.py": {
+        "bytes": 12468,
+        "sha256": "44e5c104d00cee5d59fb62d0eecc15c949c49776b83d4340ace278069df1992b"
+      }
+    },
+    "system_material_files": 10
+  },
+  "verification": {
+    "contract_output_count": 10,
+    "independent_profile_replay": true,
+    "independent_raw9CSV_replay": true,
+    "independent_saved_semantics_replay": true,
+    "local_sealed_file_count": 377,
+    "new_Native_API_POST_ledger_actions_for_public_artifacts": 0,
+    "publication_entries": 88,
+    "publication_three_SHA_files": 266,
+    "pure_replay_Desktop_sessions": 0,
+    "replay_absolute_tolerance": 1e-12,
+    "replay_relative_tolerance": 1e-10,
+    "source_inputs_unchanged": true,
+    "two_pass_seal_equal": true
+  }
+}

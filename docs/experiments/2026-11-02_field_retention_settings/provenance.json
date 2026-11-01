@@ -1,0 +1,331 @@
+{
+  "Root_separate_pure_assessment": {
+    "geometry_display_allowances": [
+      {
+        "commanded": "120.06685992702842mm",
+        "name": "stator_outer_radius",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "120.066859927028mm"
+      },
+      {
+        "commanded": "0.1555088708922267",
+        "name": "stator_back_yoke_thick_ratio",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "0.155508870892227"
+      },
+      {
+        "commanded": "0.4556261533591896",
+        "name": "stator_inner_ratio",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "0.45562615335919"
+      },
+      {
+        "commanded": "1.5933740139007568mm",
+        "name": "stator_shoe_thick",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "1.59337401390076mm"
+      },
+      {
+        "commanded": "0.8934640931431204",
+        "name": "stator_teeth_length_ratio",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "0.89346409314312"
+      },
+      {
+        "commanded": "0.4067534483969212",
+        "name": "stator_teeth_width_ratio",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "0.406753448396921"
+      },
+      {
+        "commanded": "1.7752079935744405mm",
+        "name": "stator_gap",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "1.77520799357444mm"
+      },
+      {
+        "commanded": "0.8169187832623721mm",
+        "name": "rotator_gap",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "0.816918783262372mm"
+      },
+      {
+        "commanded": "0.4638326604384929",
+        "name": "shaft_ratio",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "0.463832660438493"
+      },
+      {
+        "commanded": "1.5155006162822249mm",
+        "name": "magnet_shield_thick",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "1.51550061628222mm"
+      },
+      {
+        "commanded": "0.1175044101662934",
+        "name": "magnet_setback_ratio",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "0.117504410166293"
+      },
+      {
+        "commanded": "0.4619426039978861",
+        "name": "magnet_thick_ratio",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "0.461942603997886"
+      },
+      {
+        "commanded": "0.8439708188176156",
+        "name": "magnet_space_height_ratio",
+        "rule": "exact15-significant-digit geometry display, same unit suffix; no other field normalized",
+        "saved": "0.843970818817616"
+      }
+    ],
+    "geometry_display_rule": "exact15-significant-digit representation only for13 listed geometry strings, unchanged unit suffix; no general normalization",
+    "metadata_executed_or_dropped": false,
+    "saved_variables_all52_verified_with_that_rule": true,
+    "unevaluated_native_metadata_rows_retained": 30
+  },
+  "cases": [
+    {
+      "Native_exit_code_or_wrapper_auxiliary_certificate": false,
+      "Quit_requested": true,
+      "Root_full_saved_review": {
+        "bytes": 5553,
+        "ref": "R/part79/ROOT_859_BAND144_FULL_SAVED_REVIEW.json",
+        "sha256": "ffc6080b9ea02041164b19b5c1ccb302165927274566a203c35c05e51fcb08b2",
+        "status": "ROOT_859_BAND144_SAVED_SETTINGS_PASS_WITH_EXPLICIT_GEOMETRY_DISPLAY_RULE"
+      },
+      "actual13_cache_endpoints_verified": false,
+      "case_id": "h859_g1_noload_p3s300_band144_1a7762ae193b",
+      "cleanup_errors": [],
+      "client_retired": true,
+      "native_depth_SI_m": 0.0436181,
+      "original_SUMMARY_record": {
+        "bytes": 1973,
+        "sha256": "2bd24c8aa375a6a3feee9d5bdd01a8d905b089f52c71bb2cc136cbb716be6525"
+      },
+      "original_assessment_seal": {
+        "bytes": 3530,
+        "ref": "R/source859_band144_saved_settings_assessment_part79_20261101/ASSESSMENT_SEAL.json",
+        "sha256": "b05b32e791198c08eccd3014e44a517f055147cba0a7f750aa801a9d99d51a8d"
+      },
+      "original_known15s_main_PID_exit": true,
+      "owned_Native_PID": 73824,
+      "public_input_CSV_record": {
+        "bytes": 1985,
+        "sha256": "4c09b96d1a0cde6b90ac0b258f4ed7f05c9266a38d3179c41b927a4c38ed019f"
+      },
+      "public_result_row_CSV_record": {
+        "bytes": 32933,
+        "sha256": "c1414268992a86e76cfdb50344283968236221e1e8cb9df1d222c612dd91b80e"
+      },
+      "public_row_elapsed_seconds": 178.333,
+      "public_row_finished_local_without_offset": "2026-11-01T23:42:53",
+      "public_row_started_local_without_offset": "2026-11-01T23:39:54",
+      "raw_saved_AEDT_record": {
+        "bytes": 1151914,
+        "sha256": "2f8cb511a499997536b516da1ed4b71d7311def6e8d2cda9fe15fb393b306a7c"
+      },
+      "raw_saved_variables_record": {
+        "bytes": 38347,
+        "sha256": "21a6e73cbc5e1dd6b23fd590c7d717f97c07f340e7d68f4b898ab050ad167a77"
+      },
+      "requested_band_segments": 144,
+      "saved_Band_edges": 144,
+      "saved_M19_BH23_exact": true,
+      "saved_reports": 9,
+      "saved_setup35_exact": true,
+      "science_observations_record": {
+        "bytes": 632082,
+        "sha256": "15a23b76e38ca53232d2521d84b2329220c5c7014f2f233417cf2b6592c971d8"
+      },
+      "solutions_empty": true,
+      "timing_scope": "local setup-only wrapper versus public result-row elapsed; neither is FEA timing",
+      "winding_count": 24,
+      "wrapper_elapsed_seconds": 181.46900000004098,
+      "wrapper_exit_code": 0,
+      "wrapper_exit_record": {
+        "bytes": 334,
+        "sha256": "d3ec3ad4ea5f37a23896a8c5aa886e87919a413ea9526fd77901c6bca80adde3"
+      }
+    },
+    {
+      "Native_exit_code_or_wrapper_auxiliary_certificate": false,
+      "Quit_requested": true,
+      "Root_full_saved_review": {
+        "bytes": 5554,
+        "ref": "R/part79/ROOT_859_BAND0_FULL_SAVED_REVIEW.json",
+        "sha256": "49f11d8a6412385ca03d977a366e5d2e46c98ce428891f85c439bce59dc50acf",
+        "status": "ROOT_859_BAND0_SAVED_SETTINGS_PASS_WITH_EXPLICIT_GEOMETRY_DISPLAY_RULE"
+      },
+      "actual13_cache_endpoints_verified": false,
+      "case_id": "h859_g1_noload_p3s300_band0_94b32b8ba646",
+      "cleanup_errors": [],
+      "client_retired": true,
+      "native_depth_SI_m": 0.0436181,
+      "original_SUMMARY_record": {
+        "bytes": 2081,
+        "sha256": "dad0ff53f8ff95d4ba894f18b4da1f923e2bd277c68d85a666b57d30d24c76ab"
+      },
+      "original_assessment_seal": {
+        "bytes": 1648,
+        "ref": "R/source859_band0_saved_settings_assessment_part79_20261101/ASSESSMENT_SEAL.json",
+        "sha256": "ac948f2c9307705c0051f62759ba1f4191179f40f85a76fab615c3c95c416cb5"
+      },
+      "original_known15s_main_PID_exit": true,
+      "owned_Native_PID": 49012,
+      "public_input_CSV_record": {
+        "bytes": 1979,
+        "sha256": "1dda1d4cc28c0ce92c282a3fb01d28482b47c4008edead533d113112c7ff6e5f"
+      },
+      "public_result_row_CSV_record": {
+        "bytes": 32922,
+        "sha256": "c7acf580e4c3fefbec078b62efab6c67743b08ae7ec3ae1e8e22c2bec3efbe14"
+      },
+      "public_row_elapsed_seconds": 178.399,
+      "public_row_finished_local_without_offset": "2026-11-02T00:21:19",
+      "public_row_started_local_without_offset": "2026-11-02T00:18:21",
+      "raw_saved_AEDT_record": {
+        "bytes": 1141989,
+        "sha256": "801e03e8529ba23856275aa700c85b0c0e768a2cf339cce96fda304786f5867c"
+      },
+      "raw_saved_variables_record": {
+        "bytes": 38347,
+        "sha256": "21a6e73cbc5e1dd6b23fd590c7d717f97c07f340e7d68f4b898ab050ad167a77"
+      },
+      "requested_band_segments": 0,
+      "saved_Band_edges": 1,
+      "saved_M19_BH23_exact": true,
+      "saved_reports": 9,
+      "saved_setup35_exact": true,
+      "science_observations_record": {
+        "bytes": 632042,
+        "sha256": "4a8a05519f2bd83cb1af6527c6c70cac800fb949c9aa075d61d4b0c25b8cfaca"
+      },
+      "solutions_empty": true,
+      "timing_scope": "local setup-only wrapper versus public result-row elapsed; neither is FEA timing",
+      "winding_count": 24,
+      "wrapper_elapsed_seconds": 181.5,
+      "wrapper_exit_code": 0,
+      "wrapper_exit_record": {
+        "bytes": 319,
+        "sha256": "41239bbb69ec58c01a84ece6b7e63f166706e5b0ad8bd4cca6d7f3436b4e1c8c"
+      }
+    }
+  ],
+  "local_links": {
+    "README": "README.md",
+    "metrics": "metrics.csv",
+    "provenance": "provenance.json",
+    "selected_inputs": "case_inputs.json",
+    "separate_actual163": "../2026-11-02_sdk_solver_baseline/README.md"
+  },
+  "original_three_pure_checker_failures_preserved": [
+    {
+      "exit_code": 1,
+      "failure": "LookupError unknown encoding utf8-sig",
+      "original_log": {
+        "bytes": 3690,
+        "ref": "R/source859_band144_saved_settings_assessment_part79_20261101/INSPECTOR.log",
+        "sha256": "062f4f9ec599599ed5f3d49aad03e54849ff32667fbec840ea66853f30d29dbc"
+      }
+    },
+    {
+      "exit_code": 1,
+      "failure": "core_material_fallbacks expected tuple() versus JSON list[]",
+      "original_log": {
+        "bytes": 3366,
+        "ref": "R/source859_band144_saved_settings_assessment_part79_20261101/CODEC_DIAGNOSTIC.log",
+        "sha256": "49be3e8b7c695e61ab7b5ee82fbb09094f345437b55e5c2e068b551d97a6bbaf"
+      }
+    },
+    {
+      "exit_code": 1,
+      "failure": "raw VariableProp contains unevaluated oa/sa/ta Native metadata beyond first4scalar args",
+      "original_log": {
+        "bytes": 6038,
+        "ref": "R/source859_band144_saved_settings_assessment_part79_20261101/V3_JSON_BRIDGE.log",
+        "sha256": "e667f83360863b3e380d83c4b78baff08c0d28e66adb8d0f881a07e2b7b1830f"
+      }
+    }
+  ],
+  "pair": {
+    "actual_Spec_difference_only": {
+      "band_circle_segments": [
+        144,
+        0
+      ]
+    },
+    "all30_unevaluated_metadata_rows_equal": true,
+    "all52_full_raw_rows_equal": true,
+    "all52_scalar_strings_equal": true,
+    "numeric_or_metadata_normalization_performed": false,
+    "record": {
+      "bytes": 1908,
+      "sha256": "6a68461308e209c24cd5567c11af637465efa34180f96844c54f3446803f4769"
+    },
+    "ref": "R/source859_band0_saved_settings_assessment_part79_20261101/PAIR_NATIVE0_COMPARISON.json"
+  },
+  "public_artifact_records": {
+    "README.md": {
+      "bytes": 3978,
+      "sha256": "ac342db8d490e77dcf8c05c00da5b81a9058ef0e6ef3aeb01ba92a854d9834d3"
+    },
+    "case_inputs.json": {
+      "bytes": 3207,
+      "sha256": "0f4b185e5cfae01b50a99be8edb4049f12ba03c2249fe4dfa10bc3dd20244183"
+    },
+    "metrics.csv": {
+      "bytes": 1613,
+      "sha256": "df02b8046a30c42abe775a1049153c991313797726a589e3009eda1acf02de5a"
+    }
+  },
+  "requested_field_schedule": {
+    "Native_endpoint_inclusion_verified": false,
+    "every_n_steps": 25,
+    "expected_endpoint_snapshots": 13,
+    "range_type": "Every N Steps",
+    "start_step": 600,
+    "start_time_s": 0.025,
+    "stop_step": 900,
+    "stop_time_s": 0.0375,
+    "units": "s"
+  },
+  "schema": "public859_native0_field_retention_provenance_v1",
+  "scope": {
+    "Analyze_calls": 0,
+    "FEAs": 0,
+    "Native0_only": true,
+    "Source17_actual163_is_separate_producer": "producer_v3:sha256:307b1fd890dec70f23feb6daa5667a09fad370064de78acf58e66fba64a2beae",
+    "actual13_field_cache_endpoints_verified": false,
+    "faster_FEA_claimed": false,
+    "mean_torque_or_loss_observed": false,
+    "optimum_claimed": false,
+    "saved_field_schedule_verified": true,
+    "solutions_empty": true,
+    "spatial_convergence_proven": false,
+    "training_calibration_admission": false
+  },
+  "source": {
+    "commit": "859318df3f722e91237cb12e1196cb9477a725d5",
+    "commit_url": "https://github.com/Schwalbe262/pyaedt_motor/commit/859318df3f722e91237cb12e1196cb9477a725d5",
+    "frozen_package_record": {
+      "bytes": 141701,
+      "sha256": "96345e5e258b9ae5fb75a6d82b909659909a7fa78a1b27f054244c9b1ca8f7fe"
+    },
+    "frozen_package_ref": "R/source859_noload_band_setup_only_HELD_part78_20261101",
+    "plan_record": {
+      "bytes": 22766,
+      "sha256": "bdcf140ad0e3374081db1b5ce756fa3ec23418c6f8f5e59cfa705e049f3c48dc"
+    },
+    "private_library_file_count": 23,
+    "producer_fingerprint": "producer_v3:sha256:43067e07896226c2e078d0060361d899aa75c0998c24935fe1a9c1d4b59c3061",
+    "source17_authority_or_seed_reused": false,
+    "source17_geometry_provenance_only": true,
+    "source_file_count": 674,
+    "source_links": {
+      "module/ipmsm_ppt_setup.py": "https://github.com/Schwalbe262/pyaedt_motor/blob/859318df3f722e91237cb12e1196cb9477a725d5/module/ipmsm_ppt_setup.py",
+      "run_ipmsm_batch.py": "https://github.com/Schwalbe262/pyaedt_motor/blob/859318df3f722e91237cb12e1196cb9477a725d5/run_ipmsm_batch.py"
+    }
+  }
+}

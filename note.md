@@ -4697,3 +4697,36 @@ This file is archive/search-only for new Codex sessions. Do not read this file i
 - failure reason/next: actual saved-cache endpoint inclusion and future matchedBand pair require new pinned source/producer; no Native/deployment/reservation here. Finish reviewed originalSDK singleFEA and actual4core/output/cleanup check.
 - correction: earlier rawtask-id suspicion was not an observed defect; actual101031 contains bothid/task_id. Officialid selection is schema clarity only.
 - validation/tokens: exact changedhunks/SDK3800-3900+SetupProps999-1023 read; Rootproof part78/ROOT_FIELD_RETENTION_REVIEW.json. Token sampler unsupported already recorded; usage unavailable.
+
+## 2026-11-01 23:09 KST | part78D actual original SDK single FEA
+- part/goal/hypothesis: test real solve/actual4core/output/save/close under stock SDK path after actual101031 Save0 success.
+- actions/options: read all final runtime/preparer/prerequisite/OSguard/postprocessor/Roothelpers; Root25+12 tests/Bash2/wire52/81+778pins PASS, peer45e6 and fresh14:00resources; one actual162 reservation then54payload/request537e1bf3/1068703B andonePOST task101032.
+- metrics/result: ledger162=diag132/design30/train0, newindex c3a5ae29b8edc34beb94925b8ca7dc06f947fee60d73be4f7fa167d90da5d089; B/W durablephaseevidence complete. SoleGET collector independent_v7 tracks sameID. ActualAnalyze/core4/quality/cleanup pending, no trainingadmission.
+- failure reason/next: no submissionfailure; collectlivephase then terminalsealedraw/profile/CSV only with strictSDKknownexit, preservequalityrejection. Parallel future859field/Band Native0 package C-only. Existingintent forbidsnewPOST/retry.
+- validation/tokens: candidateRootproof c6779d/peer45e6/configa2af, exactchangedsourcehunks read; public859commit+liveoriginverified11paths/protected2/indexempty. Token sampler unsupportedalreadyrecorded/usageunavailable.
+
+## 2026-11-01 23:18 KST | part78E actual101032 pre-Native failure
+- part/goal/hypothesis: inspect actual singleSDK solve startup after submission162.
+- actions/options: soleGET collector readsameID terminalfailed1 andexactstderr; Rootrehash17sealedfiles andreadfreshactual162 importreproducer. Preservedoldcandidate/receipt/taskfailure/empty200pubresponse; no newPOST/retry.
+- metrics/result:14:10:02-14:10:34UTC/allocation15118/exit1, beforefactory/out/publisher; Native/Analyze notentered, actual4core/10outputs unavailable. Collector67236closed2/4GET4748B. Cause main eagerexecutevalidation loadsAEDTparser beforeexecute initialfreshguard; realfreshreplayTrue->False/161SDKnamespaces/0DesktopSessions/0Native.
+- failure reason/next: Root/peer missed whole-entry interaction despite25+12 subcomponenttests. NEWv5 main mustvalidateonlydry andletunchangedexecute firstfreshgate precedeexistingfullvalidation; addisolatedrealentryorder regression withoutfakeFEAreceipts/moduledeletion/newframework. New163onlyafterfreshRoot/peerreview/resources; ledger162/diag132/design30/train0 retained/indexc3a5.
+- validation/tokens: Rootproofpart78/ROOT_ACTUAL101032_FAILURE_REVIEW.json, actualseal5225d61b. This is evidence-changingPROGRESS, notlivewait. No ordinaryfailureinsight; tokensamplerunsupportedalreadyrecorded.
+
+## 2026-11-02 00:38 KST | part79C actual163 and paired859 saved settings
+- part/goal/hypothesis: runminimalmain-orderfixandverifyrealFEA plusselectivefieldNative0settings.
+- actions/options: Rootv5full39checks/83+833pins/Bash/wirePASS; separatelyreserve163(kindretry162)andPOSTonce101033. FullclosedcollectionandSource17pureprofile/9CSV/savedsemantics replay. Localpublic859Native0band144then0onlyafterfirstfullreview, noFEA; originalpurecheckerfailurespreservedandclosedrawrechecked.
+- metrics/result: actual163AnalyzeTrue923s/task961s/original15sNative4021407exit+retired/errors[]; physicalTrue/missingissues[]/steadyTrue/residual+.16248055W, butmachine1/matrix1x901 makesoverallFAILED1/resource4. R/f163sealed377/88entries266threeSHA/twopass/130GET1168608B/allwatchersclosed. Ledger163diag133/design30/train0/index49a86f2c/no164. LocalNative073824+49012bothwrapper0/181.469+181.5s/strictcleanup; saved35exact/edges144vs1/BH23/depth.0436181/winding24/reports9/Solutions{},52rawvars+metadataidentical,13geometry15gdisplaysverifiedwithoutchangingrawfiles.
+- failure reason/next: SlurminteractivejobsusespecialDSO; ordinarySDKACF4isnoteffectivecoreproof. Officiallaunchcoreoptionsneeded; C-private0.22desktop-only2linebackportR/sb1has7tests/16defaults/159privateimportsbutLinuxNative0unproven. LegacypreparesLinuxFS/Native0packet; new164onlyafterreview+Native0. SurrogatepreparesconditionalantiAlias25/50phaseplan; actualfieldcache/calibration/newML/optimumstillunproven.
+- validation/tokens: Rootactual163377rehash/controlreviewandboth859closedraw52variablechecks; allSource17/private23/protected2unchanged. No routinefailureinsight; unsupportedtokensamplerstatusreused.
+
+## 2026-11-02 00:47 KST | part79D interim report requested by user
+- Goal/hypothesis: explain problems, confirmed changes, and next verification without equating a completed solve with accuracy or optimum.
+- Actions/options: reviewed current handoff and exact report hunks; checked actual163 and paired Native0 summaries; clarified historical preparation status and linked closed settings evidence. Kept future Linux SDK/Native0 and field-sampling work distinct.
+- Metrics/result: actual163 Analyze923s/task961s/physical checks pass/actual1core still resource reject; paired Native0 settings pass, actual field cache unproven; existing-data torque R2 .8457->.8614 and efficiency .6031->.7862 remain partial, new training0.
+- Failure reason/next: actual4core, no-load torque consistency, representative convergence, new training/all10 R2>=.95, constrained two-speed design and remaining cleanup are open. No new Native/FEA/API submission; token sampler unsupported already recorded.
+
+## 2026-11-02 00:51 KST | part79E reviewed public actual163 and paired settings evidence
+- Goal/hypothesis: publish bounded exact results while preserving actual1core rejection and Native0-only limits.
+- Actions/options: Root compared all10 public metric floats with sealed actual163, both paired settings rows with source provenance, all8 public artifact hashes and10 private references; checked24 local documentation links. Clarified historical report status and subsequent actual runs.
+- Metrics/result: PASS; proof R/part79/ROOT_PENDING_PUBLIC_DOCS_REVIEW.json SHA77ab59574edc28d2304a9ee771ab48eeb4efa8cef92e25d2d36374f1a4b820b5. No Native/API/FEA/ledger action; protected2 SHA unchanged.
+- Failure reason/next: no new correctness or optimum claim; actual Linux SDK file-only snapshot is the next execution, then isolated launch-argument Native0 and actual4core test. Old user memory/code changes stay unstaged; token sampler unsupported already recorded.

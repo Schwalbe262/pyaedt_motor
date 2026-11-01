@@ -1,0 +1,106 @@
+{
+  "Native0_setup_only": true,
+  "Root_explicit_geometry_display_rule": {
+    "count": 13,
+    "names": [
+      "stator_outer_radius",
+      "stator_back_yoke_thick_ratio",
+      "stator_inner_ratio",
+      "stator_shoe_thick",
+      "stator_teeth_length_ratio",
+      "stator_teeth_width_ratio",
+      "stator_gap",
+      "rotator_gap",
+      "shaft_ratio",
+      "magnet_shield_thick",
+      "magnet_setback_ratio",
+      "magnet_thick_ratio",
+      "magnet_space_height_ratio"
+    ],
+    "rule": "only the named geometry strings are compared with exact15-significant-digit display and unchanged unit suffix; other fields not normalized"
+  },
+  "actual_field_cache": {
+    "reason": "Analyze_calls0, FEAs0 and saved Solutions empty; no cache endpoint verification",
+    "verified": false
+  },
+  "cases": [
+    {
+      "case_id": "h859_g1_noload_p3s300_band144_1a7762ae193b",
+      "observed_saved_Band_edges": 144,
+      "requested_band_segments": 144
+    },
+    {
+      "case_id": "h859_g1_noload_p3s300_band0_94b32b8ba646",
+      "observed_saved_Band_edges": 1,
+      "requested_band_segments": 0
+    }
+  ],
+  "common_requested_spec": {
+    "base_rpm": 1200.0,
+    "beta_convention": "dq_current_advance_v2",
+    "beta_deg": 0.0,
+    "core_material": "M19_29G_reference_y2",
+    "core_material_model": "m19_29g_reference_y2_v1",
+    "i_peak_a": 0.0,
+    "loss_policy": "laminated_core",
+    "magnet_material": "NdFeB_1.25T",
+    "mesh_elements": {
+      "band": 2000,
+      "magnet": 100,
+      "rotor": 1000,
+      "stator": 1000,
+      "winding": 100
+    },
+    "mesh_maximum_lengths_mm": {},
+    "mesh_refinement_modes": {},
+    "model_extent": "full_360",
+    "pole_number": 8,
+    "require_steady_state": true,
+    "save_fields_every_n_steps": 25,
+    "save_fields_start_step": 600,
+    "save_fields_stop_step": 900,
+    "series_turns_per_phase": 48,
+    "slot_number": 12,
+    "solver_nonlinear_residual": 1e-05,
+    "solver_output_error": false,
+    "stack_length_mm": 43.61808465793729,
+    "steps_per_period": 300,
+    "strict_setup": true,
+    "symmetry_factor": 1,
+    "transient_periods": 3,
+    "turns_per_coil_side": 12
+  },
+  "producer_fingerprint": "producer_v3:sha256:43067e07896226c2e078d0060361d899aa75c0998c24935fe1a9c1d4b59c3061",
+  "qualification": {
+    "FASTER_FEA_claim": false,
+    "mean_torque_or_loss_observed": false,
+    "model_training_or_optimum": false,
+    "spatial_convergence": false,
+    "training_calibration_admission": false
+  },
+  "raw_variables_pair": {
+    "full_raw_rows52_identical": true,
+    "general_normalization_performed": false,
+    "scalar_strings52_identical": true,
+    "unevaluated_metadata_on30_rows_identical": true
+  },
+  "requested_Spec_difference_only": {
+    "band_circle_segments": [
+      144,
+      0
+    ]
+  },
+  "requested_field_schedule": {
+    "Native_endpoint_inclusion_verified": false,
+    "every_n_steps": 25,
+    "expected_endpoint_snapshots": 13,
+    "range_type": "Every N Steps",
+    "start_step": 600,
+    "start_time_s": 0.025,
+    "stop_step": 900,
+    "stop_time_s": 0.0375,
+    "units": "s"
+  },
+  "schema": "public859_field_retention_selected_inputs_v1",
+  "source_commit": "859318df3f722e91237cb12e1196cb9477a725d5"
+}
