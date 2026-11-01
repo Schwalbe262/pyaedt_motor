@@ -2821,6 +2821,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
     desktop = None
     standalone_owner = None
     project = None
+    project_save_failed = False
     sim = None
     lease = None
     lease_granted = False
@@ -3194,10 +3195,17 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             }
         )
 
+        if not pooled_backend:
+            assert_standalone_owned(standalone_owner, app.desktop_class)
+            assert_standalone_project(standalone_owner)
         try:
-            project.save()
+            saved = project.save() if pooled_backend else app.save_project()
+            if saved is False or (not pooled_backend and saved is not True):
+                raise RuntimeError(f"AEDT project save failed; returned {saved!r}")
         except Exception:
-            logging.exception("Project save failed for %s", sim.PROJECT_NAME)
+            project_save_failed = True
+            row["error_class"] = "project_save_failed"
+            raise
 
         if analysis_returned_false:
             if pooled_backend and lease_granted:
@@ -3324,7 +3332,7 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                     row["artifact_native_model_depth_failure"] = str(failure_audit)
                 except Exception:
                     logging.exception("Could not preserve native-model-depth failure evidence for %s", case_id)
-        if project is not None:
+        if project is not None and not project_save_failed:
             try:
                 if not pooled_backend:
                     if standalone_owner is None or standalone_owner.solver_uncertain:

@@ -1166,3 +1166,11 @@ Do not add ordinary successful loops, ordinary failures, speculative hypotheses,
 - after: enabled branch submits1 complete update; disabled/default Native32 and existing setup fingerprint remain unchanged.
 - evidence: installedSDK solve_sweeps.py999-1023 and solve_setup.py3800-3900; failing pre-fix regression then Root10 focused/75 related PASS; part78/ROOT_FIELD_RETENTION_REVIEW.json.
 - remaining risk: Native endpoint inclusion, actual field cache and runtime benefit are unverified; this confirms configuration construction behavior only.
+
+## 2026-11-02 03:00 KST | Saved project status gates exported success
+- Source loop: part79H; R/postsolve_save_fail_closed_20261102.
+- Improvement: require exact True from standalone SDK save_project; honor pooled void None while rejecting False/exception; suppress the same failed save retry before reporting failure.
+- Before: post-setup/post-solve Save exceptions were logged and export/ok handling continued; the old-code false-save counterexample produced an ok row.
+- After: standalone False/None/int1/exception and pooled False/exception produce failed rows and zero exports/reSave, with original owned15s cleanup/PID-reuse safety preserved.
+- Evidence: six focused plus26 existing checks PASS, exactHEAD counterexample RED, Root exact hunk review and14-file seal51b451f3d9bf07a8cf8b5f9b4823a62befea63a3a9b16d4e2a3e3af6c787f27f.
+- Remaining risk: actual new-main FEA integration is pending; a True SDK return alone does not prove full saved physics or cache availability.

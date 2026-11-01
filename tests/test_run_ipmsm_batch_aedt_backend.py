@@ -25,7 +25,8 @@ class FakeProject:
         return self.name
 
     def create_design(self, **kwargs: object) -> object:
-        return types.SimpleNamespace(desktop_class=self.desktop, analyze=self.desktop.analyze)
+        return types.SimpleNamespace(desktop_class=self.desktop, analyze=self.desktop.analyze,
+                                     save_project=lambda: (self.save(), True)[1])
 
     def save(self) -> None:
         self.events.append(("save", self.path))
