@@ -293,9 +293,15 @@ class PhysicalOptimizerTests(unittest.TestCase):
 
     def test_optimizer_code_drift_does_not_publish_misidentified_predictions(self):
         bound = adapter()
-        with mock.patch.object(optimization, "sha256", side_effect=[*optimization._IMPORTED_OPTIMIZER_SOURCES.values(), "changed"]):
-            with self.assertRaisesRegex(ValueError, "source changed during search"):
+        actual_hash = optimization.sha256
+        calls = []
+        def drift_after_entry(path):
+            calls.append(path)
+            return actual_hash(path) if len(calls) <= 2 * len(optimization._OPTIMIZER_SOURCE_PATHS) else "changed"
+        with mock.patch.object(optimization, "sha256", side_effect=drift_after_entry):
+            with self.assertRaisesRegex(ValueError, "source changed"):
                 optimization.search_designs(bound, [baseline()])
+        self.assertIsNone(bound._session())
 
     def test_loss_bounds_objective_and_pareto_ranking(self):
         bound = adapter()

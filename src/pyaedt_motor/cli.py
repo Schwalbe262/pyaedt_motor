@@ -16,8 +16,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    parser = argparse.ArgumentParser(description="IPMSM research: audit, plan, doe, quality, simulate, train, benchmark, optimize, validate, archive")
-    parser.add_argument("command", choices=["audit", "plan", "doe", "quality", "simulate", "train", "benchmark", "optimize", "validate", "archive"])
+    parser = argparse.ArgumentParser(description="IPMSM research: audit, plan, doe, quality, simulate, execute-owned-cli, train, benchmark, optimize, validate, archive")
+    parser.add_argument("command", choices=["audit", "plan", "doe", "quality", "simulate", "execute-owned-cli", "train", "benchmark", "optimize", "validate", "archive"])
     if not args or args[0] in {"-h", "--help"}:
         parser.print_help()
         return 0
@@ -31,8 +31,8 @@ def main(argv: list[str] | None = None) -> int:
         require_supported_python()
     if command in {"train", "optimize"} and os.name == "nt" and not any(arg in {"-h", "--help"} for arg in args):
         from .runtime import freeze_source, native_runtime_path
-        path_flags = ["--data", "--spec", "--output", "--frame-evidence", "--frame-evidence-root"] if command == "train" else [
-            "--bundle", "--spec", "--expected-fingerprints", "--calibration-manifest", "--selected-profile", "--baseline", "--output", "--frame-evidence", "--frame-evidence-root"]
+        path_flags = ["--data", "--spec", "--output", "--frame-evidence", "--frame-evidence-root", "--cli-inputs", "--owned-cli-production-evidence"] if command == "train" else [
+            "--bundle", "--spec", "--expected-fingerprints", "--calibration-manifest", "--selected-profile", "--baseline", "--output", "--frame-evidence", "--frame-evidence-root", "--owned-cli-production-evidence"]
         for flag in path_flags:
             for index in range(1, len(args)):
                 if args[index] == flag and index + 1 < len(args):
@@ -54,10 +54,10 @@ def main(argv: list[str] | None = None) -> int:
         module = "pyaedt_motor.train_physical" if command == "train" else "pyaedt_motor.optimize_physical"
         return subprocess.run([sys.executable, "-m", module, *args[1:]],
                               cwd=frozen, env=environment).returncode
-    if command in {"audit", "plan", "doe", "quality", "train", "optimize", "archive", "benchmark"}:
+    if command in {"audit", "plan", "doe", "quality", "train", "optimize", "archive", "benchmark", "execute-owned-cli"}:
         module = importlib.import_module("pyaedt_motor." + {
             "plan": "experiments", "doe": "doe", "quality": "quality", "train": "train_physical",
-            "optimize": "optimize_physical",
+            "optimize": "optimize_physical", "execute-owned-cli": "public_batch_pilot",
             "archive": "archive", "audit": "audit", "benchmark": "benchmark"}[command])
         return int(module.main(args[1:]) or 0)
     if command == "simulate" and os.name == "nt" and not any(arg in {"-h", "--help"} for arg in args):

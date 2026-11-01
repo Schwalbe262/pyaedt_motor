@@ -570,7 +570,7 @@ def draft_reference(origin: Mapping, evidence: LocalEvidence, *, assign_identity
 
 def validate_reference(manifest: Mapping, evidence: LocalEvidence) -> tuple[float, str]:
     expected = draft_reference(manifest["origin_zero_manifest"], evidence, assign_identity=True)
-    if dict(manifest) != expected:
+    if canonical(dict(manifest)) != canonical(expected):
         raise ValueError("family reference content, scope, or actual origin evidence mismatch")
     return expected["electrical_zero_deg"], expected["reference_frame_id"]
 
@@ -606,12 +606,27 @@ def frame_fields(manifest):
 def evidence_arguments(parser):
     parser.add_argument("--frame-evidence", type=Path, help="Immutable collected-local frame audit mapping")
     parser.add_argument("--frame-evidence-root", type=Path, help="Explicit local root for mapping-relative files")
+    parser.add_argument("--owned-cli-production-evidence", type=Path, help="Explicit new production case-evidence declaration")
+    parser.add_argument("--owned-cli-production-evidence-sha256")
 
 
 def evidence_from_arguments(args):
     if bool(args.frame_evidence) != bool(args.frame_evidence_root):
         raise ValueError("frame evidence mapping and root must be supplied together")
-    return LocalEvidence(args.frame_evidence, args.frame_evidence_root) if args.frame_evidence else None
+    result = LocalEvidence(args.frame_evidence, args.frame_evidence_root) if args.frame_evidence else None
+    cli_path = getattr(args, "owned_cli_production_evidence", None)
+    cli_sha = getattr(args, "owned_cli_production_evidence_sha256", None)
+    if bool(cli_path) != bool(cli_sha):
+        raise ValueError("production CLI evidence path and SHA must be supplied together")
+    if cli_path:
+        if result is None:
+            raise ValueError("production CLI evidence also requires actual family origin evidence")
+        from .execution_compatibility import ProductionFrameEvidence
+        raw = _read(cli_path)
+        if hashlib.sha256(raw).hexdigest() != cli_sha:
+            raise ValueError("production CLI evidence declaration SHA differs")
+        result = ProductionFrameEvidence(result, {"path": str(cli_path), "bytes": len(raw), "sha256": cli_sha})
+    return result
 
 
 def apply_reference(spec: Mapping, manifest: Mapping, evidence: LocalEvidence | None = None) -> dict:
@@ -636,6 +651,9 @@ def apply_reference(spec: Mapping, manifest: Mapping, evidence: LocalEvidence | 
 
 
 def verify_rows(rows, manifest: Mapping, evidence: LocalEvidence) -> dict:
+    from .execution_compatibility import ProductionFrameEvidence
+    if isinstance(evidence, ProductionFrameEvidence):
+        return evidence.verify_rows(rows, manifest)
     angle, identity = validate_reference(manifest, evidence)
     admitted, seen = [], set()
     for row in rows:
@@ -729,6 +747,9 @@ def _exact_integer_identity(value):
 
 
 def verify_domain(domain, manifest, evidence):
+    from .execution_compatibility import ProductionFrameEvidence
+    if isinstance(evidence, ProductionFrameEvidence):
+        return evidence.verify_domain(domain, manifest)
     expected = domain.get("reference_frame_context")
     if not isinstance(expected, dict) or not expected.get("admitted_case_ids"):
         raise ValueError("approved model lacks actual family-frame case admission evidence")

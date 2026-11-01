@@ -1,0 +1,21 @@
+{
+  "Native_binary_bytes_included": false,
+  "actual_setup_task_id": 100988,
+  "original_records": {
+    "after": {
+      "bytes": 2251,
+      "local_relative_path": "raw/a0010.json",
+      "sha256": "67a2d4f57e882a7d96f0607845f49f0c387f027a62589540eaafdb7c2551e7b6"
+    },
+    "before": {
+      "bytes": 2251,
+      "local_relative_path": "raw/a0011.json",
+      "sha256": "67a2d4f57e882a7d96f0607845f49f0c387f027a62589540eaafdb7c2551e7b6"
+    },
+    "binding": {
+      "bytes": 3119,
+      "local_relative_path": "raw/a0002.json",
+      "sha256": "9c109d082067c715caece63a0b3de669e6ee9f5ea9d94b6ee131b8503da212b8"
+    }
+  }
+}

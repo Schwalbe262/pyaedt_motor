@@ -54,6 +54,13 @@ def source_files() -> dict[str, Path]:
     root = Path(__file__).resolve().parents[2]
     return {"model_bundle.py": Path(__file__), "surrogate.py": Path(surrogate.__file__),
             "reference_frames.py": Path(__file__).with_name("reference_frames.py"),
+            **{name: Path(__file__).with_name(name) for name in (
+                "execution_compatibility.py", "execution_contracts.py", "execution_evidence.py",
+                "execution_archive.py", "archive_numeric.py",
+                "native_state_semantics.py", "public_batch_pilot.py", "batch_ownership.py",
+                "quality.py", "cluster.py", "solver_profile.py")},
+            **({"compdefs_transition.py": Path(__file__).with_name("compdefs_transition.py")}
+               if Path(__file__).with_name("compdefs_transition.py").is_file() else {}),
             "remote_case.py": Path(__file__).with_name("remote_case.py"),
             "doe.py": Path(__file__).with_name("doe.py"),
             "calibrate_ipmsm_beta.py": root / "calibrate_ipmsm_beta.py",

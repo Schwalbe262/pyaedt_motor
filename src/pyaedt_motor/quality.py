@@ -104,8 +104,8 @@ def _solver_nonlinear_residual(row):
     return numbers[0] if numbers else 0.005
 
 
-def _profile_settings(row):
-    settings = {"quality_profile": _profile(row), "solver_output_error": True}
+def _profile_settings(row, profile_id=None):
+    settings = {"quality_profile": _profile(row) if profile_id is None else profile_id, "solver_output_error": True}
     for key in PROFILE_NUMERIC:
         if key == "solver_nonlinear_residual":
             settings[key] = _solver_nonlinear_residual(row)
@@ -226,14 +226,15 @@ def _profile(row):
     return _input_text(row, "quality_profile")
 
 
-def _point_key(row):
+def _point_key(row, cli_frame_identity=None):
     # Inactive stator_shoe_thick does not change the physical geometry identity.
     numeric = tuple((key, _number(row, key)) for key in (*GEOMETRY, *NUMERIC_FRAME))
-    texts = tuple((key, _input_text(row, key)) for key in TEXT_FRAME)
+    texts = tuple((key, cli_frame_identity if key == "beta_calibration_id" and cli_frame_identity is not None
+                   else _input_text(row, key)) for key in TEXT_FRAME)
     return numeric, texts
 
 
-def _identity_issues(row, expected):
+def _identity_issues(row, expected, cli_frame_identity=None):
     problems = []
     for key in (*GEOMETRY, *NUMERIC_FRAME):
         try:
@@ -242,6 +243,10 @@ def _identity_issues(row, expected):
         except ValueError as exc:
             problems.append(str(exc))
     for key in (*TEXT_FRAME, "quality_profile"):
+        if key == "beta_calibration_id" and cli_frame_identity is not None:
+            if _text(row.get("input_" + key, row.get(key))) != _text(expected.get(key, expected.get("input_" + key))):
+                problems.append("plan_mismatch:" + key)
+            continue  # Unchanged raw IDs; actual numeric binding supplies grouping scope.
         try:
             if _input_text(row, key) != _input_text(expected, key):
                 problems.append("plan_mismatch:" + key)
@@ -286,16 +291,21 @@ def _identity_issues(row, expected):
     return problems
 
 
-def _row_issues(row, rules):
+def _row_issues(row, rules, cli_case=None):
     problems = []
     try:
         _row_context(row)
     except ValueError as exc:
         problems.append("invalid_row_context:" + str(exc))
-    if _text(row.get("status")).lower() != "ok":
-        problems.append("result_not_ok")
-    if _text(row.get("analyze")).lower() not in {"true", "1", "1.0"}:
-        problems.append("not_analyzed")
+    if cli_case is None:
+        if _text(row.get("status")).lower() != "ok":
+            problems.append("result_not_ok")
+        if _text(row.get("analyze")).lower() not in {"true", "1", "1.0"}:
+            problems.append("not_analyzed")
+        if row.get("input_execution_backend") == "public_owned_cli_v1":
+            problems.append("explicit_CLI_FS_evidence_missing")
+    elif row.get("status") != cli_case["original_status"]:
+        problems.append("CLI_original_status_rewritten")
     if row.get("input_metric_contract_version") != METRIC_CONTRACT_VERSION:
         problems.append("not_v3_metrics")
     problems.extend(v3_training_row_issues(row))
@@ -309,6 +319,8 @@ def _row_issues(row, rules):
     except ValueError as exc:
         problems.append(str(exc))
     for key in PAIR_SOURCE_FIELDS:
+        if key == "input_beta_calibration_id" and cli_case is not None and cli_case["frame_binding"]["numeric_binding_verified"]:
+            continue  # Original blank ID remains blank; separate actual numeric-frame proof.
         if not _text(row.get(key)):
             problems.append("missing_source:" + key)
     if any(rule.column == "output_voltage_span_last_peak_v" for rule in rules) and row.get("output_voltage_span_source") != "physical_three_phase_waveform":
@@ -398,7 +410,8 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
                      reference_profile: str, refined_reference_profile: str | None = None,
                      tolerances: Sequence[MetricTolerance] = DEFAULT_TOLERANCES,
                      mesh_counts: Mapping[str, int] | None = None,
-                     frame_manifest: Mapping | None = None, frame_evidence=None) -> dict:
+                     frame_manifest: Mapping | None = None, frame_evidence=None,
+                     cli_execution=None, cli_expected_key=None, cli_resolver=None) -> dict:
     """Return explicit coverage and diagnostics; absent refinement cannot promote."""
     rules = tuple(tolerances)
     columns = {rule.column for rule in rules}
@@ -414,7 +427,26 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
         raise ValueError("case plan must not be empty")
     from . import reference_frames as frames
     frame_context = {}
-    if any(str(row.get("input_beta_calibration_id", "")).startswith(frames.PREFIX) for row in results) or frame_manifest is not None:
+    cli_cases = {}
+    cli_frame_identity = None
+    if cli_execution is not None:
+        if rules != tuple(DEFAULT_TOLERANCES):
+            raise ValueError("owned CLI production profiles require unchanged canonical tolerances")
+        from .execution_compatibility import verify_profile_inputs
+        cli_cases, actual_mesh, binding = verify_profile_inputs(cli_execution, results, case_plan,
+                     expected_key=cli_expected_key, frame_manifest=frame_manifest, frame_evidence=frame_evidence,
+                     resolver=cli_resolver)
+        cli_frame_identity = binding["reference_frame_id"]
+        if mesh_counts and dict(mesh_counts) != actual_mesh:
+            raise ValueError("CLI mesh counts must equal actual native global counts")
+        mesh_counts = actual_mesh
+        frame_context = {"reference_frame_context": binding, "execution_compatibility": {
+            "schema": "owned_cli_physics_compatibility_v2", "physics_key": cli_expected_key,
+            "declaration": cli_execution, "family_manifest": frame_manifest,
+            "frame_evidence": {"mapping": {"path": str(frame_evidence.path),
+                "bytes": len(frame_evidence.raw), "sha256": frame_evidence.sha256}, "root": str(frame_evidence.root)},
+            "training_admission": False}}
+    elif any(str(row.get("input_beta_calibration_id", "")).startswith(frames.PREFIX) for row in results) or frame_manifest is not None:
         if frame_manifest is None or frame_evidence is None or not frames.is_family(frame_manifest):
             raise ValueError("family profile comparison requires its explicit manifest and local audits")
         frame_context = {"reference_frame_context": frames.verify_rows(results, frame_manifest, frame_evidence)}
@@ -427,7 +459,8 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
         if not case or case in planned:
             raise ValueError("case plan has missing/duplicate case identity")
         planned[case] = dict(row)
-        groups[_point_key(row)][_profile(row)].append(case)
+        profile_id = cli_cases[case]["comparison_profile_id"] if cli_cases else _profile(row)
+        groups[_point_key(row, cli_frame_identity)][profile_id].append(case)
     family = {profile for group in groups.values() if reference_profile in group for profile in group}
     global_issues = []
     if not family:
@@ -465,8 +498,8 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
         if reference is None:
             group_errors.append("missing_or_ambiguous_reference_result")
         else:
-            group_errors.extend("reference:" + issue for issue in _identity_issues(reference, planned[reference_id]))
-            group_errors.extend("reference:" + issue for issue in _row_issues(reference, rules))
+            group_errors.extend("reference:" + issue for issue in _identity_issues(reference, planned[reference_id], cli_frame_identity))
+            group_errors.extend("reference:" + issue for issue in _row_issues(reference, rules, cli_cases.get(reference_id)))
         refined_ids = profiles.get(refined_reference_profile, []) if refined_reference_profile else []
         refined_rows = index.get(refined_ids[0], []) if len(refined_ids) == 1 else []
         refined = refined_rows[0] if len(refined_rows) == 1 else None
@@ -479,8 +512,8 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
                 cert_errors.append("missing_or_ambiguous_refined_reference_in_plan" if len(refined_ids) != 1
                                    else "missing_or_ambiguous_refined_reference_result")
         elif reference is not None:
-            cert_errors.extend("refined:" + issue for issue in _identity_issues(refined, planned[refined_ids[0]]))
-            cert_errors.extend("refined:" + issue for issue in _row_issues(refined, rules))
+            cert_errors.extend("refined:" + issue for issue in _identity_issues(refined, planned[refined_ids[0]], cli_frame_identity))
+            cert_errors.extend("refined:" + issue for issue in _row_issues(refined, rules, cli_cases.get(refined_ids[0])))
             cert_errors.extend(_source_issues(refined, reference))
             try:
                 if _number(refined, "steps_per_period") <= _number(reference, "steps_per_period"):
@@ -511,8 +544,8 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
                 errors.append("missing_or_ambiguous_candidate_result")
             metrics, ratio = {}, None
             if candidate is not None:
-                errors.extend(_identity_issues(candidate, planned[case_id]))
-                errors.extend(_row_issues(candidate, rules))
+                errors.extend(_identity_issues(candidate, planned[case_id], cli_frame_identity))
+                errors.extend(_row_issues(candidate, rules, cli_cases.get(case_id)))
                 if reference is not None:
                     errors.extend(_source_issues(candidate, reference))
                     metrics = _deltas(candidate, reference, rules)
@@ -532,7 +565,8 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
                                 "actual_mesh_elements": _mesh_count(mesh_counts, case_id)})
     profile_settings, setting_errors = {}, {}
     for profile in family:
-        variants = {json.dumps(_profile_settings(row), sort_keys=True) for row in planned.values() if _profile(row) == profile}
+        variants = {json.dumps(_profile_settings(row, profile if cli_cases else None), sort_keys=True) for row in planned.values()
+                    if (cli_cases[row["case_id"]]["comparison_profile_id"] if cli_cases else _profile(row)) == profile}
         profile_settings[profile] = json.loads(next(iter(variants))) if len(variants) == 1 else None
         setting_errors[profile] = [] if len(variants) == 1 else ["mixed_profile_settings"]
     profile_summary = []
@@ -650,6 +684,8 @@ def selected_profile_manifest(report, report_path: Path, profile: str) -> dict:
                               "sha256": hashlib.sha256(report_bytes).hexdigest()}]}
     if declared["winding_context"] is not None:
         selected["winding_context"] = dict(declared["winding_context"])
+    if "execution_compatibility" in report:
+        selected["execution_compatibility"] = report["execution_compatibility"]
     return selected
 
 
@@ -681,7 +717,19 @@ def main(argv=None):
     parser.add_argument("--require-production-profile", action="store_true")
     parser.add_argument("--selected-profile")
     parser.add_argument("--selected-output", type=Path)
+    parser.add_argument("--owned-cli-execution-evidence", type=Path)
+    parser.add_argument("--owned-cli-execution-evidence-sha256")
+    parser.add_argument("--owned-cli-physics-key")
     args = parser.parse_args(argv)
+    cli_execution = None
+    if any((args.owned_cli_execution_evidence, args.owned_cli_execution_evidence_sha256, args.owned_cli_physics_key)):
+        if not all((args.owned_cli_execution_evidence, args.owned_cli_execution_evidence_sha256, args.owned_cli_physics_key)):
+            raise ValueError("all explicit CLI execution evidence arguments are required")
+        from .public_batch_pilot import record, read_sealed
+        cli_execution = {"path": str(args.owned_cli_execution_evidence.resolve()), **record(args.owned_cli_execution_evidence)}
+        if cli_execution["sha256"] != args.owned_cli_execution_evidence_sha256:
+            raise ValueError("Root CLI execution evidence SHA differs")
+        read_sealed(cli_execution)
     if args.output.exists():
         raise FileExistsError(args.output)
     if bool(args.selected_profile) != bool(args.selected_output):
@@ -734,7 +782,8 @@ def main(argv=None):
                               refined_reference_profile=args.refined_reference_profile, tolerances=rules,
                               mesh_counts=mesh_counts,
                               frame_manifest=json.loads(args.reference_frame_manifest.read_bytes()) if args.reference_frame_manifest else None,
-                              frame_evidence=frames.evidence_from_arguments(args))
+                              frame_evidence=frames.evidence_from_arguments(args),
+                              cli_execution=cli_execution, cli_expected_key=args.owned_cli_physics_key)
     report["case_plan_sha256"] = input_files[0]["sha256"]
     report["case_plan_file"] = input_files[0]
     report["result_files"] = input_files[1:]

@@ -1,0 +1,533 @@
+{
+  "scope": "genuine existing FS100987 failed-original diagnostic evidence; no production promotion",
+  "files": {
+    "binding": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pcw2\\actual100987_binding.json",
+      "raw": {
+        "bytes": 6960,
+        "sha256": "2ef5c9912cb5c62e99b785e4dfb78d6e3b7fac795d65f05837f9182d089b64d7"
+      },
+      "gzip": {
+        "bytes": 1701,
+        "sha256": "297dcab79657a7844ed84d50e3f4de635831ac6013284d92901cfb0c5d453180"
+      }
+    },
+    "authority/task": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\task_status.json",
+      "raw": {
+        "bytes": 2094,
+        "sha256": "e8c415800517240b847be09f976fc003ecc5115071c97308a6ddf5846aa63391"
+      },
+      "gzip": {
+        "bytes": 856,
+        "sha256": "e5dc95fa3110073a6f668f8da0d3437693a67a9ac368ebbfb79a5c838ed21e9f"
+      }
+    },
+    "authority/submission": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db1_actual_pair_fs_replay_20261101\\parent_execution_state_v3\\submission_summary.json",
+      "raw": {
+        "bytes": 287,
+        "sha256": "608b3b7ad5157686b7aa48b3d26cc93675e6fe0b06fb0dfb549f1f5240e5501d"
+      },
+      "gzip": {
+        "bytes": 228,
+        "sha256": "ad04d595fbed2944d69d65edf2ca90c98c4994e8ce2a67410487b389f4c54ceb"
+      }
+    },
+    "authority/request": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db1_actual_pair_fs_replay_20261101\\submission_v3\\request_UNEXECUTED.json",
+      "raw": {
+        "bytes": 1440370,
+        "sha256": "c10fb0980570570cb24370e22940c55c08250e1f844af716d7390b3e143fd900"
+      },
+      "gzip": {
+        "bytes": 237030,
+        "sha256": "ebdc308ce760c81a64dd7d0bfa97aa453e64d32d484770fca8711f85bf2b5913"
+      }
+    },
+    "authority/seal": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\collection_seal.json",
+      "raw": {
+        "bytes": 2373,
+        "sha256": "4f46ed23490f2ae06a50a5e04b34011184f664d02e0e1cc9d6fbe9d1b8afbf1a"
+      },
+      "gzip": {
+        "bytes": 894,
+        "sha256": "4b9e865f6dab695470524767f6ce03eea76ee166e74d1684be0ff7b9b7bcc68e"
+      }
+    },
+    "authority/transport": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\ASCII_transport_manifest.json",
+      "raw": {
+        "bytes": 3388,
+        "sha256": "559db7283f6e401733ce4965a41a077a67db7f456f6d64cc50b56261b0d74198"
+      },
+      "gzip": {
+        "bytes": 1041,
+        "sha256": "10934df9308e9d8ea6bb4d1de961095b4c3600510df2b744c463aa10e1955494"
+      }
+    },
+    "authority/config": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db1_actual_pair_fs_replay_20261101\\packet_v3\\config.json",
+      "raw": {
+        "bytes": 526845,
+        "sha256": "5f2cae7eeb99de5df891d3719f123fa57b757790860338a01b9112713934d906"
+      },
+      "gzip": {
+        "bytes": 70511,
+        "sha256": "635da22df27b5b2e8799ea8ee704813650b5dd47658949815e79941fb8e6c6f6"
+      }
+    },
+    "authority/verifier": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db1_actual_pair_fs_replay_20261101\\packet_v3\\execution_evidence.py",
+      "raw": {
+        "bytes": 31313,
+        "sha256": "87c33abfce29d4cafa9e5693369113fc3c0957969ff658533ad1882f03309931"
+      },
+      "gzip": {
+        "bytes": 9236,
+        "sha256": "160fdd886181efa4c9725a41efacc1ec6fc91b5ec63a681ba44562fbf7a0c18c"
+      }
+    },
+    "authority/worker": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db1_actual_pair_fs_replay_20261101\\packet_v3\\replay_actual_pair.py",
+      "raw": {
+        "bytes": 11326,
+        "sha256": "acda3984ee895eb377db34417fc884f01b137be236f022cdaf7b4a1058c3bb2b"
+      },
+      "gzip": {
+        "bytes": 3982,
+        "sha256": "a370a2f8b35bd3b704ed3ae7bf279e357b912f791be827dee3a35dd16082b550"
+      }
+    },
+    "authority/collection_proof": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\collection_proof.json",
+      "raw": {
+        "bytes": 2082,
+        "sha256": "f49ea6aedc5767d07a8c59ef7957c4dd1f1f9e3b9b1515a8f0aac0772cd10091"
+      },
+      "gzip": {
+        "bytes": 637,
+        "sha256": "bbcee9a29fcbd79b99085a920a83cdabb699a53fd5c4b559865f901f9b469c47"
+      }
+    },
+    "publication/ASCII_transport_manifest.json": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\ASCII_transport_manifest.json",
+      "raw": {
+        "bytes": 3388,
+        "sha256": "559db7283f6e401733ce4965a41a077a67db7f456f6d64cc50b56261b0d74198"
+      },
+      "gzip": {
+        "bytes": 1041,
+        "sha256": "10934df9308e9d8ea6bb4d1de961095b4c3600510df2b744c463aa10e1955494"
+      }
+    },
+    "publication/FS_replay_result.json": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\FS_replay_result.json",
+      "raw": {
+        "bytes": 2594,
+        "sha256": "1dae2b9cb7bdb93ff47edc9898eccc985261477776e1fed5d84bdd172a52972d"
+      },
+      "gzip": {
+        "bytes": 897,
+        "sha256": "b369827f8daeeb17a557463f4b713fb0f9e05eebf6c0360c6f4c6feb89f60f87"
+      }
+    },
+    "publication/FS_replay_result.json.gz": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\FS_replay_result.json.gz",
+      "raw": {
+        "bytes": 897,
+        "sha256": "3a4b26aff519ab066c8f49aa3944f496ce026a388f535607e42ad11fff16f142"
+      },
+      "gzip": {
+        "bytes": 920,
+        "sha256": "d3b3aea607346c1cd0db3e7886741a3c073bd57920341633f4a91785fa9e9412"
+      }
+    },
+    "publication/FS_replay_result.json.gz.b64": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\FS_replay_result.json.gz.b64",
+      "raw": {
+        "bytes": 1196,
+        "sha256": "881f44be0ccbaab4cb797ece3e82b5fb715553d3c2c1cd6b52b2c1ca272a4797"
+      },
+      "gzip": {
+        "bytes": 945,
+        "sha256": "c0de85e64b5ff417c0024dcf5c5b982b1564f5d4b77f488a9757a776ee86d218"
+      }
+    },
+    "publication/evidence_index_100984.json": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\evidence_index_100984.json",
+      "raw": {
+        "bytes": 249974,
+        "sha256": "03c59125fe43b901e556816d833cd641b576a8a31c9045dbd2a23468c8aac247"
+      },
+      "gzip": {
+        "bytes": 34737,
+        "sha256": "35c4397b81bfafd817c6e823e6b19ebb100b9fee0ff3e5b3a641a7e636c83d65"
+      }
+    },
+    "publication/evidence_index_100984.json.gz": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\evidence_index_100984.json.gz",
+      "raw": {
+        "bytes": 34737,
+        "sha256": "f357baa66a89ebc2398b079bc0d1924a5d2cb5578756f2fbb2c8436ce533c12f"
+      },
+      "gzip": {
+        "bytes": 34770,
+        "sha256": "5c07df2b088d09689c0fa46a03ed9435eff4d6f4cce543b882d91ae967bf9056"
+      }
+    },
+    "publication/evidence_index_100984.json.gz.b64": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\evidence_index_100984.json.gz.b64",
+      "raw": {
+        "bytes": 46316,
+        "sha256": "8bd1bbe97b56e4ac445c41ce0ba443644be9abc5ad9bbb7b3b4e16d85dcebe74"
+      },
+      "gzip": {
+        "bytes": 35074,
+        "sha256": "601e0924f20299938ede954cfb2d806079454608f086a541aeca3654d0b23407"
+      }
+    },
+    "publication/evidence_index_100985.json": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\evidence_index_100985.json",
+      "raw": {
+        "bytes": 249979,
+        "sha256": "a11ec5d2002f6a8f027ada34e9a57fa102847616d4933c17e4a46e79e06b31b4"
+      },
+      "gzip": {
+        "bytes": 34742,
+        "sha256": "5b24db63c7c04ba107b01f77df400065c4afc03ddea78d1853101f58dd688f18"
+      }
+    },
+    "publication/evidence_index_100985.json.gz": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\evidence_index_100985.json.gz",
+      "raw": {
+        "bytes": 34742,
+        "sha256": "a52fc05e04715cdc333a68d9227b6bb1c39e8d374c00103e6770d9d8bc23e421"
+      },
+      "gzip": {
+        "bytes": 34775,
+        "sha256": "d04bff7d857bb3701961092897bb3b06a5fe7b18f318f8baef4fc760910bde85"
+      }
+    },
+    "publication/evidence_index_100985.json.gz.b64": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\evidence_index_100985.json.gz.b64",
+      "raw": {
+        "bytes": 46324,
+        "sha256": "3ce5c0e8f437c2ed936efa0b761d272f79e23faa3de00b83ee1a097f170c1002"
+      },
+      "gzip": {
+        "bytes": 35073,
+        "sha256": "50a178f25a4c85c4a5390fd48d1abe78c11eace700189a30d82b3bbc4e59a92d"
+      }
+    },
+    "publication/replay_100984.json": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\replay_100984.json",
+      "raw": {
+        "bytes": 43566,
+        "sha256": "e99936e108e4810e14e5f60997f3bd46f92167c9df94442a599c6fe967a724a0"
+      },
+      "gzip": {
+        "bytes": 7856,
+        "sha256": "4a3f986aee8944b877f375b7c64188fc16ea56c0a97ecbb1e185447da07be924"
+      }
+    },
+    "publication/replay_100984.json.gz": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\replay_100984.json.gz",
+      "raw": {
+        "bytes": 7856,
+        "sha256": "170abe042094a0b3e23319aee544fcf08e3b32160e0442f20280ff7be2f84297"
+      },
+      "gzip": {
+        "bytes": 7879,
+        "sha256": "9e10868840dcaddd2c37ce042cb578413d6f1988e7e9bab3d941b2ae4327179d"
+      }
+    },
+    "publication/replay_100984.json.gz.b64": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\replay_100984.json.gz.b64",
+      "raw": {
+        "bytes": 10476,
+        "sha256": "9e5586f8e588bb14a0c65cf14bc9cae143553e75184f97af4d9039d8ad91b370"
+      },
+      "gzip": {
+        "bytes": 7951,
+        "sha256": "efb89364f69b93630b1bc179830abd38ceee7c0eae0717b635df89e07e2175e8"
+      }
+    },
+    "publication/replay_100985.json": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\replay_100985.json",
+      "raw": {
+        "bytes": 43539,
+        "sha256": "79b4958fe71a4e0802d126abaefef3290a4003cd850cd5037cc7f241aa455c46"
+      },
+      "gzip": {
+        "bytes": 7888,
+        "sha256": "89f725f6021c8e8cbdf26be152f544fe2c0b2ca65e5407f22c95b32d2bcc071d"
+      }
+    },
+    "publication/replay_100985.json.gz": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\replay_100985.json.gz",
+      "raw": {
+        "bytes": 7888,
+        "sha256": "ae5d367f7827a781e75d04f563d6a404a861dab9af79176d808760363b8a11fa"
+      },
+      "gzip": {
+        "bytes": 7911,
+        "sha256": "ff4469cea3dbffeb2248ee016a75df1c31397f7852ed81a2e02c872e557603f2"
+      }
+    },
+    "publication/replay_100985.json.gz.b64": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2fs\\actual_100987\\replay_100985.json.gz.b64",
+      "raw": {
+        "bytes": 10520,
+        "sha256": "7e06600f9e44136a4c8ef93c54a65c62d0670c195a414c22e3136a0b3e362554"
+      },
+      "gzip": {
+        "bytes": 7972,
+        "sha256": "92b7802eb02d017e873ff20834a5f8380a0f657eb55c32b7f5bb5c2dc1d6f62b"
+      }
+    },
+    "derivations": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pcw2\\actual100987_derivations.json",
+      "raw": {
+        "bytes": 441652,
+        "sha256": "f3db54d1da751bd21d8532754e4a546a77fceb4c05d94c4e2c495082323776d6"
+      },
+      "gzip": {
+        "bytes": 96321,
+        "sha256": "3537eacd43d2d544a89c95a89410e30bd88de0e082f078654c52713b3fa4a3dd"
+      }
+    },
+    "source14/run_ipmsm_batch.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\run_ipmsm_batch.py",
+      "raw": {
+        "bytes": 150155,
+        "sha256": "f324592ad44299ed0c1c8169092630db7d09550335715b8dd51babf9c5678479"
+      },
+      "gzip": {
+        "bytes": 34764,
+        "sha256": "5a0e6ce1ff5b8290404abd252a0865c5d8da8659a7db2d25a74254b740ab5f28"
+      }
+    },
+    "source14/module/ipmsm_ppt_setup.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\module\\ipmsm_ppt_setup.py",
+      "raw": {
+        "bytes": 99478,
+        "sha256": "82c905ad6ef0a7682b25ef2fa9b903d571e1c573df228ec25ffb1730dec83e9d"
+      },
+      "gzip": {
+        "bytes": 24200,
+        "sha256": "a832c265e643935d2a6bbd3e92fe9de37366d342b733422a22873ea0c7180174"
+      }
+    },
+    "source14/module/ipmsm_geometry.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\module\\ipmsm_geometry.py",
+      "raw": {
+        "bytes": 12778,
+        "sha256": "21526b064dae8ba1770d0755057ab095e67165df62cab8f925d2363c7d484c09"
+      },
+      "gzip": {
+        "bytes": 3011,
+        "sha256": "1ed827388a57b6197c62e4afad60f7ea073eebb2fe751ee5d35d059a66ac4a5d"
+      }
+    },
+    "source14/module/variable.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\module\\variable.py",
+      "raw": {
+        "bytes": 16106,
+        "sha256": "d87359bcef6ee9442db6477ca4d43053c0bf48e3b702404f5b91f795ce52806e"
+      },
+      "gzip": {
+        "bytes": 2611,
+        "sha256": "215bf756256ef987f933d209ccf57272fa9dd6dddbe3873265d2368c5dca5df1"
+      }
+    },
+    "source14/module/ipmsm_waveform_quality.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\module\\ipmsm_waveform_quality.py",
+      "raw": {
+        "bytes": 13700,
+        "sha256": "24af0c759bdccd3cd60b22815cb90ad2fbf794318d6c9bd40eb0000b34969f9a"
+      },
+      "gzip": {
+        "bytes": 4394,
+        "sha256": "74f8a18f76429b6c3f3223d457d4d35a702b0c9d4bb8284a5ac02b65c461b973"
+      }
+    },
+    "source14/src/pyaedt_motor/batch_ownership.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\src\\pyaedt_motor\\batch_ownership.py",
+      "raw": {
+        "bytes": 14983,
+        "sha256": "9c0a5c364d19e062f40cb6337a0df60b04c8f16eff00f5250245ea82bd7066f5"
+      },
+      "gzip": {
+        "bytes": 4796,
+        "sha256": "274a95ba15baad82b9a8d4d957dfcf91c9f47065c47525f8e9832407ef16ff87"
+      }
+    },
+    "source14/configs/material_m19_29g_reference_y2.json": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\configs\\material_m19_29g_reference_y2.json",
+      "raw": {
+        "bytes": 4985,
+        "sha256": "ad85048a90e1da6cfaa33d8f4fa9df9ffd5a58960b5aeedface5e1a34cd59a04"
+      },
+      "gzip": {
+        "bytes": 1923,
+        "sha256": "6350c3d790e0b43301c604078e781f348644210279ae578f9dc4d29292e1f470"
+      }
+    },
+    "source14/src/pyaedt_motor/public_batch_pilot.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\src\\pyaedt_motor\\public_batch_pilot.py",
+      "raw": {
+        "bytes": 32012,
+        "sha256": "bb092099277d2c0abf2775f0a7a3a297c0b7c13c9a6f272bbef3da80308b6ea7"
+      },
+      "gzip": {
+        "bytes": 9669,
+        "sha256": "89b91e51eaf5454fe0b516010957ed10f8aee5d6f5637ec14947db41a2928c86"
+      }
+    },
+    "source14/src/pyaedt_motor/io.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\src\\pyaedt_motor\\io.py",
+      "raw": {
+        "bytes": 1838,
+        "sha256": "c19641b5bba9df7ddc17fe4506bda49da8d0e4453e99b85db12ae4cfcfe552cd"
+      },
+      "gzip": {
+        "bytes": 825,
+        "sha256": "8a8f55f9cd86592d5e8ee31f986e1dc420c872ed960a13e2eb56f291aea86bc0"
+      }
+    },
+    "source14/src/pyaedt_motor/solver_profile.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb64_commit\\source\\src\\pyaedt_motor\\solver_profile.py",
+      "raw": {
+        "bytes": 12468,
+        "sha256": "44e5c104d00cee5d59fb62d0eecc15c949c49776b83d4340ace278069df1992b"
+      },
+      "gzip": {
+        "bytes": 3773,
+        "sha256": "b76f2640a7fed9d8cad8b0d1b7ebda442e5253d0baa20ec9044034109c6fbff1"
+      }
+    },
+    "source15/run_ipmsm_batch.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\run_ipmsm_batch.py",
+      "raw": {
+        "bytes": 150155,
+        "sha256": "f324592ad44299ed0c1c8169092630db7d09550335715b8dd51babf9c5678479"
+      },
+      "gzip": {
+        "bytes": 34764,
+        "sha256": "5a0e6ce1ff5b8290404abd252a0865c5d8da8659a7db2d25a74254b740ab5f28"
+      }
+    },
+    "source15/module/ipmsm_ppt_setup.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\module\\ipmsm_ppt_setup.py",
+      "raw": {
+        "bytes": 99478,
+        "sha256": "82c905ad6ef0a7682b25ef2fa9b903d571e1c573df228ec25ffb1730dec83e9d"
+      },
+      "gzip": {
+        "bytes": 24200,
+        "sha256": "a832c265e643935d2a6bbd3e92fe9de37366d342b733422a22873ea0c7180174"
+      }
+    },
+    "source15/module/ipmsm_geometry.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\module\\ipmsm_geometry.py",
+      "raw": {
+        "bytes": 12778,
+        "sha256": "21526b064dae8ba1770d0755057ab095e67165df62cab8f925d2363c7d484c09"
+      },
+      "gzip": {
+        "bytes": 3011,
+        "sha256": "1ed827388a57b6197c62e4afad60f7ea073eebb2fe751ee5d35d059a66ac4a5d"
+      }
+    },
+    "source15/module/variable.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\module\\variable.py",
+      "raw": {
+        "bytes": 16106,
+        "sha256": "d87359bcef6ee9442db6477ca4d43053c0bf48e3b702404f5b91f795ce52806e"
+      },
+      "gzip": {
+        "bytes": 2611,
+        "sha256": "215bf756256ef987f933d209ccf57272fa9dd6dddbe3873265d2368c5dca5df1"
+      }
+    },
+    "source15/module/ipmsm_waveform_quality.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\module\\ipmsm_waveform_quality.py",
+      "raw": {
+        "bytes": 13700,
+        "sha256": "24af0c759bdccd3cd60b22815cb90ad2fbf794318d6c9bd40eb0000b34969f9a"
+      },
+      "gzip": {
+        "bytes": 4394,
+        "sha256": "74f8a18f76429b6c3f3223d457d4d35a702b0c9d4bb8284a5ac02b65c461b973"
+      }
+    },
+    "source15/src/pyaedt_motor/batch_ownership.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\src\\pyaedt_motor\\batch_ownership.py",
+      "raw": {
+        "bytes": 14983,
+        "sha256": "9c0a5c364d19e062f40cb6337a0df60b04c8f16eff00f5250245ea82bd7066f5"
+      },
+      "gzip": {
+        "bytes": 4796,
+        "sha256": "274a95ba15baad82b9a8d4d957dfcf91c9f47065c47525f8e9832407ef16ff87"
+      }
+    },
+    "source15/configs/material_m19_29g_reference_y2.json": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\configs\\material_m19_29g_reference_y2.json",
+      "raw": {
+        "bytes": 4985,
+        "sha256": "ad85048a90e1da6cfaa33d8f4fa9df9ffd5a58960b5aeedface5e1a34cd59a04"
+      },
+      "gzip": {
+        "bytes": 1923,
+        "sha256": "6350c3d790e0b43301c604078e781f348644210279ae578f9dc4d29292e1f470"
+      }
+    },
+    "source15/src/pyaedt_motor/public_batch_pilot.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\src\\pyaedt_motor\\public_batch_pilot.py",
+      "raw": {
+        "bytes": 34764,
+        "sha256": "5f4098187e3aabf389bfe5c47373b6d0ba70664ba7a85e1f45324db785b7ded4"
+      },
+      "gzip": {
+        "bytes": 10150,
+        "sha256": "4adb44b870e0998f8c1982633adc23c218d3a42ded272f9bd345709fdf68c0a7"
+      }
+    },
+    "source15/src/pyaedt_motor/io.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\src\\pyaedt_motor\\io.py",
+      "raw": {
+        "bytes": 1838,
+        "sha256": "c19641b5bba9df7ddc17fe4506bda49da8d0e4453e99b85db12ae4cfcfe552cd"
+      },
+      "gzip": {
+        "bytes": 825,
+        "sha256": "8a8f55f9cd86592d5e8ee31f986e1dc420c872ed960a13e2eb56f291aea86bc0"
+      }
+    },
+    "source15/src/pyaedt_motor/solver_profile.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\pb66_commit\\source\\src\\pyaedt_motor\\solver_profile.py",
+      "raw": {
+        "bytes": 12468,
+        "sha256": "44e5c104d00cee5d59fb62d0eecc15c949c49776b83d4340ace278069df1992b"
+      },
+      "gzip": {
+        "bytes": 3773,
+        "sha256": "b76f2640a7fed9d8cad8b0d1b7ebda442e5253d0baa20ec9044034109c6fbff1"
+      }
+    },
+    "legacy_db2_helper.py": {
+      "original_path": "C:\\Users\\peets\\NEC\\pyaedt_motor_runtime\\rebuild_20261030\\db2\\source\\src\\pyaedt_motor\\execution_evidence.py",
+      "raw": {
+        "bytes": 31313,
+        "sha256": "87c33abfce29d4cafa9e5693369113fc3c0957969ff658533ad1882f03309931"
+      },
+      "gzip": {
+        "bytes": 9236,
+        "sha256": "160fdd886181efa4c9725a41efacc1ec6fc91b5ec63a681ba44562fbf7a0c18c"
+      }
+    }
+  }
+}

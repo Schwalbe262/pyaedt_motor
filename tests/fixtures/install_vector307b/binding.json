@@ -1,0 +1,97 @@
+{
+  "schema": "hpc950_vendor_wrapper_launch_binding_v1",
+  "execution_user": "r1jae262",
+  "install_root": "/opt/ohpc/pub/Electronics/v252/AnsysEM",
+  "wrapper_path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/ansysedt",
+  "wrapper_symlink_chain": [
+    {
+      "path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/ansysedt",
+      "target": ".runtimeexewrapper"
+    },
+    {
+      "path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/.runtimeexewrapper",
+      "target": ".answrapper"
+    }
+  ],
+  "shebang": "#! /bin/bash ",
+  "interpreter": "/bin/bash",
+  "native_exe": "/opt/ohpc/pub/Electronics/v252/AnsysEM/ansysedt.exe",
+  "known_installed_files": [
+    {
+      "path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/ansysedt",
+      "bytes": 17333,
+      "sha256": "dafc763ef0b8e8a2a4630aa5e8d7a0a9770c99038d637429ef9b2ddaa87d92fd"
+    },
+    {
+      "path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/ansysedt.exe",
+      "bytes": 4891104,
+      "sha256": "d51aa91e8d31b12c8ab3a6bc90bb079604ede25118831373f8838b64d5f610ed"
+    },
+    {
+      "path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/product.info",
+      "bytes": 128,
+      "sha256": "2edce646ea160aa4b7be2df5e113eb34741bc5418223dfbe5338044cb6a6e6db"
+    },
+    {
+      "path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/.setup_runtime",
+      "bytes": 34554,
+      "sha256": "5fae3927d4c949d3682c83880f2941270b864fdf8dad1fce5beada8faf29e149"
+    },
+    {
+      "path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/mainwin561/Linux64/mw/setmwruntime",
+      "bytes": 5257,
+      "sha256": "0def7a314ca0bd25b2acf2fc002b4d532cab0165e22294fb4ff87d6fd5d08a6c"
+    },
+    {
+      "path": "/opt/ohpc/pub/Electronics/v252/AnsysEM/.prodsetup",
+      "bytes": 291,
+      "sha256": "93468b29d5abfc3755595ff4d0a31348417f48f8583e9e226b0b4b9eea84c93a"
+    }
+  ],
+  "static_registry_relative": "mainwin561/Linux64/GenericClassicRegistry/mainwin.classic.hklm.bin",
+  "static_registry_policy": "Require readable regular resource before launch, record its SHA before/after. No manual registry edit. Native MWREGISTRY must resolve to this exact static resource.",
+  "native_argv_model": "Native argv is [native_exe,*wrapper_argv[1:]] per wrapper608/619 and runtime593 in ANS_MWREG=static; no CmdPrefix/mono/remote runtime switches permitted.",
+  "single_Native_source_model": {
+    "wrapper_ranges": [
+      [
+        125,
+        163
+      ],
+      [
+        608,
+        625
+      ]
+    ],
+    "runtime_ranges": [
+      [
+        425,
+        438
+      ],
+      [
+        545,
+        598
+      ],
+      [
+        773,
+        830
+      ],
+      [
+        835,
+        864
+      ]
+    ],
+    "static_skips_first_call_and_autoconfiguration": true
+  },
+  "actual_FS_proof": {
+    "task_id": 100975,
+    "stdout": {
+      "bytes": 142702,
+      "sha256": "709eee6a2d1c3bb9bb349bb04490836faa89bbcc79071136c08aae5a468981ba"
+    },
+    "collection_proof": {
+      "bytes": 992,
+      "sha256": "f9ee963378429618055f6e5c650fddb7c1b90a45cecb141b1338fe1f9b77de23"
+    }
+  },
+  "actual_runtime_verified": false
+}

@@ -1,0 +1,482 @@
+{
+  "cases": {
+    "1": {
+      "CLI_wall_s_includes_autoextract": 1896.2063851449639,
+      "known_normal_CLI": true,
+      "matrix_core_counts": {
+        "4": 1801
+      },
+      "mesh_budget_scale": 1,
+      "native_global_triangles": 9828,
+      "original_pilot_status": "solved_saved_closure_unproven",
+      "original_saved_strict_passed": false,
+      "original_task_exit": 1,
+      "original_task_status": "failed",
+      "physics_issues": [],
+      "profile_convergence_certified": false,
+      "raw_all_9_grids_1801": true,
+      "regional_sum_not_global_N": 19656,
+      "same_instance_policy_semantic": null,
+      "steady_passed": true,
+      "targets": {
+        "output_coreloss_last_avg_w": 25.284712647707,
+        "output_efficiency_last_pct": 91.92810051670952,
+        "output_ld_last_avg_h": 0.0006751847686258351,
+        "output_lq_last_avg_h": 0.0006652461241945865,
+        "output_phase_voltage_last_peak_abs_v": 27.18789922355866,
+        "output_solidloss_last_avg_w": 8.36363216961108,
+        "output_torque_last_avg_nm": 20.481042305919765,
+        "output_torque_last_max_nm": 25.1006716660251,
+        "output_total_loss_last_avg_w": 225.99008073538454,
+        "output_voltage_span_last_peak_v": 48.297925319700575
+      },
+      "task_id": 100985,
+      "training_allowed": false,
+      "unique_final_parts": 38,
+      "whole_pilot_wall_s": 1938.4014373235404
+    },
+    "2": {
+      "CLI_wall_s_includes_autoextract": 3382.3285482674837,
+      "known_normal_CLI": true,
+      "matrix_core_counts": {
+        "4": 1801
+      },
+      "mesh_budget_scale": 2,
+      "native_global_triangles": 17502,
+      "original_pilot_status": "solved_saved_closure_unproven",
+      "original_saved_strict_passed": false,
+      "original_task_exit": 1,
+      "original_task_status": "failed",
+      "physics_issues": [],
+      "profile_convergence_certified": false,
+      "raw_all_9_grids_1801": true,
+      "regional_sum_not_global_N": 35004,
+      "same_instance_policy_semantic": true,
+      "steady_passed": true,
+      "targets": {
+        "output_coreloss_last_avg_w": 25.5674941236162,
+        "output_efficiency_last_pct": 91.92106010218616,
+        "output_ld_last_avg_h": 0.0006762640992016642,
+        "output_lq_last_avg_h": 0.0006675619032834548,
+        "output_phase_voltage_last_peak_abs_v": 26.99710097959141,
+        "output_solidloss_last_avg_w": 8.343593273898422,
+        "output_torque_last_avg_nm": 20.485416125772606,
+        "output_torque_last_max_nm": 25.0651816106591,
+        "output_total_loss_last_avg_w": 226.25282331558108,
+        "output_voltage_span_last_peak_v": 48.48983349013669
+      },
+      "task_id": 100989,
+      "training_allowed": false,
+      "unique_final_parts": 38,
+      "whole_pilot_wall_s": 3427.3938233759254
+    },
+    "4": {
+      "CLI_wall_s_includes_autoextract": 4612.285113887861,
+      "known_normal_CLI": true,
+      "matrix_core_counts": {
+        "4": 1801
+      },
+      "mesh_budget_scale": 4,
+      "native_global_triangles": 26478,
+      "original_pilot_status": "solved_saved_closure_unproven",
+      "original_saved_strict_passed": false,
+      "original_task_exit": 1,
+      "original_task_status": "failed",
+      "physics_issues": [],
+      "profile_convergence_certified": false,
+      "raw_all_9_grids_1801": true,
+      "regional_sum_not_global_N": 52956,
+      "same_instance_policy_semantic": true,
+      "steady_passed": true,
+      "targets": {
+        "output_coreloss_last_avg_w": 25.60847771910435,
+        "output_efficiency_last_pct": 91.90311140261151,
+        "output_ld_last_avg_h": 0.000680388315664183,
+        "output_lq_last_avg_h": 0.0006762875578969941,
+        "output_phase_voltage_last_peak_abs_v": 27.05974957357911,
+        "output_solidloss_last_avg_w": 8.261592995188243,
+        "output_torque_last_avg_nm": 20.43230933647781,
+        "output_torque_last_max_nm": 25.0048062188394,
+        "output_total_loss_last_avg_w": 226.21180663235913,
+        "output_voltage_span_last_peak_v": 48.28247546427636
+      },
+      "task_id": 100990,
+      "training_allowed": false,
+      "unique_final_parts": 38,
+      "whole_pilot_wall_s": 4655.871853752062
+    }
+  },
+  "pairs": {
+    "M1_vs_M2": {
+      "all_10_original_thresholds_passed": true,
+      "metrics": {
+        "output_coreloss_last_avg_w": {
+          "candidate": 25.284712647707,
+          "delta": -0.2827814759092,
+          "error": 1.1060195204973187,
+          "kind": "relative_pct",
+          "limit": 5.0,
+          "passed": true,
+          "reference": 25.5674941236162
+        },
+        "output_efficiency_last_pct": {
+          "candidate": 91.92810051670952,
+          "delta": 0.007040414523359573,
+          "error": 0.007040414523359573,
+          "kind": "absolute_pp",
+          "limit": 0.5,
+          "passed": true,
+          "reference": 91.92106010218616
+        },
+        "output_ld_last_avg_h": {
+          "candidate": 0.0006751847686258351,
+          "delta": -1.079330575829156e-06,
+          "error": 0.15960193319493304,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 0.0006762640992016642
+        },
+        "output_lq_last_avg_h": {
+          "candidate": 0.0006652461241945865,
+          "delta": -2.31577908886831e-06,
+          "error": 0.3469010255794963,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 0.0006675619032834548
+        },
+        "output_phase_voltage_last_peak_abs_v": {
+          "candidate": 27.18789922355866,
+          "delta": 0.19079824396725087,
+          "error": 0.7067360458868741,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 26.99710097959141
+        },
+        "output_solidloss_last_avg_w": {
+          "candidate": 8.36363216961108,
+          "delta": 0.02003889571265738,
+          "error": 0.24017105166602273,
+          "kind": "relative_pct",
+          "limit": 5.0,
+          "passed": true,
+          "reference": 8.343593273898422
+        },
+        "output_torque_last_avg_nm": {
+          "candidate": 20.481042305919765,
+          "delta": -0.00437381985284091,
+          "error": 0.021350895807960804,
+          "kind": "relative_pct",
+          "limit": 1.0,
+          "passed": true,
+          "reference": 20.485416125772606
+        },
+        "output_torque_last_max_nm": {
+          "candidate": 25.1006716660251,
+          "delta": 0.03549005536600092,
+          "error": 0.14159105614023793,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 25.0651816106591
+        },
+        "output_total_loss_last_avg_w": {
+          "candidate": 225.99008073538454,
+          "delta": -0.2627425801965444,
+          "error": 0.11612786808413295,
+          "kind": "relative_pct",
+          "limit": 3.0,
+          "passed": true,
+          "reference": 226.25282331558108
+        },
+        "output_voltage_span_last_peak_v": {
+          "candidate": 48.297925319700575,
+          "delta": -0.19190817043611474,
+          "error": 0.395769910150652,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 48.48983349013669
+        }
+      },
+      "reference_is_exact_truth": false,
+      "violations": []
+    },
+    "M1_vs_M4": {
+      "all_10_original_thresholds_passed": true,
+      "metrics": {
+        "output_coreloss_last_avg_w": {
+          "candidate": 25.284712647707,
+          "delta": -0.3237650713973501,
+          "error": 1.264288627183083,
+          "kind": "relative_pct",
+          "limit": 5.0,
+          "passed": true,
+          "reference": 25.60847771910435
+        },
+        "output_efficiency_last_pct": {
+          "candidate": 91.92810051670952,
+          "delta": 0.024989114098005416,
+          "error": 0.024989114098005416,
+          "kind": "absolute_pp",
+          "limit": 0.5,
+          "passed": true,
+          "reference": 91.90311140261151
+        },
+        "output_ld_last_avg_h": {
+          "candidate": 0.0006751847686258351,
+          "delta": -5.2035470383479535e-06,
+          "error": 0.7647907699985034,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 0.000680388315664183
+        },
+        "output_lq_last_avg_h": {
+          "candidate": 0.0006652461241945865,
+          "delta": -1.1041433702407692e-05,
+          "error": 1.6326536801508658,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 0.0006762875578969941
+        },
+        "output_phase_voltage_last_peak_abs_v": {
+          "candidate": 27.18789922355866,
+          "delta": 0.12814964997954803,
+          "error": 0.47358032501776054,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 27.05974957357911
+        },
+        "output_solidloss_last_avg_w": {
+          "candidate": 8.36363216961108,
+          "delta": 0.10203917442283661,
+          "error": 1.2351028970111062,
+          "kind": "relative_pct",
+          "limit": 5.0,
+          "passed": true,
+          "reference": 8.261592995188243
+        },
+        "output_torque_last_avg_nm": {
+          "candidate": 20.481042305919765,
+          "delta": 0.0487329694419536,
+          "error": 0.23850935613504348,
+          "kind": "relative_pct",
+          "limit": 1.0,
+          "passed": true,
+          "reference": 20.43230933647781
+        },
+        "output_torque_last_max_nm": {
+          "candidate": 25.1006716660251,
+          "delta": 0.09586544718570167,
+          "error": 0.38338808286174064,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 25.0048062188394
+        },
+        "output_total_loss_last_avg_w": {
+          "candidate": 225.99008073538454,
+          "delta": -0.2217258969745899,
+          "error": 0.09801694273851065,
+          "kind": "relative_pct",
+          "limit": 3.0,
+          "passed": true,
+          "reference": 226.21180663235913
+        },
+        "output_voltage_span_last_peak_v": {
+          "candidate": 48.297925319700575,
+          "delta": 0.015449855424215286,
+          "error": 0.031998888366124585,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 48.28247546427636
+        }
+      },
+      "reference_is_exact_truth": false,
+      "violations": []
+    },
+    "M2_vs_M4": {
+      "all_10_original_thresholds_passed": true,
+      "metrics": {
+        "output_coreloss_last_avg_w": {
+          "candidate": 25.5674941236162,
+          "delta": -0.040983595488150115,
+          "error": 0.16003917115922775,
+          "kind": "relative_pct",
+          "limit": 5.0,
+          "passed": true,
+          "reference": 25.60847771910435
+        },
+        "output_efficiency_last_pct": {
+          "candidate": 91.92106010218616,
+          "delta": 0.017948699574645843,
+          "error": 0.017948699574645843,
+          "kind": "absolute_pp",
+          "limit": 0.5,
+          "passed": true,
+          "reference": 91.90311140261151
+        },
+        "output_ld_last_avg_h": {
+          "candidate": 0.0006762640992016642,
+          "delta": -4.1242164625187976e-06,
+          "error": 0.606156273934953,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 0.000680388315664183
+        },
+        "output_lq_last_avg_h": {
+          "candidate": 0.0006675619032834548,
+          "delta": -8.725654613539382e-06,
+          "error": 1.2902284703673925,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 0.0006762875578969941
+        },
+        "output_phase_voltage_last_peak_abs_v": {
+          "candidate": 26.99710097959141,
+          "delta": -0.06264859398770284,
+          "error": 0.23151948918578444,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 27.05974957357911
+        },
+        "output_solidloss_last_avg_w": {
+          "candidate": 8.343593273898422,
+          "delta": 0.08200027871017923,
+          "error": 0.9925480322976238,
+          "kind": "relative_pct",
+          "limit": 5.0,
+          "passed": true,
+          "reference": 8.261592995188243
+        },
+        "output_torque_last_avg_nm": {
+          "candidate": 20.485416125772606,
+          "delta": 0.05310678929479451,
+          "error": 0.2599157462831817,
+          "kind": "relative_pct",
+          "limit": 1.0,
+          "passed": true,
+          "reference": 20.43230933647781
+        },
+        "output_torque_last_max_nm": {
+          "candidate": 25.0651816106591,
+          "delta": 0.06037539181970075,
+          "error": 0.24145514782758867,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 25.0048062188394
+        },
+        "output_total_loss_last_avg_w": {
+          "candidate": 226.25282331558108,
+          "delta": 0.04101668322195451,
+          "error": 0.018131981629329844,
+          "kind": "relative_pct",
+          "limit": 3.0,
+          "passed": true,
+          "reference": 226.21180663235913
+        },
+        "output_voltage_span_last_peak_v": {
+          "candidate": 48.48983349013669,
+          "delta": 0.20735802586033003,
+          "error": 0.4294685056356562,
+          "kind": "relative_pct",
+          "limit": 2.0,
+          "passed": true,
+          "reference": 48.28247546427636
+        }
+      },
+      "reference_is_exact_truth": false,
+      "violations": []
+    }
+  },
+  "profile_convergence_certified": false,
+  "schema": "actual307b_spatial_diagnostic_summary_v1",
+  "source_comparison": {
+    "bytes": 30693,
+    "sha256": "f4ccc572de6e3a78a3cacd64ff93cde879a98cff81130513ebb7b3abdcf1ae41"
+  },
+  "status": "SINGLE_POINT_DIAGNOSTIC_ONLY",
+  "tolerances": [
+    {
+      "assumption": false,
+      "column": "output_torque_last_avg_nm",
+      "denominator_floor": 1.0,
+      "kind": "relative_pct",
+      "limit": 1.0
+    },
+    {
+      "assumption": true,
+      "column": "output_torque_last_max_nm",
+      "denominator_floor": 1.0,
+      "kind": "relative_pct",
+      "limit": 2.0
+    },
+    {
+      "assumption": false,
+      "column": "output_coreloss_last_avg_w",
+      "denominator_floor": 1.0,
+      "kind": "relative_pct",
+      "limit": 5.0
+    },
+    {
+      "assumption": false,
+      "column": "output_solidloss_last_avg_w",
+      "denominator_floor": 1.0,
+      "kind": "relative_pct",
+      "limit": 5.0
+    },
+    {
+      "assumption": false,
+      "column": "output_total_loss_last_avg_w",
+      "denominator_floor": 1.0,
+      "kind": "relative_pct",
+      "limit": 3.0
+    },
+    {
+      "assumption": false,
+      "column": "output_efficiency_last_pct",
+      "denominator_floor": 1.0,
+      "kind": "absolute_pp",
+      "limit": 0.5
+    },
+    {
+      "assumption": true,
+      "column": "output_ld_last_avg_h",
+      "denominator_floor": 1e-09,
+      "kind": "relative_pct",
+      "limit": 2.0
+    },
+    {
+      "assumption": true,
+      "column": "output_lq_last_avg_h",
+      "denominator_floor": 1e-09,
+      "kind": "relative_pct",
+      "limit": 2.0
+    },
+    {
+      "assumption": true,
+      "column": "output_phase_voltage_last_peak_abs_v",
+      "denominator_floor": 1.0,
+      "kind": "relative_pct",
+      "limit": 2.0
+    },
+    {
+      "assumption": true,
+      "column": "output_voltage_span_last_peak_v",
+      "denominator_floor": 1.0,
+      "kind": "relative_pct",
+      "limit": 2.0
+    }
+  ],
+  "training_admission": false
+}

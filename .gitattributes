@@ -26,3 +26,11 @@ legacy/v4r5_native_contract_2026_07/** -text -whitespace
 
 # Keep the published, SHA-sealed experiment figures byte-identical to their source.
 /docs/experiments/2026-11-01_public_cycles/*.svg -text
+/docs/experiments/2026-11-01_public_spatial/** -text -whitespace
+
+# Portable execution fixtures preserve their sealed raw and provenance bytes.
+/tests/fixtures/compatibility_legacy/** -text -whitespace
+/tests/fixtures/family_origin307b/** -text -whitespace
+/tests/fixtures/install_vector307b/** -text -whitespace
+/tests/fixtures/owned_cli_upstream/** -text -whitespace
+/tests/fixtures/public_cli_p3_numeric/** -text -whitespace

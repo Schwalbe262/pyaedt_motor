@@ -6,13 +6,17 @@ not an independently verified motor design, nor a proof of global optimality.
 from __future__ import annotations
 
 import argparse
+import asyncio
 from collections import Counter
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 import math
 import os
+import threading
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -26,6 +30,7 @@ from ipmsm_optimization import (
     optimization_spec_from_mapping, phase_resistance_100c_ohm,
 )
 from . import doe
+from . import model_bundle as bundle_runtime
 from .doe import ACTIVE_GEOMETRY, physical_geometry_hash, sample_feasible_geometries
 from .model_bundle import (
     ALL_TARGETS, REQUIRED_FINGERPRINTS, PhysicalMotorBundle, canonical_json,
@@ -46,6 +51,14 @@ _IMPORTED_OPTIMIZER_SHA256 = _IMPORTED_OPTIMIZER_SOURCES["optimize_physical.py"]
 
 def _digest(value) -> str:
     return hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def _execution_context():
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+    return threading.get_ident(), id(task) if task is not None else None
 
 
 @dataclass
@@ -102,6 +115,72 @@ class PhysicalBundleAdapter:
         self._bind_domain()
         self._metadata_sha256 = _digest(bundle.metadata)
         self.artifact_provenance: dict = {"kind": "in_memory_approved_bundle"}
+        self._search_session = ContextVar("checked_search_" + str(id(self)), default=None)
+
+    def _session(self):
+        session = self._search_session.get()
+        if session is not None and session["active"] and session["owner"] == _execution_context():
+            return session
+        return None
+
+    def _context_pin(self):
+        return _digest({"metadata": self.bundle.metadata, "fingerprints": self.fingerprints,
+            "domain": self.domain, "spec": asdict(self.spec), "source_spec": self.source_spec,
+            "manifest": self.calibration_manifest, "artifact": self.artifact_provenance,
+            "imported_optimizer_sources": _IMPORTED_OPTIMIZER_SOURCES,
+            "imported_prediction_sources": bundle_runtime._IMPORTED_PREDICTION_SOURCES,
+            "evidence_identity": id(self.frame_evidence)})
+
+    def _full_search_check(self):
+        if _digest(self.bundle.metadata) != self._metadata_sha256:
+            raise ValueError("bundle metadata changed after optimization context binding")
+        if self.frame_evidence is not None:
+            self.frame_evidence.assert_unchanged()
+        if any(sha256(path) != _IMPORTED_OPTIMIZER_SOURCES[name] for name, path in _OPTIMIZER_SOURCE_PATHS.items()):
+            raise ValueError("optimizer source changed; refusing checked search publication")
+        if bundle_runtime.source_contract() != bundle_runtime._IMPORTED_PREDICTION_SOURCES:
+            raise ValueError("model prediction source changed; refusing checked search publication")
+
+    def _check_prediction_evidence(self):
+        session = self._session()
+        if session is None:
+            if self.frame_evidence is not None:
+                self.frame_evidence.assert_unchanged()
+            return
+        if self._context_pin() != session["pin"]:
+            raise ValueError("checked search memory authority or model context changed")
+        if self.frame_evidence is not None:
+            memory_check = getattr(self.frame_evidence, "assert_memory_unchanged", None)
+            if memory_check is not None:
+                memory_check()
+            else:
+                from . import reference_frames as frames
+                if frames.digest(self.frame_evidence.mapping) != self.frame_evidence._mapping_digest:
+                    raise ValueError("local evidence mapping changed in memory")
+
+    @contextmanager
+    def _checked_search(self, *, join=False):
+        # Only this synchronous atomic call may defer disk scans. A copied
+        # context on another thread/task and a closed session remain strict.
+        if join and self._session() is not None:
+            self._check_prediction_evidence()
+            try:
+                yield
+            finally:
+                self._check_prediction_evidence()
+            return
+        self._full_search_check()
+        session = {"owner": _execution_context(), "pin": self._context_pin(), "active": True}
+        token = self._search_session.set(session)
+        try:
+            yield
+        finally:
+            try:
+                self._check_prediction_evidence()
+                self._full_search_check()
+            finally:
+                session["active"] = False
+                self._search_session.reset(token)
 
     @classmethod
     def from_directory(cls, directory: Path, source_spec: Mapping,
@@ -168,6 +247,7 @@ class PhysicalBundleAdapter:
 
     def build_inputs(self, design: Mapping, point: OperatingPoint,
                      controls: Sequence[tuple[float, float]]) -> pd.DataFrame:
+        self._check_prediction_evidence()
         values = self.normalize_design(design)
         length = values["stack_length_mm"]
         metrics = geometry_metrics(values, length, self.spec.winding, slot_number=self.spec.slot_number)
@@ -193,11 +273,13 @@ class PhysicalBundleAdapter:
 
     def predict_controls(self, design: Mapping, point: OperatingPoint,
                          controls: Sequence[tuple[float, float]]) -> PredictionBatch:
+        self._check_prediction_evidence()
         if _digest(self.bundle.metadata) != self._metadata_sha256:
             raise ValueError("bundle metadata changed after optimization context binding")
         frame = self.build_inputs(design, point, controls)
         if not len(frame):
             empty = pd.DataFrame(columns=ALL_TARGETS)
+            self._check_prediction_evidence()
             return PredictionBatch(frame, empty, empty.copy(), empty.copy(), {}, 0)
         columns = self.domain["input_columns"]
         supported = np.isfinite(frame[columns].to_numpy(float)).all(axis=1)
@@ -217,6 +299,7 @@ class PhysicalBundleAdapter:
         selected = frame.loc[supported]
         empty = pd.DataFrame(columns=ALL_TARGETS, index=selected.index)
         if not len(selected):
+            self._check_prediction_evidence()
             return PredictionBatch(selected, empty, empty.copy(), empty.copy(), reasons, len(frame))
         validate_inputs(selected, self.domain)
         predictions = self.bundle.predict(selected, fingerprints=self.fingerprints, with_bounds=True)
@@ -228,6 +311,7 @@ class PhysicalBundleAdapter:
         if (physics_issues(center) or (lower > center + 1e-9).any().any() or
                 (upper < center - 1e-9).any().any()):
             raise ValueError("bundle returned inconsistent physical prediction intervals")
+        self._check_prediction_evidence()
         return PredictionBatch(selected, center, lower, upper, reasons, len(frame))
 
 
@@ -443,6 +527,12 @@ def generate_design_plan(adapter: PhysicalBundleAdapter, baseline: Mapping, *, c
 
 def build_fea_validation_rows(adapter: PhysicalBundleAdapter, proposals: Sequence[DesignProposal],
                               selected_profile: Path) -> tuple[list[dict], dict]:
+    with adapter._checked_search(join=True):
+        return _build_fea_validation_rows_checked(adapter, proposals, selected_profile)
+
+
+def _build_fea_validation_rows_checked(adapter: PhysicalBundleAdapter, proposals: Sequence[DesignProposal],
+                                      selected_profile: Path) -> tuple[list[dict], dict]:
     """Replay a sealed approved profile; never guess missing artifact settings.
 
     Only supported predicted-feasible proposals receive runnable rows. These
@@ -450,7 +540,11 @@ def build_fea_validation_rows(adapter: PhysicalBundleAdapter, proposals: Sequenc
     """
     if not adapter.bundle.approved or _digest(adapter.bundle.metadata) != adapter._metadata_sha256:
         raise ValueError("validation plan requires the unchanged approved model")
-    profile = doe.load_selected_profile(selected_profile)
+    from .execution_compatibility import ProductionFrameEvidence
+    if isinstance(adapter.frame_evidence, ProductionFrameEvidence):
+        profile = doe.load_selected_profile(selected_profile, execution_backend="public_owned_cli_v1")
+    else:
+        profile = doe.load_selected_profile(selected_profile)
     from . import reference_frames as frames
     if frames.is_family(adapter.calibration_manifest):
         frames.validate_reference(adapter.calibration_manifest, adapter.frame_evidence)
@@ -543,6 +637,17 @@ def build_fea_validation_rows(adapter: PhysicalBundleAdapter, proposals: Sequenc
 
 
 def search_designs(adapter: PhysicalBundleAdapter, designs: Sequence[Mapping], *, seed: int | None = None,
+                   search_variables: Sequence[str] | None = None, search_mode: str = "explicit_plan",
+                   max_design_evaluations: int = 256, selected_profile: Path | None = None) -> dict:
+    # A report/FEA-row value cannot leave this boundary until the closing full
+    # source/evidence scan succeeds, including exceptional/nested calls.
+    with adapter._checked_search():
+        return _search_designs_checked(adapter, designs, seed=seed, search_variables=search_variables,
+            search_mode=search_mode, max_design_evaluations=max_design_evaluations,
+            selected_profile=selected_profile)
+
+
+def _search_designs_checked(adapter: PhysicalBundleAdapter, designs: Sequence[Mapping], *, seed: int | None = None,
                    search_variables: Sequence[str] | None = None, search_mode: str = "explicit_plan",
                    max_design_evaluations: int = 256, selected_profile: Path | None = None) -> dict:
     if not designs:

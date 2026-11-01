@@ -126,6 +126,15 @@ def _relative(root, name):
 
 
 def verify_inputs(contract):
+    if contract.get("schema") == "public_owned_cli_execution_contract_v2":
+        from . import execution_contracts as production
+        authority = production.validate_contract(contract)
+        observed = {"source/" + name: value for name, value in contract["source_files"].items()}
+        observed.update({"library/" + name: value for name, value in contract["library_files"].items()})
+        observed.update({"syslib/" + name: value for name, value in contract["system_material_files"].items()})
+        observed.update({key: contract[key] for key in ("case", "installation_binding", "reservation_receipt")})
+        observed["production_launch"] = authority
+        return json.loads(read_sealed(contract["case"])), observed
     if contract["schema"] != SCHEMA or contract["mode"] not in {"setup_only", "solve"}:
         raise ValueError("unknown explicit pilot contract/mode")
     source, library = Path(contract["source_root"]), Path(contract["library_root"])
@@ -172,6 +181,10 @@ def execution_contract_sha256(contract):
 
 
 def validate_execution(contract, *, platform_name=None, environ=None, hostname=None):
+    production = contract.get("schema") == "public_owned_cli_execution_contract_v2"
+    if production:
+        from .execution_contracts import validate_contract
+        validate_contract(contract)
     environment = os.environ if environ is None else environ
     if (os.name if platform_name is None else platform_name) != "posix":
         raise ValueError("initial vendor-wrapper pilot is Linux-only")
@@ -193,7 +206,7 @@ def validate_execution(contract, *, platform_name=None, environ=None, hostname=N
     if (node != contract["node"] or slurm_node is not None and slurm_node != node
             or not re.fullmatch(r"[A-Za-z0-9_-]+", node)):
         raise ValueError("explicit one-host placement differs")
-    if contract["mode"] == "solve":
+    if contract["mode"] == "solve" and not production:
         item = contract.get("reservation_receipt")
         if not isinstance(item, dict) or record(item["path"]) != {k: item[k] for k in ("bytes", "sha256")}:
             raise ValueError("actual root reservation receipt required")
@@ -386,7 +399,27 @@ def postprocess(project, output, runner, spec, operation, required, builder_cont
             "normal_completion": profile.get("normal_completion") is True and profile.get("observed_v252") is True}
 
 
+def semantic_input_check(contract, before_path, after_path, prepared_record, solved_record):
+    """Same-instance full raw readback, actual pinned st2, no Native calls."""
+    from . import native_state_semantics as semantic
+    if record(semantic.__file__) != contract["source_files"]["src/pyaedt_motor/native_state_semantics.py"]:
+        raise ValueError("semantic implementation source differs")
+    policy = contract["semantic_policy"]
+    return semantic.compare_states(semantic.read_state(before_path), semantic.read_state(after_path),
+        prepared_record=prepared_record, solved_record=solved_record, renderer_producer=contract["expected_producer"],
+        policy_bytes=read_sealed(policy), policy_sha256=policy["sha256"])
+
+
 def execute(contract, output, *, runner=None, owner=None, reader=saved_native, processor=postprocess, control_record=None):
+    production = contract.get("schema") == "public_owned_cli_execution_contract_v2"
+    if production and runner is None:
+        from .execution_contracts import cohort_fingerprint
+        if "run_ipmsm_batch" in sys.modules:
+            raise ValueError("fresh production CLI process required")
+        cohort_fingerprint(contract)
+        source = Path(contract["source_root"]).resolve()
+        sys.path[:0] = [str(source), str(source / "src")]
+        runner = importlib.import_module("run_ipmsm_batch")
     case, before = verify_inputs(contract)
     if control_record is not None:
         read_sealed(control_record)
@@ -409,6 +442,13 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
               "F903_scope": {"builder_requested_environment": "0", "builder_live_feature_query": False,
                              "solver_observed_environment": None, "solver_live_feature_query": False},
               "builder_PID_is_solver_PID": False, "standalone_Analyze_return_ABI_claimed": False}
+    if production:
+        result["production_launch"] = before["production_launch"]
+        result["execution_contract_schema"] = contract["schema"]
+        result["execution_purpose"] = contract["purpose"]
+        result["execution_cohort_fingerprint"] = before["production_launch"]["cohort_fingerprint"]
+        result["execution_contract_sha256"] = before["production_launch"]["contract_sha256"]
+        result["physics_compatibility_requirement"] = before["production_launch"]["physics_compatibility_requirement"]
     start = time.monotonic()
     try:
         write_new(output / "source_and_inputs_before.json", before)
@@ -460,6 +500,12 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
             raise ValueError("prepared project differs from retained unsolved preimage")
         result["prepared_project"] = {"path": str(project), **prepared_record}
         write_new(output / "prepared_native_closure.json", saved)
+        if production and contract["semantic_policy"] is not None:
+            prepared_raw = Path(result["prepared_unsolved_project"]["path"])
+            result["semantic_preflight"] = semantic_input_check(contract, prepared_raw, prepared_raw, prepared_record, prepared_record)
+            write_new(output / "semantic_preflight.json", result["semantic_preflight"])
+            if result["semantic_preflight"]["semantic_equivalence_proven"] is not True:
+                raise ValueError("actual full raw semantic preflight failed before CLI")
         if verify_inputs(contract)[1] != before:
             raise ValueError("inputs changed before solver launch")
         if contract["mode"] == "setup_only":
@@ -509,6 +555,13 @@ def execute(contract, output, *, runner=None, owner=None, reader=saved_native, p
         after = reader(project)
         write_new(output / "solved_native_closure.json", after)
         result["saved_serialization_comparison"] = compare_saved(saved, after)
+        if production and contract["semantic_policy"] is not None:
+            result["raw_saved_serialization_comparison"] = dict(result["saved_serialization_comparison"])
+            result["same_instance_semantic_comparison"] = semantic_input_check(contract,
+                Path(result["prepared_unsolved_project"]["path"]), project,
+                {k: result["prepared_unsolved_project"][k] for k in ("bytes", "sha256")}, record(project))
+            write_new(output / "same_instance_semantic_comparison.json", result["same_instance_semantic_comparison"])
+            result["saved_serialization_comparison"]["semantic_equivalence_proven"] = result["same_instance_semantic_comparison"]["semantic_equivalence_proven"]
         result["postprocess"] = processor(project, output, runner, spec, str(case.get("operation", "sin_current")), required, built)
         post = result["postprocess"]
         result["physical_quality_rejected"] = not post["physical_passed"]
@@ -560,7 +613,8 @@ def main(argv=None):
     if sealed["sha256"] != args.contract_sha256:
         raise ValueError("explicit contract SHA mismatch")
     contract = json.loads(read_sealed(sealed))
-    verify_inputs(contract)
+    if not args.execute or contract.get("schema") == SCHEMA:
+        verify_inputs(contract)
     if not args.execute:
         print(json.dumps({"status": "PREPARED_DRY", "mode": contract["mode"], "Native_calls": 0, "BatchSolve_calls": 0}))
         return 0

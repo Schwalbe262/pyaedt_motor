@@ -349,10 +349,15 @@ def _selection_content(settings, evidence, producer, material, fingerprint, wind
                              "winding_context": winding}))
 
 
-def load_selected_profile(path: Path) -> SelectedProfile:
+def load_selected_profile(path: Path, *, execution_backend=None) -> SelectedProfile:
     path = Path(path)
     payload = path.read_bytes()
     document = _strict_json(payload)
+    if execution_backend == "public_owned_cli_v1":
+        from .execution_compatibility import verify_selected_profile
+        verified_cli = verify_selected_profile(path)
+    elif execution_backend is not None or "execution_compatibility" in document:
+        raise ValueError("explicit owned CLI profile validation required; no SDK fallback")
     if document.get("schema_version") != PROFILE_SCHEMA:
         raise ValueError(f"profile schema_version must be {PROFILE_SCHEMA}")
     if document.get("metric_contract_version") != METRIC_CONTRACT:
@@ -367,7 +372,11 @@ def load_selected_profile(path: Path) -> SelectedProfile:
     if not isinstance(evidence, list) or not evidence:
         raise ValueError("selected profile requires hashed convergence evidence")
     verified = []
+    if execution_backend == "public_owned_cli_v1":
+        verified = verified_cli["local_evidence"]
     for record in evidence:
+        if execution_backend == "public_owned_cli_v1":
+            continue  # Actual original->local byte mapping was replayed above.
         if not isinstance(record, dict) or not isinstance(record.get("path"), str):
             raise ValueError("profile evidence requires path and SHA256")
         source = Path(record["path"])
@@ -774,6 +783,17 @@ def verify_training_plan(path: Path) -> dict:
     if identifier != "training_plan_v3:sha256:" + _sha(_json_bytes(proof)):
         raise ValueError("training manifest content differs from its identifier")
     _require_manifest_sources(proof, source_pin)
+    if "profile_execution" in proof:
+        from .public_batch_pilot import read_sealed
+        declaration = proof["profile_execution"]
+        if declaration.get("backend") != "public_owned_cli_v1":
+            raise ValueError("unknown explicit profile execution backend")
+        read_sealed(declaration["selected_profile"])
+        selected = load_selected_profile(Path(declaration["selected_profile"]["path"]),
+                                         execution_backend="public_owned_cli_v1")
+        if (selected.manifest_sha256 != proof["profile_sha256"]
+                or selected.selection_content_sha256 != proof["profile_selection_sha256"]):
+            raise ValueError("owned CLI plan profile authority differs")
     payload = path.read_bytes()
     if proof.get("schema_version") != PLAN_SCHEMA or proof.get("plan_sha256") != _sha(payload):
         raise ValueError("training plan SHA256/schema mismatch")
@@ -819,6 +839,7 @@ def main(argv: list[str] | None = None) -> int:
     from . import reference_frames as frames
     frames.evidence_arguments(parser)
     parser.add_argument("--profile-manifest", type=Path, required=True)
+    parser.add_argument("--execution-backend", choices=("standalone", "public_owned_cli_v1"), default="standalone")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--exclude", type=Path, action="append", default=[])
     parser.add_argument("--geometries", type=int, default=720)
@@ -832,7 +853,8 @@ def main(argv: list[str] | None = None) -> int:
     calibration = _strict_json(args.calibration_manifest.read_bytes())
     frame_evidence = frames.evidence_from_arguments(args)
     spec = optimization_spec_from_mapping(frames.apply_reference(spec_raw, calibration, frame_evidence))
-    profile = load_selected_profile(args.profile_manifest)
+    profile = load_selected_profile(args.profile_manifest,
+              execution_backend=args.execution_backend if args.execution_backend == "public_owned_cli_v1" else None)
     excluded, exclusions = exclusion_hashes(args.exclude)
     rows, manifest = generate_training_plan(spec, calibration, profile, geometries=args.geometries, seed=args.seed,
                                             case_prefix=args.case_prefix, excluded_hashes=excluded,
@@ -840,6 +862,10 @@ def main(argv: list[str] | None = None) -> int:
                                             controls_per_geometry=args.controls_per_geometry, frame_evidence=frame_evidence)
     manifest.update(excluded_sources=exclusions, spec_file_sha256=_sha(args.spec.read_bytes()),
                     calibration_file_sha256=_sha(args.calibration_manifest.read_bytes()))
+    if args.execution_backend == "public_owned_cli_v1":
+        from .public_batch_pilot import record
+        manifest["profile_execution"] = {"backend": "public_owned_cli_v1", "selected_profile": {
+            "path": str(args.profile_manifest.resolve()), **record(args.profile_manifest)}}
     proof = write_training_plan(args.output, rows, manifest)
     print(f"Planned {len(rows)} cases/{args.geometries} groups; SHA256={proof['plan_sha256']}; "
           f"retry reserve={args.retry_reserve}; bounded refill={proof['bounded_refill_required']}; no submissions")

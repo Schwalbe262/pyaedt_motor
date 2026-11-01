@@ -1,0 +1,179 @@
+{
+  "actual_task_id": 100984,
+  "files": {
+    "PPT_Back_EMF.csv": {
+      "gzip": {
+        "bytes": 27740,
+        "sha256": "736cdd855af261ff1b787548d636d0fd32677d7aba29e7aedc6ecd15556f86ec"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtexport/IPMSM/PPT_Back_EMF-1056164.csv",
+      "raw": {
+        "bytes": 61241,
+        "sha256": "0127a7633701d592e48223245dd0744ec3c13d8c620713370c2c5b646d3c4fda"
+      }
+    },
+    "PPT_Cogging_Torque.csv": {
+      "gzip": {
+        "bytes": 10623,
+        "sha256": "ddecb1b7914163454c98dccb41244c3b870596cf931d723b3c6bbe9cade63993"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtexport/IPMSM/PPT_Cogging_Torque-1056164.csv",
+      "raw": {
+        "bytes": 29376,
+        "sha256": "5dbce207d51c67c2480d9d742ec8a68b27f8f4f18cb1d3bfedc0eac50360215d"
+      }
+    },
+    "PPT_Flux_Linkages.csv": {
+      "gzip": {
+        "bytes": 26778,
+        "sha256": "2dd6495f6c9ee8f1a09ef343de29c0b15364de24165d25b178002b6c613999cf"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtexport/IPMSM/PPT_Flux_Linkages-1056164.csv",
+      "raw": {
+        "bytes": 67032,
+        "sha256": "9a9d0d4a3766e1b92136da219f2d3c3b9335cab8619d47d74a3a0538334a07bf"
+      }
+    },
+    "PPT_Inductance_Matrix.csv": {
+      "gzip": {
+        "bytes": 57518,
+        "sha256": "4838f78584adc050de9438cbe5af269d4a7c81ef4c7efded657c1462799de61e"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtexport/IPMSM/PPT_Inductance_Matrix-1056164.csv",
+      "raw": {
+        "bytes": 156613,
+        "sha256": "1d9a1e9aa9c2f88e85713ce00e684f69e250ca6cccd546736fba9fb661fce2c8"
+      }
+    },
+    "PPT_Losses.csv": {
+      "gzip": {
+        "bytes": 19128,
+        "sha256": "7e385f186d2095ab04d61445354ee136349ec1ca9c47fbe673b2853f8821a255"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtexport/IPMSM/PPT_Losses-1056164.csv",
+      "raw": {
+        "bytes": 44565,
+        "sha256": "996d94b1cf87ded60d14b48e563c44b801669026fd79c50b7b724ffee9f4705d"
+      }
+    },
+    "PPT_PhaseA_Voltage_Limit.csv": {
+      "gzip": {
+        "bytes": 10994,
+        "sha256": "bdb580ddf431f8065664f0211b9e1a609bdd434aaccea02fe1552bbc0785fe9f"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtexport/IPMSM/PPT_PhaseA_Voltage_Limit-1056164.csv",
+      "raw": {
+        "bytes": 29443,
+        "sha256": "96ec909989b2e2d3647e456bc003f19c0b9c514204498f2360415c6970c926f6"
+      }
+    },
+    "PPT_Phase_Currents.csv": {
+      "gzip": {
+        "bytes": 13683,
+        "sha256": "7dd15e62b8ff0b51f6f066631f67b45d0b12ff7792c8c2561cff8ebf27915681"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtexport/IPMSM/PPT_Phase_Currents-1056164.csv",
+      "raw": {
+        "bytes": 61226,
+        "sha256": "6712b860d0b2164552fac3657faf9ead00ba18d08615f9d7e7e01fbf9ad11e47"
+      }
+    },
+    "PPT_Phase_Voltages.csv": {
+      "gzip": {
+        "bytes": 26944,
+        "sha256": "9357bbfb8042dcfef0e5854740b7fdfb191f350e057d8bc795a864975667c5d8"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtexport/IPMSM/PPT_Phase_Voltages-1056164.csv",
+      "raw": {
+        "bytes": 61397,
+        "sha256": "abd6e5fcbd0593d9352694f66dfe6ecdb55a1dbd856cfb27ed6053e2928215be"
+      }
+    },
+    "PPT_Torque.csv": {
+      "gzip": {
+        "bytes": 10623,
+        "sha256": "ddecb1b7914163454c98dccb41244c3b870596cf931d723b3c6bbe9cade63993"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtexport/IPMSM/PPT_Torque-1056164.csv",
+      "raw": {
+        "bytes": 29376,
+        "sha256": "5dbce207d51c67c2480d9d742ec8a68b27f8f4f18cb1d3bfedc0eac50360215d"
+      }
+    },
+    "builder.json": {
+      "gzip": {
+        "bytes": 7585,
+        "sha256": "586ff6f0bf87f356c9076cc34c583046b7c0b390d3efb21e0587a0b13b0a6cfa"
+      },
+      "original_relative_path": "output/builder_result.json",
+      "raw": {
+        "bytes": 36623,
+        "sha256": "ec53e1574e100d27dd2fd4b7964c1c8827b8f69ac47c69405e67a9c5ec7644b9"
+      }
+    },
+    "case.json": {
+      "gzip": {
+        "bytes": 1073,
+        "sha256": "bfd06c1e8c1f53dca1159c646a19b307b8b2830b1bc9a6f5061974098a972305"
+      },
+      "original_relative_path": "bundle/case.json",
+      "raw": {
+        "bytes": 2268,
+        "sha256": "f91a084fd39a6329b1760edcb3c863f078e5be12857eba0fc2880e298aaf86ed"
+      }
+    },
+    "prepared.json": {
+      "gzip": {
+        "bytes": 45284,
+        "sha256": "90be3f01c4742315b213ebef19718afa2e985284a58414f1ef0d3f2f4bcf9df2"
+      },
+      "original_relative_path": "output/prepared_native_closure.json",
+      "raw": {
+        "bytes": 819045,
+        "sha256": "feedf2225f960cfb160c9d50389538d802871378be6d8886412f6aa510439e3b"
+      }
+    },
+    "saved.profile": {
+      "gzip": {
+        "bytes": 14245,
+        "sha256": "2b0da72ecbb403b22e76ad7f4286b117a1541545c8705352c09670c98ecc82fd"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedtresults/IPMSM.results/DV195_S141_V0.profile",
+      "raw": {
+        "bytes": 597130,
+        "sha256": "df88de99fbe87ffdae2962289204d1be1381b4631426f0d45e23a17ce885b4c4"
+      }
+    },
+    "setup_audit.json": {
+      "gzip": {
+        "bytes": 5026,
+        "sha256": "10e604b1426307a0707d87df158d81046c1b91dcc057b3b8912dbd3bda129150"
+      },
+      "original_relative_path": "output/scene/simulation2/setup_audit.json",
+      "raw": {
+        "bytes": 28232,
+        "sha256": "56fb66a2f4df3e9644ea133c316651e43b7a940d27b7a14edb61fcea1ca107ee"
+      }
+    },
+    "solved.aedt": {
+      "gzip": {
+        "bytes": 70595,
+        "sha256": "88fb6d4cf86522d75ed6da9aa6cd06a069c7562219820d597240b165c4419134"
+      },
+      "original_relative_path": "output/scene/simulation2/simulation2.aedt",
+      "raw": {
+        "bytes": 1158494,
+        "sha256": "c4e744d84a54a8ab0191a24ebbc979c693e7e9bb0a89147bec373f160f3cf965"
+      }
+    }
+  },
+  "original_collection_seal": {
+    "bytes": 22219,
+    "sha256": "95ac4cd937a96ff81bff35e61d79c38ae2797458f5bcdb2b4d48535ac6e9125e"
+  },
+  "original_worker_status_preserved": "solved_saved_closure_unproven",
+  "physical_renderer": "producer_v3:sha256:307b1fd890dec70f23feb6daa5667a09fad370064de78acf58e66fba64a2beae",
+  "schema": "public_cli_p3_numeric_portable_fixture_v1",
+  "source_commit": "224fafd297822072c3b2a5b835d9f7b0aa8443e4",
+  "test_scope": "Actual numeric/saved-file bytes with inert owned-process/control context; not Native proof or admission"
+}

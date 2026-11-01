@@ -72,8 +72,51 @@ def score_by_speed(truth: pd.DataFrame, predictions: pd.DataFrame) -> dict:
             "rows": len(truth), "by_speed_rpm": records}
 
 
-def validate_new_data(frame: pd.DataFrame) -> None:
+def validate_cli_training_inputs(frame, cli_inputs=None):
+    """Missing CLI evidence cannot enter the SDK path or promote False admission."""
+    from . import execution_contracts as contracts
+    if "input_execution_backend" not in frame:
+        if cli_inputs is not None or any(key in frame for key in
+                ("input_execution_contract_sha256", "input_execution_cohort_fingerprint")):
+            raise ValueError("explicit CLI backend marker missing; no SDK fallback")
+        return  # Existing SDK path, unchanged. CLI collectors must label rows.
+    backends = set(frame["input_execution_backend"].astype(str))
+    if len(backends) != 1:
+        raise ValueError("mixed SDK/CLI training backends require separate cohorts")
+    cli_keys = set()
+    for row in frame.to_dict("records"):
+        backend = row.get("input_execution_backend")
+        if backend == "standalone":
+            from .reference_frames import _missing_csv
+            if cli_inputs is not None or any(not _missing_csv(row.get(key)) for key in
+                    ("input_execution_contract_sha256", "input_execution_cohort_fingerprint", "input_execution_purpose")):
+                raise ValueError("SDK row carries CLI authority markers; no backend laundering")
+            continue
+        if backend != contracts.BACKEND or cli_inputs is None:
+            raise ValueError("explicit CLI training evidence required; no SDK fallback")
+        entry = cli_inputs["cases"].get(row["case_id"])
+        if entry is None:
+            raise ValueError("missing case-specific CLI training evidence")
+        from .execution_archive import contract_from_entry
+        contract = contract_from_entry(entry)
+        if contract["purpose"] != "training":
+            raise ValueError("diagnostic/design launch cannot become training")
+        from .execution_evidence import verify_production_cli_evidence
+        proof = verify_production_cli_evidence(**entry["cli_index"], case_id=row["case_id"],
+                                    producer=contract["expected_producer"])
+        if (proof.get("training_eligible") is not True or proof.get("errors")
+                or proof.get("solver_context_known") is not True or proof.get("solver_state_uncertain") is not False):
+            raise ValueError("actual CLI production admission remains false or unproved")
+        from .reference_frames import _verify_collected_row
+        _verify_collected_row(row, proof["production_row"], {})
+        cli_keys.add(proof["physics_key"])
+    if len(cli_keys) > 1:
+        raise ValueError("mixed production physics compatibility in one training cohort")
+
+
+def validate_new_data(frame: pd.DataFrame, *, cli_inputs=None) -> None:
     """Reject bad/old rows rather than silently changing the evaluation cohort."""
+    validate_cli_training_inputs(frame, cli_inputs)
     required = {"case_id", "geometry_group_id", "design_hash", "input_metric_contract_version", "input_producer_fingerprint",
                 "input_stack_length_mm", *["input_" + name for name in GEOMETRY], *ALL_TARGETS}
     if required - set(frame):
@@ -162,7 +205,8 @@ def _outside_support_count(inputs, domain) -> int:
 
 
 def fit_prepared(prepared, spec: dict, destination: Path, *, seed=42, jobs=4,
-                 candidates=CANDIDATES, data_sha256: str | None = None, frame_evidence=None) -> PhysicalMotorBundle:
+                 candidates=CANDIDATES, data_sha256: str | None = None, frame_evidence=None, cli_inputs=None,
+                 cli_inputs_authority=None) -> PhysicalMotorBundle:
     """Publish selection before evaluating the full preassigned test cohort."""
     import train_ipmsm_lightgbm as trainer
     runtime_pin = capture_runtime_pin()
@@ -174,14 +218,17 @@ def fit_prepared(prepared, spec: dict, destination: Path, *, seed=42, jobs=4,
     training_hashes = {name: source_payload_sha256(payload) for name, payload in training_payloads.items()}
     def publication_guard():
         assert_runtime_pin(runtime_pin)
+        if cli_inputs_authority is not None:
+            from .public_batch_pilot import read_sealed
+            read_sealed(cli_inputs_authority)
         if frame_evidence is not None:
             frame_evidence.assert_unchanged()
         if any(source_payload_sha256(path.read_bytes()) != training_hashes[name]
                for name, path in training_paths.items()):
             raise RuntimeError("training/preprocessing code changed during fitting; refusing publication")
     publication_guard()
-    validate_new_data(prepared.raw_df)
-    validate_new_data(prepared.valid_df)
+    validate_new_data(prepared.raw_df, cli_inputs=cli_inputs)
+    validate_new_data(prepared.valid_df, cli_inputs=cli_inputs)
     if any(prepared.repaired_derived_inputs.values()):
         raise ValueError("new v3 data must not require historical geometry repairs")
     assert_effective_cohort_unchanged(prepared)
@@ -267,7 +314,22 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--cli-inputs", type=Path)
+    parser.add_argument("--cli-inputs-sha256")
     args = parser.parse_args(argv)
+    cli_inputs = None
+    cli_inputs_authority = None
+    if bool(args.cli_inputs) != bool(args.cli_inputs_sha256):
+        raise ValueError("CLI inputs path and SHA must be supplied together")
+    if args.cli_inputs:
+        from .public_batch_pilot import read_sealed, record
+        sealed = {"path": str(args.cli_inputs), **record(args.cli_inputs)}
+        if sealed["sha256"] != args.cli_inputs_sha256:
+            raise ValueError("CLI training input authority SHA differs")
+        from .execution_archive import production_inputs_document
+        from .execution_compatibility import Reads
+        cli_inputs = production_inputs_document(sealed, Reads())
+        cli_inputs_authority = sealed
     if args.output.exists():
         raise FileExistsError(args.output)
     if args.jobs < 1 or args.seed < 0:
@@ -283,11 +345,12 @@ def main(argv=None):
         snapshot = Path(temporary) / args.data.name
         snapshot.write_bytes(payload)
         frame = pd.read_csv(snapshot, low_memory=False)
-        validate_new_data(frame)
+        validate_new_data(frame, cli_inputs=cli_inputs)
         prepared = trainer.prepare_training_data(deps, [snapshot], False, False, 1.5, v2=True)
         bundle = fit_prepared(prepared, json.loads(args.spec.read_text(encoding="utf-8-sig")), args.output,
                               seed=args.seed, jobs=args.jobs, data_sha256=digest,
-                              frame_evidence=frames.evidence_from_arguments(args))
+                              frame_evidence=frames.evidence_from_arguments(args), cli_inputs=cli_inputs,
+                              cli_inputs_authority=cli_inputs_authority)
     atomic_write_bytes(args.output / "source_dataset.csv", payload)
     for target, metric in bundle.metadata["test_metrics"].items():
         print(f"{target}: R2={metric['r2']} MAE={metric['mae']}")

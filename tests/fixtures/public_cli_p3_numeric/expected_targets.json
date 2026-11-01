@@ -1,0 +1,18 @@
+{
+  "source_pilot_record": {
+    "bytes": 126831,
+    "sha256": "eb1790fc4e8b52e11ba8b537f40c3340a30f34b7abcf7af89d3ac1681163f84e"
+  },
+  "summary": {
+    "output_coreloss_last_avg_w": 25.110062579265374,
+    "output_efficiency_last_pct": 91.93447604411358,
+    "output_ld_last_avg_h": 0.0006751824391597523,
+    "output_lq_last_avg_h": 0.0006650839752101205,
+    "output_phase_voltage_last_peak_abs_v": 27.146165260714728,
+    "output_solidloss_last_avg_w": 8.36602223922749,
+    "output_torque_last_avg_nm": 20.483028425724942,
+    "output_torque_last_max_nm": 25.1035410735446,
+    "output_total_loss_last_avg_w": 225.8178207365594,
+    "output_voltage_span_last_peak_v": 48.38490000039556
+  }
+}

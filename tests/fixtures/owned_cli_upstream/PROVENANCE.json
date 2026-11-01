@@ -1,0 +1,465 @@
+{
+  "files": {
+    "m2/Root_policy.json": {
+      "gzip": {
+        "bytes": 1156,
+        "sha256": "33d1a135945a5d520c17ee2f1d899e04b485b6a4b8533b8365f56e0c58ebdd0e"
+      },
+      "raw": {
+        "bytes": 2252,
+        "sha256": "5b3d970a9122ab50624a6773cb73183b8332f66d482b2151043f29448102ff8f"
+      },
+      "source": {
+        "actual_Root_policy_SHA": "5b3d970a9122ab50624a6773cb73183b8332f66d482b2151043f29448102ff8f",
+        "scope": "type policy only; no inert fixture authority is actual"
+      }
+    },
+    "m2/after.aedt": {
+      "gzip": {
+        "bytes": 70586,
+        "sha256": "02f3095a026f3b1b5238afc2b710ab0dfa62910ae194ee26c58c91f4b9e72c86"
+      },
+      "raw": {
+        "bytes": 1158473,
+        "sha256": "69ad3c74f4b6f76f384edf8fa25579c443d3c55ceeba233442f734e44131691b"
+      },
+      "source": {
+        "actual_failed_status_preserved": true,
+        "actual_task_id": 100989,
+        "path": "output/scene/simulation3/simulation3.aedt"
+      }
+    },
+    "m2/before.aedt": {
+      "gzip": {
+        "bytes": 69990,
+        "sha256": "3ea4a6b7bb2307e56082c3917200d1168404adc210ae90f365ff82815bf63ff6"
+      },
+      "raw": {
+        "bytes": 1151677,
+        "sha256": "4815a4336bf706096871dec89e1375c3248dff5d4a445a98ce9959f7031fdd71"
+      },
+      "source": {
+        "actual_failed_status_preserved": true,
+        "actual_task_id": 100989,
+        "path": "output/prepared_unsolved.aedt"
+      }
+    },
+    "m2/builder.json": {
+      "gzip": {
+        "bytes": 7577,
+        "sha256": "5124fccecd5313f26447935e03d7fd4683f15fa867392cb7d9a8e236be8ac073"
+      },
+      "raw": {
+        "bytes": 36630,
+        "sha256": "e20d513061823ae889531bdf50539047daa3b7eb32e5685e13fa861c84c0b50e"
+      },
+      "source": {
+        "actual_failed_status_preserved": true,
+        "actual_task_id": 100989,
+        "path": "output/builder_result.json"
+      }
+    },
+    "m2/case.json": {
+      "gzip": {
+        "bytes": 1066,
+        "sha256": "e61d9a8baa0153724826234b4720744ffa6f8a2add939b2cd5dcdbfc8d4cb96e"
+      },
+      "raw": {
+        "bytes": 2294,
+        "sha256": "681c5f224812159b242f8e56e3a3e8426a88a71f3ace29fbd34bc6a67aa53560"
+      },
+      "source": {
+        "actual_failed_status_preserved": true,
+        "actual_task_id": 100989,
+        "path": "bundle/case.json"
+      }
+    },
+    "m2/installation_after.json": {
+      "gzip": {
+        "bytes": 916,
+        "sha256": "705f8145ceb8ef0891a9546d4f92d1b2bf2648c3c6066ad53da69bfa4743eead"
+      },
+      "raw": {
+        "bytes": 2251,
+        "sha256": "67a2d4f57e882a7d96f0607845f49f0c387f027a62589540eaafdb7c2551e7b6"
+      },
+      "source": {
+        "actual_failed_status_preserved": true,
+        "actual_task_id": 100989,
+        "path": "output/installation_observed_after.json"
+      }
+    },
+    "m2/installation_before.json": {
+      "gzip": {
+        "bytes": 916,
+        "sha256": "705f8145ceb8ef0891a9546d4f92d1b2bf2648c3c6066ad53da69bfa4743eead"
+      },
+      "raw": {
+        "bytes": 2251,
+        "sha256": "67a2d4f57e882a7d96f0607845f49f0c387f027a62589540eaafdb7c2551e7b6"
+      },
+      "source": {
+        "actual_failed_status_preserved": true,
+        "actual_task_id": 100989,
+        "path": "output/installation_observed_before.json"
+      }
+    },
+    "m2/installation_binding.json": {
+      "gzip": {
+        "bytes": 1210,
+        "sha256": "40b4de64b1309b262bbad52b05b442dcff25b7d61f1ae7d36a0ac1b69b026d2f"
+      },
+      "raw": {
+        "bytes": 3119,
+        "sha256": "9c109d082067c715caece63a0b3de669e6ee9f5ea9d94b6ee131b8503da212b8"
+      },
+      "source": {
+        "actual_failed_status_preserved": true,
+        "actual_task_id": 100989,
+        "path": "bundle/installation_binding.json"
+      }
+    },
+    "m2/setup_audit.json": {
+      "gzip": {
+        "bytes": 5027,
+        "sha256": "9269266fc5b513601d115bf4c89cf4989ef19909653ea8c001b4075ac1b3cae2"
+      },
+      "raw": {
+        "bytes": 28233,
+        "sha256": "642823d2b92b914c90b67c60b8f205d21d50dfad073cc83bc9ff30dee7fa2aa2"
+      },
+      "source": {
+        "actual_failed_status_preserved": true,
+        "actual_task_id": 100989,
+        "path": "output/scene/simulation3/setup_audit.json"
+      }
+    },
+    "numeric300/PPT_Back_EMF.csv": {
+      "gzip": {
+        "bytes": 53468,
+        "sha256": "be68fe2b8240d6c057416f5ce938100a7e91cc19abdc6012cf999f83cc3257ca"
+      },
+      "raw": {
+        "bytes": 123784,
+        "sha256": "5e08a79b9d68ed37005655cdf92e4f8631f70c553d9ebb81134fcfb6c2f0bdca"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "evidence/run/scene/ld4_260cdca892c90d73/exports/rt5solve_12c_d879_r1e5_s300_bb1c832a757a_PPT_Back_EMF.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric300/PPT_Cogging_Torque.csv": {
+      "gzip": {
+        "bytes": 21235,
+        "sha256": "f0eb15fd71b94b13de0a55f6f790b6d908a185a2acc3dbc5c53a077405aaf7c9"
+      },
+      "raw": {
+        "bytes": 59770,
+        "sha256": "fcbbc9f11da6b9bbf441357f9c09921ba6fcaf59891e64568c0a9efe5cf66e3b"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "evidence/run/scene/ld4_260cdca892c90d73/exports/rt5solve_12c_d879_r1e5_s300_bb1c832a757a_PPT_Cogging_Torque.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric300/PPT_Flux_Linkages.csv": {
+      "gzip": {
+        "bytes": 52922,
+        "sha256": "0149e6a297965bc0f3505ebec19c2c12aff677fc3f4638905625cd521587abc6"
+      },
+      "raw": {
+        "bytes": 134987,
+        "sha256": "b8b6c01ef5b7a50ad50d57841798149f39e9173f05c50c2de5305f7d0e15600d"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "evidence/run/scene/ld4_260cdca892c90d73/exports/rt5solve_12c_d879_r1e5_s300_bb1c832a757a_PPT_Flux_Linkages.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric300/PPT_Inductance_Matrix.csv": {
+      "gzip": {
+        "bytes": 124310,
+        "sha256": "8b16b6e6d8898d87ab3e8906a4ceccd6ce56e5f042ee58d413ba08c5b563d5f0"
+      },
+      "raw": {
+        "bytes": 398249,
+        "sha256": "4041531079c602251dd7ee17ac7981dce3d88a40b2e215f013df712f7793fab6"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "evidence/run/scene/ld4_260cdca892c90d73/exports/rt5solve_12c_d879_r1e5_s300_bb1c832a757a_PPT_Inductance_Matrix.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric300/PPT_Losses.csv": {
+      "gzip": {
+        "bytes": 36880,
+        "sha256": "28797f27c6c60c02495e82ddbe18d366be1cf674483fbeea9645c21256345c83"
+      },
+      "raw": {
+        "bytes": 90316,
+        "sha256": "8802660f1e35ab295350b6063ae77dd4e0305bf5fcfa7d4d6aacd3bfa85b4ad3"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "evidence/run/scene/ld4_260cdca892c90d73/exports/rt5solve_12c_d879_r1e5_s300_bb1c832a757a_PPT_Losses.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric300/PPT_PhaseA_Voltage_Limit.csv": {
+      "gzip": {
+        "bytes": 21989,
+        "sha256": "c7e18696715308c2312d18b8c60311124ae330e3feec042d1149fcbdb4b5c3cf"
+      },
+      "raw": {
+        "bytes": 59814,
+        "sha256": "4ce32f17573909432e9b427482f66e6532d29d6d6706deec34d93b7e9f58404e"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "evidence/run/scene/ld4_260cdca892c90d73/exports/rt5solve_12c_d879_r1e5_s300_bb1c832a757a_PPT_PhaseA_Voltage_Limit.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric300/PPT_Phase_Currents.csv": {
+      "gzip": {
+        "bytes": 27676,
+        "sha256": "e8a6290f2de21badaa0a6a10ba5d0c366ca78a2a20befb816198f3cc7dc438be"
+      },
+      "raw": {
+        "bytes": 123376,
+        "sha256": "a8eb5f0101cb1574eafc3f2f009cce05c433e888d1cca350f037e766a5643a29"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "evidence/run/scene/ld4_260cdca892c90d73/exports/rt5solve_12c_d879_r1e5_s300_bb1c832a757a_PPT_Phase_Currents.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric300/PPT_Phase_Voltages.csv": {
+      "gzip": {
+        "bytes": 53252,
+        "sha256": "aa6083cc4c48670efe8e6a6cd7ad99b428a398d370169c6dc08fcff3792f9c3c"
+      },
+      "raw": {
+        "bytes": 123537,
+        "sha256": "280af4084184101d790b122f289c4f9e2d730a5447ab1b4ef74af63245eff18c"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "evidence/run/scene/ld4_260cdca892c90d73/exports/rt5solve_12c_d879_r1e5_s300_bb1c832a757a_PPT_Phase_Voltages.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric300/PPT_Torque.csv": {
+      "gzip": {
+        "bytes": 21235,
+        "sha256": "f0eb15fd71b94b13de0a55f6f790b6d908a185a2acc3dbc5c53a077405aaf7c9"
+      },
+      "raw": {
+        "bytes": 59770,
+        "sha256": "fcbbc9f11da6b9bbf441357f9c09921ba6fcaf59891e64568c0a9efe5cf66e3b"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "evidence/run/scene/ld4_260cdca892c90d73/exports/rt5solve_12c_d879_r1e5_s300_bb1c832a757a_PPT_Torque.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric300/case.csv": {
+      "gzip": {
+        "bytes": 1082,
+        "sha256": "e54396aa550bd8b6ebbce3fa379fda8dfdcf281e09a713381e97efa7a02d786a"
+      },
+      "raw": {
+        "bytes": 2003,
+        "sha256": "faf850259f6c809a0cc5364c9d86652b7a20202984504a99c1c62c7b655604d4"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "path": "case.csv"
+      }
+    },
+    "numeric300/case.json": {
+      "gzip": {
+        "bytes": 1150,
+        "sha256": "c7ca1f4a8c98bf8f4782517a598f808574501176e61e1e84a362ef6e56a6d345"
+      },
+      "raw": {
+        "bytes": 2367,
+        "sha256": "0365fdcd545001757e8804f8687aae59f4f9693fe1564bcf70b2a1fece082c3b"
+      },
+      "source": {
+        "actual_task_id": 100954,
+        "representation": "parsed case row; original CSV separate"
+      }
+    },
+    "numeric360/PPT_Back_EMF.csv": {
+      "gzip": {
+        "bytes": 65500,
+        "sha256": "fe1d936d7d5b6dbf9dc1afba07940ce281e74e9b2bdf26a70e2a7303e06c57ba"
+      },
+      "raw": {
+        "bytes": 149590,
+        "sha256": "0be29b8111a7860f108f55babaa732ff63b6360b012a95d31bd0e8141e6b3a62"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "evidence/run/scene/ld4_0202738ee406e2f7/exports/rt5solve_12c_d879_r1e5_s360_b4482e823429_PPT_Back_EMF.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric360/PPT_Cogging_Torque.csv": {
+      "gzip": {
+        "bytes": 26848,
+        "sha256": "3319b203c5a1545efc1e4584c2f9d4bf36398afe84413886c5a9cfcb3b774bc4"
+      },
+      "raw": {
+        "bytes": 72751,
+        "sha256": "898a453fd15b5f4dba30d9f47a3b265e5c4a486745b88a7b1ea37e3dccfbddcc"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "evidence/run/scene/ld4_0202738ee406e2f7/exports/rt5solve_12c_d879_r1e5_s360_b4482e823429_PPT_Cogging_Torque.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric360/PPT_Flux_Linkages.csv": {
+      "gzip": {
+        "bytes": 64987,
+        "sha256": "781c8546b0c60e77eaf77e24f00ee1be68a361c46e2d19439fe360a4e44c8605"
+      },
+      "raw": {
+        "bytes": 163005,
+        "sha256": "9b2d8681962c7319dde765e12c106434029f5cee848a4e2ff13aa191e6a85a61"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "evidence/run/scene/ld4_0202738ee406e2f7/exports/rt5solve_12c_d879_r1e5_s360_b4482e823429_PPT_Flux_Linkages.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric360/PPT_Inductance_Matrix.csv": {
+      "gzip": {
+        "bytes": 150942,
+        "sha256": "8aa74aa725bd446c34932ebff92933d5e774dbd880b0396778132fa735ed5e42"
+      },
+      "raw": {
+        "bytes": 478139,
+        "sha256": "bb2c6da60bf674b3711b9900e3223a4c378f7dee8b4df60f4e1cbdfab96de4a3"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "evidence/run/scene/ld4_0202738ee406e2f7/exports/rt5solve_12c_d879_r1e5_s360_b4482e823429_PPT_Inductance_Matrix.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric360/PPT_Losses.csv": {
+      "gzip": {
+        "bytes": 45810,
+        "sha256": "1997000d5eba1981df8e88b01bdbb4740c2a3919d61bcb70f93547c8a2c83e71"
+      },
+      "raw": {
+        "bytes": 109385,
+        "sha256": "4210284ed58ca6f7d9ffa28b1d9111eefa66b59f7eeaf6b076c6986a26a25a4f"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "evidence/run/scene/ld4_0202738ee406e2f7/exports/rt5solve_12c_d879_r1e5_s360_b4482e823429_PPT_Losses.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric360/PPT_PhaseA_Voltage_Limit.csv": {
+      "gzip": {
+        "bytes": 27966,
+        "sha256": "3cb6759920963cec82bbfb392c03d178976f452d0ff88ff04e777fda4a2c8f42"
+      },
+      "raw": {
+        "bytes": 72812,
+        "sha256": "0ad6c4943ed631d8ab59ba79a2d02bbbc600a7da5aa3830eac8937c0b2c262f9"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "evidence/run/scene/ld4_0202738ee406e2f7/exports/rt5solve_12c_d879_r1e5_s360_b4482e823429_PPT_PhaseA_Voltage_Limit.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric360/PPT_Phase_Currents.csv": {
+      "gzip": {
+        "bytes": 35989,
+        "sha256": "8960057d8d7d0d314923df1e3b7d97e2d55b1e258cfc56f7ae3f953f8e6b29eb"
+      },
+      "raw": {
+        "bytes": 149025,
+        "sha256": "dc1cbd407e9c65eaf86ae678607355fa84893fbfeb8bfaf2a69649148d85c25f"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "evidence/run/scene/ld4_0202738ee406e2f7/exports/rt5solve_12c_d879_r1e5_s360_b4482e823429_PPT_Phase_Currents.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric360/PPT_Phase_Voltages.csv": {
+      "gzip": {
+        "bytes": 65348,
+        "sha256": "26786de4605e8bcb22402742eeaf35096208e44198e0f915d61f17a5bda82be1"
+      },
+      "raw": {
+        "bytes": 149260,
+        "sha256": "3dbde0c0577c2301af6bc99d19c77c180c102c1304e1291b0ea10cfeceb1d43a"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "evidence/run/scene/ld4_0202738ee406e2f7/exports/rt5solve_12c_d879_r1e5_s360_b4482e823429_PPT_Phase_Voltages.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric360/PPT_Torque.csv": {
+      "gzip": {
+        "bytes": 26848,
+        "sha256": "3319b203c5a1545efc1e4584c2f9d4bf36398afe84413886c5a9cfcb3b774bc4"
+      },
+      "raw": {
+        "bytes": 72751,
+        "sha256": "898a453fd15b5f4dba30d9f47a3b265e5c4a486745b88a7b1ea37e3dccfbddcc"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "evidence/run/scene/ld4_0202738ee406e2f7/exports/rt5solve_12c_d879_r1e5_s360_b4482e823429_PPT_Torque.csv",
+        "scientific_producer": "Source11/570; unchanged raw, not actual307b refinement"
+      }
+    },
+    "numeric360/case.csv": {
+      "gzip": {
+        "bytes": 1083,
+        "sha256": "f8f10c82a716533e05f349ff235fb8b33a1afa342d5ff73dd4916ec2db636b92"
+      },
+      "raw": {
+        "bytes": 2003,
+        "sha256": "b4341c5434d8396444a41f23e944ed089621842ad0326274f6f06d144c43c4de"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "path": "case.csv"
+      }
+    },
+    "numeric360/case.json": {
+      "gzip": {
+        "bytes": 1150,
+        "sha256": "ef9ea0ea7637103f270b1cd3cf16ee0122d2b8103bfd07b8b4bd10db2b48e3a8"
+      },
+      "raw": {
+        "bytes": 2367,
+        "sha256": "1650b5f006ac8c834220bfb3d777e1864c5b6268d3a7d2057f0ca5ca5d012987"
+      },
+      "source": {
+        "actual_task_id": 100956,
+        "representation": "parsed case row; original CSV separate"
+      }
+    }
+  },
+  "scope": "unit-regression input bytes, not actual production/profile authority"
+}
