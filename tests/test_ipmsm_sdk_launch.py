@@ -33,7 +33,7 @@ def profile_fixture(directory, enabled):
 def quiet_row(directory):
     cleanup = dict(verified=True, owned_pid=42, process_exited=True, native_quit_requested=True, errors=[],
                    client_retirement=dict(client_retired=True, errors=[]))
-    return dict(project_path=str(directory.resolve()), simulation_name='simulation1', input_design_name='IPMSM',
+    return dict(project_path=str(directory.resolve()), simulation_name='simulation1',
                 standalone_owned_pid=42, standalone_owner_identity=json.dumps(IDENTITY), standalone_solver_uncertain=False,
                 standalone_analyze_return_received=True, standalone_analyze_return_type='builtins.bool',
                 standalone_analyze_return_repr='True', standalone_cleanup=json.dumps(cleanup))

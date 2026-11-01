@@ -80,7 +80,9 @@ def profile4_after_exit(row,identity,project_dir,*,analyze):
     try:
         project=Path(project_dir).resolve(strict=True)
         need(project.is_dir()and str(project)==row['project_path'],'exact owned project directory required')
-        name=row['simulation_name'];design=row['input_design_name']
+        name=row['simulation_name']
+        # StandaloneDesignProject admits this fixed renderer name; CSV has no design-name column.
+        design='IPMSM'
         need(all(type(v)is str and re.fullmatch('[A-Za-z0-9_.-]+',v)and v not in ('.','..')for v in (name,design)),
              'safe explicit project/design names required')
         def contained(path):
