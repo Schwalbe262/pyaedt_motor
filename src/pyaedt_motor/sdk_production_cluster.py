@@ -122,6 +122,7 @@ class SDKProductionController(cluster.Controller):
         payload["entrypoint"] = "tools/run_owned_sdk_case.py"
         payload["command"] = shlex.join(command)
         payload["env_setup"] += _upload(contract["case"]["path"], launch.read_ref(contract["case"]))
+        payload["env_setup"] += "\nexport PYAEDT_LIBRARY_ROOT=" + shlex.quote(contract["launch_runtime"]["library_root"])
         return payload
 
     def _request_record(self, row, execute):
