@@ -14,9 +14,9 @@
 
 기존 데이터와 읽기 전용 대시보드가 사용하는 `C:\Users\peets\NEC\pyaedt_motor_blob_lf_325`는 유지합니다. 켜져 있던 과거 예약 작업 7개는 비활성화했습니다. 실행 중이던 대시보드 프로세스는 유지하며, 새 물리 계약에 대한 승인을 과거 자동화 계약으로 대신하지 않습니다.
 
-현재 M19 기준 모델의 클러스터 FEA 소스는 `PYAEDT_MOTOR_REBUILD_M19_43006688`의 고정 커밋 `4300668`입니다. 이전 source4~7은 각 실험의 재현용으로 보존합니다. 실행 자원·라이선스 정책은 기존 모터 프로젝트 `PYAEDT_MOTOR_IPMSM_V2`를 사용하며, 진행 중인 작업의 원격 소스를 갱신하지 않습니다. 최신 상태는 `HANDOFF_CURRENT.md`에서 확인합니다.
+초기 M19 기준 검증에 사용한 클러스터 FEA 소스는 `PYAEDT_MOTOR_REBUILD_M19_43006688`의 고정 커밋 `4300668`입니다. 이전 source4~7은 각 실험의 재현용으로 보존합니다. 실행 자원·라이선스 정책은 기존 모터 프로젝트 `PYAEDT_MOTOR_IPMSM_V2`를 사용하며, 진행 중인 작업의 원격 소스를 갱신하지 않습니다. 최신 상태는 `HANDOFF_CURRENT.md`에서 확인합니다.
 
-원격 task ID와 시도 예산은 C: 실행 폴더의 `attempt_ledger.jsonl`, 현재 M19 영점 해석은 `m19_zero2_43006688`, 이전 PNF 실험은 `cluster_wave_rb3b` 등 각 실행 폴더에서 확인합니다. 완료된 실행은 D:에 보관합니다. 수집 도구는 결과와 실제 메시 요소 수를 읽으며, 수집만으로 작업을 새로 제출하거나 재시도하지 않습니다.
+원격 task ID와 시도 예산은 C: 실행 폴더의 `attempt_ledger.jsonl`, 초기 M19 영점 해석은 `m19_zero2_43006688`, 이전 PNF 실험은 `cluster_wave_rb3b` 등 각 실행 폴더에서 확인합니다. 완료된 실행은 D:에 보관합니다. 수집 도구는 결과와 실제 메시 요소 수를 읽으며, 수집만으로 작업을 새로 제출하거나 재시도하지 않습니다.
 
 
 ## 2026-10-30 추가 정리
@@ -32,7 +32,7 @@ Y:의 과거 수집·모델·PPT 추출·md 폴더는 각각 D:의 `y0`~`y4`로 
 
 ## main과 과거 브랜치
 
-검증한 연구 코드를 main에 통합하고, 과거 브랜치 6개는 원래 HEAD를 가리키는 원격 annotated tag를 확인한 뒤 정리했습니다. 태그는 `archive/20261030/chore/...`, `archive/20261030/release/...`, `archive/20261030/fix/...`이며 이전 main은 `archive/20261030/main-before-rebuild`입니다. 현재 local·origin 작업 브랜치는 main과 research/ipmsm-rebuild-20261030입니다. D의 3개 작업트리는 원래 HEAD에서 detached 상태로 보관했습니다. 상세 전후 ref는 C 실행 폴더의 `git_consolidation_result.json`을 참고합니다.
+검증한 연구 코드를 main에 통합하고, 과거 브랜치 6개는 원래 HEAD를 가리키는 원격 annotated tag를 확인한 뒤 정리했습니다. 태그는 `archive/20261030/chore/...`, `archive/20261030/release/...`, `archive/20261030/fix/...`이며 이전 main은 `archive/20261030/main-before-rebuild`입니다. 2026-11-02에는 남아 있던 연구 브랜치의 모든 커밋이 main에 포함됨을 확인하고, 원래 HEAD `8bb5216d359d3c50b41829d179641db6fcbc4f79`를 원격 annotated tag `archive/20261102/research/ipmsm-rebuild-20261030`로 보존했습니다. 원격 태그의 대상 커밋을 대조한 뒤 정확한 원래 HEAD를 조건으로 원격 브랜치를 정리했고 로컬도 merged-only 삭제를 사용했습니다. 현재 local·origin 활성 브랜치는 main 하나입니다. 증거는 C 실행 루트의 `part83/MERGED_RESEARCH_BRANCH_ARCHIVE_VERIFIED.json`입니다. 보관 작업트리는 원래 HEAD의 detached 상태로 유지합니다. 상세 전후 ref는 C 실행 폴더의 `git_consolidation_result.json`을 참고합니다.
 
 과거 untracked 분석·그림 도구 5개와 테스트 2개는 `legacy/final_design_2026_07`에 모았습니다. `source_map.csv`와 README에 원래 경로·SHA·복원 방법이 있습니다. `.gitattributes`도 해당 보관 파일의 원래 바이트를 유지하도록 설정했습니다. 원래 수정돼 있던 adaptive 소스·테스트 2개는 작업 파일에서 변경하지 않았습니다.
 
