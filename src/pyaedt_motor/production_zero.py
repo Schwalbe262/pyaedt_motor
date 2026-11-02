@@ -36,8 +36,13 @@ def _require_sdk_origin(proof,*,inert):
     need(proof['mode']=='node_smoke'and proof['production_eligible']is False and proof['receipt']['stage']=='diagnostic'and proof['observed_cores']==4,'fresh two-speed original SDK diagnostic receipt required')
     if not inert:need(proof.get('actual_observation_eligible')is True,'actual production zero rejects inert SDK origin observations')
 
-def generate_production_zero_rows(spec, *, geometry_seed=42, quality_profile='reference_ultra'):
+def generate_production_zero_rows(spec, *, geometry_seed=42, quality_profile='reference_ultra', protocol_id=None, geometry=None, stack_length_mm=None):
     """New spec-bound zero plan; blank IDs require fresh two-speed raw evidence."""
+    if protocol_id is not None:
+        from . import declared_winding_study as declared
+        need(protocol_id==declared.PROTOCOL_ID,'explicit supported declared-winding protocol required')
+        return declared.generate_zero_rows(spec,geometry=geometry,stack_length_mm=stack_length_mm,geometry_seed=geometry_seed,quality_profile=quality_profile)
+    need(geometry is None and stack_length_mm is None,'explicit geometry requires the declared-winding protocol')
     context=spec_context(spec)
     need((spec.winding.series_turns_per_phase,spec.winding.turns_per_coil_side)==(40,10),'this new origin protocol currently supports explicit Ns40/10 only')
     from .doe import sample_feasible_geometries
@@ -72,14 +77,21 @@ class VerifiedProductionZero:
     @classmethod
     def from_plan(cls,path,sha256,*,spec=None):
         obj=cls();path=Path(path).absolute();raw=path.read_bytes();need(record(raw)['sha256']==sha256,'explicit production evidence plan SHA required')
-        plan=json.loads(obj.read({'path':str(path),**record(raw)}));need(plan['schema']==EVIDENCE_SCHEMA,'production evidence schema required')
+        from . import declared_winding_study as declared
+        plan=json.loads(obj.read({'path':str(path),**record(raw)}));need(plan['schema']in(EVIDENCE_SCHEMA,declared.EVIDENCE_SCHEMA),'production evidence schema required')
+        declared_mode=plan['schema']==declared.EVIDENCE_SCHEMA
+        need(plan.get('protocol_id')==declared.PROTOCOL_ID if declared_mode else 'protocol_id'not in plan,'explicit outer declared protocol required; legacy protocol cannot be relabeled')
         mode=plan.get('evidence_mode','linux_original');need(mode in ('linux_original','inert_fixture'),'unknown origin mode')
         if mode=='linux_original':need(os.name=='posix','production origin issuance requires original Linux filesystem')
         obj.inert=mode=='inert_fixture';obj.plan=plan;obj.spec=load_spec(json.loads(obj.read(plan['spec'])))
         if spec is not None:need(asdict(spec)==asdict(obj.spec),'supplied spec differs from sealed declared spec')
         expected=spec_context(obj.spec)
-        from research_ns40_zero import VerifiedNs40Study
-        study_raw=obj.read(plan['study']);obj.study=VerifiedNs40Study.from_plan(Path(plan['study']['path']),record(study_raw)['sha256'])
+        study_raw=obj.read(plan['study'])
+        if declared_mode:
+            obj.study=declared.VerifiedDeclaredWindingStudy.from_plan(Path(plan['study']['path']),record(study_raw)['sha256'],declared_spec=obj.spec,evidence_mode=mode,declared_spec_ref=plan['spec'])
+        else:
+            from research_ns40_zero import VerifiedNs40Study
+            obj.study=VerifiedNs40Study.from_plan(Path(plan['study']['path']),record(study_raw)['sha256'])
         study_plan=json.loads(study_raw);obj.study_plan=study_plan
         need(len(obj.study._rows)==2 and sorted(float(r['input_base_rpm'])for r in obj.study._rows)==[1200.,5000.],'exact two original speeds required')
         from run_ipmsm_batch import build_spec,summarize_transient_outputs
@@ -138,6 +150,7 @@ class VerifiedProductionZero:
                 proof=sdk.verify_case(row['case_id'],expected_producer=obj.study.scope['source_producer'])
                 _require_sdk_origin(proof,inert=obj.inert)
                 _verify_collected_row(row,proof['original_row'],{})
+                if declared_mode:need(canonical(proof['case'])==canonical(byid[row['case_id']]['input_case']),'declared origin must retain the exact original SDK input case, including protocol marker')
                 need(canonical(proof['full_spec42'])==canonical(asdict(build_spec(byid[row['case_id']]['input_case']))),'original SDK zero fullspec differs')
             obj._sdk_evidence=sdk;obj._sdk_pin=digest(sdk.cases)
         obj.observations=observed;obj.expected=expected;obj._spec_pin=digest(asdict(obj.spec));obj._rows_pin=digest(obj.study._rows)
@@ -146,15 +159,21 @@ class VerifiedProductionZero:
         obj._study_identity=id(obj.study);obj._sdk_identity=id(obj._sdk_evidence)
         obj._retained_pin=digest(obj._retained_authority());obj._verified=True;obj.assert_unchanged();return obj
     def _retained_authority(self):
-        return {'origin_files':self._pins,'study_files':self.study._pins,
+        value={'origin_files':self._pins,'study_files':self.study._pins,
             'observer':{'path':str(self._observer_path),**self._observer_pin},
             'native_parser':{'path':str(self._parser_path),**self._parser_pin}}
+        from . import declared_winding_study as declared
+        if self.plan['schema']==declared.EVIDENCE_SCHEMA:
+            value['declared_study']={'class':id(type(self.study)),'memory_pin':self.study._memory_pin,'implementation':self.study._implementation_pin}
+        return value
     def assert_memory_unchanged(self):
         """Check retained authority only; checked search owns the FS boundaries."""
         need(type(self)is VerifiedProductionZero and self._verified,'verified typed production origin required')
         need(id(self.study)==self._study_identity and self.study._validated is True and id(self._sdk_evidence)==self._sdk_identity,'production origin evidence object changed')
         need(digest(asdict(self.spec))==self._spec_pin and digest(self.study._rows)==self._rows_pin and digest(self.study.scope)==self._scope_pin,'production origin context changed')
         need(digest(self.plan)==self._plan_pin and digest(self.study_plan)==self._study_plan_pin and digest(self.observations)==self._observations_pin and self.inert is self._mode_pin,'production origin plan/observations/mode changed')
+        from . import declared_winding_study as declared
+        if self.plan['schema']==declared.EVIDENCE_SCHEMA:declared.require_context(self.study)
         need(digest(self._retained_authority())==self._retained_pin,'production origin retained file authority changed')
         if self._sdk_evidence is not None:
             need(digest(self._sdk_evidence.cases)==self._sdk_pin,'original SDK origin declaration changed')
@@ -171,13 +190,19 @@ class VerifiedProductionZero:
     def manifest(self):
         self.assert_unchanged()
         if not self.inert:need(os.name=='posix','production identity requires original Linux evidence')
-        from calibrate_ipmsm_beta import analyze_zero_calibration_rows
-        measured=analyze_zero_calibration_rows(self.study._rows,_research_context=self.study)
+        from . import declared_winding_study as declared
+        if self.plan['schema']==declared.EVIDENCE_SCHEMA:
+            measured=declared.analyze_zero_rows(self.study)
+        else:
+            from calibrate_ipmsm_beta import analyze_zero_calibration_rows
+            measured=analyze_zero_calibration_rows(self.study._rows,_research_context=self.study)
         # Construct a fresh protocol payload; never modify or rehash a research manifest.
         value={key:measured[key]for key in ('method','convention','electrical_zero_deg','initial_position_deg','successful_rows','successful_speeds_rpm','circular_resultant','max_circular_deviation_deg','observations','material_context','winding_context','material_fingerprint','metric_contract','producer_fingerprint','back_emf_source','design_hash','quality_profile')}
         value.update(schema_version=SCHEMA,protocol_implementation_sha256=implementation_sha256(),winding_spec=asdict(self.spec.winding),
             origin_evidence_sha256=digest({'plan':self.plan,'observations':self.observations}),origin_scope=self.study.scope,
             evidence_mode='inert_fixture'if self.inert else'linux_original',training_admission=False)
+        if self.plan['schema']==declared.EVIDENCE_SCHEMA:
+            value.update(declared_study_protocol=declared.PROTOCOL_ID,declared_study_schema=declared.SCHEMA,declared_spec_canonical_sha256=declared.digest(asdict(self.spec)),declared_protocol_implementation_sha256=declared.implementation_sha256())
         inferred=measured['electrical_zero_deg'];literal=format(inferred,'g')+'deg';effective=float(format(inferred,'g'))
         value['inferred_electrical_zero_deg']=inferred;value['electrical_zero_deg']=effective
         value['native_angle_binding']={'policy':'frozen_ppt_g_formatter_v1','ppt_source_sha256':self.study_plan['source_files']['module/ipmsm_ppt_setup.py']['sha256'],

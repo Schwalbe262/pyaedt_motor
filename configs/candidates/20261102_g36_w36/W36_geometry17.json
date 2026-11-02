@@ -1,0 +1,19 @@
+{
+  "magnet_height_ratio": 0.7863388159312308,
+  "magnet_setback_ratio": 0.1446956854313612,
+  "magnet_shield_thick": 1.6148577649146318,
+  "magnet_space_height_ratio": 0.9016233073547484,
+  "magnet_thick_ratio": 0.2910191611386835,
+  "pole_num": 8,
+  "rotator_gap": 1.0895414937287569,
+  "shaft_ratio": 0.5277311299927533,
+  "slot_num": 12,
+  "slot_opening_ratio": 0.1750601237639785,
+  "stator_back_yoke_thick_ratio": 0.1291317907348275,
+  "stator_gap": 1.776260981336236,
+  "stator_inner_ratio": 0.5237467269040644,
+  "stator_outer_radius": 148.80603225901723,
+  "stator_shoe_thick": 1.5,
+  "stator_teeth_length_ratio": 0.8538038030266761,
+  "stator_teeth_width_ratio": 0.6213756687939167
+}

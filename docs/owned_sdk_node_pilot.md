@@ -25,6 +25,10 @@ conda:pyaedt2026v1/env_profile=pyaedt2026v1 policy with module v252 loaded:
 python -I -B src/pyaedt_motor/sdk_node_fs.py --profile <absolute-FS-profile.json> --sha256 <SHA> --source-root <new-source-root> --output <fresh-FS-output> --capture-fs
 ```
 
+Set PYAEDT_LIBRARY_ROOT to the same sealed library_root before the FS command.
+The SDK FEA controller exports this per-case path after inherited setup; the FS
+bootstrap must supply it explicitly too. The activation equality check remains.
+
 It imports the existing private SDK and records actual files, import origins,
 host/UID and current Slurm4. It creates no Native instance. Root collects the
 original successful job/binding and the raw_FS_observation/filesystem_proof

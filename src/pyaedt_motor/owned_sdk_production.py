@@ -34,7 +34,8 @@ EXTRA_SOURCE = ("src/pyaedt_motor/owned_sdk_production.py", "src/pyaedt_motor/na
                 "src/pyaedt_motor/sdk_production_cluster.py", "tools/run_owned_sdk_case.py",
                 "src/pyaedt_motor/quality.py", "src/pyaedt_motor/doe.py", "src/pyaedt_motor/train_physical.py",
                 "src/pyaedt_motor/winding_frames.py", "src/pyaedt_motor/winding_native.py", "src/pyaedt_motor/production_zero.py",
-                "research_ns40_zero.py", "src/pyaedt_motor/sdk_node_fs.py", "calibrate_ipmsm_beta.py", "ipmsm_optimization.py")
+                "research_ns40_zero.py", "src/pyaedt_motor/sdk_node_fs.py", "calibrate_ipmsm_beta.py", "ipmsm_optimization.py",
+                "src/pyaedt_motor/declared_winding_study.py")
 
 
 def need(value, message):
