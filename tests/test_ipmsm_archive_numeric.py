@@ -43,7 +43,7 @@ class ArchiveNumericTests(unittest.TestCase):
             resolver = archive.ArchiveResolver(files, scratch)
             value = archive.numeric_replay(files, contract, resolver, scratch)
             self.assertTrue(value["numeric"]["physical_quality_passed"])
-            self.assertEqual(value["builder_input_fields_verified"], 114)
+            self.assertEqual(value["builder_input_fields_verified"], 117)
             self.assertEqual(value["Native_calls"], 0)
             self.assertEqual(value["module_or_function_patches"], 0)
             self.assertIn("run_ipmsm_batch", value["ordinary_imports"])

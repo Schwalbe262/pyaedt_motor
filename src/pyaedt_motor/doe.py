@@ -316,6 +316,7 @@ class SelectedProfile:
     material_context: dict[str, str] | None = None
     material_fingerprint: str | None = None
     winding_context: dict[str, Any] | None = None
+    owned_sdk_profile_source: dict[str, Any] | None = None
 
 
 def _profile_context(document: Mapping[str, Any]) -> tuple[dict | None, str | None, dict | None]:
@@ -343,10 +344,13 @@ def _profile_context(document: Mapping[str, Any]) -> tuple[dict | None, str | No
     return material, fingerprint, winding
 
 
-def _selection_content(settings, evidence, producer, material, fingerprint, winding) -> str:
-    return _sha(_json_bytes({"settings": settings, "evidence": evidence, "producer": producer,
+def _selection_content(settings, evidence, producer, material, fingerprint, winding, sdk_source=None) -> str:
+    value = {"settings": settings, "evidence": evidence, "producer": producer,
                              "material_context": material, "material_fingerprint": fingerprint,
-                             "winding_context": winding}))
+                             "winding_context": winding}
+    if sdk_source is not None:
+        value["owned_sdk_profile_source"] = sdk_source
+    return _sha(_json_bytes(value))
 
 
 def load_selected_profile(path: Path, *, execution_backend=None) -> SelectedProfile:
@@ -356,8 +360,12 @@ def load_selected_profile(path: Path, *, execution_backend=None) -> SelectedProf
     if execution_backend == "public_owned_cli_v1":
         from .execution_compatibility import verify_selected_profile
         verified_cli = verify_selected_profile(path)
-    elif execution_backend is not None or "execution_compatibility" in document:
+    elif execution_backend == "public_owned_sdk_v1":
+        from .owned_sdk_production import verify_selected_profile_document
+        verify_selected_profile_document(path, expected_sha256=_sha(payload))
+    elif execution_backend is not None or "execution_compatibility" in document or "owned_sdk_profile_proof" in document:
         raise ValueError("explicit owned CLI profile validation required; no SDK fallback")
+    sdk_source = {"path": str(path.resolve()), "bytes": len(payload), "sha256": _sha(payload)} if execution_backend == "public_owned_sdk_v1" else None
     if document.get("schema_version") != PROFILE_SCHEMA:
         raise ValueError(f"profile schema_version must be {PROFILE_SCHEMA}")
     if document.get("metric_contract_version") != METRIC_CONTRACT:
@@ -391,14 +399,13 @@ def load_selected_profile(path: Path, *, execution_backend=None) -> SelectedProf
         legacy = asdict(MaterialContextSpec())
         if any(key in normalized and normalized[key] != value for key, value in legacy.items()):
             raise ValueError("nonlegacy selected profile requires explicit material context")
-    content_sha = _selection_content(normalized, verified, producer, material, fingerprint, winding)
+    content_sha = _selection_content(normalized, verified, producer, material, fingerprint, winding, sdk_source)
     return SelectedProfile(normalized, tuple(verified), producer, _sha(payload), content_sha,
-                           material, fingerprint, winding)
+                           material, fingerprint, winding, sdk_source)
 
 
 def _case_context_fields(material: MaterialContextSpec, winding: WindingSpec) -> dict[str, Any]:
-    if (winding.series_turns_per_phase, winding.turns_per_coil_side, winding.parallel_branches) != (48, 12, 1):
-        raise ValueError("production winding requires fixed48series turns/12turns per side/1parallel branch")
+    _geometry_helper.fixed_case_context_fields(material, winding)
     if winding.fill_factor > .45 or winding.winding_temperature_c != 100:
         raise ValueError("production winding context requires fill<=0.45 and temperature100C")
     return {**asdict(material), "conductor_area_per_branch_mm2": winding.conductor_area_per_branch_mm2,
@@ -407,16 +414,17 @@ def _case_context_fields(material: MaterialContextSpec, winding: WindingSpec) ->
 
 
 def _require_plan_context(rows: list[dict], manifest: Mapping[str, Any]) -> None:
+    from . import winding_frames as frames
     frame = manifest.get("reference_frame_context")
-    if frame is not None or any(str(row.get("beta_calibration_id", "")).startswith("family-reference-frame:sha256:") for row in rows):
-        from . import reference_frames as frames
-        if (not isinstance(frame, dict) or frame.get("method") != frames.METHOD or
+    if frame is not None or any(frames.is_frame_id(row.get("beta_calibration_id", "")) for row in rows):
+        from . import winding_frames as frames
+        if (not isinstance(frame, dict) or frame.get("method") != manifest.get("reference_frame_method", frames.METHOD) or
                 frame.get("reference_frame_id") != manifest.get("calibration_id") or
-                frame.get("protocol_implementation_sha256") != frames.implementation_sha256() or
+                frame.get("protocol_implementation_sha256") != manifest.get("reference_frame_protocol_sha256", frames.implementation_sha256()) or
                 frame.get("renderer_producer_fingerprint") != manifest.get("expected_producer_fingerprint")):
             raise ValueError("training plan lacks its explicit family reference context")
         for row in rows:
-            for key, value in {"reference_frame_method": frames.METHOD, "reference_frame_id": frame["reference_frame_id"],
+            for key, value in {"reference_frame_method": frame["method"], "reference_frame_id": frame["reference_frame_id"],
                                "beta_calibration_id": frame["reference_frame_id"],
                                "electrical_zero_deg": frame["electrical_zero_deg"],
                                "initial_position_deg": frame["initial_position_deg"]}.items():
@@ -677,7 +685,7 @@ def generate_training_plan(
     if partition_policy not in (None, TRAIN_AXIS_ANCHOR_POLICY):
         raise ValueError("unknown explicit input partition policy")
     from calibrate_ipmsm_beta import _require_zero_context
-    from . import reference_frames as frames
+    from . import winding_frames as frames
     _production_spec(spec)
     geometries = _integer(geometries, "geometries", 5)
     seed = _integer(seed, "seed")
@@ -704,7 +712,8 @@ def generate_training_plan(
     if not re.fullmatch(r"producer_v3:sha256:[0-9a-f]{64}", profile.producer_fingerprint):
         raise ValueError("selected profile requires an explicit producer fingerprint")
     content_sha = _selection_content(profile.settings, profile.evidence, profile.producer_fingerprint,
-                                    profile.material_context, profile.material_fingerprint, profile.winding_context)
+                                    profile.material_context, profile.material_fingerprint, profile.winding_context,
+                                    profile.owned_sdk_profile_source)
     if content_sha != profile.selection_content_sha256:
         raise ValueError("selected profile settings/evidence changed in memory")
     for record in profile.evidence:
@@ -726,7 +735,11 @@ def generate_training_plan(
     if profile.winding_context is not None and any(not math.isclose(
             profile.winding_context[key], context_fields[key], rel_tol=1e-12, abs_tol=1e-12) for key in WINDING_CONTEXT_FIELDS):
         raise ValueError("selected profile and spec winding context differ")
-    _require_zero_context(context_fields, calibration)
+    if frames.is_production(calibration):
+        if not frames.is_family(calibration):
+            raise ValueError("new production winding DOE requires its explicit family frame and SDK-certified profile")
+        frames.require_spec_context(spec, calibration, frame_evidence)
+    else:_require_zero_context(context_fields, calibration)
     calibration_material = calibration.get("material_fingerprint")
     if (reference_material or (calibration_material is not None and profile.material_fingerprint is not None)) and calibration_material != profile.material_fingerprint:
         raise ValueError("zero calibration material fingerprint differs from selected profile")
@@ -852,6 +865,9 @@ def generate_training_plan(
         _require_paired_controls(rows, manifest)
     if frames.is_family(calibration):
         manifest["reference_frame_context"] = frames.semantic_context(calibration)
+        if frames.is_production(calibration):
+            manifest["reference_frame_method"] = frames.method_for(calibration)
+            manifest["reference_frame_protocol_sha256"] = frames.implementation_for(calibration)
         frame_evidence.assert_unchanged()
     _require_plan_context(rows, manifest)
     _require_anchor_partition(rows, manifest)
@@ -953,10 +969,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--calibration-manifest", type=Path, required=True)
-    from . import reference_frames as frames
+    from . import winding_frames as frames
     frames.evidence_arguments(parser)
     parser.add_argument("--profile-manifest", type=Path, required=True)
-    parser.add_argument("--execution-backend", choices=("standalone", "public_owned_cli_v1"), default="standalone")
+    parser.add_argument("--execution-backend", choices=("standalone", "public_owned_cli_v1", "public_owned_sdk_v1"), default="standalone")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--exclude", type=Path, action="append", default=[])
     parser.add_argument("--geometries", type=int, default=720)
@@ -973,7 +989,7 @@ def main(argv: list[str] | None = None) -> int:
     frame_evidence = frames.evidence_from_arguments(args)
     spec = optimization_spec_from_mapping(frames.apply_reference(spec_raw, calibration, frame_evidence))
     profile = load_selected_profile(args.profile_manifest,
-              execution_backend=args.execution_backend if args.execution_backend == "public_owned_cli_v1" else None)
+              execution_backend=args.execution_backend if args.execution_backend != "standalone" else None)
     excluded, exclusions = exclusion_hashes(args.exclude)
     rows, manifest = generate_training_plan(spec, calibration, profile, geometries=args.geometries, seed=args.seed,
                                             case_prefix=args.case_prefix, excluded_hashes=excluded,
@@ -982,9 +998,9 @@ def main(argv: list[str] | None = None) -> int:
                                             partition_policy=args.partition_policy)
     manifest.update(excluded_sources=exclusions, spec_file_sha256=_sha(args.spec.read_bytes()),
                     calibration_file_sha256=_sha(args.calibration_manifest.read_bytes()))
-    if args.execution_backend == "public_owned_cli_v1":
+    if args.execution_backend in {"public_owned_cli_v1", "public_owned_sdk_v1"}:
         from .public_batch_pilot import record
-        manifest["profile_execution"] = {"backend": "public_owned_cli_v1", "selected_profile": {
+        manifest["profile_execution"] = {"backend": args.execution_backend, "selected_profile": {
             "path": str(args.profile_manifest.resolve()), **record(args.profile_manifest)}}
     proof = write_training_plan(args.output, rows, manifest)
     print(f"Planned {len(rows)} cases/{args.geometries} groups; SHA256={proof['plan_sha256']}; "

@@ -91,7 +91,7 @@ class PhysicalBundleAdapter:
         self.source_spec = deepcopy(dict(source_spec))
         if bundle.metadata.get("spec_sha256") != _digest(self.source_spec):
             raise ValueError("source spec differs from the surrogate training spec")
-        from . import reference_frames as frames
+        from . import winding_frames as frames
         calibration_manifest = deepcopy(dict(calibration_manifest))
         if (calibration_manifest.get("metric_contract") != "motor_metrics_v3" or
                 calibration_manifest.get("back_emf_source") != "periodic_flux_derivative"):
@@ -154,7 +154,7 @@ class PhysicalBundleAdapter:
             if memory_check is not None:
                 memory_check()
             else:
-                from . import reference_frames as frames
+                from . import winding_frames as frames
                 if frames.digest(self.frame_evidence.mapping) != self.frame_evidence._mapping_digest:
                     raise ValueError("local evidence mapping changed in memory")
 
@@ -540,12 +540,14 @@ def _build_fea_validation_rows_checked(adapter: PhysicalBundleAdapter, proposals
     """
     if not adapter.bundle.approved or _digest(adapter.bundle.metadata) != adapter._metadata_sha256:
         raise ValueError("validation plan requires the unchanged approved model")
+    from . import winding_frames as frames
     from .execution_compatibility import ProductionFrameEvidence
     if isinstance(adapter.frame_evidence, ProductionFrameEvidence):
         profile = doe.load_selected_profile(selected_profile, execution_backend="public_owned_cli_v1")
+    elif type(adapter.frame_evidence) is frames.ProductionWindingEvidence:
+        profile = doe.load_selected_profile(selected_profile, execution_backend="public_owned_sdk_v1")
     else:
         profile = doe.load_selected_profile(selected_profile)
-    from . import reference_frames as frames
     if frames.is_family(adapter.calibration_manifest):
         frames.validate_reference(adapter.calibration_manifest, adapter.frame_evidence)
         frames.profile_context(profile, adapter.calibration_manifest)
@@ -718,7 +720,7 @@ def main(argv=None) -> int:
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--expected-fingerprints", type=Path, required=True)
     parser.add_argument("--calibration-manifest", type=Path, required=True)
-    from . import reference_frames as frames
+    from . import winding_frames as frames
     frames.evidence_arguments(parser)
     parser.add_argument("--baseline", type=Path, required=True, help="JSON independent geometry plus stack_length_mm")
     parser.add_argument("--selected-profile", type=Path, help="Sealed approved profile required for runnable FEA validation rows")

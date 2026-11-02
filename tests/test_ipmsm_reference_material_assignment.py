@@ -52,6 +52,9 @@ def assignment_fixture(mode="success"):
         def __init__(self):
             self.calls = []
 
+        def GetModelUnits(self):
+            return "mm"
+
         def ChangeProperty(self, args):
             self.calls.append(args)
             assert args[0] == "NAME:AllTabs"
@@ -77,8 +80,17 @@ def assignment_fixture(mode="success"):
 
     editor = Editor()
     manager = SimpleNamespace(GetProjectMaterialNames=lambda: [NAME])
+    # Pure readback stub for the real depth audit preceding critical setup checks.
+    stack_mm = f"{setup.IPMSMPPTSpec().stack_length_mm:g}"
+    stack_si = float(stack_mm) * 1e-3
+    settings = SimpleNamespace(GetPropNames=lambda: ["Model Depth"],
+                               GetPropValue={"Model Depth": "StackLength"}.__getitem__,
+                               GetPropSIValue={"Model Depth": stack_si}.__getitem__)
+    native_design = SimpleNamespace(GetChildObject={"Design Settings": settings}.__getitem__,
+                                    GetVariableValue={"StackLength": stack_mm + "mm"}.__getitem__)
     motor = SimpleNamespace(modeler=SimpleNamespace(oeditor=editor, get_object_from_name=bodies.__getitem__),
                             oproject=SimpleNamespace(GetDefinitionManager=lambda: manager),
+                            odesign=native_design, get_evaluated_value={"StackLength": stack_si}.__getitem__,
                             validate_simple=lambda: 1, analyze=mock.Mock(return_value=True))
     return motor, groups, live, solve_inside, cache, primitives
 
@@ -118,8 +130,10 @@ def test_native_failure_or_wrong_live_name_stops_before_analyze_even_with_strict
             stack.enter_context(mock.patch.object(setup, name, return_value="ok"))
         stack.enter_context(mock.patch.object(setup, "_get_group", side_effect=lambda m, g, key, p: groups.get(key, [])))
         stack.enter_context(mock.patch.object(setup, "ensure_region_and_band", return_value={"region": [], "band": []}))
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError) as error:
             setup.configure_ipmsm_from_ppt(motor, groups, reference_spec(), analyze=True, create_reports=False)
+        if mode in ("noop", "wrong"):
+            assert "Essential AEDT setup failed: materials.errors:" in str(error.value)
     motor.analyze.assert_not_called()
 
 

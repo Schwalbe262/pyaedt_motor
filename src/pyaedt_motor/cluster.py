@@ -537,6 +537,13 @@ class Controller:
         self._save()
         return entry
 
+    def _case_ready(self, row: dict) -> bool:
+        return True
+
+    def _prepare_submission(self, row: dict, request: dict, entry: dict, records: list[dict]) -> None:
+        """Opt-in sealed routes may materialize an actual post-reservation receipt."""
+        return None
+
     def _collect(self, case: str, entry: dict, task: dict, request: dict, execute: bool) -> None:
         status = str(task.get("status", "")).lower()
         if not status:
@@ -737,6 +744,8 @@ class Controller:
         for row in pending:
             if additions >= slots:
                 break
+            if not self._case_ready(row):
+                continue
             self._unchanged_plan()
             current, _ = self._family_active()
             # Protect against server-counter lag after our own successful POSTs.
@@ -752,6 +761,7 @@ class Controller:
                     break
                 entry = self._reserve(case, request, records, counts)
                 ledger_cases[case] = records[-1]
+            self._prepare_submission(row, request, entry, records)
             # Persist uncertainty BEFORE the socket. A crash here is conservative.
             entry["phase"] = "post_unknown"
             entry["post_started_at"] = _now()

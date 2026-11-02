@@ -54,6 +54,9 @@ def source_files() -> dict[str, Path]:
     root = Path(__file__).resolve().parents[2]
     return {"model_bundle.py": Path(__file__), "surrogate.py": Path(surrogate.__file__),
             "reference_frames.py": Path(__file__).with_name("reference_frames.py"),
+            "winding_frames.py": Path(__file__).with_name("winding_frames.py"),
+            "production_zero.py": Path(__file__).with_name("production_zero.py"),
+            "winding_native.py": Path(__file__).with_name("winding_native.py"),
             **{name: Path(__file__).with_name(name) for name in (
                 "execution_compatibility.py", "execution_contracts.py", "execution_evidence.py",
                 "execution_archive.py", "archive_numeric.py",
@@ -61,9 +64,14 @@ def source_files() -> dict[str, Path]:
                 "quality.py", "cluster.py", "solver_profile.py")},
             **({"compdefs_transition.py": Path(__file__).with_name("compdefs_transition.py")}
                if Path(__file__).with_name("compdefs_transition.py").is_file() else {}),
+            **{name: Path(__file__).with_name(name) for name in (
+                "owned_sdk_production.py", "sdk_case_worker.py", "sdk_production_cluster.py", "sdk_node_fs.py",
+                "sdk_launch.py", "_sdk_launch_binding.py", "_sdk_launch_resource.py")
+               if Path(__file__).with_name(name).is_file()},
             "remote_case.py": Path(__file__).with_name("remote_case.py"),
             "doe.py": Path(__file__).with_name("doe.py"),
             "calibrate_ipmsm_beta.py": root / "calibrate_ipmsm_beta.py",
+            "research_ns40_zero.py": root / "research_ns40_zero.py",
             "ipmsm_optimization.py": root / "ipmsm_optimization.py"}
 
 
@@ -329,7 +337,7 @@ def domain_from_training(inputs: pd.DataFrame, spec: dict, *, case_frame: pd.Dat
     if not math.isclose(winding.winding_temperature_c, 100):
         raise ValueError("this resistance contract supports 100 degC winding temperature")
     actual_cases = inputs if case_frame is None else case_frame
-    from .reference_frames import verify_spec_rows
+    from .winding_frames import verify_spec_rows
     frame_context = verify_spec_rows(spec, actual_cases.to_dict("records"), frame_evidence)
     study_constants = case_study_context(actual_cases, spec, winding)
     missing = {"input_" + key for key in GEOMETRY_VARIABLE_NAMES} - set(inputs)

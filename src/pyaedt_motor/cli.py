@@ -36,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
         from .runtime import freeze_source, native_runtime_path
         path_flags = ["--data", "--spec", "--output", "--frame-evidence", "--frame-evidence-root", "--cli-inputs", "--owned-cli-production-evidence"] if command == "train" else [
             "--bundle", "--spec", "--expected-fingerprints", "--calibration-manifest", "--selected-profile", "--baseline", "--output", "--frame-evidence", "--frame-evidence-root", "--owned-cli-production-evidence"]
+        path_flags += ['--production-zero-evidence','--owned-sdk-production-evidence']
         for flag in path_flags:
             for index in range(1, len(args)):
                 if args[index] == flag and index + 1 < len(args):

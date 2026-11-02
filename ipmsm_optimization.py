@@ -674,9 +674,8 @@ def fixed_case_context_fields(material: MaterialContextSpec, winding: WindingSpe
     These values identify one study context; they are not design variables or
     surrogate features. The current 12-slot runner has one parallel branch.
     """
-    if (winding.series_turns_per_phase, winding.turns_per_coil_side,
-            winding.coils_per_phase, winding.parallel_branches) != (48, 12, 4, 1):
-        raise ValueError("case generation requires Ns=48, 12 turns/coil side and one parallel branch")
+    if not isinstance(winding, WindingSpec) or (winding.coils_per_phase, winding.parallel_branches) != (4, 1):
+        raise ValueError("case generation requires a typed winding with four coils per phase and one parallel branch")
     return {
         "core_material_model": material.core_material_model,
         "core_material": material.core_material,

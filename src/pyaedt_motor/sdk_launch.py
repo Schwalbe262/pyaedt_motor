@@ -121,10 +121,17 @@ class Context:
         path=Path(profile_path).resolve(strict=True);raw=read_once(path);pin=raw_record(raw)
         need(pin['sha256']==digest,'launch profile changed')
         self.ref={'path':str(path),**pin};self.profile=json.loads(raw);self.root=Path(source_root).resolve(strict=True)
-        p=self.profile;need(p['schema']==SCHEMA and p['execution_enabled']is True and p['purpose']=='diagnostic','HELD: explicit diagnostic profile has not been enabled')
-        need(p['node']=='n116'and type(p['cores'])is int and p['cores']==4 and p['sdk_execution_identity']=='private_pyaedt022_launch_only_backport_v1','fixed verified route required')
+        p=self.profile;self.production=None
+        if p.get('schema')!='private_sdk022_owned_production_launch_profile_v1':
+            need(p['schema']==SCHEMA and p['execution_enabled']is True and p['purpose']=='diagnostic','HELD: explicit diagnostic profile has not been enabled')
+            need(p['node']=='n116'and type(p['cores'])is int and p['cores']==4 and p['sdk_execution_identity']=='private_pyaedt022_launch_only_backport_v1','fixed verified route required')
+            need(set(p['source_files'])==set(PHYSICAL+ENTRIES),'required launch and physical source records differ')
+        else:
+            from .owned_sdk_production import LaunchAuthority
+            need(p['execution_enabled']is True and type(p['cores'])is int and p['cores']==4 and p['sdk_execution_identity']=='private_pyaedt022_launch_only_backport_v1','enabled explicit resource4 production profile required')
+            self.production=LaunchAuthority(p)
+            need(p['purpose']==self.production.contract['purpose'],'profile purpose differs')
         need(type(p['source_commit'])is str and re.fullmatch('[0-9a-f]{40}',p['source_commit'])is not None,'explicit promoted source commit required')
-        need(set(p['source_files'])==set(PHYSICAL+ENTRIES),'required launch and physical source records differ')
         self.check_inputs();self.scope=None;self.settings=None;self.custom_before=None;self.control=None;self.case_used=False;self.owned_identity=None
     def check_inputs(self):
         need(record(self.ref['path'])=={k:self.ref[k]for k in ('bytes','sha256')},'launch profile drift')
@@ -144,6 +151,7 @@ class Context:
         need(Path(os.environ.get('PYAEDT_LIBRARY_ROOT','')).resolve()==self.library,'explicit existing private library path required')
         need(len(self.profile['library_files'])==23,'complete private library23 required')
         self.verify_sdk_files();sys.path.insert(0,str(self.sdk))
+        if self.production is not None:self.production.activate()
     def verify_sdk_files(self):
         for root,manifest in ((self.sdk,self.manifest),(self.original,self.original_manifest)):
             for name,want in manifest.items():need(record(root/name)==want,'SDK artifact drift: '+name)
@@ -161,6 +169,7 @@ class Context:
         case=str(cases[0].get('case_id',''));need(re.fullmatch('[A-Za-z0-9_.-]+',case)is not None and case not in ('.','..')and len(case)<=96,'safe explicit case ID required')
         simulation=Path(args.simulation_dir).resolve();self.control=simulation.parent/(simulation.name+'_sdk_launch_'+case);need(not self.control.exists(),'exclusive launch control directory required');self.control.mkdir(parents=True)
         self.case_used=True
+        if self.production is not None:self.production.validate_cases(args,cases)
     def write(self,name,value):
         with(self.control/name).open('x',encoding='utf-8',newline='\n')as stream:json.dump(value,stream,sort_keys=True,allow_nan=False);stream.write('\n')
     def before_factory(self,settings,version):
@@ -181,22 +190,33 @@ class Context:
                     path=Path(file).resolve(strict=True)
                     need(path.is_relative_to(self.library)and record(path)==self.profile['library_files'][path.relative_to(self.library).as_posix()],'mixed private library module refused')
         need(Path(os.environ.get('ANSYSEM_ROOT252','')).resolve()==Path(self.profile['install_root']).resolve(),'pinned installation root required')
-        gate,captured=resource.capture_current(type('ReadOnly',(),{'record':staticmethod(record)})(),os.environ)
+        kwargs={}if self.production is None else {'policy':self.production.policy}
+        gate,captured=resource.capture_current(type('ReadOnly',(),{'record':staticmethod(record)})(),os.environ,**kwargs)
         self.scope=resource.Scope(os.environ,gate,captured);self.settings=settings
         self.custom_before=(hasattr(settings,'custom_desktop_launch_args'),getattr(settings,'custom_desktop_launch_args',None))
-        binding.bind_private_settings(settings,binding.CANONICAL_STRING,private_root=self.sdk,settings_module_path=self.sdk/'ansys/aedt/core/generic/settings.py')
-        self.write('before.json',{'profile':self.ref,'route':self.profile['sdk_execution_identity'],'sdk_artifact_origin_project':json.loads(read_ref(self.profile['sdk_identity']))['source_project'],'source_commit':self.profile['source_commit'],'resource_gate':gate,'fixed_args':list(binding.FIXED_ARGS),'actual_solver4_proven':False,'training_admission':False})
+        args,text=(list(binding.FIXED_ARGS),binding.CANONICAL_STRING)if self.production is None else binding.production_arguments(self.profile['node'])
+        kwargs={}if self.production is None else {'verified_node':self.profile['node']}
+        binding.bind_private_settings(settings,text,private_root=self.sdk,settings_module_path=self.sdk/'ansys/aedt/core/generic/settings.py',**kwargs)
+        self.write('before.json',{'profile':self.ref,'route':self.profile['sdk_execution_identity'],'sdk_artifact_origin_project':json.loads(read_ref(self.profile['sdk_identity']))['source_project'],'source_commit':self.profile['source_commit'],'resource_gate':gate,'fixed_args':args,'actual_solver4_proven':False,'training_admission':False,
+                   **({'worker_entry':self.worker_entry}if self.production is not None else {})})
+        if self.production is not None:self.production.capture_inputs(self,'production_inputs_before.json')
         self.check_inputs();self.scope.check()
     def verify_owned(self,owner,identity_reader):
         from . import _sdk_launch_binding as binding
         import psutil
         need(owner.verified is True and identity_reader(owner.pid)==owner.identity,'positive own Native identity required')
         process=psutil.Process(owner.pid);argv=process.cmdline();env=process.environ()
-        need(Path(process.exe()).resolve()==Path(self.profile['install_root']).resolve()/'ansysedt.exe'and argv[-4:]==list(binding.FIXED_ARGS),'actual owned installation/argv mismatch')
+        expected=list(binding.FIXED_ARGS)if self.production is None else binding.production_arguments(self.profile['node'])[0]
+        need(Path(process.exe()).resolve()==Path(self.profile['install_root']).resolve()/'ansysedt.exe'and argv[-4:]==expected,'actual owned installation/argv mismatch')
         readback=self.scope.observe_native(env);need(identity_reader(owner.pid)==owner.identity,'own identity changed during observation')
         need(all(env.get(key)==value for key,value in self.defaults.items()),'owned Native SDK12 defaults differ')
         self.owned_identity=json.loads(json.dumps(owner.identity))
-        self.write('owned.json',{'owned_identity':owner.identity,'argv_tail4':argv[-4:],'Ansys_resource_readback':readback,'SDK12_matches_defaults':True,'scope':'pre-CAD observation only; no exit or solver4 certificate'})
+        value={'owned_identity':owner.identity,'argv_tail4':argv[-4:],'Ansys_resource_readback':readback,'SDK12_matches_defaults':True,'scope':'pre-CAD observation only; no exit or solver4 certificate'}
+        if self.production is not None:value['owned_SDK12_environment']={key:env.get(key)for key in self.defaults}
+        if self.production is None or not(self.control/'owned.json').exists():self.write('owned.json',value)
+        else:need(json.loads(read_once(self.control/'owned.json'))==json.loads(json.dumps(value)),'owned identity changed before Analyze')
+    def before_analyze(self,app,owner,spec,row,case,project_dir):
+        if self.production is not None:self.production.before_analyze(self,app,owner,spec,row,case,project_dir)
     def after_cleanup(self,row,*,analyze=False,project_dir=None):
         result=None
         if self.scope is not None:
@@ -207,10 +227,14 @@ class Context:
         self.write('after.json',{'profile':self.ref,'environment':result,'recorded_original_cleanup':row.get('standalone_cleanup'),
             'solver_uncertain':row.get('standalone_solver_uncertain'),'resource_profile_audit':audit_ref,'training_admission':False})
         row['artifact_sdk_launch_provenance']=str(self.control/'after.json');row['input_sdk_execution_identity']=self.profile['sdk_execution_identity'];row['input_sdk_launch_profile_sha256']=self.ref['sha256'];row['input_execution_purpose']='diagnostic'
+        if getattr(self,'production',None)is not None:self.production.stamp_attempt(row)
         if result is not None:
             need(result['Slurm_whitelist_unchanged']and result['Ansys_resource_input_restored'],'launch environment drift/restoration failure')
         self.check_inputs();self.verify_sdk_files()
         if analyze is not False:need(evidence['actual_4core_proven']is True,'actual saved-native machine4/matrix4 not proven: '+evidence['status'])
+        if getattr(self,'production',None)is not None:
+            self.production.capture_inputs(self,'production_inputs_after.json')
+            self.production.after_cleanup(self,row)
     def close_python_only(self):
         try:
             if self.scope is not None:self.scope.restore();self.scope=None
@@ -219,10 +243,16 @@ class Context:
                 if self.custom_before[0]:self.settings.custom_desktop_launch_args=self.custom_before[1]
                 elif hasattr(self.settings,'custom_desktop_launch_args'):delattr(self.settings,'custom_desktop_launch_args')
 
-def run_child(args,source_root):
+def run_child(args,source_root,*,worker_entry=None):
     global _ACTIVE
     selected,rest=extract_flags(args);need(selected.sdk_launch_profile is not None,'profile required by explicit child entry')
-    context=Context(selected.sdk_launch_profile,selected.sdk_launch_profile_sha256,source_root);context.activate();_ACTIVE=context
+    context=Context(selected.sdk_launch_profile,selected.sdk_launch_profile_sha256,source_root)
+    if context.production is not None:
+        need(type(worker_entry)is dict and worker_entry.get('schema')=='owned_sdk_original_worker_entry_v1','original SDK worker entry required')
+        need(worker_entry.get('argv')==[sys.argv[0],*args]and worker_entry.get('cwd')==os.getcwd()
+             and worker_entry.get('isolated')is bool(sys.flags.isolated)and worker_entry.get('dont_write_bytecode')is bool(sys.dont_write_bytecode),'worker entry capture differs from actual fresh process')
+        context.worker_entry=worker_entry
+    context.activate();_ACTIVE=context
     try:
         sys.path[:0]=[str(Path(source_root)),str(Path(source_root)/'src')]
         sys.argv=[str(Path(source_root)/'run_ipmsm_batch.py'),*rest]

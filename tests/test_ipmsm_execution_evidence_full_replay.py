@@ -129,12 +129,21 @@ class FullSerializedSpecReplayTests(unittest.TestCase):
         # and Linux without absolute runtime/test-machine paths.
         return tempfile.TemporaryDirectory(prefix="inert_cli_", dir=Path(__file__).resolve().parent)
 
-    def test_public_build_spec_json_roundtrip_through_full_verifier(self):
+    def test_current_spec_json_roundtrip_in_explicit_inert_bundle(self):
         with self.bundle() as temporary:
             bundle = FullReplayBundle(temporary)
             spec = runner.build_spec(bundle.data["case"], default_electrical_zero_deg=0.0)
             self.assertEqual(asdict(spec)["core_material_fallbacks"], ())
             self.assertEqual(bundle.data["setup_audit"]["requested_spec"]["core_material_fallbacks"], [])
+            # Explicit synthetic current-schema metadata on an inert bundle.
+            # Archived gzip/raw bytes remain unchanged and are tested below.
+            legacy_spec = bundle.data["setup_audit"]["requested_spec"]
+            current_spec = json.loads(json.dumps(asdict(spec)))
+            self.assertEqual(set(current_spec) - set(legacy_spec), {
+                "save_fields_start_step", "save_fields_stop_step", "save_fields_every_n_steps"})
+            self.assertEqual({key: current_spec[key] for key in legacy_spec}, legacy_spec)
+            bundle.data["setup_audit"]["requested_spec"] = current_spec
+            bundle.reseal()
             result = bundle.verify()
             self.assertEqual(result["errors"], [])
             self.assertTrue(result["solver_context_known"])
@@ -145,6 +154,18 @@ class FullSerializedSpecReplayTests(unittest.TestCase):
             self.assertFalse(result["full_saved_closure_passed"])
             self.assertFalse(result["training_eligible"])
             self.assertEqual(result["status"], "HELD_ACTUAL_BACKEND_VALIDATION")
+
+    def test_archived_spec_missing_save_controls_is_rejected_unchanged(self):
+        with self.bundle() as temporary:
+            bundle = FullReplayBundle(temporary)
+            archived_spec = bundle.data["setup_audit"]["requested_spec"]
+            self.assertEqual(len(archived_spec), 39)
+            self.assertFalse(any(key.startswith("save_fields_") for key in archived_spec))
+            result = bundle.verify()
+            self.assertTrue(result["solver_context_known"])
+            self.assertEqual(result["errors"], [{
+                "phase": "admission_evidence", "error": "public builder setup/NoAnalyze differs"}])
+            self.assertNotIn("physical_quality_passed", result)
 
     def test_changed_serialized_spec_rejected_by_same_full_entrypoint(self):
         for field in ("steps_per_period", "core_material_fallbacks"):

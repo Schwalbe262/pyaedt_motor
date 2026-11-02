@@ -54,22 +54,25 @@ def fields(raw,keys):
   need(len(values)==1,'missing/duplicate scontrol key: '+key);result[key]=values[0]
  return result
 
-def evaluate(job_raw,step_raw,env,*,uid,node):
- need(type(uid)is int and uid==1641 and node=='n116','own UID1641/n116 required')
+def evaluate(job_raw,step_raw,env,*,uid,node,policy=None):
+ selected=POLICY if policy is None else policy
+ need(type(uid)is int and uid==1641 and node==selected['node']and selected['UID']==1641 and selected['account']=='dw16','own UID1641/explicit node required')
  jobid,stepid=ids(env);job=fields(job_raw,('JobId','UserId','JobState','NodeList','NumNodes','NumCPUs'))
  step=fields(step_raw,('StepId','UserId','State','NodeList','Nodes','CPUs','Tasks'))
  need(job['JobId']==jobid and step['StepId']==jobid+'.'+stepid,'scontrol current job/step mismatch')
  need(job['UserId']=='dw16(1641)'and step['UserId']=='1641','actual own job/step UID required')
- need(job['JobState']==step['State']=='RUNNING'and job['NodeList']==step['NodeList']=='n116','current running single n116 allocation required')
+ need(job['JobState']==step['State']=='RUNNING'and job['NodeList']==step['NodeList']==node,'current running single explicit allocation required')
  need(job['NumNodes']==step['Nodes']=='1','one node required')
  for v in (job['NumCPUs'],step['CPUs'],step['Tasks']):need(re.fullmatch(r'[1-9][0-9]{0,8}',v),'typed positive Slurm resource required')
  allocated,step_cpus=int(job['NumCPUs']),int(step['CPUs'])
- need(64<=allocated and 4<=step_cpus<=allocated and step['Tasks']=='1','resource4 must fit actual job>=64 and own step>=4/one task')
+ minimum=selected['minimum_job_CPUs'];need(type(minimum)is int and minimum>=4,'typed job minimum>=4 required')
+ need(minimum<=allocated and 4<=step_cpus<=allocated and step['Tasks']=='1','resource4 must fit actual job minimum and own step>=4/one task')
  return {'job':job,'step':step,'requested_Ansys_resource_slots':4,'actual_job_allocated_CPUs':allocated,
          'actual_step_CPUs':step_cpus,'resource4_within_observed_allocation':True,'actual_Native_solve_cores_proven':False}
 
-def capture_current(h,env):
- need(os.name=='posix'and os.getuid()==os.geteuid()==1641 and socket.gethostname().split('.')[0]=='n116','exact current worker principal required')
+def capture_current(h,env,*,policy=None):
+ selected=POLICY if policy is None else policy
+ need(os.name=='posix'and os.getuid()==os.geteuid()==1641 and socket.gethostname().split('.')[0]==selected['node'],'exact current worker principal required')
  prior=snapshot(env);job,step=ids(env);check_installed_sources(h)
  executable=shutil.which('scontrol');need(executable is not None,'scontrol required; no fallback')
  executable=str(Path(executable).resolve(strict=True));need(Path(executable).name=='scontrol','exact scontrol executable required')
@@ -82,11 +85,12 @@ def capture_current(h,env):
   need(completed.returncode==0 and not err,'readonly current job/step query failed; no fallback')
   responses.append(raw);commands.append({'argv':command,'returncode':0,'stdout_record':rec(raw),'stderr_record':rec(err)})
  need(snapshot(env)==prior and h.record(executable)==executable_record,'Slurm environment or query executable drift')
- selected=evaluate(*responses,env,uid=os.getuid(),node=socket.gethostname().split('.')[0]);check_installed_sources(h)
+ selected=evaluate(*responses,env,uid=os.getuid(),node=socket.gethostname().split('.')[0],policy=selected);check_installed_sources(h)
  need(time.monotonic()-start<=30,'stale resource observation')
  return {'schema':'owned_current_Slurm_Ansys_resource4_gate_v1','observed_UTC':datetime.now(timezone.utc).isoformat(),
          'commands':commands,'executable':{'path':executable,**executable_record},'selected':selected,
-         'Slurm_whitelist':prior,'proxy_sources':SOURCE_PINS,'proxy_executed':False},start
+         'Slurm_whitelist':prior,'proxy_sources':SOURCE_PINS,'proxy_executed':False,
+         **({'raw_job':responses[0].decode('utf-8'),'raw_step':responses[1].decode('utf-8')}if policy is not None else {})},start
 
 class Scope:
  def __init__(self,env,evidence,captured_at):

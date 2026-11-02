@@ -850,6 +850,22 @@ def validated_zero_manifest(manifest: Mapping[str, Any]) -> tuple[float, str]:
     return electrical_zero_deg, calibration_id
 
 
+def analyze_production_zero(spec, context):
+    """Fresh spec-bound production protocol; legacy/research APIs remain unchanged."""
+    from pyaedt_motor.production_zero import analyze_production_zero as analyze
+    return analyze(spec, context)
+
+
+def validate_production_zero(manifest, spec, context):
+    from pyaedt_motor.production_zero import validate_production_zero as validate
+    return validate(manifest, spec, context)
+
+
+def apply_production_zero_to_spec(spec, manifest, context):
+    from pyaedt_motor.production_zero import apply_production_zero_to_spec as apply
+    return apply(spec, manifest, context)
+
+
 def apply_zero_manifest_to_spec(
     spec: Mapping[str, Any],
     calibration_manifest: Mapping[str, Any],
@@ -1391,6 +1407,20 @@ def build_parser() -> argparse.ArgumentParser:
     apply_manifest.add_argument("--calibration-manifest", type=Path, required=True)
     apply_manifest.add_argument("--output", type=Path, required=True)
 
+    for command in ("production-zero-analyze", "production-zero-apply", "production-frame"):
+        production = subparsers.add_parser(command, help="Explicit spec-bound winding protocol; requires retained raw evidence.")
+        production.add_argument("--spec", type=Path, required=True)
+        production.add_argument("--evidence-plan", type=Path, required=True)
+        production.add_argument("--evidence-sha256", required=True)
+        production.add_argument("--output", type=Path, required=True)
+        if command != "production-zero-analyze":
+            production.add_argument("--calibration-manifest", type=Path, required=True)
+    production_generate = subparsers.add_parser("production-zero-generate", help="New typed Ns40 two-speed no-load plan with blank calibration IDs.")
+    production_generate.add_argument("--spec", type=Path, required=True)
+    production_generate.add_argument("--geometry-seed", type=int, default=42)
+    production_generate.add_argument("--quality-profile", default="reference_ultra")
+    production_generate.add_argument("--output", type=Path, required=True)
+
     # Retain old command names only to produce an explicit migration failure.
     legacy_generate = subparsers.add_parser("generate", help=argparse.SUPPRESS)
     legacy_generate.add_argument("--source")
@@ -1441,6 +1471,31 @@ def write_json_object(path: Path, value: Mapping[str, Any], *, overwrite: bool =
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command.startswith("production-"):
+        from pyaedt_motor.production_zero import VerifiedProductionZero, load_spec
+        from pyaedt_motor import winding_frames
+        raw_spec = read_json_object(args.spec)
+        spec = load_spec(raw_spec)
+        if args.command == "production-zero-generate":
+            from pyaedt_motor.production_zero import generate_production_zero_rows
+            if args.output.exists():
+                raise FileExistsError(args.output)
+            rows = generate_production_zero_rows(spec, geometry_seed=args.geometry_seed, quality_profile=args.quality_profile)
+            write_rows(args.output, rows)
+            print(f"production-zero-generate rows={len(rows)} output={args.output}; no reservation or identity issued")
+            return 0
+        context = VerifiedProductionZero.from_plan(args.evidence_plan, args.evidence_sha256)
+        if args.command == "production-zero-analyze":
+            result = analyze_production_zero(spec, context)
+        else:
+            manifest = read_json_object(args.calibration_manifest)
+            validate_production_zero(manifest, spec, context)
+            result = (apply_production_zero_to_spec(raw_spec, manifest, context)
+                      if args.command == "production-zero-apply" else
+                      winding_frames.draft_reference(manifest, context, assign_identity=True))
+        write_json_object(args.output, result, overwrite=False)
+        print(f"{args.command} output={args.output}; no solver or training admission")
+        return 0
     if args.command in {"generate", "analyze"}:
         raise SystemExit(
             "legacy loaded torque-max electrical-zero commands were removed; use zero-generate/zero-analyze "

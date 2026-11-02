@@ -1,0 +1,196 @@
+{
+  "original_frozen_data_modified": false,
+  "records": {
+    "case.csv": {
+      "bytes": 2067,
+      "gzip": "001.gz",
+      "sha256": "19d3d5e40746d33956498323f88fd1faecf7b33fb629442dedf0a1947fa552b8"
+    },
+    "library/pyaedt_module/__init__.py": {
+      "bytes": 147,
+      "gzip": "015.gz",
+      "sha256": "f743322b5b96a55f9a3e60fcb9bf83de521aab8c5ba22ba8eca177517a29d62a"
+    },
+    "library/pyaedt_module/core/__init__.py": {
+      "bytes": 193,
+      "gzip": "023.gz",
+      "sha256": "11a1375ec1952e07e99c7cc4872e07931e134554f2d65fbeb6fd3dfa2b7b8c1a"
+    },
+    "library/pyaedt_module/core/post_processing.py": {
+      "bytes": 6364,
+      "gzip": "016.gz",
+      "sha256": "e878a09459dc20f9c9002d9de13cf78bf7dde8ad79226f6c2d1d8ffa81dfc675"
+    },
+    "library/pyaedt_module/core/pydesign.py": {
+      "bytes": 19646,
+      "gzip": "017.gz",
+      "sha256": "1c2deca48b5cdbb5256ffd8bba375bad5837bf1805681594eec13803203120e0"
+    },
+    "library/pyaedt_module/core/pydesign_old.py": {
+      "bytes": 13343,
+      "gzip": "018.gz",
+      "sha256": "858ee845a21041741ee1a5555fd2399bcc9d33861cdab254eff84b48da0f99d5"
+    },
+    "library/pyaedt_module/core/pydesktop.py": {
+      "bytes": 10274,
+      "gzip": "019.gz",
+      "sha256": "08550217a564f37842d7ee62d0b7f1f499a6aa46d019865ea34bc09a645321fc"
+    },
+    "library/pyaedt_module/core/pyproject.py": {
+      "bytes": 15832,
+      "gzip": "020.gz",
+      "sha256": "2214f1ac9dfd8e720f8203e961f499b8c82d6b59ac150273f3494ef9a4ae2b0a"
+    },
+    "library/pyaedt_module/core/pysystem.py": {
+      "bytes": 801,
+      "gzip": "021.gz",
+      "sha256": "c073de1259e95335be50752af63c5b5a6d553283f89c9abaaa484467dcda5c69"
+    },
+    "library/pyaedt_module/core/scheduler.py": {
+      "bytes": 7344,
+      "gzip": "022.gz",
+      "sha256": "27f3eee7933182b42d92e7ed8105c1a6fc7919dff17eb0a49d7c907c6c59c28f"
+    },
+    "library/pyaedt_module/model3d/PCB_winding.py": {
+      "bytes": 2863,
+      "gzip": "027.gz",
+      "sha256": "7c92ae517793be6b627daa71e3b469f846666d899ac0ca5aa500c03cb1d48188"
+    },
+    "library/pyaedt_module/model3d/__init__.py": {
+      "bytes": 52,
+      "gzip": "030.gz",
+      "sha256": "af0535f4d52e90289045b94adc3ed26babe84f9a135de402a9a11eb2127f7c3d"
+    },
+    "library/pyaedt_module/model3d/core.py": {
+      "bytes": 6334,
+      "gzip": "024.gz",
+      "sha256": "e0f0fa4b7dd4847536d93580b7bf3bd2643a48fc6cfa80656a8b58163052491c"
+    },
+    "library/pyaedt_module/model3d/face.py": {
+      "bytes": 2202,
+      "gzip": "025.gz",
+      "sha256": "206bf5e3229489170f2b938e5e0debd01bcc96ad11c4b67c14266b1a66f43589"
+    },
+    "library/pyaedt_module/model3d/model3d.py": {
+      "bytes": 1733,
+      "gzip": "026.gz",
+      "sha256": "8845eb1c43d4a73894f1b1396537ae08e8f9fc5ba1bde35aa906ff8abd263e4e"
+    },
+    "library/pyaedt_module/model3d/transformer_winding.py": {
+      "bytes": 16678,
+      "gzip": "028.gz",
+      "sha256": "d860811c5c0c88d08ba64824de261bc16e3856b5a9bb1377f48f8b89dab291b8"
+    },
+    "library/pyaedt_module/model3d/winding.py": {
+      "bytes": 9875,
+      "gzip": "029.gz",
+      "sha256": "bdb486662007e0a2719f838e0b7b59142abaf004f0d8be5e7ee4df5c5021b194"
+    },
+    "library/pyaedt_module/solver/__init__.py": {
+      "bytes": 170,
+      "gzip": "037.gz",
+      "sha256": "9253ee53a327167a6e040fc64a5a9d4519a1f04f95221c918be0dc64f2653e90"
+    },
+    "library/pyaedt_module/solver/circuit.py": {
+      "bytes": 195,
+      "gzip": "031.gz",
+      "sha256": "ed753e43353e9ee79352ad500cb6156f4a269c8b5ca5574f846f32f9ed53068c"
+    },
+    "library/pyaedt_module/solver/debug.ipynb": {
+      "bytes": 2273,
+      "gzip": "032.gz",
+      "sha256": "e2ff326e3728570df528d42bd60a272ab71c4d9418834176d3a57ed43f3a9afa"
+    },
+    "library/pyaedt_module/solver/hfss.py": {
+      "bytes": 1811,
+      "gzip": "033.gz",
+      "sha256": "baf901a0c092e2d4e52632ca0c0d64fdf6039eaf44e5f341d7dd84f910f65956"
+    },
+    "library/pyaedt_module/solver/icepak.py": {
+      "bytes": 9574,
+      "gzip": "034.gz",
+      "sha256": "7e8f754fc1e89a925e4f0af3e6f6bc0a134f14a3cc0f8896d3907af813b818db"
+    },
+    "library/pyaedt_module/solver/maxwell2d.py": {
+      "bytes": 306,
+      "gzip": "035.gz",
+      "sha256": "45926b338d2fb80200a373b805a1371852eefa80a141a7e81668981df001429f"
+    },
+    "library/pyaedt_module/solver/maxwell3d.py": {
+      "bytes": 9682,
+      "gzip": "036.gz",
+      "sha256": "1ec5af2de1f2bf6a63f407eafb58344e6351b25f08ad6fbad6c2ad435d2f7f87"
+    },
+    "native.profile": {
+      "bytes": 596121,
+      "gzip": "004.gz",
+      "sha256": "cc18493842f9e91a4913c65826e906e54bb2293f6efcbd293fde924615927b4a"
+    },
+    "original_row.json": {
+      "bytes": 56340,
+      "gzip": "000.gz",
+      "sha256": "d81c58a38451158ff493625c29348cdfa0109847757ede85608e5c364dab1c68"
+    },
+    "own.acf": {
+      "bytes": 967,
+      "gzip": "005.gz",
+      "sha256": "d7ecb5ebf49ad47c5da0e7f0be17b0994e0a22aa1e65da0b5eb46559d4ce8595"
+    },
+    "reports/PPT_Back_EMF.csv": {
+      "bytes": 61250,
+      "gzip": "006.gz",
+      "sha256": "bd2a77ebfe0ca6e3d4bce49deb00219c8a7377955872d1600405e7d056c536fe"
+    },
+    "reports/PPT_Cogging_Torque.csv": {
+      "bytes": 30125,
+      "gzip": "007.gz",
+      "sha256": "447388a26e9e581cd1ea1f0835df3a5e616f5444c779df55a615cc83d49a6688"
+    },
+    "reports/PPT_Flux_Linkages.csv": {
+      "bytes": 66831,
+      "gzip": "008.gz",
+      "sha256": "de6f9e982e66ff5789e41aed00bc38c73d2ede48a07109bfb774062eb09913ef"
+    },
+    "reports/PPT_Inductance_Matrix.csv": {
+      "bytes": 197586,
+      "gzip": "009.gz",
+      "sha256": "756825ada29634dfa30c114f16b09fe7880affec6976535cfc7c24aabf6f730d"
+    },
+    "reports/PPT_Losses.csv": {
+      "bytes": 46596,
+      "gzip": "010.gz",
+      "sha256": "d7f9088514a918534a37f5e1e87c5aa94c4afc8dd0345c377422d82da759e1fc"
+    },
+    "reports/PPT_PhaseA_Voltage_Limit.csv": {
+      "bytes": 29419,
+      "gzip": "011.gz",
+      "sha256": "b5d3484621bc9bc96eca353b408f7e72386f9f829dee523ccedc5f1605b96247"
+    },
+    "reports/PPT_Phase_Currents.csv": {
+      "bytes": 19614,
+      "gzip": "012.gz",
+      "sha256": "1843ee26003b9ee4ba47c51fd9f7ad5e69431fb61445dcbe1dba20964c931e51"
+    },
+    "reports/PPT_Phase_Voltages.csv": {
+      "bytes": 61334,
+      "gzip": "013.gz",
+      "sha256": "6af7379461f8ee63e7c3d4eb8e8401c8b616d0ecbd9c0771bdc9d968e476d590"
+    },
+    "reports/PPT_Torque.csv": {
+      "bytes": 30125,
+      "gzip": "014.gz",
+      "sha256": "447388a26e9e581cd1ea1f0835df3a5e616f5444c779df55a615cc83d49a6688"
+    },
+    "saved.aedt": {
+      "bytes": 1176458,
+      "gzip": "002.gz",
+      "sha256": "39e9bf0b4acfdf86fb7dd60945a01fda065db1870667d604229004ea28c3ecf0"
+    },
+    "setup.json": {
+      "bytes": 28856,
+      "gzip": "003.gz",
+      "sha256": "8d8b379012e89c1d66a9635622e43a1c7577427ae935f3bae535d36f5a6dba15"
+    }
+  },
+  "source": "Closed actual Source18 task101039 attempt172; numerical/material input bytes only. Synthetic highspeed and unit metadata are generated separately; no actual highspeed/Source19 claim."
+}

@@ -425,7 +425,7 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
             raise ValueError("invalid metric denominator floor")
     if not case_plan:
         raise ValueError("case plan must not be empty")
-    from . import reference_frames as frames
+    from . import winding_frames as frames
     frame_context = {}
     cli_cases = {}
     cli_frame_identity = None
@@ -446,10 +446,10 @@ def compare_profiles(results: Sequence[Mapping[str, Any]], case_plan: Sequence[M
             "frame_evidence": {"mapping": {"path": str(frame_evidence.path),
                 "bytes": len(frame_evidence.raw), "sha256": frame_evidence.sha256}, "root": str(frame_evidence.root)},
             "training_admission": False}}
-    elif any(str(row.get("input_beta_calibration_id", "")).startswith(frames.PREFIX) for row in results) or frame_manifest is not None:
+    elif any(frames.is_frame_id(row.get("input_beta_calibration_id", "")) for row in results) or frame_manifest is not None:
         if frame_manifest is None or frame_evidence is None or not frames.is_family(frame_manifest):
             raise ValueError("family profile comparison requires its explicit manifest and local audits")
-        frame_context = {"reference_frame_context": frames.verify_rows(results, frame_manifest, frame_evidence)}
+        frame_context = {"reference_frame_context": frames.verify_profile_rows(results, frame_manifest, frame_evidence)}
         for row in case_plan:
             if any(row.get(key) != value for key, value in frames.frame_fields(frame_manifest).items()):
                 raise ValueError("quality plan reference-frame declaration differs")
@@ -703,7 +703,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", type=Path, nargs="+", required=True)
     parser.add_argument("--plan", type=Path, required=True)
-    from . import reference_frames as frames
+    from . import winding_frames as frames
     frames.evidence_arguments(parser)
     parser.add_argument("--reference-frame-manifest", type=Path)
     parser.add_argument("--reference-profile", required=True)

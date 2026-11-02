@@ -79,6 +79,8 @@ class V3DoeTests(unittest.TestCase):
         package.mkdir(parents=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
         shutil.copyfile(doe.__file__, package / "doe.py")
+        for name in ("reference_frames.py", "winding_frames.py", "production_zero.py"):
+            shutil.copyfile(Path(doe.__file__).with_name(name), package / name)
         shutil.copyfile(doe._geometry_helper.__file__, root / "ipmsm_optimization.py")
         return root
 
@@ -235,10 +237,10 @@ class V3DoeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed in memory"):
             doe.generate_training_plan(self.spec, self.calibration, profile, geometries=10)
 
-    def test_production_doe_rejects_nonphysical_fixed_winding_contract(self):
-        for winding in [replace(self.spec.winding, series_turns_per_phase=24, turns_per_coil_side=6),
-                        replace(self.spec.winding, parallel_branches=2, coils_per_phase=8)]:
-            with self.subTest(winding=winding), self.assertRaisesRegex(ValueError, "fixed48"):
+    def test_production_doe_rejects_unbound_or_unsupported_winding_context(self):
+        for winding, error in [(replace(self.spec.winding, series_turns_per_phase=24, turns_per_coil_side=6), "winding context differ"),
+                               (replace(self.spec.winding, parallel_branches=2, coils_per_phase=8), "four coils per phase")]:
+            with self.subTest(winding=winding), self.assertRaisesRegex(ValueError, error):
                 doe.generate_training_plan(replace(self.spec, winding=winding), self.calibration,
                                            self.profile, geometries=10)
 

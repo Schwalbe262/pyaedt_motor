@@ -3139,6 +3139,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
                 setup_result["native_model_depth_audit_pre_analysis"] = audit_native_model_depth(design, spec)
                 assert_standalone_owned(standalone_owner, app.desktop_class)
                 assert_standalone_project(standalone_owner)
+                if launch_context is not None:
+                    launch_context.before_analyze(app, standalone_owner, spec, row, case, project_path)
                 standalone_owner.solver_uncertain = True
                 try:
                     state = record_standalone_solver_state(standalone_owner, case_id, row["input_producer_fingerprint"], "pre_analyze_intent")

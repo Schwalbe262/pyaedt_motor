@@ -20,12 +20,14 @@ class ProductionEvidence(unittest.TestCase):
         from tests._archive_numeric_fixture import raw_fixture
         case = json.loads(raw_fixture("case.json")); builder = json.loads(raw_fixture("builder.json"))
         spec = runner.build_spec(case)
-        self.assertEqual(evidence._verify_production_builder_inputs(runner, case, spec, builder), 114)
+        self.assertEqual(evidence._verify_production_builder_inputs(runner, case, spec, builder), 117)
         keys = [*("input_"+name for name in GEOMETRY_VARIABLE_NAMES), "input_i_peak_a", "input_phase_resistance_ohm",
-                "input_steps_per_period", "input_transient_periods", "input_source_case_id", "geometry_group_id"]
+                "input_steps_per_period", "input_transient_periods", "input_source_case_id", "geometry_group_id",
+                "input_save_fields_start_step", "input_save_fields_stop_step", "input_save_fields_every_n_steps"]
         for key in keys:
             changed = dict(builder)
-            changed[key] = float(changed[key]) + 1 if key.startswith("input_") and key != "input_source_case_id" else "tampered"
+            value = changed.get(key)
+            changed[key] = (1 if value is None else float(value) + 1) if key.startswith("input_") and key != "input_source_case_id" else "tampered"
             with self.subTest(key=key), self.assertRaises(ValueError):
                 evidence._verify_production_builder_inputs(runner, case, spec, changed)
         changed = dict(builder); changed["input_mesh_elements"] = "{'band': 2000, 'magnet': 1}"
