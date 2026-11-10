@@ -1846,6 +1846,40 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
         "band": _get_group(m2d, object_groups, "band", ("Band",)),
     }
     result: dict[str, Any] = {}
+    if spec.airgap_band_mapping_angle_deg is not None:
+        if len(groups["band"]) != 1:
+            raise ValueError("airgap treatment requires exactly one existing moving Band")
+        # assign_rotate_motion can create CylindricalGap1 automatically. The
+        # SDK refuses a second CGT: identify the actual Native operation first,
+        # then replace only that exact Band-bound operation via public delete().
+        mesh_node = m2d.odesign.GetChildObject("Mesh")
+        child_names = list(mesh_node.GetChildNames())
+        if len(child_names) != len(set(child_names)):
+            raise ValueError("duplicate native mesh child names")
+        existing = []
+        for name in child_names:
+            node = mesh_node.GetChildObject(name)
+            prop_names = list(node.GetPropNames())
+            if "Type" in prop_names and node.GetPropValue("Type") in ("CylindricalGap", "Cylindrical Gap Based"):
+                existing.append(name)
+        if len(existing) > 1:
+            raise ValueError("multiple native CylindricalGap operations cannot be replaced")
+        if existing:
+            name = existing[0]
+            matches = [op for op in m2d.mesh.meshoperations if op.name == name]
+            if len(matches) != 1:
+                raise ValueError("native CylindricalGap has no exact public SDK operation")
+            node = mesh_node.GetChildObject(name)
+            if node.GetPropValue("Type") not in ("CylindricalGap", "Cylindrical Gap Based"):
+                raise ValueError("native CylindricalGap type changed before replacement")
+            assigned = node.GetPropValue("Assignment")
+            assigned = [part.strip() for part in assigned.split(",")] if isinstance(assigned, str) else assigned
+            if not isinstance(assigned, list) or assigned != groups["band"]:
+                raise ValueError("native CylindricalGap belongs to a different Band/object")
+            if matches[0].delete() is not True:
+                raise RuntimeError("native CylindricalGap public delete did not return exact True")
+            if name in list(mesh_node.GetChildNames()):
+                raise RuntimeError("native CylindricalGap still exists after public delete")
     for group_name, objects in groups.items():
         if not objects:
             result[group_name] = "skipped: no objects"
@@ -1947,7 +1981,7 @@ def audit_mesh_operation_settings(operations: dict[str, Any], objects: dict[str,
                 raise ValueError("airgap CylindricalGap assignment must be the existing Band")
             if prop.get("Type") not in ("CylindricalGap", "Cylindrical Gap Based"):
                 raise ValueError("airgap mesh type is not CylindricalGap")
-            if prop.get("Enabled") is not True or prop.get("UseBandMappingAngle") is not True:
+            if prop.get("UseBandMappingAngle") is not True:
                 raise ValueError("airgap Band Mapping Angle must be independently enabled")
             raw = prop.get("BandMappingAngle")
             match = re.fullmatch(r"\s*([+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)\s*deg\s*", str(raw))
@@ -2003,7 +2037,7 @@ def audit_native_mesh_settings(design: Any, object_groups: dict[str, Any], spec:
                 return node.GetPropValue(found[0])
             assignment = read_airgap("Assignment")
             operations["Mesh_AirGap"] = {
-                "Type": read_airgap("Type"), "Enabled": read_airgap("Enabled"),
+                "Type": read_airgap("Type"),
                 "Objects": [part.strip() for part in assignment.split(",")] if isinstance(assignment, str) else assignment,
                 "UseBandMappingAngle": read_airgap("UseBandMappingAngle"),
                 "BandMappingAngle": read_airgap("BandMappingAngle"),

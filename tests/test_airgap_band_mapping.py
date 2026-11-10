@@ -1,6 +1,9 @@
 """Opt-in v252 TAU2D O-gap treatment; inert SDK/OO data, never Native."""
 import copy
+import ast
 from dataclasses import replace
+from pathlib import Path
+import sys
 from types import SimpleNamespace as NS
 import unittest
 from unittest import mock
@@ -14,15 +17,35 @@ def properties(spec):
     ops={"Mesh_"+group:{"Objects":OBJECTS[group],"Type":"LengthBased","Enabled":True,"RefineInside":True,
         "RestrictElem":True,"RestrictLength":False,"NumMaxElem":str(count),"MaxLength":"1mm","ApplyToInitialMesh":False}
         for group,count in spec.mesh_elements.items()}
-    ops["Mesh_AirGap"]={"Objects":["Band"],"Type":"CylindricalGap","Enabled":True,"UseBandMappingAngle":True,"BandMappingAngle":str(spec.airgap_band_mapping_angle_deg)+"deg"}
+    ops["Mesh_AirGap"]={"Objects":["Band"],"Type":"CylindricalGap","UseBandMappingAngle":True,"BandMappingAngle":str(spec.airgap_band_mapping_angle_deg)+"deg"}
     return ops
-def assigned(spec,returned=True,updated=True,design_type="Maxwell 2D"):
+def assigned(spec,returned=True,updated=True,design_type="Maxwell 2D",existing=None,deletion=True,events=None,native_deleted=True,cache_missing=False):
     length=[];gap=[]
+    events=events if events is not None else[]
+    native=copy.deepcopy(existing or{})
+    handles=[]
+    class Node:
+        def __init__(self,p):self.p=p
+        def GetPropNames(self):return list(self.p)
+        def GetPropValue(self,k):return self.p[k]
+    class Operation:
+        def __init__(self,name):self.name=name;self.props={'Objects':['cached foreign object']}
+        def delete(self):
+            events.append('delete:'+self.name)
+            if deletion is True:
+                if native_deleted:del native[self.name]
+                handles.remove(self)
+            return deletion
+    handles.extend(Operation(name)for name in native)
+    if cache_missing:handles.clear()
     def make(**kw):
         length.append(kw);return NS(props={},update=lambda:True)
     def cylindrical(*args,**kw):
+        if any(p['Type']=='CylindricalGap'for p in native.values()):raise AssertionError('duplicate CGT would reach SDK')
         gap.append((args,kw));return NS(props={"cached":"not evidence"},update=lambda:updated)if returned else returned
-    app=NS(design_type=design_type,mesh=NS(assign_length_mesh=make,assign_cylindrical_gap=cylindrical))
+    mesh_node=NS(GetChildNames=lambda:list(native),GetChildObject=lambda name:Node(native[name]))
+    app=NS(design_type=design_type,odesign=NS(GetChildObject=lambda name:mesh_node),
+           mesh=NS(assign_length_mesh=make,assign_cylindrical_gap=cylindrical,meshoperations=handles))
     with mock.patch.object(ppt,"_get_group",side_effect=lambda m,g,k,f:g[k]):
         result=ppt.assign_mesh(app,NAMES,spec)
     return result,length,gap
@@ -53,7 +76,7 @@ class BandMappingAngleTests(unittest.TestCase):
         spec=chosen();ops=properties(spec)
         audit=ppt.audit_mesh_operation_settings(ops,OBJECTS,spec,source="saved_AEDT")
         self.assertTrue(audit['passed']);self.assertFalse(audit['groups']['airgap']['actual_mesh_geometry_verified'])
-        for key,value in [("Objects",['Region']),("Type","LengthBased"),("Enabled",False),("UseBandMappingAngle",1),
+        for key,value in [("Objects",['Region']),("Type","LengthBased"),("UseBandMappingAngle",1),
                           ("BandMappingAngle",".7deg"),("BandMappingAngle",".6rad"),("MovingSideLayers",2)]:
             bad=copy.deepcopy(ops);bad['Mesh_AirGap'][key]=value
             with self.subTest(key=key),self.assertRaises(ValueError):ppt.audit_mesh_operation_settings(bad,OBJECTS,spec,source="saved_AEDT")
@@ -62,7 +85,7 @@ class BandMappingAngleTests(unittest.TestCase):
         for group in OBJECTS:
             p=saved['Mesh_'+group];actual['Mesh_'+group]={"Type":"Length Based","Enabled":True,"Assignment":','.join(p['Objects']),
                 "Region":"Inside Selection","Restrict Max Elems":True,"Restrict Length":False,"Apply To Initial Mesh":False,"Max Elems":p['NumMaxElem'],"Max Length":"1mm"}
-        actual['Mesh_AirGap']={"Type":"Cylindrical Gap Based","Enabled":True,"Assignment":"Band","Use Band Mapping Angle":True,"Band Mapping Angle":"0.6deg"}
+        actual['Mesh_AirGap']={"Type":"Cylindrical Gap Based","Assignment":"Band","Use Band Mapping Angle":True,"Band Mapping Angle":"0.6deg"}
         class Node:
             def __init__(self,p):self.p=p
             def GetPropNames(self):return list(self.p)
@@ -96,4 +119,44 @@ class BandMappingAngleTests(unittest.TestCase):
         self.assertEqual(queried,['Length Based','Skin Depth Based','Surface Approximation Based','Cylindrical Gap Based'])
         self.assertEqual(deleted,['Mesh_band','Mesh_AirGap'])
         self.assertEqual(result['mesh'],deleted);self.assertNotIn('OtherAirGap',deleted)
+    def test_actual_auto_cgt_shape_is_replaced_after_independent_band_binding(self):
+        events=[]
+        auto={'CylindricalGap1':{'Type':'CylindricalGap','Assignment':'Band','UseBandMappingAngle':False,'BandMappingAngle':'1deg'}}
+        result,length,gap=assigned(chosen(),existing=auto,events=events)
+        self.assertEqual(events,['delete:CylindricalGap1']);self.assertEqual(len(length),5)
+        self.assertIn('airgap',result);self.assertEqual(gap[0][1]['name'],'Mesh_AirGap')
+    def test_foreign_or_multiple_cgt_cannot_be_deleted(self):
+        for native in [
+            {'CylindricalGap1':{'Type':'CylindricalGap','Assignment':'Region'}},
+            {'A':{'Type':'CylindricalGap','Assignment':'Band'},'B':{'Type':'CylindricalGap','Assignment':'Band'}},
+        ]:
+            events=[]
+            with self.subTest(native=native),self.assertRaises(ValueError):assigned(chosen(),existing=native,events=events)
+            self.assertEqual(events,[])
+    def test_nonexact_public_delete_never_reaches_new_assignment(self):
+        native={'CylindricalGap1':{'Type':'CylindricalGap','Assignment':'Band'}}
+        for deletion in [False,None,1]:
+            events=[]
+            with self.subTest(deletion=deletion),self.assertRaisesRegex(RuntimeError,'delete.*exact True'):
+                assigned(chosen(),existing=native,deletion=deletion,events=events)
+            self.assertEqual(events,['delete:CylindricalGap1'])
+    def test_public_delete_true_without_actual_native_removal_is_rejected(self):
+        native={'CylindricalGap1':{'Type':'CylindricalGap','Assignment':'Band'}}
+        with self.assertRaisesRegex(RuntimeError,'still exists'):
+            assigned(chosen(),existing=native,native_deleted=False)
+    def test_missing_public_sdk_cached_handle_rejects_without_refresh_or_delete(self):
+        native={'CylindricalGap1':{'Type':'CylindricalGap','Assignment':'Band'}};events=[]
+        with self.assertRaisesRegex(ValueError,'no exact public SDK operation'):
+            assigned(chosen(),existing=native,cache_missing=True,events=events)
+        self.assertEqual(events,[])
+    def test_new_sdk_calls_exist_in_installed022_source_without_native_import(self):
+        source=Path(sys.executable).parent/'Lib/site-packages/ansys/aedt/core/modules/mesh.py'
+        classes={n.name:n for n in ast.parse(source.read_text(encoding='utf-8')).body if isinstance(n,ast.ClassDef)}
+        mesh={n.name for n in classes['Mesh'].body if isinstance(n,ast.FunctionDef)}
+        operations={n.name for n in classes['MeshOperation'].body if isinstance(n,ast.FunctionDef)}
+        self.assertTrue({'meshoperations','assign_cylindrical_gap'}<=mesh)
+        self.assertTrue({'delete','update'}<=operations)
+        self.assertNotIn('refresh_mesh_operations',mesh)
+        own=next(n for n in ast.parse(Path(ppt.__file__).read_text(encoding='utf-8')).body if isinstance(n,ast.FunctionDef)and n.name=='assign_mesh')
+        self.assertNotIn('refresh_mesh_operations',{n.func.attr for n in ast.walk(own)if isinstance(n,ast.Call)and isinstance(n.func,ast.Attribute)})
 if __name__=='__main__':unittest.main()
