@@ -113,6 +113,7 @@ class IPMSMPPTSpec:
     require_steady_state: bool = False
     circle_segments: int = 0
     band_circle_segments: int = 144
+    airgap_band_mapping_angle_deg: float | None = None
     loss_policy: str = "laminated_core"
     conductor_area_per_branch_mm2: float = 15.3206469
     slot_fill_limit: float = 0.45
@@ -292,6 +293,12 @@ def validate_ppt_spec_contract(
         raise ValueError("circle_segments must be 0 (exact arcs) or at least 12")
     if spec.band_circle_segments != 0 and spec.band_circle_segments < 12:
         raise ValueError("band_circle_segments must be 0 (exact arcs) or at least 12")
+    if spec.airgap_band_mapping_angle_deg is not None:
+        angle = spec.airgap_band_mapping_angle_deg
+        if type(angle) not in (int, float) or not math.isfinite(angle) or not 0.0005 <= angle <= 3.0:
+            raise ValueError("airgap_band_mapping_angle_deg must be finite and between 0.0005 and 3 degrees")
+        if spec.band_circle_segments != 0:
+            raise ValueError("airgap Band Mapping Angle requires band_circle_segments=0 (curved outline)")
     if spec.loss_policy not in {"laminated_core", "legacy_implicit"}:
         raise ValueError("unsupported loss_policy")
     if not isinstance(spec.mesh_maximum_lengths_mm, dict):
@@ -1140,13 +1147,13 @@ def clear_previous_ppt_setup(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
     try:
         module = m2d.odesign.GetModule("MeshSetup")
         existing = set()
-        for mesh_type in ("Length Based", "Skin Depth Based", "Surface Approximation Based"):
+        for mesh_type in ("Length Based", "Skin Depth Based", "Surface Approximation Based", "Cylindrical Gap Based"):
             try:
                 existing.update(module.GetOperationNames(mesh_type))
             except Exception:
                 pass
         deleted = []
-        for name in ["Mesh_magnet", "Mesh_rotor", "Mesh_stator", "Mesh_winding", "Mesh_band"]:
+        for name in ["Mesh_magnet", "Mesh_rotor", "Mesh_stator", "Mesh_winding", "Mesh_band", "Mesh_AirGap"]:
             if name not in existing:
                 continue
             try:
@@ -1826,7 +1833,11 @@ def assign_losses(
 
 def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPPTSpec) -> dict[str, Any]:
     """Apply the mesh element counts stated in the deck."""
+    if spec.airgap_band_mapping_angle_deg is not None:
+        validate_ppt_spec_contract(spec)
     m2d = _m2d(design)
+    if spec.airgap_band_mapping_angle_deg is not None and m2d.design_type != "Maxwell 2D":
+        raise ValueError("airgap Band Mapping Angle contract supports only Maxwell 2D")
     groups = {
         "magnet": _get_group(m2d, object_groups, "magnets", ("magnet",)),
         "rotor": _get_group(m2d, object_groups, "rotor", ("rotator", "rotor")),
@@ -1865,6 +1876,21 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
             result[group_name] = operation
         except Exception as exc:
             result[group_name] = f"skipped: {exc}"
+    if spec.airgap_band_mapping_angle_deg is not None:
+        # v252 TAU2D Cylindrical Gap Treatment creates matched layers on BOTH
+        # sides of the curved moving interface; this is not Band-disk length refinement.
+        # 3D CloneMesh/layer-count arguments are deliberately not used in 2D.
+        if len(groups["band"]) != 1:
+            raise ValueError("airgap treatment requires exactly one existing moving Band")
+        operation = m2d.mesh.assign_cylindrical_gap(
+            groups["band"][0], name="Mesh_AirGap",
+            band_mapping_angle=spec.airgap_band_mapping_angle_deg,
+        )
+        if not operation:
+            raise RuntimeError("airgap CylindricalGap operation was not created")
+        if operation.update() is not True:
+            raise RuntimeError("airgap CylindricalGap update did not return exact True")
+        result["airgap"] = operation
     return result
 
 
@@ -1913,6 +1939,28 @@ def audit_mesh_operation_settings(operations: dict[str, Any], objects: dict[str,
                 raise ValueError(f"inactive mesh length placeholder differs: {group}")
             audit["groups"][group] = {"mode": "length_only" if length_only else "additional_budget",
                                       "requested_length_mm": length, "properties": dict(prop)}
+        if spec.airgap_band_mapping_angle_deg is not None:
+            prop = operations["Mesh_AirGap"]
+            assigned = prop["Objects"]
+            if (not isinstance(assigned, list) or len(assigned) != 1
+                    or set(assigned) != set(objects["band"])):
+                raise ValueError("airgap CylindricalGap assignment must be the existing Band")
+            if prop.get("Type") not in ("CylindricalGap", "Cylindrical Gap Based"):
+                raise ValueError("airgap mesh type is not CylindricalGap")
+            if prop.get("Enabled") is not True or prop.get("UseBandMappingAngle") is not True:
+                raise ValueError("airgap Band Mapping Angle must be independently enabled")
+            raw = prop.get("BandMappingAngle")
+            match = re.fullmatch(r"\s*([+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)\s*deg\s*", str(raw))
+            if not match or float(match[1]) != float(str(spec.airgap_band_mapping_angle_deg)):
+                raise ValueError("airgap Band Mapping Angle/degree unit differs")
+            if any(key in prop for key in ("CloneMesh", "MovingSideLayers", "StaticSideLayers")):
+                raise ValueError("3D cylindrical-gap layer controls are invalid for this 2D contract")
+            audit["groups"]["airgap"] = {
+                "mode": "TAU2D_cylindrical_gap_band_mapping_angle",
+                "requested_angle_deg": spec.airgap_band_mapping_angle_deg,
+                "treatment_scope": "matched mesh on both sides of curved Band per v252",
+                "actual_mesh_geometry_verified": False, "properties": dict(prop),
+            }
         audit["passed"] = True
         audit["inactive_placeholders_verified"] = source == "saved_AEDT"
         return audit
@@ -1944,6 +1992,22 @@ def audit_native_mesh_settings(design: Any, object_groups: dict[str, Any], spec:
                 "RefineInside": read("Region") == "Inside Selection", "RestrictElem": read("Restrict Max Elems"),
                 "RestrictLength": read("Restrict Length"), "ApplyToInitialMesh": read("Apply To Initial Mesh"),
                 "NumMaxElem": read("Max Elems"), "MaxLength": read("Max Length")}
+        if spec.airgap_band_mapping_angle_deg is not None:
+            node = mesh.GetChildObject("Mesh_AirGap")
+            names = list(node.GetPropNames())
+            def read_airgap(key):
+                canonical = lambda value: re.sub(r"[^a-z0-9]", "", value.casefold())
+                found = [name for name in names if canonical(name) == canonical(key)]
+                if len(found) != 1:
+                    raise ValueError("missing or ambiguous native airgap property: " + key)
+                return node.GetPropValue(found[0])
+            assignment = read_airgap("Assignment")
+            operations["Mesh_AirGap"] = {
+                "Type": read_airgap("Type"), "Enabled": read_airgap("Enabled"),
+                "Objects": [part.strip() for part in assignment.split(",")] if isinstance(assignment, str) else assignment,
+                "UseBandMappingAngle": read_airgap("UseBandMappingAngle"),
+                "BandMappingAngle": read_airgap("BandMappingAngle"),
+            }
     except Exception as exc:
         error = ValueError("native mesh OO readback failed: " + str(exc))
         error.mesh_refinement_audit = {"source": "native_OO", "passed": False, "error": str(exc)}
@@ -2206,7 +2270,7 @@ def configure_ipmsm_from_ppt(
     }
 
     m2d = _m2d(design)
-    if spec.mesh_refinement_modes:
+    if spec.mesh_refinement_modes or spec.airgap_band_mapping_angle_deg is not None:
         result["native_mesh_audit"] = audit_native_mesh_settings(design, merged_groups, spec)
     result["native_model_depth_audit"] = audit_native_model_depth(design, spec)
     try:
@@ -2231,7 +2295,7 @@ def configure_ipmsm_from_ppt(
         exc.native_model_depth_audit["before_validation"] = result["native_model_depth_audit"]
         raise
 
-    if spec.mesh_refinement_modes:
+    if spec.mesh_refinement_modes or spec.airgap_band_mapping_angle_deg is not None:
         result["native_mesh_audit_post_validation"] = audit_native_mesh_settings(design, merged_groups, spec)
     if analyze:
         solve_started = time.perf_counter()

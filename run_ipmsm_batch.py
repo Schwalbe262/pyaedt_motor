@@ -391,6 +391,7 @@ INPUT_SPEC_COLUMNS = (
     "input_save_fields_every_n_steps",
     "input_mesh_elements",
     "input_mesh_refinement_modes",
+    "input_airgap_band_mapping_angle_deg",
     *(f"input_mesh_{key}_mode" for key in MESH_ELEMENT_KEYS),
     *(f"input_mesh_{key}_max_length_mm" for key in MESH_ELEMENT_KEYS),
     *(f"input_mesh_{key}_elements" for key in MESH_ELEMENT_KEYS),
@@ -758,6 +759,8 @@ def setup_fingerprint(
             "strict_setup": spec.strict_setup,
             "mesh_maximum_lengths_mm": spec.mesh_maximum_lengths_mm,
             **({"mesh_refinement_modes": spec.mesh_refinement_modes} if spec.mesh_refinement_modes else {}),
+            **({"airgap_band_mapping_angle_deg": spec.airgap_band_mapping_angle_deg}
+               if spec.airgap_band_mapping_angle_deg is not None else {}),
             **({"save_fields_start_step": spec.save_fields_start_step,
                 "save_fields_stop_step": spec.save_fields_stop_step,
                 "save_fields_every_n_steps": spec.save_fields_every_n_steps}
@@ -1182,6 +1185,13 @@ def build_spec(
         require_steady_state=case_bool(case, "require_steady_state", default=False),
         circle_segments=case_int(case, "circle_segments", "input_circle_segments", default=0),
         band_circle_segments=case_int(case, "band_circle_segments", "input_band_circle_segments", default=144),
+        airgap_band_mapping_angle_deg=(
+            case_strict_positive_float(
+                case, "airgap_band_mapping_angle_deg", "input_airgap_band_mapping_angle_deg", default=0.3,
+            )
+            if case_value(case, "airgap_band_mapping_angle_deg", "input_airgap_band_mapping_angle_deg", default="")
+            not in ("", None) else None
+        ),
         loss_policy=str(case_value(case, "loss_policy", "input_loss_policy", default="laminated_core")),
         mesh_maximum_lengths_mm={
             key: case_strict_positive_float(case, f"mesh_{key}_max_length_mm", f"input_mesh_{key}_max_length_mm", default=1.0)
