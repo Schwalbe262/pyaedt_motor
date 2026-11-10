@@ -75,7 +75,41 @@ def with_bma(raw):
     return new
 
 
+def with_edge(raw):
+    new = with_bma(raw)
+    new['module/ipmsm_ppt_setup.py'] = new['module/ipmsm_ppt_setup.py'].replace(
+        b'    pole_number: int = 8\n',
+        b'    pole_number: int = 8\n    band_edge_max_length_mm: float | None = None\n').replace(
+        b'spec.airgap_band_mapping_angle_deg is not None:',
+        b'spec.airgap_band_mapping_angle_deg is not None or spec.band_edge_max_length_mm is not None:').replace(
+        b'"Mesh_AirGap"]:', b'"Mesh_AirGap", "Mesh_BandEdge"]:')
+    for name in ('_band_edge_selection', '_band_edge_properties', '_automatic_band_gap', 'audit_saved_band_edge_mesh'):
+        new['module/ipmsm_ppt_setup.py'] += ('\ndef ' + name + '(design):\n    return "inert mesh evidence"\n').encode()
+    new['run_ipmsm_batch.py'] = new['run_ipmsm_batch.py'].replace(
+        b'pole_number=8,', b'pole_number=8, band_edge_max_length_mm=case.get("band_edge_max_length_mm"),')
+    return new
+
+
 class AirgapFrameProjectionTests(unittest.TestCase):
+    def test_only_explicit_edge_field_helpers_cleanup_and_single_mesh_readback_project(self):
+        old = small_renderer(); new = with_edge(old)
+        self.assertEqual(frames._frame_source_closure(old), frames._frame_source_closure(new))
+        self.assertNotEqual(producer(old), producer(new))
+
+    def test_edge_unknown_fields_helpers_guards_and_cleanup_remain_in_projection(self):
+        old = small_renderer()
+        for path, before, after in (
+            ('module/ipmsm_ppt_setup.py', b'band_edge_max_length_mm', b'band_edge_other_length_mm'),
+            ('run_ipmsm_batch.py', b'band_edge_max_length_mm', b'band_edge_other_length_mm'),
+            ('module/ipmsm_ppt_setup.py', b'def _band_edge_properties(', b'def _band_edge_other_properties('),
+            ('module/ipmsm_ppt_setup.py', b'spec.band_edge_max_length_mm is not None:', b'spec.band_edge_max_length_mm is not None or spec.pole_number == 10:'),
+            ('module/ipmsm_ppt_setup.py', b'"Mesh_BandEdge"]:', b'"Mesh_BandEdge", "PhaseA"]:'),
+            ('module/ipmsm_ppt_setup.py', b'    return result\n', b'        design["IdCommand"] = "changed physical current"\n    return result\n'),
+        ):
+            new = with_edge(old); self.assertIn(before, new[path]); new[path] = new[path].replace(before, after, 1)
+            with self.subTest(change=after):
+                self.assertNotEqual(frames._frame_source_closure(old), frames._frame_source_closure(new))
+
     def test_only_named_bma_field_keyword_and_exact_audit_guard_are_projected(self):
         old = small_renderer()
         new = with_bma(old)

@@ -114,6 +114,7 @@ class IPMSMPPTSpec:
     circle_segments: int = 0
     band_circle_segments: int = 144
     airgap_band_mapping_angle_deg: float | None = None
+    band_edge_max_length_mm: float | None = None
     loss_policy: str = "laminated_core"
     conductor_area_per_branch_mm2: float = 15.3206469
     slot_fill_limit: float = 0.45
@@ -299,6 +300,18 @@ def validate_ppt_spec_contract(
             raise ValueError("airgap_band_mapping_angle_deg must be finite and between 0.0005 and 3 degrees")
         if spec.band_circle_segments != 0:
             raise ValueError("airgap Band Mapping Angle requires band_circle_segments=0 (curved outline)")
+    if spec.band_edge_max_length_mm is not None:
+        length = spec.band_edge_max_length_mm
+        try:
+            valid_edge_length = type(length) in (int, float) and math.isfinite(length) and length > 0
+        except OverflowError:
+            valid_edge_length = False
+        if not valid_edge_length:
+            raise ValueError("band_edge_max_length_mm must be finite and positive")
+        if spec.band_circle_segments != 0:
+            raise ValueError("Band edge refinement requires a curved Band (band_circle_segments=0)")
+        if spec.airgap_band_mapping_angle_deg is not None:
+            raise ValueError("manual Band Mapping Angle and Band edge refinement are mutually exclusive")
     if spec.loss_policy not in {"laminated_core", "legacy_implicit"}:
         raise ValueError("unsupported loss_policy")
     if not isinstance(spec.mesh_maximum_lengths_mm, dict):
@@ -1153,7 +1166,7 @@ def clear_previous_ppt_setup(design: Any, spec: IPMSMPPTSpec) -> dict[str, Any]:
             except Exception:
                 pass
         deleted = []
-        for name in ["Mesh_magnet", "Mesh_rotor", "Mesh_stator", "Mesh_winding", "Mesh_band", "Mesh_AirGap"]:
+        for name in ["Mesh_magnet", "Mesh_rotor", "Mesh_stator", "Mesh_winding", "Mesh_band", "Mesh_AirGap", "Mesh_BandEdge"]:
             if name not in existing:
                 continue
             try:
@@ -1831,12 +1844,119 @@ def assign_losses(
     return result
 
 
+def _band_edge_selection(m2d: Any, band: list) -> tuple[str, list[int]]:
+    if len(band) != 1 or type(band[0]) is not str or not band[0]:
+        raise ValueError("Band boundary refinement requires one actual Band")
+    name = band[0]
+    edges = m2d.modeler.get_object_edges(name)
+    raw = list(m2d.modeler.oeditor.GetEdgeIDsFromObject(name))
+    if any(type(v) not in (str, int) or not str(v).isdecimal() for v in raw):
+        raise ValueError("invalid actual Band edge IDs")
+    native = [int(v) for v in raw]
+    if (len(edges) != 1 or type(edges[0]) is not int or edges[0] <= 0 or edges != native
+            or m2d.modeler.get_object_name_from_edge_id(edges[0]) != name):
+        raise ValueError("Band boundary must be one exact forward/reverse-bound curved edge")
+    return name, edges
+
+
+def _band_edge_properties(prop: dict, spec: IPMSMPPTSpec, band: str, edges: list[int], source: str) -> dict:
+    """Initial-mesh activation contract observed in v252; no Enabled default."""
+    if type(edges) is not list or len(edges) != 1 or type(edges[0]) is not int or edges[0] <= 0:
+        raise ValueError("one positive actual Band edge ID required")
+    if source == "native_OO":
+        keys = {"Name", "Type", "Assignment", "Region", "Restrict Length", "Max Length",
+                "Restrict Max Elems", "Apply To Initial Mesh"}
+        if (set(prop) != keys or prop["Name"] != "Mesh_BandEdge" or prop["Type"] != "Length Based"
+                or prop["Assignment"] != f"{band} (Edge_{edges[0]})" or prop["Region"] != "On Selection"):
+            raise ValueError("native Band edge assignment/type/eight-property schema differs")
+        flags = {"Restrict Length": True, "Restrict Max Elems": False, "Apply To Initial Mesh": True}
+        length = prop["Max Length"]
+    elif source == "saved_AEDT":
+        if (prop.get("Type") != "LengthBased" or prop.get("Edges") != edges
+                or type(prop.get("Edges")) is not list or any(type(v) is not int for v in prop["Edges"])
+                or prop.get("Objects") or prop.get("Faces")):
+            raise ValueError("saved exact Band edge-only assignment differs")
+        flags = {"RefineInside": False, "RestrictElem": False, "RestrictLength": True, "ApplyToInitialMesh": True}
+        if str(prop.get("NumMaxElem")) != "1000":
+            raise ValueError("saved inactive edge element placeholder differs")
+        length = prop.get("MaxLength")
+    else:
+        raise ValueError("unsupported Band edge evidence source")
+    if any(type(prop.get(k)) is not bool or prop[k] is not v for k, v in flags.items()):
+        raise ValueError("Band edge initial-mesh activation/length-only flags differ")
+    match = re.fullmatch(r"\s*([+0-9.eE-]+)\s*mm\s*", str(length))
+    if not match or float(match[1]) != spec.band_edge_max_length_mm:
+        raise ValueError("Band edge maximum length/mm differs")
+    return {"operation_name": "Mesh_BandEdge", "object": band, "edge_ids": list(edges),
+            "requested_length_mm": spec.band_edge_max_length_mm, "activation_property": "Apply To Initial Mesh",
+            "Enabled_applicable": False, "scope": "circumferential boundary seeding; radial distribution unverified",
+            "actual_mesh_geometry_verified": False, "properties": dict(prop)}
+
+
+def _automatic_band_gap(m2d: Any, band: str) -> dict:
+    mesh = m2d.odesign.GetChildObject("Mesh")
+    matches = []
+    for name in mesh.GetChildNames():
+        node = mesh.GetChildObject(name); names = list(node.GetPropNames())
+        def read(key):
+            found = [n for n in names if re.sub(r"[^a-z0-9]", "", n.casefold()) == key]
+            if len(found) != 1: raise ValueError("missing/ambiguous automatic Band mesh property")
+            return node.GetPropValue(found[0])
+        if any(re.sub(r"[^a-z0-9]", "", n.casefold()) == "type" for n in names):
+            kind = read("type")
+            if kind in ("CylindricalGap", "Cylindrical Gap Based"):
+                if read("assignment") != band or read("usebandmappingangle") is not False:
+                    raise ValueError("automatic CGT must belong to Band with mappingFalse")
+                matches.append({"operation_name": name, "Type": kind, "Objects": [band], "UseBandMappingAngle": False})
+    if len(matches) != 1: raise ValueError("expected one automatic Band CGT")
+    return matches[0]
+
+
+def audit_saved_band_edge_mesh(state: dict, spec: IPMSMPPTSpec, native_audit: dict) -> dict:
+    """Read an already saved project; bind raw body IDs and edge to the live audit."""
+    validate_ppt_spec_contract(spec)
+    if spec.band_edge_max_length_mm is None: raise ValueError("explicit Band edge opt-in required")
+    live = native_audit["groups"]["band_edge"]
+    model = state["project"]["Maxwell2DModel"]
+    parts = model["ModelSetup"]["GeometryCore"]["GeometryOperations"]["ToplevelParts"]["GeometryPart"]
+    body_names = {}; seen = set(); circles = []
+    for part in parts:
+        name = part["Attributes"]["Name"]
+        if type(name) is not str or name in seen: raise ValueError("ambiguous saved part name")
+        seen.add(name); sequence = part["Operations"]["Operation"]
+        for op in sequence if isinstance(sequence, list) else [sequence]:
+            for number in (op.get("ParentPartID"), op.get("OperationIdentity", {}).get("BodyID")):
+                if type(number) is int and number > 0:
+                    if number in body_names and body_names[number] != name: raise ValueError("ambiguous saved body ID")
+                    body_names[number] = name
+            if name == live["object"] and op.get("OperationType") == "Circle": circles.append(op)
+    if len(circles) != 1: raise ValueError("one saved Band circle required")
+    circle = circles[0]; params = circle["CircleParameters"]
+    if (params["NumSegments"] != "0" or params["WhichAxis"] != "Z"
+            or params["Radius"] != "rotor_radius + rotator_gap/2"
+            or type(circle["OperationIdentity"]["Topology"]["NumEdges"]) is not int
+            or circle["OperationIdentity"]["Topology"]["NumEdges"] != 1):
+        raise ValueError("saved Band curved-circle topology differs")
+    raw = model["MeshSetup"]["MeshOperations"]; operations = {"Mesh_BandEdge": raw["Mesh_BandEdge"]}
+    names = ["Mesh_" + g for g in spec.mesh_elements] + [live["automatic_gap"]["operation_name"]]
+    for name in names:
+        prop = dict(raw[name]); ids = prop["Objects"]
+        if type(ids) is not list or not ids or any(type(i) is not int or i not in body_names for i in ids):
+            raise ValueError("unknown saved mesh body assignment")
+        prop["Objects"] = [body_names[i] for i in ids]; operations[name] = prop
+    objects = {g: native_audit["groups"][g]["properties"]["Objects"] for g in spec.mesh_elements}
+    objects["band_edge"] = live["edge_ids"]
+    result = audit_mesh_operation_settings(operations, objects, spec, source="saved_AEDT")
+    result["saved_Band_circle"] = params
+    return result
+
+
 def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPPTSpec) -> dict[str, Any]:
     """Apply the mesh element counts stated in the deck."""
-    if spec.airgap_band_mapping_angle_deg is not None:
+    if spec.airgap_band_mapping_angle_deg is not None or spec.band_edge_max_length_mm is not None:
         validate_ppt_spec_contract(spec)
     m2d = _m2d(design)
-    if spec.airgap_band_mapping_angle_deg is not None and m2d.design_type != "Maxwell 2D":
+    if (spec.airgap_band_mapping_angle_deg is not None or spec.band_edge_max_length_mm is not None) and m2d.design_type != "Maxwell 2D":
         raise ValueError("airgap Band Mapping Angle contract supports only Maxwell 2D")
     groups = {
         "magnet": _get_group(m2d, object_groups, "magnets", ("magnet",)),
@@ -1881,6 +2001,11 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
 
         gap_name, gap_node, gap_type = unique_gap()
         same_band(gap_node)
+    if spec.band_edge_max_length_mm is not None:
+        band_name, edge_ids = _band_edge_selection(m2d, groups["band"])
+        gap_before = _automatic_band_gap(m2d, band_name)
+        if "Mesh_BandEdge" in m2d.odesign.GetChildObject("Mesh").GetChildNames():
+            raise ValueError("stale owned Mesh_BandEdge; clear_existing is required")
     for group_name, objects in groups.items():
         if not objects:
             result[group_name] = "skipped: no objects"
@@ -1940,6 +2065,19 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
         result["airgap"] = {"operation_name": gap_name, "native_type": gap_type,
                             "Objects": list(groups["band"]), "UseBandMappingAngle": True,
                             "BandMappingAngle": actual_angle, "edit_api": "MeshSetup.EditCylindricalGapOp"}
+    if spec.band_edge_max_length_mm is not None:
+        returned = m2d.odesign.GetModule("MeshSetup").AssignLengthOp([
+            "NAME:Mesh_BandEdge", "RefineInside:=", False, "Edges:=", edge_ids, "RestrictElem:=", False,
+            "NumMaxElem:=", "1000", "RestrictLength:=", True,
+            "MaxLength:=", str(spec.band_edge_max_length_mm) + "mm", "ApplyToInitialMesh:=", True])
+        if returned is not None: raise RuntimeError("AssignLengthOp returned unexpected non-None")
+        node = m2d.odesign.GetChildObject("Mesh").GetChildObject("Mesh_BandEdge")
+        names = list(node.GetPropNames())
+        if len(names) != 8: raise ValueError("unexpected initial-edge NativeOO property count")
+        result["band_edge"] = _band_edge_properties({n: node.GetPropValue(n) for n in names}, spec, band_name, edge_ids, "native_OO")
+        if _band_edge_selection(m2d, groups["band"]) != (band_name, edge_ids) or _automatic_band_gap(m2d, band_name) != gap_before:
+            raise ValueError("Band edge/automatic CGT changed during edge assignment")
+        result["band_edge"]["automatic_gap"] = gap_before
     return result
 
 
@@ -2016,6 +2154,15 @@ def audit_mesh_operation_settings(operations: dict[str, Any], objects: dict[str,
                 "treatment_scope": "matched mesh on both sides of curved Band per v252",
                 "actual_mesh_geometry_verified": False, "properties": dict(prop),
             }
+        if spec.band_edge_max_length_mm is not None:
+            gaps = [(name, prop) for name, prop in operations.items() if isinstance(prop, dict)
+                    and prop.get("Type") in ("CylindricalGap", "Cylindrical Gap Based")]
+            if (len(gaps) != 1 or gaps[0][1].get("Objects") != objects["band"]
+                    or gaps[0][1].get("UseBandMappingAngle") is not False):
+                raise ValueError("automatic CGT Band/mappingFalse differs")
+            edge = _band_edge_properties(operations["Mesh_BandEdge"], spec, objects["band"][0], objects["band_edge"], source)
+            edge["automatic_gap"] = {"operation_name": gaps[0][0], **gaps[0][1]}
+            audit["groups"]["band_edge"] = edge
         audit["passed"] = True
         audit["inactive_placeholders_verified"] = source == "saved_AEDT"
         return audit
@@ -2047,7 +2194,7 @@ def audit_native_mesh_settings(design: Any, object_groups: dict[str, Any], spec:
                 "RefineInside": read("Region") == "Inside Selection", "RestrictElem": read("Restrict Max Elems"),
                 "RestrictLength": read("Restrict Length"), "ApplyToInitialMesh": read("Apply To Initial Mesh"),
                 "NumMaxElem": read("Max Elems"), "MaxLength": read("Max Length")}
-        if spec.airgap_band_mapping_angle_deg is not None:
+        if spec.airgap_band_mapping_angle_deg is not None or spec.band_edge_max_length_mm is not None:
             children = list(mesh.GetChildNames())
             if len(children) != len(set(children)):
                 raise ValueError("duplicate native mesh child names")
@@ -2074,8 +2221,15 @@ def audit_native_mesh_settings(design: Any, object_groups: dict[str, Any], spec:
                 "Type": read_airgap("Type"),
                 "Objects": [part.strip() for part in assignment.split(",")] if isinstance(assignment, str) else assignment,
                 "UseBandMappingAngle": read_airgap("UseBandMappingAngle"),
-                "BandMappingAngle": read_airgap("BandMappingAngle"),
             }
+            if spec.airgap_band_mapping_angle_deg is not None:
+                operations[gap_name]["BandMappingAngle"] = read_airgap("BandMappingAngle")
+        if spec.band_edge_max_length_mm is not None:
+            band_name, edge_ids = _band_edge_selection(m2d, groups["band"])
+            node = mesh.GetChildObject("Mesh_BandEdge"); names = list(node.GetPropNames())
+            if len(names) != 8: raise ValueError("unexpected initial-edge NativeOO property count")
+            operations["Mesh_BandEdge"] = {name: node.GetPropValue(name) for name in names}
+            groups["band_edge"] = edge_ids
     except Exception as exc:
         error = ValueError("native mesh OO readback failed: " + str(exc))
         error.mesh_refinement_audit = {"source": "native_OO", "passed": False, "error": str(exc)}
@@ -2338,7 +2492,7 @@ def configure_ipmsm_from_ppt(
     }
 
     m2d = _m2d(design)
-    if spec.mesh_refinement_modes or spec.airgap_band_mapping_angle_deg is not None:
+    if spec.mesh_refinement_modes or spec.airgap_band_mapping_angle_deg is not None or spec.band_edge_max_length_mm is not None:
         result["native_mesh_audit"] = audit_native_mesh_settings(design, merged_groups, spec)
     result["native_model_depth_audit"] = audit_native_model_depth(design, spec)
     try:
@@ -2363,7 +2517,7 @@ def configure_ipmsm_from_ppt(
         exc.native_model_depth_audit["before_validation"] = result["native_model_depth_audit"]
         raise
 
-    if spec.mesh_refinement_modes or spec.airgap_band_mapping_angle_deg is not None:
+    if spec.mesh_refinement_modes or spec.airgap_band_mapping_angle_deg is not None or spec.band_edge_max_length_mm is not None:
         result["native_mesh_audit_post_validation"] = audit_native_mesh_settings(design, merged_groups, spec)
     if analyze:
         solve_started = time.perf_counter()

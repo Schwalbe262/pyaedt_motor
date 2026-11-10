@@ -761,6 +761,8 @@ def setup_fingerprint(
             **({"mesh_refinement_modes": spec.mesh_refinement_modes} if spec.mesh_refinement_modes else {}),
             **({"airgap_band_mapping_angle_deg": spec.airgap_band_mapping_angle_deg}
                if spec.airgap_band_mapping_angle_deg is not None else {}),
+            **({"band_edge_max_length_mm": spec.band_edge_max_length_mm}
+               if spec.band_edge_max_length_mm is not None else {}),
             **({"save_fields_start_step": spec.save_fields_start_step,
                 "save_fields_stop_step": spec.save_fields_stop_step,
                 "save_fields_every_n_steps": spec.save_fields_every_n_steps}
@@ -1191,6 +1193,10 @@ def build_spec(
             )
             if case_value(case, "airgap_band_mapping_angle_deg", "input_airgap_band_mapping_angle_deg", default="")
             not in ("", None) else None
+        ),
+        band_edge_max_length_mm=(
+            case_strict_positive_float(case, "band_edge_max_length_mm", "input_band_edge_max_length_mm", default=1.0)
+            if case_value(case, "band_edge_max_length_mm", "input_band_edge_max_length_mm", default="") not in ("", None) else None
         ),
         loss_policy=str(case_value(case, "loss_policy", "input_loss_policy", default="laminated_core")),
         mesh_maximum_lengths_mm={
@@ -2913,6 +2919,8 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
 
         input_data = {}
         input_data.update(asdict(spec))
+        if spec.band_edge_max_length_mm is None:
+            input_data.pop("band_edge_max_length_mm")  # Keep opt-out CSV/header unchanged.
         input_data.update(transient_setup_metadata(spec))
         input_data.update({f"mesh_{key}_elements": spec.mesh_elements.get(key, "") for key in MESH_ELEMENT_KEYS})
         input_data.update({f"mesh_{key}_mode": mode for key, mode in spec.mesh_refinement_modes.items()})
@@ -3224,6 +3232,23 @@ def run_one_case(payload: tuple[dict[str, Any], dict[str, Any]]) -> dict[str, An
             project_save_failed = True
             row["error_class"] = "project_save_failed"
             raise
+
+        if spec.band_edge_max_length_mm is not None:
+            if options.analyze and setup_result.get("analysis") is not True:
+                raise RuntimeError("Band edge audit requires exactTrue Analyze return")
+            if not pooled_backend and standalone_owner.solver_uncertain:
+                raise RuntimeError("Band edge audit suppressed while solver is uncertain")
+            if not pooled_backend:
+                assert_standalone_owned(standalone_owner, app.desktop_class)
+                assert_standalone_project(standalone_owner)
+            from module.ipmsm_ppt_setup import audit_native_mesh_settings, audit_saved_band_edge_mesh
+            from pyaedt_motor.native_state_semantics import read_state
+            post_mesh = audit_native_mesh_settings(design, object_groups, spec)
+            saved_mesh = audit_saved_band_edge_mesh(read_state(project_path / (sim.PROJECT_NAME + ".aedt")), spec, post_mesh)
+            applied["native_mesh_audit_after_save"] = post_mesh
+            applied["saved_band_edge_mesh_audit"] = saved_mesh
+            audit_path.write_text(json.dumps(applied, indent=2, ensure_ascii=False), encoding="utf-8")
+            row["applied_setup_fingerprint"] = stable_fingerprint("applied_setup_v3", applied)
 
         if analysis_returned_false:
             if pooled_backend and lease_granted:

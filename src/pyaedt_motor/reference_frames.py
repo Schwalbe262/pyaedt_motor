@@ -359,7 +359,8 @@ def _frame_source_closure(raw_files):
     Numerical solver equivalence and BEMF alignment are deliberately not inferred.
     """
     ppt = ast.parse(raw_files["module/ipmsm_ppt_setup.py"])
-    excluded = {"assign_mesh", "audit_mesh_operation_settings", "audit_native_mesh_settings", "validate_ppt_spec_contract"}
+    excluded = {"assign_mesh", "audit_mesh_operation_settings", "audit_native_mesh_settings", "validate_ppt_spec_contract",
+                "_band_edge_selection", "_band_edge_properties", "_automatic_band_gap", "audit_saved_band_edge_mesh"}
     members = {}
     for node in ppt.body:
         if isinstance(node, ast.FunctionDef) and node.name in excluded:
@@ -369,7 +370,7 @@ def _frame_source_closure(raw_files):
             node.body = [value for value in node.body if not (isinstance(value, ast.AnnAssign)
                          and isinstance(value.target, ast.Name) and value.target.id in
                          {"mesh_elements", "mesh_maximum_lengths_mm", "mesh_refinement_modes",
-                          "airgap_band_mapping_angle_deg"})]
+                           "airgap_band_mapping_angle_deg", "band_edge_max_length_mm"})]
         if isinstance(node, ast.FunctionDef) and node.name == "clear_previous_ppt_setup":
             node = copy.deepcopy(node)
             for section in node.body:
@@ -383,15 +384,25 @@ def _frame_source_closure(raw_files):
                 for loop in section.body:
                     if isinstance(loop, ast.For) and isinstance(loop.target, ast.Name) and loop.target.id in additions:
                         kind, values = additions[loop.target.id]
+                        if (loop.target.id == "name" and isinstance(loop.iter, ast.List)
+                                and all(isinstance(item, ast.Constant) for item in loop.iter.elts)
+                                and tuple(item.value for item in loop.iter.elts) == values + ("Mesh_BandEdge",)):
+                            loop.iter.elts.pop()  # Only this exact owned edge-operation addition.
                         if (isinstance(loop.iter, kind) and all(isinstance(item, ast.Constant) for item in loop.iter.elts)
                                 and tuple(item.value for item in loop.iter.elts) == values):
                             loop.iter.elts.pop()  # Only the exact BMA addition; retain the entire cleanup body.
         if isinstance(node, ast.FunctionDef) and node.name == "configure_ipmsm_from_ppt":
             node = copy.deepcopy(node)
-            # The two added conditional native mesh readbacks do not assign an axis/current/PM.
+            # Project only a single known mesh readback, never other guarded statements.
+            guards = {"spec.mesh_refinement_modes",
+                      "spec.mesh_refinement_modes or spec.airgap_band_mapping_angle_deg is not None",
+                      "spec.mesh_refinement_modes or spec.airgap_band_mapping_angle_deg is not None or spec.band_edge_max_length_mm is not None"}
+            readbacks = {ast.dump(ast.parse(f"result[{key!r}] = audit_native_mesh_settings(design, {groups}, spec)").body[0])
+                         for key in ("native_mesh_audit", "native_mesh_audit_post_validation")
+                         for groups in ("merged_groups", "{}")}
             node.body = [value for value in node.body if not (isinstance(value, ast.If)
-                         and ast.unparse(value.test) in {"spec.mesh_refinement_modes",
-                             "spec.mesh_refinement_modes or spec.airgap_band_mapping_angle_deg is not None"})]
+                          and ast.unparse(value.test) in guards and not value.orelse and len(value.body) == 1
+                          and ast.dump(value.body[0]) in readbacks)]
         members[getattr(node, "name", f"top_{len(members)}")] = digest(ast.dump(node, include_attributes=False))
     runner = ast.parse(raw_files["run_ipmsm_batch.py"])
     build = copy.deepcopy(next(node for node in runner.body if isinstance(node, ast.FunctionDef) and node.name == "build_spec"))
@@ -399,7 +410,7 @@ def _frame_source_closure(raw_files):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "IPMSMPPTSpec":
             node.keywords = [item for item in node.keywords if item.arg not in
                              {"mesh_elements", "mesh_maximum_lengths_mm", "mesh_refinement_modes",
-                              "airgap_band_mapping_angle_deg"}]
+                               "airgap_band_mapping_angle_deg", "band_edge_max_length_mm"}]
     members["runner_build_non_mesh_spec"] = digest(ast.dump(build, include_attributes=False))
     # Helpers used to read the retained spec fields are pinned in their entirety.
     for node in runner.body:
