@@ -1849,37 +1849,38 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
     if spec.airgap_band_mapping_angle_deg is not None:
         if len(groups["band"]) != 1:
             raise ValueError("airgap treatment requires exactly one existing moving Band")
-        # assign_rotate_motion can create CylindricalGap1 automatically. The
-        # SDK refuses a second CGT: identify the actual Native operation first,
-        # then replace only that exact Band-bound operation via public delete().
-        mesh_node = m2d.odesign.GetChildObject("Mesh")
-        child_names = list(mesh_node.GetChildNames())
-        if len(child_names) != len(set(child_names)):
-            raise ValueError("duplicate native mesh child names")
-        existing = []
-        for name in child_names:
-            node = mesh_node.GetChildObject(name)
-            prop_names = list(node.GetPropNames())
-            if "Type" in prop_names and node.GetPropValue("Type") in ("CylindricalGap", "Cylindrical Gap Based"):
-                existing.append(name)
-        if len(existing) > 1:
-            raise ValueError("multiple native CylindricalGap operations cannot be replaced")
-        if existing:
-            name = existing[0]
-            matches = [op for op in m2d.mesh.meshoperations if op.name == name]
+
+        def read_gap(node, key):
+            canonical = lambda value: re.sub(r"[^a-z0-9]", "", value.casefold())
+            names = [name for name in node.GetPropNames() if canonical(name) == canonical(key)]
+            if len(names) != 1:
+                raise ValueError("missing or ambiguous native airgap property: " + key)
+            return node.GetPropValue(names[0])
+
+        def unique_gap():
+            mesh = m2d.odesign.GetChildObject("Mesh")
+            names = list(mesh.GetChildNames())
+            if len(names) != len(set(names)):
+                raise ValueError("duplicate native mesh child names")
+            matches = []
+            for name in names:
+                node = mesh.GetChildObject(name)
+                if any(re.sub(r"[^a-z0-9]", "", key.casefold()) == "type" for key in node.GetPropNames()):
+                    kind = read_gap(node, "Type")
+                    if kind in ("CylindricalGap", "Cylindrical Gap Based"):
+                        matches.append((name, node, kind))
             if len(matches) != 1:
-                raise ValueError("native CylindricalGap has no exact public SDK operation")
-            node = mesh_node.GetChildObject(name)
-            if node.GetPropValue("Type") not in ("CylindricalGap", "Cylindrical Gap Based"):
-                raise ValueError("native CylindricalGap type changed before replacement")
-            assigned = node.GetPropValue("Assignment")
+                raise ValueError("expected exactly one existing native CylindricalGap after rotation")
+            return matches[0]
+
+        def same_band(node):
+            assigned = read_gap(node, "Assignment")
             assigned = [part.strip() for part in assigned.split(",")] if isinstance(assigned, str) else assigned
             if not isinstance(assigned, list) or assigned != groups["band"]:
                 raise ValueError("native CylindricalGap belongs to a different Band/object")
-            if matches[0].delete() is not True:
-                raise RuntimeError("native CylindricalGap public delete did not return exact True")
-            if name in list(mesh_node.GetChildNames()):
-                raise RuntimeError("native CylindricalGap still exists after public delete")
+
+        gap_name, gap_node, gap_type = unique_gap()
+        same_band(gap_node)
     for group_name, objects in groups.items():
         if not objects:
             result[group_name] = "skipped: no objects"
@@ -1911,21 +1912,36 @@ def assign_mesh(design: Any, object_groups: dict[str, Any] | None, spec: IPMSMPP
         except Exception as exc:
             result[group_name] = f"skipped: {exc}"
     if spec.airgap_band_mapping_angle_deg is not None:
-        # v252 TAU2D Cylindrical Gap Treatment creates matched layers on BOTH
-        # sides of the curved moving interface; this is not Band-disk length refinement.
-        # 3D CloneMesh/layer-count arguments are deliberately not used in 2D.
-        if len(groups["band"]) != 1:
-            raise ValueError("airgap treatment requires exactly one existing moving Band")
-        operation = m2d.mesh.assign_cylindrical_gap(
-            groups["band"][0], name="Mesh_AirGap",
-            band_mapping_angle=spec.airgap_band_mapping_angle_deg,
+        # Preserve the rotation-created CGT's name/ID and assignment. Deleting it
+        # and creating a second operation is not an in-place edit. SDK0.22's
+        # no-key update() also rejects the native "Cylindrical Gap Based" alias.
+        current_name, current_node, current_type = unique_gap()
+        if (current_name, current_type) != (gap_name, gap_type):
+            raise ValueError("native CylindricalGap identity/type changed before edit")
+        same_band(current_node)
+        angle = str(spec.airgap_band_mapping_angle_deg) + "deg"
+        edited = m2d.odesign.GetModule("MeshSetup").EditCylindricalGapOp(
+            gap_name, ["NAME:" + gap_name, "UseBandMappingAngle:=", True, "BandMappingAngle:=", angle]
         )
-        if not operation:
-            raise RuntimeError("airgap CylindricalGap operation was not created")
-        if operation.update() is not True:
-            raise RuntimeError("airgap CylindricalGap update did not return exact True")
-        result["airgap"] = operation
+        # v252 documents a void return. Success is the independent Native readback,
+        # never a cached MeshOperation property or an assumed True from the call.
+        if edited is not None:
+            raise RuntimeError("EditCylindricalGapOp returned an unexpected non-None value")
+        actual_name, actual_node, actual_type = unique_gap()
+        if (actual_name, actual_type) != (gap_name, gap_type):
+            raise ValueError("native CylindricalGap identity/type changed after edit")
+        same_band(actual_node)
+        if read_gap(actual_node, "UseBandMappingAngle") is not True:
+            raise ValueError("native CylindricalGap Band Mapping Angle edit was not applied")
+        actual_angle = read_gap(actual_node, "BandMappingAngle")
+        match = re.fullmatch(r"\s*([+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)\s*deg\s*", str(actual_angle))
+        if not match or float(match[1]) != float(str(spec.airgap_band_mapping_angle_deg)):
+            raise ValueError("native CylindricalGap edited angle/degree unit differs")
+        result["airgap"] = {"operation_name": gap_name, "native_type": gap_type,
+                            "Objects": list(groups["band"]), "UseBandMappingAngle": True,
+                            "BandMappingAngle": actual_angle, "edit_api": "MeshSetup.EditCylindricalGapOp"}
     return result
+
 
 
 def audit_mesh_operation_settings(operations: dict[str, Any], objects: dict[str, list], spec: IPMSMPPTSpec, *, source: str) -> dict[str, Any]:
@@ -1974,7 +1990,11 @@ def audit_mesh_operation_settings(operations: dict[str, Any], objects: dict[str,
             audit["groups"][group] = {"mode": "length_only" if length_only else "additional_budget",
                                       "requested_length_mm": length, "properties": dict(prop)}
         if spec.airgap_band_mapping_angle_deg is not None:
-            prop = operations["Mesh_AirGap"]
+            gaps = [(name, prop) for name, prop in operations.items() if isinstance(prop, dict)
+                    and prop.get("Type") in ("CylindricalGap", "Cylindrical Gap Based")]
+            if len(gaps) != 1 or not isinstance(gaps[0][0], str) or not gaps[0][0]:
+                raise ValueError("expected exactly one actual CylindricalGap operation")
+            gap_name, prop = gaps[0]
             assigned = prop["Objects"]
             if (not isinstance(assigned, list) or len(assigned) != 1
                     or set(assigned) != set(objects["band"])):
@@ -1990,6 +2010,7 @@ def audit_mesh_operation_settings(operations: dict[str, Any], objects: dict[str,
             if any(key in prop for key in ("CloneMesh", "MovingSideLayers", "StaticSideLayers")):
                 raise ValueError("3D cylindrical-gap layer controls are invalid for this 2D contract")
             audit["groups"]["airgap"] = {
+                "operation_name": gap_name,
                 "mode": "TAU2D_cylindrical_gap_band_mapping_angle",
                 "requested_angle_deg": spec.airgap_band_mapping_angle_deg,
                 "treatment_scope": "matched mesh on both sides of curved Band per v252",
@@ -2027,7 +2048,20 @@ def audit_native_mesh_settings(design: Any, object_groups: dict[str, Any], spec:
                 "RestrictLength": read("Restrict Length"), "ApplyToInitialMesh": read("Apply To Initial Mesh"),
                 "NumMaxElem": read("Max Elems"), "MaxLength": read("Max Length")}
         if spec.airgap_band_mapping_angle_deg is not None:
-            node = mesh.GetChildObject("Mesh_AirGap")
+            children = list(mesh.GetChildNames())
+            if len(children) != len(set(children)):
+                raise ValueError("duplicate native mesh child names")
+            gaps = []
+            for name in children:
+                child = mesh.GetChildObject(name)
+                type_names = [key for key in child.GetPropNames() if re.sub(r"[^a-z0-9]", "", key.casefold()) == "type"]
+                if len(type_names) > 1:
+                    raise ValueError("ambiguous native mesh type")
+                if type_names and child.GetPropValue(type_names[0]) in ("CylindricalGap", "Cylindrical Gap Based"):
+                    gaps.append((name, child))
+            if len(gaps) != 1:
+                raise ValueError("expected exactly one existing native CylindricalGap")
+            gap_name, node = gaps[0]
             names = list(node.GetPropNames())
             def read_airgap(key):
                 canonical = lambda value: re.sub(r"[^a-z0-9]", "", value.casefold())
@@ -2036,7 +2070,7 @@ def audit_native_mesh_settings(design: Any, object_groups: dict[str, Any], spec:
                     raise ValueError("missing or ambiguous native airgap property: " + key)
                 return node.GetPropValue(found[0])
             assignment = read_airgap("Assignment")
-            operations["Mesh_AirGap"] = {
+            operations[gap_name] = {
                 "Type": read_airgap("Type"),
                 "Objects": [part.strip() for part in assignment.split(",")] if isinstance(assignment, str) else assignment,
                 "UseBandMappingAngle": read_airgap("UseBandMappingAngle"),
